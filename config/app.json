@@ -1,0 +1,33 @@
+﻿{
+  "windows": [
+    {
+      "title": "myengine - main",
+      "width": 1280,
+      "height": 720,
+      "clearColor": [0.08, 0.12, 0.20, 1.0]
+    },
+    {
+      "title": "myengine - secondary",
+      "width": 900,
+      "height": 600,
+      "clearColor": [0.18, 0.10, 0.10, 1.0]
+    },
+    {
+      "title": "myengine - third",
+      "width": 400,
+      "height": 300,
+      "clearColor": [0.9, 0.4, 0.02, 1.0]
+    },
+    {
+      "title": "myengine - fourth",
+      "width": 200,
+      "height": 100,
+      "clearColor": [0.01, 0.4, 0.9, 1.0]
+    }
+  ],
+  "input": {
+    "moveSpeed": 0.8,
+    "scaleSpeed": 0.7,
+    "rotateSpeedDeg": 120.0
+  }
+}
