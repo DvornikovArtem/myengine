@@ -21,7 +21,6 @@ namespace myengine::appstate
     void GameplayState::OnEnter(core::Application& app)
     {
         app.SetStateLabel("Gameplay");
-        app.GetLogger().Info("Gameplay state: arrows move primitive, LMB scales, RMB rotates, Esc returns to menu.");
     }
 
     void GameplayState::OnExit(core::Application& app)

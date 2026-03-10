@@ -32,3 +32,15 @@ logs/
 Debug/
 Release/
 x64/
+
+!external/**/Debug/
+!external/**/x64/
+
+external/**/Debug/**
+external/**/x64/**
+
+!external/**/Debug/**/
+!external/**/x64/**/
+
+!external/**/Debug/**/*.lib
+!external/**/x64/**/*.lib

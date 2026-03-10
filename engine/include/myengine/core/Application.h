@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,9 +12,9 @@
 #include <myengine/core/Timer.h>
 #include <myengine/core/Types.h>
 #include <myengine/core/Window.h>
+#include <myengine/ecs/World.h>
 #include <myengine/input/InputManager.h>
 #include <myengine/render/IRenderAdapter.h>
-#include <myengine/scene/TestPrimitive.h>
 #include <myengine/state/StateMachine.h>
 
 namespace myengine::core
@@ -38,6 +39,7 @@ namespace myengine::core
         LRESULT HandleWindowMessage(Window& window, UINT msg, WPARAM wparam, LPARAM lparam);
 
         state::StateMachine& GetStateMachine();
+        ecs::World& GetWorld();
         input::InputManager& GetInputManager();
         Logger& GetLogger();
         void SetStateLabel(const std::string& label);
@@ -49,8 +51,7 @@ namespace myengine::core
             std::wstring baseTitle;
             render::RenderSurfaceHandle surface;
             Color clearColor;
-            scene::TestPrimitive primitive;
-            bool continuousZoomOut = false;
+            ecs::EntityId controlledEntity = ecs::kInvalidEntity;
             bool closed = false;
         };
 
@@ -59,7 +60,11 @@ namespace myengine::core
         const WindowRuntime* FindWindow(WindowId id) const;
 
         bool AllWindowsClosed() const;
-        void ApplyInput(float deltaTime);
+        void SetInputOwnerWindow(WindowId id);
+        void SetCursorVisible(bool visible);
+        void WarpCursorToWindowCenter(const Window& window);
+        void BuildDemoScene();
+        void RebindWindowControlledEntities();
         void RenderFrame();
 
         HINSTANCE instance_ = nullptr;
@@ -71,10 +76,14 @@ namespace myengine::core
         Timer timer_;
         input::InputManager input_;
         state::StateMachine stateMachine_;
+        ecs::World world_;
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
+        std::filesystem::path sceneSavePath_;
+        bool cameraControlActive_ = false;
+        bool cursorHidden_ = false;
 
         float deltaLogAccumulator_ = 0.0f;
     };

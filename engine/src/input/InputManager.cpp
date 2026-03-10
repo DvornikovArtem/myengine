@@ -38,6 +38,37 @@ namespace myengine::input
         }
     }
 
+    void InputManager::OnMouseWheel(const int delta)
+    {
+        mouseWheelAccumulated_ += delta;
+    }
+
+    void InputManager::OnMouseMove(const int x, const int y)
+    {
+        if (hasMousePosition_)
+        {
+            mouseDeltaX_ += x - lastMouseX_;
+            mouseDeltaY_ += y - lastMouseY_;
+        }
+
+        lastMouseX_ = x;
+        lastMouseY_ = y;
+        hasMousePosition_ = true;
+    }
+
+    void InputManager::AddMouseDelta(const int deltaX, const int deltaY)
+    {
+        mouseDeltaX_ += deltaX;
+        mouseDeltaY_ += deltaY;
+    }
+
+    void InputManager::SetMousePositionReference(const int x, const int y)
+    {
+        lastMouseX_ = x;
+        lastMouseY_ = y;
+        hasMousePosition_ = true;
+    }
+
     bool InputManager::IsKeyDown(const std::uint32_t key) const {
         if (key >= keys_.size())
         {
@@ -53,5 +84,27 @@ namespace myengine::input
             return false;
         }
         return mouseButtons_[index];
+    }
+
+    int InputManager::ConsumeMouseWheelSteps()
+    {
+        const int steps = mouseWheelAccumulated_ / kMouseWheelDelta;
+        mouseWheelAccumulated_ -= steps * kMouseWheelDelta;
+        return steps;
+    }
+
+    std::pair<int, int> InputManager::ConsumeMouseDelta()
+    {
+        const std::pair<int, int> delta{mouseDeltaX_, mouseDeltaY_};
+        mouseDeltaX_ = 0;
+        mouseDeltaY_ = 0;
+        return delta;
+    }
+
+    void InputManager::ResetMouseTracking()
+    {
+        hasMousePosition_ = false;
+        mouseDeltaX_ = 0;
+        mouseDeltaY_ = 0;
     }
 }
