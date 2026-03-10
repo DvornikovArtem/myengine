@@ -1,4 +1,9 @@
-﻿function(myengine_copy_runtime_assets target_name)
+function(myengine_copy_runtime_assets target_name)
+  if(NOT MYENGINE_COPY_RUNTIME_ASSETS)
+    message(STATUS "Runtime asset copy disabled for ${target_name} (MYENGINE_COPY_RUNTIME_ASSETS=OFF)")
+    return()
+  endif()
+
   add_custom_command(TARGET ${target_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_SOURCE_DIR}/assets"

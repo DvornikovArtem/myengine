@@ -1,0 +1,384 @@
+{
+  "entities": [
+    {
+      "Camera": {
+        "farPlane": 200.0,
+        "fovYDeg": 65.0,
+        "isPrimary": true,
+        "nearPlane": 0.009999999776482582,
+        "orthographicHalfHeight": 1.0,
+        "position": [
+          -1.0588709115982056,
+          0.5098318457603455,
+          -0.5322291851043701
+        ],
+        "rotationDeg": [
+          28.980016708374023,
+          24.480079650878906,
+          0.0
+        ]
+      },
+      "CameraController": {
+        "mouseSensitivityDeg": 0.18000000715255737,
+        "moveSpeed": 1.2260786294937134,
+        "rotateSpeedDeg": 84.0,
+        "zoomSpeed": 0.699999988079071
+      },
+      "Tag": {
+        "name": "Camera_1"
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 1
+    },
+    {
+      "MeshRenderer": {
+        "color": [
+          0.949999988079071,
+          0.3499999940395355,
+          0.30000001192092896,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "triangle",
+        "texturePath": ""
+      },
+      "Tag": {
+        "name": "Controlled_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          100.0,
+          0.44999998807907104
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.2800000011920929,
+          0.2800000011920929,
+          0.2800000011920929
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 2
+    },
+    {
+      "Hierarchy": {
+        "children": [
+          4
+        ],
+        "parent": 0
+      },
+      "MeshRenderer": {
+        "color": [
+          0.2199999988079071,
+          0.75,
+          0.41999998688697815,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "quad",
+        "texturePath": ""
+      },
+      "Motion": {
+        "angularVelocityDeg": [
+          0.0,
+          0.0,
+          35.0
+        ],
+        "linearVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "ParentQuad_1"
+      },
+      "Transform": {
+        "position": [
+          -0.44999998807907104,
+          0.3499999940395355,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          2037.31201171875
+        ],
+        "scale": [
+          0.3199999928474426,
+          0.3199999928474426,
+          0.3199999928474426
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 3
+    },
+    {
+      "Hierarchy": {
+        "children": [],
+        "parent": 3
+      },
+      "MeshRenderer": {
+        "color": [
+          0.25999999046325684,
+          0.5600000023841858,
+          0.949999988079071,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "line",
+        "texturePath": ""
+      },
+      "Tag": {
+        "name": "ChildLine_1"
+      },
+      "Transform": {
+        "position": [
+          0.550000011920929,
+          0.0,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.550000011920929,
+          0.550000011920929,
+          0.550000011920929
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 4
+    },
+    {
+      "Hierarchy": {
+        "children": [
+          8
+        ],
+        "parent": 0
+      },
+      "MeshRenderer": {
+        "color": [
+          0.9700000286102295,
+          0.8199999928474426,
+          0.25999999046325684,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "cube",
+        "texturePath": "assets/textures/african_head_diffuse.dds"
+      },
+      "Motion": {
+        "angularVelocityDeg": [
+          0.0,
+          45.0,
+          65.0
+        ],
+        "linearVelocity": [
+          0.3499999940395355,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "MovingCube_1"
+      },
+      "Transform": {
+        "position": [
+          0.0161832794547081,
+          -0.2199999988079071,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          2619.40283203125,
+          3783.580078125
+        ],
+        "scale": [
+          0.23000000417232513,
+          0.23000000417232513,
+          0.23000000417232513
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 5
+    },
+    {
+      "Hierarchy": {
+        "children": [],
+        "parent": 5
+      },
+      "MeshRenderer": {
+        "color": [
+          0.7200000286102295,
+          0.3799999952316284,
+          0.9200000166893005,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "cube",
+        "texturePath": "assets/textures/african_head_diffuse.dds"
+      },
+      "Tag": {
+        "name": "CubeChild_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.30000001192092896,
+          5.0,
+          0.30000001192092896
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 6
+    },
+    {
+      "Hierarchy": {
+        "children": [],
+        "parent": 5
+      },
+      "MeshRenderer": {
+        "color": [
+          0.7200000286102295,
+          0.3799999952316284,
+          0.9200000166893005,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "cube",
+        "texturePath": "assets/textures/african_head_diffuse.dds"
+      },
+      "Tag": {
+        "name": "CubeChild_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          5.0,
+          0.30000001192092896,
+          0.30000001192092896
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 7
+    },
+    {
+      "Hierarchy": {
+        "children": [],
+        "parent": 5
+      },
+      "MeshRenderer": {
+        "color": [
+          0.7200000286102295,
+          0.3799999952316284,
+          0.9200000166893005,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "cube",
+        "texturePath": "assets/textures/african_head_diffuse.dds"
+      },
+      "Tag": {
+        "name": "CubeChild_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.30000001192092896,
+          0.30000001192092896,
+          5.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 8
+    },
+    {
+      "MeshRenderer": {
+        "color": [
+          0.949999988079071,
+          0.3499999940395355,
+          0.30000001192092896,
+          1.0
+        ],
+        "materialName": "",
+        "primitive": "triangle",
+        "texturePath": ""
+      },
+      "Tag": {
+        "name": "AccentTriangle_1"
+      },
+      "Transform": {
+        "position": [
+          -0.10000000149011612,
+          -0.5799999833106995,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.2199999988079071,
+          0.2199999988079071,
+          0.2199999988079071
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 9
+    }
+  ]
+}

@@ -2,16 +2,19 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "d3dx12.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 
-#include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/core/Logger.h>
+#include <myengine/render/dx12/Dx12RenderAdapter.h>
 
 namespace myengine::render::dx12
 {
@@ -23,9 +26,88 @@ namespace myengine::render::dx12
             stream << "0x" << std::hex << static_cast<unsigned long>(hr);
             return stream.str();
         }
+
+        std::size_t PrimitiveIndex(const PrimitiveType primitive)
+        {
+            switch (primitive)
+            {
+                case PrimitiveType::Line:
+                    return 0;
+                case PrimitiveType::Triangle:
+                    return 1;
+                case PrimitiveType::Quad:
+                    return 2;
+                case PrimitiveType::Cube:
+                    return 3;
+                default:
+                    return 1;
+            }
+        }
+
+        DirectX::XMMATRIX MatrixToXm(const Matrix4& matrix)
+        {
+            DirectX::XMFLOAT4X4 value{};
+            std::memcpy(&value, matrix.data.data(), sizeof(float) * 16);
+            return DirectX::XMLoadFloat4x4(&value);
+        }
+
+        Matrix4 XmToMatrix(const DirectX::XMMATRIX& matrix)
+        {
+            DirectX::XMFLOAT4X4 value{};
+            DirectX::XMStoreFloat4x4(&value, matrix);
+
+            Matrix4 result{};
+            std::memcpy(result.data.data(), &value, sizeof(float) * 16);
+            return result;
+        }
+
+        std::filesystem::path GetExecutableDirectory()
+        {
+            wchar_t modulePath[MAX_PATH]{};
+            GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+            return std::filesystem::path(modulePath).parent_path();
+        }
+
+        std::filesystem::path ResolveRuntimePath(const std::filesystem::path& relativePath)
+        {
+            if (relativePath.is_absolute())
+            {
+                return relativePath;
+            }
+
+    #ifdef MYENGINE_SOURCE_DIR
+            const std::filesystem::path sourceCandidate = std::filesystem::path(MYENGINE_SOURCE_DIR) / relativePath;
+            if (std::filesystem::exists(sourceCandidate))
+            {
+                return sourceCandidate;
+            }
+    #endif
+
+            const std::filesystem::path executableCandidate = GetExecutableDirectory() / relativePath;
+            if (std::filesystem::exists(executableCandidate))
+            {
+                return executableCandidate;
+            }
+
+            const std::filesystem::path currentDirCandidate = std::filesystem::current_path() / relativePath;
+            if (std::filesystem::exists(currentDirCandidate))
+            {
+                return currentDirCandidate;
+            }
+
+    #ifdef MYENGINE_SOURCE_DIR
+            return std::filesystem::path(MYENGINE_SOURCE_DIR) / relativePath;
+    #else
+            return relativePath;
+    #endif
+        }
+
     }
 
-    Dx12RenderAdapter::Dx12RenderAdapter(core::Logger& logger) : logger_(logger) {}
+    Dx12RenderAdapter::Dx12RenderAdapter(core::Logger& logger)
+        : logger_(logger), resourceManager_(logger)
+    {
+    }
 
     Dx12RenderAdapter::~Dx12RenderAdapter()
     {
@@ -52,12 +134,57 @@ namespace myengine::render::dx12
         {
             return false;
         }
-        if (!BuildTriangleResources())
+        if (!BuildPrimitiveResources())
+        {
+            return false;
+        }
+        if (!BuildTextureResources())
         {
             return false;
         }
 
         logger_.Info("DX12 render adapter initialized");
+        return true;
+    }
+
+    bool Dx12RenderAdapter::PreloadTexture(const std::string_view texturePath)
+    {
+        if (texturePath.empty())
+        {
+            return true;
+        }
+
+        const std::filesystem::path resolvedPath = ResolveRuntimePath(std::filesystem::path(texturePath));
+        const std::string cacheKey = resolvedPath.lexically_normal().generic_string();
+
+        if (loadedTextures_.find(cacheKey) != loadedTextures_.end())
+        {
+            return true;
+        }
+
+        if (missingTextures_.find(cacheKey) != missingTextures_.end())
+        {
+            return false;
+        }
+
+        resource::TextureData loadedTexture{};
+        if (!resourceManager_.LoadTextureRgba8(resolvedPath, loadedTexture))
+        {
+            logger_.Warning(
+                "PreloadTexture: failed to load texture file: " + std::string(texturePath) +
+                " (resolved: " + resolvedPath.string() + ")");
+            missingTextures_.insert(cacheKey);
+            return false;
+        }
+
+        TextureRecord texture{};
+        texture.width = loadedTexture.width;
+        texture.height = loadedTexture.height;
+        texture.pixels = std::move(loadedTexture.pixelsRgba8);
+
+        missingTextures_.erase(cacheKey);
+        loadedTextures_.insert_or_assign(cacheKey, std::move(texture));
+        logger_.Info("PreloadTexture: loaded file " + resolvedPath.string());
         return true;
     }
 
@@ -73,6 +200,7 @@ namespace myengine::render::dx12
         surface.hwnd = hwnd;
         surface.width = std::max<std::uint32_t>(width, 1);
         surface.height = std::max<std::uint32_t>(height, 1);
+        surface.viewProjection = Matrix4::Identity();
 
         DXGI_SWAP_CHAIN_DESC1 swapDesc{};
         swapDesc.Width = surface.width;
@@ -171,6 +299,11 @@ namespace myengine::render::dx12
         {
             return false;
         }
+        if (surface->dsvHeap == nullptr || surface->depthStencil == nullptr)
+        {
+            logger_.Error("BeginFrame failed: depth resources are not initialized");
+            return false;
+        }
 
         if (FAILED(context_.commandAllocator->Reset()))
         {
@@ -178,7 +311,7 @@ namespace myengine::render::dx12
             return false;
         }
 
-        if (FAILED(context_.commandList->Reset(context_.commandAllocator.Get(), pipelineState_.Get())))
+        if (FAILED(context_.commandList->Reset(context_.commandAllocator.Get(), nullptr)))
         {
             logger_.Error("Command list reset failed");
             return false;
@@ -191,44 +324,108 @@ namespace myengine::render::dx12
         context_.commandList->ResourceBarrier(1, &toRenderTarget);
 
         const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(surface->rtvHeap->GetCPUDescriptorHandleForHeapStart(), static_cast<INT>(surface->currentBackBuffer), static_cast<INT>(surface->rtvDescriptorSize));
+        const auto dsvHandle = surface->dsvHeap->GetCPUDescriptorHandleForHeapStart();
 
         const float color[4] = {clearColor.r, clearColor.g, clearColor.b, clearColor.a};
 
         context_.commandList->RSSetViewports(1, &surface->viewport);
         context_.commandList->RSSetScissorRects(1, &surface->scissorRect);
-        context_.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+        context_.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
         context_.commandList->ClearRenderTargetView(rtvHandle, color, 0, nullptr);
-
+        context_.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
-        context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView_);
 
         activeSurface_ = surface;
         return true;
     }
 
-    void Dx12RenderAdapter::DrawPrimitive(const RenderSurfaceHandle handle, const Transform2D& transform)
+    void Dx12RenderAdapter::SetViewProjection(const RenderSurfaceHandle handle, const Matrix4& view, const Matrix4& projection)
+    {
+        auto* surface = FindSurface(handle);
+        if (surface == nullptr)
+        {
+            return;
+        }
+
+        const DirectX::XMMATRIX viewMatrix = MatrixToXm(view);
+        const DirectX::XMMATRIX projectionMatrix = MatrixToXm(projection);
+        surface->viewProjection = XmToMatrix(DirectX::XMMatrixMultiply(viewMatrix, projectionMatrix));
+    }
+
+    void Dx12RenderAdapter::DrawPrimitive(
+        const RenderSurfaceHandle handle,
+        const PrimitiveType primitive,
+        const Matrix4& model,
+        const core::Color& color,
+        const std::string_view texturePath)
     {
         if (activeSurface_ == nullptr || !handle.IsValid())
         {
             return;
         }
 
-        const DirectX::XMMATRIX model = DirectX::XMMatrixScaling(transform.scale, transform.scale, 1.0f) *
-            DirectX::XMMatrixRotationZ(DirectX::XMConvertToRadians(transform.rotationDeg)) *
-            DirectX::XMMatrixTranslation(transform.positionX, transform.positionY, 0.0f);
+        auto* surface = FindSurface(handle);
+        if (surface == nullptr || surface != activeSurface_)
+        {
+            return;
+        }
 
-        DirectX::XMFLOAT4X4 transformMatrix{};
-        XMStoreFloat4x4(&transformMatrix, XMMatrixTranspose(model));
+        const PrimitiveGeometry& geometry = primitives_[PrimitiveIndex(primitive)];
+        if (geometry.vertexCount == 0)
+        {
+            return;
+        }
+        if (textureSrvHeap_ == nullptr)
+        {
+            return;
+        }
 
-        context_.commandList->SetGraphicsRoot32BitConstants(0, 16, &transformMatrix, 0);
-        context_.commandList->DrawInstanced(3, 1, 0, 0);
+        if (geometry.topology == D3D_PRIMITIVE_TOPOLOGY_LINELIST)
+        {
+            context_.commandList->SetPipelineState(linePipelineState_.Get());
+        }
+        else
+        {
+            context_.commandList->SetPipelineState(trianglePipelineState_.Get());
+        }
+
+        context_.commandList->IASetPrimitiveTopology(geometry.topology);
+        context_.commandList->IASetVertexBuffers(0, 1, &geometry.vertexBufferView);
+
+        ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
+        context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
+
+        const UINT textureDescriptorIndex = ResolveTextureDescriptorIndex(texturePath);
+        D3D12_GPU_DESCRIPTOR_HANDLE textureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
+        textureHandle.ptr += static_cast<UINT64>(textureDescriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+        context_.commandList->SetGraphicsRootDescriptorTable(1, textureHandle);
+
+        struct DrawConstants
+        {
+            DirectX::XMFLOAT4X4 model;
+            DirectX::XMFLOAT4X4 viewProjection;
+            float color[4];
+        } constants{};
+
+        const DirectX::XMMATRIX modelMatrix = MatrixToXm(model);
+        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(surface->viewProjection);
+
+        DirectX::XMStoreFloat4x4(&constants.model, DirectX::XMMatrixTranspose(modelMatrix));
+        DirectX::XMStoreFloat4x4(&constants.viewProjection, DirectX::XMMatrixTranspose(viewProjectionMatrix));
+
+        constants.color[0] = color.r;
+        constants.color[1] = color.g;
+        constants.color[2] = color.b;
+        constants.color[3] = color.a;
+
+        context_.commandList->SetGraphicsRoot32BitConstants(0, 36, &constants, 0);
+        context_.commandList->DrawInstanced(geometry.vertexCount, 1, 0, 0);
     }
 
     void Dx12RenderAdapter::EndFrame(const RenderSurfaceHandle handle)
     {
         auto* surface = FindSurface(handle);
-        if (surface == nullptr || activeSurface_ == nullptr)
+        if (surface == nullptr || activeSurface_ == nullptr || surface != activeSurface_)
         {
             return;
         }
@@ -267,9 +464,22 @@ namespace myengine::render::dx12
 
         surfaces_.clear();
 
-        vertexUploadBuffer_.Reset();
-        vertexBuffer_.Reset();
-        pipelineState_.Reset();
+        for (auto& primitive : primitives_)
+        {
+            primitive.vertexUploadBuffer.Reset();
+            primitive.vertexBuffer.Reset();
+            primitive.vertexBufferView = {};
+            primitive.vertexCount = 0;
+            primitive.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+        }
+
+        loadedTextures_.clear();
+        missingTextures_.clear();
+        textureSrvHeap_.Reset();
+        textureSrvDescriptorSize_ = 0;
+        nextTextureDescriptorIndex_ = 0;
+        linePipelineState_.Reset();
+        trianglePipelineState_.Reset();
         rootSignature_.Reset();
 
         context_.commandList.Reset();
@@ -433,11 +643,28 @@ namespace myengine::render::dx12
             return false;
         }
 
-        CD3DX12_ROOT_PARAMETER rootParameter;
-        rootParameter.InitAsConstants(16, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
+        CD3DX12_DESCRIPTOR_RANGE textureRange;
+        textureRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+        std::array<CD3DX12_ROOT_PARAMETER, 2> rootParameters;
+        rootParameters[0].InitAsConstants(36, 0, 0, D3D12_SHADER_VISIBILITY_ALL);
+        rootParameters[1].InitAsDescriptorTable(1, &textureRange, D3D12_SHADER_VISIBILITY_PIXEL);
+
+        CD3DX12_STATIC_SAMPLER_DESC samplerDesc(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        samplerDesc.ShaderRegister = 0;
+        samplerDesc.RegisterSpace = 0;
+        samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
         CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init(1, &rootParameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+        rootSignatureDesc.Init(
+            static_cast<UINT>(rootParameters.size()),
+            rootParameters.data(),
+            1,
+            &samplerDesc,
+            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
         Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
         Microsoft::WRL::ComPtr<ID3DBlob> rootError;
@@ -463,57 +690,302 @@ namespace myengine::render::dx12
         std::array<D3D12_INPUT_ELEMENT_DESC, 2> inputLayout =
         {
             D3D12_INPUT_ELEMENT_DESC{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            D3D12_INPUT_ELEMENT_DESC{"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            D3D12_INPUT_ELEMENT_DESC{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         };
 
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-        psoDesc.pRootSignature = rootSignature_.Get();
-        psoDesc.VS = {reinterpret_cast<BYTE*>(vertexShader->GetBufferPointer()), vertexShader->GetBufferSize()};
-        psoDesc.PS = {reinterpret_cast<BYTE*>(pixelShader->GetBufferPointer()), pixelShader->GetBufferSize()};
-        psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        psoDesc.DepthStencilState.DepthEnable = FALSE;
-        psoDesc.DepthStencilState.StencilEnable = FALSE;
-        psoDesc.InputLayout = {inputLayout.data(), static_cast<UINT>(inputLayout.size())};
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-        psoDesc.SampleDesc.Count = 1;
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC baseDesc{};
+        baseDesc.pRootSignature = rootSignature_.Get();
+        baseDesc.VS = {reinterpret_cast<BYTE*>(vertexShader->GetBufferPointer()), vertexShader->GetBufferSize()};
+        baseDesc.PS = {reinterpret_cast<BYTE*>(pixelShader->GetBufferPointer()), pixelShader->GetBufferSize()};
+        baseDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        baseDesc.SampleMask = UINT_MAX;
+        baseDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        baseDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        baseDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        baseDesc.DepthStencilState.DepthEnable = TRUE;
+        baseDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        baseDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        baseDesc.DepthStencilState.StencilEnable = FALSE;
+        baseDesc.InputLayout = {inputLayout.data(), static_cast<UINT>(inputLayout.size())};
+        baseDesc.NumRenderTargets = 1;
+        baseDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        baseDesc.DSVFormat = kDepthFormat;
+        baseDesc.SampleDesc.Count = 1;
 
-        hr = context_.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(pipelineState_.GetAddressOf()));
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC triangleDesc = baseDesc;
+        triangleDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        hr = context_.device->CreateGraphicsPipelineState(&triangleDesc, IID_PPV_ARGS(trianglePipelineState_.GetAddressOf()));
         if (FAILED(hr))
         {
-            logger_.Error("CreateGraphicsPipelineState failed: " + HrToString(hr));
+            logger_.Error("CreateGraphicsPipelineState (triangle) failed: " + HrToString(hr));
+            return false;
+        }
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC lineDesc = baseDesc;
+        lineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+        hr = context_.device->CreateGraphicsPipelineState(&lineDesc, IID_PPV_ARGS(linePipelineState_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateGraphicsPipelineState (line) failed: " + HrToString(hr));
             return false;
         }
 
         return true;
     }
 
-    bool Dx12RenderAdapter::BuildTriangleResources()
+    bool Dx12RenderAdapter::BuildPrimitiveResources()
     {
-        const std::array<Vertex, 3> vertices =
+        const std::array<Vertex, 2> lineVertices =
         {
-            Vertex{{0.0f, 0.35f, 0.0f}, {1.0f, 0.3f, 0.3f, 1.0f}},
-            Vertex{{0.35f, -0.35f, 0.0f}, {0.3f, 1.0f, 0.3f, 1.0f}},
-            Vertex{{-0.35f, -0.35f, 0.0f}, {0.3f, 0.3f, 1.0f, 1.0f}},
+            Vertex{{-0.5f, 0.0f, 0.0f}, {0.0f, 0.5f}},
+            Vertex{{0.5f, 0.0f, 0.0f}, {1.0f, 0.5f}},
         };
 
-        const UINT vertexBufferSize = static_cast<UINT>(sizeof(Vertex) * vertices.size());
+        const std::array<Vertex, 3> triangleVertices =
+        {
+            Vertex{{0.0f, 0.35f, 0.0f}, {0.5f, 0.0f}},
+            Vertex{{0.35f, -0.35f, 0.0f}, {1.0f, 1.0f}},
+            Vertex{{-0.35f, -0.35f, 0.0f}, {0.0f, 1.0f}},
+        };
 
-        HRESULT hr = S_OK;
+        const std::array<Vertex, 6> quadVertices =
+        {
+            Vertex{{-0.35f, 0.35f, 0.0f}, {0.0f, 0.0f}},
+            Vertex{{0.35f, 0.35f, 0.0f}, {1.0f, 0.0f}},
+            Vertex{{0.35f, -0.35f, 0.0f}, {1.0f, 1.0f}},
+            Vertex{{-0.35f, 0.35f, 0.0f}, {0.0f, 0.0f}},
+            Vertex{{0.35f, -0.35f, 0.0f}, {1.0f, 1.0f}},
+            Vertex{{-0.35f, -0.35f, 0.0f}, {0.0f, 1.0f}},
+        };
+
+        const std::array<Vertex, 36> cubeVertices =
+        {
+            Vertex{{-0.2f, -0.2f, 0.2f}, {0.0f, 1.0f}}, Vertex{{-0.2f, 0.2f, 0.2f}, {0.0f, 0.0f}}, Vertex{{0.2f, 0.2f, 0.2f}, {1.0f, 0.0f}},
+            Vertex{{-0.2f, -0.2f, 0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, 0.2f, 0.2f}, {1.0f, 0.0f}}, Vertex{{0.2f, -0.2f, 0.2f}, {1.0f, 1.0f}},
+
+            Vertex{{-0.2f, -0.2f, -0.2f}, {1.0f, 1.0f}}, Vertex{{0.2f, 0.2f, -0.2f}, {0.0f, 0.0f}}, Vertex{{-0.2f, 0.2f, -0.2f}, {1.0f, 0.0f}},
+            Vertex{{-0.2f, -0.2f, -0.2f}, {1.0f, 1.0f}}, Vertex{{0.2f, -0.2f, -0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, 0.2f, -0.2f}, {0.0f, 0.0f}},
+
+            Vertex{{-0.2f, 0.2f, -0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, 0.2f, -0.2f}, {1.0f, 1.0f}}, Vertex{{0.2f, 0.2f, 0.2f}, {1.0f, 0.0f}},
+            Vertex{{-0.2f, 0.2f, -0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, 0.2f, 0.2f}, {1.0f, 0.0f}}, Vertex{{-0.2f, 0.2f, 0.2f}, {0.0f, 0.0f}},
+
+            Vertex{{-0.2f, -0.2f, -0.2f}, {0.0f, 0.0f}}, Vertex{{0.2f, -0.2f, 0.2f}, {1.0f, 1.0f}}, Vertex{{0.2f, -0.2f, -0.2f}, {1.0f, 0.0f}},
+            Vertex{{-0.2f, -0.2f, -0.2f}, {0.0f, 0.0f}}, Vertex{{-0.2f, -0.2f, 0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, -0.2f, 0.2f}, {1.0f, 1.0f}},
+
+            Vertex{{-0.2f, -0.2f, -0.2f}, {1.0f, 1.0f}}, Vertex{{-0.2f, 0.2f, 0.2f}, {0.0f, 0.0f}}, Vertex{{-0.2f, 0.2f, -0.2f}, {1.0f, 0.0f}},
+            Vertex{{-0.2f, -0.2f, -0.2f}, {1.0f, 1.0f}}, Vertex{{-0.2f, -0.2f, 0.2f}, {0.0f, 1.0f}}, Vertex{{-0.2f, 0.2f, 0.2f}, {0.0f, 0.0f}},
+
+            Vertex{{0.2f, -0.2f, -0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, 0.2f, -0.2f}, {0.0f, 0.0f}}, Vertex{{0.2f, 0.2f, 0.2f}, {1.0f, 0.0f}},
+            Vertex{{0.2f, -0.2f, -0.2f}, {0.0f, 1.0f}}, Vertex{{0.2f, 0.2f, 0.2f}, {1.0f, 0.0f}}, Vertex{{0.2f, -0.2f, 0.2f}, {1.0f, 1.0f}},
+        };
+
+        if (!UploadPrimitiveGeometry(primitives_[PrimitiveIndex(PrimitiveType::Line)], lineVertices.data(), static_cast<UINT>(lineVertices.size()), D3D_PRIMITIVE_TOPOLOGY_LINELIST))
+        {
+            return false;
+        }
+        if (!UploadPrimitiveGeometry(primitives_[PrimitiveIndex(PrimitiveType::Triangle)], triangleVertices.data(), static_cast<UINT>(triangleVertices.size()), D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST))
+        {
+            return false;
+        }
+        if (!UploadPrimitiveGeometry(primitives_[PrimitiveIndex(PrimitiveType::Quad)], quadVertices.data(), static_cast<UINT>(quadVertices.size()), D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST))
+        {
+            return false;
+        }
+        if (!UploadPrimitiveGeometry(primitives_[PrimitiveIndex(PrimitiveType::Cube)], cubeVertices.data(), static_cast<UINT>(cubeVertices.size()), D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool Dx12RenderAdapter::BuildTextureResources()
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+        heapDesc.NumDescriptors = kMaxTextureDescriptors;
+        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+        const HRESULT hr = context_.device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(textureSrvHeap_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateDescriptorHeap (SRV) failed: " + HrToString(hr));
+            return false;
+        }
+
+        textureSrvDescriptorSize_ = context_.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        nextTextureDescriptorIndex_ = 0;
+        missingTextures_.clear();
+        loadedTextures_.clear();
+
+        TextureRecord defaultTexture{};
+        defaultTexture.width = 1;
+        defaultTexture.height = 1;
+        defaultTexture.pixels = {255, 255, 255, 255};
+        loadedTextures_.emplace(defaultTextureKey_, std::move(defaultTexture));
+        return true;
+    }
+
+    bool Dx12RenderAdapter::EnsureTextureUploaded(TextureRecord& texture)
+    {
+        if (texture.uploaded)
+        {
+            return true;
+        }
+        if (textureSrvHeap_ == nullptr || context_.device == nullptr || context_.commandList == nullptr)
+        {
+            return false;
+        }
+        if (activeSurface_ == nullptr)
+        {
+            return false;
+        }
+        if (texture.width == 0 || texture.height == 0 || texture.pixels.empty())
+        {
+            return false;
+        }
+        if (nextTextureDescriptorIndex_ >= kMaxTextureDescriptors)
+        {
+            logger_.Warning("EnsureTextureUploaded: SRV heap is full");
+            return false;
+        }
+
+        const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            texture.width,
+            texture.height);
+
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        HRESULT hr = context_.device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &textureDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(texture.textureResource.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource for texture failed: " + HrToString(hr));
+            return false;
+        }
+
+        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(texture.textureResource.Get(), 0, 1);
+        const auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+        CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+        hr = context_.device->CreateCommittedResource(
+            &uploadHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &uploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(texture.uploadResource.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource for texture upload failed: " + HrToString(hr));
+            return false;
+        }
+
+        D3D12_SUBRESOURCE_DATA textureData{};
+        textureData.pData = texture.pixels.data();
+        textureData.RowPitch = static_cast<LONG_PTR>(texture.width) * 4;
+        textureData.SlicePitch = textureData.RowPitch * static_cast<LONG_PTR>(texture.height);
+
+        UpdateSubresources<1>(
+            context_.commandList.Get(),
+            texture.textureResource.Get(),
+            texture.uploadResource.Get(),
+            0,
+            0,
+            1,
+            &textureData);
+
+        const auto toShaderResource = CD3DX12_RESOURCE_BARRIER::Transition(
+            texture.textureResource.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        context_.commandList->ResourceBarrier(1, &toShaderResource);
+
+        const UINT descriptorIndex = nextTextureDescriptorIndex_++;
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = textureSrvHeap_->GetCPUDescriptorHandleForHeapStart();
+        cpuHandle.ptr += static_cast<UINT64>(descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+        context_.device->CreateShaderResourceView(texture.textureResource.Get(), &srvDesc, cpuHandle);
+
+        texture.descriptorIndex = descriptorIndex;
+        texture.uploaded = true;
+        texture.pixels.clear();
+        texture.pixels.shrink_to_fit();
+        return true;
+    }
+
+    UINT Dx12RenderAdapter::ResolveTextureDescriptorIndex(const std::string_view texturePath)
+    {
+        auto getDefaultTexture = [this]() -> TextureRecord*
+        {
+            const auto it = loadedTextures_.find(defaultTextureKey_);
+            if (it == loadedTextures_.end())
+            {
+                return nullptr;
+            }
+            return &it->second;
+        };
+
+        if (TextureRecord* defaultTexture = getDefaultTexture(); defaultTexture != nullptr)
+        {
+            EnsureTextureUploaded(*defaultTexture);
+        }
+
+        if (!texturePath.empty())
+        {
+            const std::filesystem::path resolvedPath = ResolveRuntimePath(std::filesystem::path(texturePath));
+            const std::string key = resolvedPath.lexically_normal().generic_string();
+
+            auto it = loadedTextures_.find(key);
+            if (it == loadedTextures_.end() && missingTextures_.find(key) == missingTextures_.end())
+            {
+                PreloadTexture(texturePath);
+                it = loadedTextures_.find(key);
+            }
+
+            if (it != loadedTextures_.end() && EnsureTextureUploaded(it->second))
+            {
+                return it->second.descriptorIndex;
+            }
+        }
+
+        if (TextureRecord* defaultTexture = getDefaultTexture(); defaultTexture != nullptr && defaultTexture->uploaded)
+        {
+            return defaultTexture->descriptorIndex;
+        }
+
+        return 0;
+    }
+
+    bool Dx12RenderAdapter::UploadPrimitiveGeometry(
+        PrimitiveGeometry& geometry,
+        const Vertex* vertices,
+        const UINT vertexCount,
+        const D3D_PRIMITIVE_TOPOLOGY topology)
+    {
+        const UINT vertexBufferSize = static_cast<UINT>(sizeof(Vertex) * vertexCount);
 
         CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
         CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
-        hr = context_.device->CreateCommittedResource(
+        HRESULT hr = context_.device->CreateCommittedResource(
             &defaultHeap,
             D3D12_HEAP_FLAG_NONE,
             &bufferDesc,
             D3D12_RESOURCE_STATE_COMMON,
             nullptr,
-            IID_PPV_ARGS(vertexBuffer_.GetAddressOf()));
+            IID_PPV_ARGS(geometry.vertexBuffer.GetAddressOf()));
         if (FAILED(hr))
         {
             logger_.Error("CreateCommittedResource for vertex buffer failed: " + HrToString(hr));
@@ -527,7 +999,7 @@ namespace myengine::render::dx12
             &bufferDesc,
             D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
-            IID_PPV_ARGS(vertexUploadBuffer_.GetAddressOf()));
+            IID_PPV_ARGS(geometry.vertexUploadBuffer.GetAddressOf()));
         if (FAILED(hr))
         {
             logger_.Error("CreateCommittedResource for upload buffer failed: " + HrToString(hr));
@@ -536,32 +1008,32 @@ namespace myengine::render::dx12
 
         if (FAILED(context_.commandAllocator->Reset()))
         {
-            logger_.Error("Command allocator reset failed while uploading vertex buffer");
+            logger_.Error("Command allocator reset failed while uploading primitive geometry");
             return false;
         }
 
         if (FAILED(context_.commandList->Reset(context_.commandAllocator.Get(), nullptr)))
         {
-            logger_.Error("Command list reset failed while uploading vertex buffer");
+            logger_.Error("Command list reset failed while uploading primitive geometry");
             return false;
         }
 
         D3D12_SUBRESOURCE_DATA vertexData{};
-        vertexData.pData = vertices.data();
+        vertexData.pData = vertices;
         vertexData.RowPitch = vertexBufferSize;
-        vertexData.SlicePitch = vertexData.RowPitch;
+        vertexData.SlicePitch = vertexBufferSize;
 
-        auto toCopyDest = CD3DX12_RESOURCE_BARRIER::Transition(vertexBuffer_.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+        auto toCopyDest = CD3DX12_RESOURCE_BARRIER::Transition(geometry.vertexBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
         context_.commandList->ResourceBarrier(1, &toCopyDest);
 
-        UpdateSubresources<1>(context_.commandList.Get(), vertexBuffer_.Get(), vertexUploadBuffer_.Get(), 0, 0, 1, &vertexData);
+        UpdateSubresources<1>(context_.commandList.Get(), geometry.vertexBuffer.Get(), geometry.vertexUploadBuffer.Get(), 0, 0, 1, &vertexData);
 
-        auto toVertexBuffer = CD3DX12_RESOURCE_BARRIER::Transition(vertexBuffer_.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        auto toVertexBuffer = CD3DX12_RESOURCE_BARRIER::Transition(geometry.vertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
         context_.commandList->ResourceBarrier(1, &toVertexBuffer);
 
         if (FAILED(context_.commandList->Close()))
         {
-            logger_.Error("Command list close failed during vertex upload");
+            logger_.Error("Command list close failed during primitive upload");
             return false;
         }
 
@@ -569,9 +1041,11 @@ namespace myengine::render::dx12
         context_.commandQueue->ExecuteCommandLists(1, commandLists);
         WaitForGpu();
 
-        vertexBufferView_.BufferLocation = vertexBuffer_->GetGPUVirtualAddress();
-        vertexBufferView_.StrideInBytes = sizeof(Vertex);
-        vertexBufferView_.SizeInBytes = vertexBufferSize;
+        geometry.vertexBufferView.BufferLocation = geometry.vertexBuffer->GetGPUVirtualAddress();
+        geometry.vertexBufferView.StrideInBytes = sizeof(Vertex);
+        geometry.vertexBufferView.SizeInBytes = vertexBufferSize;
+        geometry.topology = topology;
+        geometry.vertexCount = vertexCount;
 
         return true;
     }
@@ -582,6 +1056,8 @@ namespace myengine::render::dx12
         {
             backBuffer.Reset();
         }
+        surface.depthStencil.Reset();
+        surface.dsvHeap.Reset();
 
         surface.currentBackBuffer = surface.swapChain->GetCurrentBackBufferIndex();
 
@@ -599,6 +1075,57 @@ namespace myengine::render::dx12
             context_.device->CreateRenderTargetView(surface.backBuffers[i].Get(), nullptr, rtvHandle);
             rtvHandle.Offset(1, static_cast<INT>(surface.rtvDescriptorSize));
         }
+
+        D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
+        dsvHeapDesc.NumDescriptors = 1;
+        dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+
+        HRESULT dsvHeapResult = context_.device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(surface.dsvHeap.GetAddressOf()));
+        if (FAILED(dsvHeapResult))
+        {
+            logger_.Error("CreateDescriptorHeap for DSV failed: " + HrToString(dsvHeapResult));
+            return;
+        }
+
+        D3D12_RESOURCE_DESC depthDesc{};
+        depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        depthDesc.Alignment = 0;
+        depthDesc.Width = surface.width;
+        depthDesc.Height = surface.height;
+        depthDesc.DepthOrArraySize = 1;
+        depthDesc.MipLevels = 1;
+        depthDesc.Format = kDepthFormat;
+        depthDesc.SampleDesc.Count = 1;
+        depthDesc.SampleDesc.Quality = 0;
+        depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+        D3D12_CLEAR_VALUE depthClearValue{};
+        depthClearValue.Format = kDepthFormat;
+        depthClearValue.DepthStencil.Depth = 1.0f;
+        depthClearValue.DepthStencil.Stencil = 0;
+
+        CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+        HRESULT depthResult = context_.device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &depthDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &depthClearValue,
+            IID_PPV_ARGS(surface.depthStencil.GetAddressOf()));
+        if (FAILED(depthResult))
+        {
+            logger_.Error("CreateCommittedResource for depth buffer failed: " + HrToString(depthResult));
+            return;
+        }
+
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+        dsvDesc.Format = kDepthFormat;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+
+        context_.device->CreateDepthStencilView(surface.depthStencil.Get(), &dsvDesc, surface.dsvHeap->GetCPUDescriptorHandleForHeapStart());
 
         surface.viewport.TopLeftX = 0.0f;
         surface.viewport.TopLeftY = 0.0f;
@@ -659,24 +1186,7 @@ namespace myengine::render::dx12
 
     std::wstring Dx12RenderAdapter::ResolveShaderPath() const
     {
-        wchar_t modulePath[MAX_PATH]{};
-        GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
-
-        const std::filesystem::path executablePath(modulePath);
-        const std::filesystem::path executableDir = executablePath.parent_path();
-
-        const std::filesystem::path firstCandidate = executableDir / L"assets/shaders/primitive.hlsl";
-        if (std::filesystem::exists(firstCandidate))
-        {
-            return firstCandidate.wstring();
-        }
-
-        const std::filesystem::path secondCandidate = L"assets/shaders/primitive.hlsl";
-        if (std::filesystem::exists(secondCandidate))
-        {
-            return secondCandidate.wstring();
-        }
-
-        return firstCandidate.wstring();
+        const std::filesystem::path resolved = ResolveRuntimePath("assets/shaders/primitive.hlsl");
+        return resolved.wstring();
     }
 }

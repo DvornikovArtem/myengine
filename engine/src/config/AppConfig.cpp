@@ -48,7 +48,6 @@ namespace myengine::config
         config.windows =
         {
             WindowConfig{"myengine - main", 1280, 720, core::Color{0.10f, 0.12f, 0.20f, 1.0f}},
-            WindowConfig{"myengine - secondary", 900, 600, core::Color{0.20f, 0.10f, 0.10f, 1.0f}},
         };
 
         config.input = InputConfig{0.8f, 0.8f, 120.0f};

@@ -18,7 +18,7 @@ set(APP_SHADER_FILES
 set_source_files_properties(${APP_SHADER_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
 
 add_executable(myengine WIN32 ${APP_HEADERS} ${APP_CPP} ${APP_SHADER_FILES})
-target_link_libraries(myengine PRIVATE myengine_engine)
+target_link_libraries(myengine PRIVATE myengine_engine myengine_directxtk myengine_directxtex)
 target_include_directories(myengine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(myengine PRIVATE MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
