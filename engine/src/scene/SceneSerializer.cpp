@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 
 #include <myengine/core/Logger.h>
 #include <myengine/ecs/World.h>
@@ -41,44 +41,6 @@ namespace myengine::scene
             }
         }
 
-        std::string PrimitiveToString(const render::PrimitiveType primitive)
-        {
-            switch (primitive)
-            {
-                case render::PrimitiveType::Line:
-                    return "line";
-                case render::PrimitiveType::Triangle:
-                    return "triangle";
-                case render::PrimitiveType::Quad:
-                    return "quad";
-                case render::PrimitiveType::Cube:
-                    return "cube";
-                default:
-                    return "triangle";
-            }
-        }
-
-        render::PrimitiveType PrimitiveFromString(const std::string& value)
-        {
-            if (value == "line")
-            {
-                return render::PrimitiveType::Line;
-            }
-            if (value == "triangle")
-            {
-                return render::PrimitiveType::Triangle;
-            }
-            if (value == "quad")
-            {
-                return render::PrimitiveType::Quad;
-            }
-            if (value == "cube")
-            {
-                return render::PrimitiveType::Cube;
-            }
-            return render::PrimitiveType::Triangle;
-        }
-
         json VecToJson(const ecs::components::Vec3& value)
         {
             return json::array({value.x, value.y, value.z});
@@ -95,26 +57,6 @@ namespace myengine::scene
             result.x = value[0].get<float>();
             result.y = value[1].get<float>();
             result.z = value[2].get<float>();
-            return result;
-        }
-
-        json ColorToJson(const core::Color& color)
-        {
-            return json::array({color.r, color.g, color.b, color.a});
-        }
-
-        core::Color ColorFromJson(const json& value, const core::Color& fallback = core::Color{1.0f, 1.0f, 1.0f, 1.0f})
-        {
-            if (!value.is_array() || value.size() != 4)
-            {
-                return fallback;
-            }
-
-            core::Color result = fallback;
-            result.r = value[0].get<float>();
-            result.g = value[1].get<float>();
-            result.b = value[2].get<float>();
-            result.a = value[3].get<float>();
             return result;
         }
     }
@@ -148,10 +90,9 @@ namespace myengine::scene
             {
                 entityJson["MeshRenderer"] =
                 {
-                    {"primitive", PrimitiveToString(renderer->primitive)},
-                    {"color", ColorToJson(renderer->color)},
-                    {"materialName", renderer->materialName},
-                    {"texturePath", renderer->texturePath},
+                    {"meshPath", renderer->meshPath},
+                    {"materialPath", renderer->materialPath},
+                    {"visible", renderer->visible},
                 };
             }
 
@@ -290,10 +231,9 @@ namespace myengine::scene
                 {
                     auto& renderer = world.Emplace<ecs::components::MeshRendererComponent>(entity);
                     const auto& rendererJson = entityJson["MeshRenderer"];
-                    renderer.primitive = PrimitiveFromString(rendererJson.value("primitive", std::string("triangle")));
-                    renderer.color = ColorFromJson(rendererJson.value("color", json::array()));
-                    renderer.materialName = rendererJson.value("materialName", std::string());
-                    renderer.texturePath = rendererJson.value("texturePath", std::string());
+                    renderer.meshPath = rendererJson.value("meshPath", std::string());
+                    renderer.materialPath = rendererJson.value("materialPath", std::string());
+                    renderer.visible = rendererJson.value("visible", true);
                 }
 
                 if (entityJson.contains("Motion"))

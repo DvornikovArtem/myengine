@@ -1,11 +1,11 @@
 // RenderSystem.cpp
 
-#include <cstring>
 #include <cmath>
+#include <cstring>
 #include <string>
-#include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include <DirectXMath.h>
 
@@ -17,6 +17,7 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
 #include <myengine/ecs/systems/RenderSystem.h>
+#include <myengine/resource/ResourceManager.h>
 #include <myengine/spatial/UniformGrid2D.h>
 
 namespace myengine::ecs::systems
@@ -121,11 +122,6 @@ namespace myengine::ecs::systems
             return;
         }
 
-        if (!context.renderAdapter.BeginFrame(context.surface, context.clearColor))
-        {
-            return;
-        }
-
         const float aspect = context.windowHeight == 0
             ? 1.0f
             : static_cast<float>(context.windowWidth) / static_cast<float>(context.windowHeight);
@@ -185,13 +181,12 @@ namespace myengine::ecs::systems
                 cameraFound = true;
             });
 
-        context.renderAdapter.SetViewProjection(context.surface, ToRenderMatrix(viewMatrix), ToRenderMatrix(projectionMatrix));
-
         std::unordered_map<EntityId, DirectX::XMFLOAT4X4> worldMatrixCache;
         std::unordered_set<EntityId> visiting;
         spatial::UniformGrid2D grid(1.0f);
         std::vector<EntityId> indexedEntities;
         std::unordered_set<EntityId> uniqueEntities;
+        std::vector<render::DrawItem> drawItems;
 
         world.ForEach<components::TransformComponent, components::MeshRendererComponent>(
             [&](const EntityId entity, components::TransformComponent&, components::MeshRendererComponent&)
@@ -202,13 +197,7 @@ namespace myengine::ecs::systems
                     return;
                 }
 
-                const DirectX::XMMATRIX worldMatrix = ResolveWorldMatrix(
-                    entity,
-                    world,
-                    worldMatrixCache,
-                    visiting,
-                    hierarchyCycleWarningLogged_,
-                    context);
+                const DirectX::XMMATRIX worldMatrix = ResolveWorldMatrix(entity, world, worldMatrixCache, visiting, hierarchyCycleWarningLogged_, context);
 
                 const DirectX::XMFLOAT3 position = ExtractTranslation(worldMatrix);
                 grid.Insert(entity, position.x, position.y);
@@ -229,40 +218,63 @@ namespace myengine::ecs::systems
             }
         }
 
-        for (const EntityId entity : indexedEntities)
+        if (context.resourceManager != nullptr)
         {
-            if (!world.Has<components::MeshRendererComponent>(entity))
+            for (const EntityId entity : indexedEntities)
             {
-                continue;
-            }
-
-            auto& renderer = world.Get<components::MeshRendererComponent>(entity);
-            if (!renderer.texturePath.empty())
-            {
-                if (!context.renderAdapter.PreloadTexture(renderer.texturePath) &&
-                    context.logger != nullptr &&
-                    textureWarningLogged_.insert(entity).second)
+                if (!world.Has<components::MeshRendererComponent>(entity))
                 {
-                    context.logger->Warning(
-                        "RenderSystem: texture preload failed for entity=" + std::to_string(entity) +
-                        " path=" + renderer.texturePath);
+                    continue;
                 }
+
+                auto& renderer = world.Get<components::MeshRendererComponent>(entity);
+                if (!renderer.visible || renderer.meshPath.empty() || renderer.materialPath.empty())
+                {
+                    continue;
+                }
+
+                auto meshResource = context.resourceManager->Load<resource::MeshAsset>(renderer.meshPath);
+                auto materialResource = context.resourceManager->Load<resource::MaterialAsset>(renderer.materialPath);
+                if (meshResource == nullptr || materialResource == nullptr)
+                {
+                    continue;
+                }
+
+                auto shaderResource = context.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
+                auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
+                if (shaderResource == nullptr || textureResource == nullptr)
+                {
+                    continue;
+                }
+                if (!meshResource->asset.gpuHandle.IsValid() ||
+                    !shaderResource->asset.gpuHandle.IsValid() ||
+                    !textureResource->asset.gpuHandle.IsValid())
+                {
+                    continue;
+                }
+
+                const DirectX::XMMATRIX worldMatrix = ResolveWorldMatrix(entity, world, worldMatrixCache, visiting, hierarchyCycleWarningLogged_, context);
+
+                render::DrawItem drawItem;
+                drawItem.mesh = meshResource->asset.gpuHandle;
+                drawItem.shader = shaderResource->asset.gpuHandle;
+                drawItem.texture = textureResource->asset.gpuHandle;
+                drawItem.model = ToRenderMatrix(worldMatrix);
+                drawItem.color = materialResource->asset.tint;
+                drawItems.push_back(drawItem);
             }
+        }
 
-            const DirectX::XMMATRIX worldMatrix = ResolveWorldMatrix(
-                entity,
-                world,
-                worldMatrixCache,
-                visiting,
-                hierarchyCycleWarningLogged_,
-                context);
+        if (!context.renderAdapter.BeginFrame(context.surface, context.clearColor))
+        {
+            return;
+        }
 
-            context.renderAdapter.DrawPrimitive(
-                context.surface,
-                renderer.primitive,
-                ToRenderMatrix(worldMatrix),
-                renderer.color,
-                renderer.texturePath);
+        context.renderAdapter.SetViewProjection(context.surface, ToRenderMatrix(viewMatrix), ToRenderMatrix(projectionMatrix));
+
+        for (const auto& drawItem : drawItems)
+        {
+            context.renderAdapter.Draw(context.surface, drawItem);
         }
 
         context.renderAdapter.EndFrame(context.surface);

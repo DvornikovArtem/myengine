@@ -2,8 +2,6 @@
 
 #pragma once
 
-#include <string_view>
-
 #include <myengine/core/Types.h>
 #include <myengine/render/RenderTypes.h>
 
@@ -15,27 +13,25 @@
 
 namespace myengine::render
 {
-	class IRenderAdapter
-	{
-	public:
-		virtual ~IRenderAdapter() = default;
+    class IRenderAdapter
+    {
+    public:
+        virtual ~IRenderAdapter() = default;
 
-		virtual bool Initialize() = 0;
-		virtual bool PreloadTexture(std::string_view texturePath) = 0;
+        virtual bool Initialize() = 0;
 
-		virtual RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) = 0;
-		virtual void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) = 0;
+        virtual MeshHandle UploadMesh(const MeshData& meshData) = 0;
+        virtual TextureHandle CreateTexture(const TextureData& textureData) = 0;
+        virtual ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) = 0;
 
-		virtual bool BeginFrame(RenderSurfaceHandle surface, const core::Color& clearColor) = 0;
-		virtual void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) = 0;
-		virtual void DrawPrimitive(
-			RenderSurfaceHandle surface,
-			PrimitiveType primitive,
-			const Matrix4& model,
-			const core::Color& color,
-			std::string_view texturePath) = 0;
-		virtual void EndFrame(RenderSurfaceHandle surface) = 0;
+        virtual RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) = 0;
+        virtual void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) = 0;
 
-		virtual void Shutdown() = 0;
-	};
+        virtual bool BeginFrame(RenderSurfaceHandle surface, const core::Color& clearColor) = 0;
+        virtual void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) = 0;
+        virtual void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) = 0;
+        virtual void EndFrame(RenderSurfaceHandle surface) = 0;
+
+        virtual void Shutdown() = 0;
+    };
 }

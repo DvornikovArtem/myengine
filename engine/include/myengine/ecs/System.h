@@ -11,6 +11,11 @@ namespace myengine::core
     class Logger;
 }
 
+namespace myengine::resource
+{
+    class ResourceManager;
+}
+
 namespace myengine::ecs
 {
     class World;
@@ -24,6 +29,7 @@ namespace myengine::ecs
         std::uint32_t windowWidth = 1;
         std::uint32_t windowHeight = 1;
         core::Logger* logger = nullptr;
+        resource::ResourceManager* resourceManager = nullptr;
     };
 
     class IUpdateSystem
