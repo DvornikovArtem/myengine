@@ -46,3 +46,5 @@ external/**/x64/**
 
 !external/**/Debug/**/*.lib
 !external/**/x64/**/*.lib
+
+!assets/models/**/*.obj
