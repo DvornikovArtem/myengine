@@ -27,6 +27,8 @@ compile_commands.json
 
 # Logs and runtime output
 logs/
+*.myemesh
+*.myetex
 
 # Legacy IDE output
 Debug/

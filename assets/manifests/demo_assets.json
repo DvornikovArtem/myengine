@@ -1,0 +1,17 @@
+{
+  "meshes": [
+    "../models/crate.obj",
+    "../models/pyramid.obj"
+  ],
+  "textures": [
+    "../textures/debug.bmp"
+  ],
+  "shaders": [
+    "../shaders/textured_lit.shader.json"
+  ],
+  "materials": [
+    "../materials/default.material.json",
+    "../materials/warm.material.json",
+    "../materials/cool.material.json"
+  ]
+}

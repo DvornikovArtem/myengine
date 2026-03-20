@@ -1,0 +1,268 @@
+{
+  "entities": [
+    {
+      "Camera": {
+        "farPlane": 200.0,
+        "fovYDeg": 65.0,
+        "isPrimary": true,
+        "nearPlane": 0.009999999776482582,
+        "orthographicHalfHeight": 1.0,
+        "position": [
+          0.0,
+          0.25,
+          -6.5
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "CameraController": {
+        "mouseSensitivityDeg": 0.18000000715255737,
+        "moveSpeed": 0.800000011920929,
+        "rotateSpeedDeg": 84.0,
+        "zoomSpeed": 0.699999988079071
+      },
+      "Tag": {
+        "name": "Camera_1"
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 1
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "assets/materials/default.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Motion": {
+        "angularVelocityDeg": [
+          12.0,
+          35.0,
+          0.0
+        ],
+        "linearVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "Controlled_1"
+      },
+      "Transform": {
+        "position": [
+          -1.7000000476837158,
+          0.0,
+          2.200000047683716
+        ],
+        "rotationDeg": [
+          740.0475463867188,
+          2158.47265625,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          1.100000023841858,
+          1.100000023841858
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 2
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "assets/materials/default.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Motion": {
+        "angularVelocityDeg": [
+          0.0,
+          -28.0,
+          0.0
+        ],
+        "linearVelocity": [
+          0.25,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "SharedCrate_1"
+      },
+      "Transform": {
+        "position": [
+          -2.1901230812072754,
+          0.0,
+          2.200000047683716
+        ],
+        "rotationDeg": [
+          0.0,
+          -1726.7799072265625,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          1.100000023841858,
+          1.100000023841858
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 3
+    },
+    {
+      "Hierarchy": {
+        "children": [
+          7
+        ],
+        "parent": 0
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/warm.material.json",
+        "meshPath": "assets/models/pyramid.obj",
+        "visible": true
+      },
+      "Motion": {
+        "angularVelocityDeg": [
+          0.0,
+          55.0,
+          22.0
+        ],
+        "linearVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "Pyramid_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.6000000238418579,
+          0.30000001192092896
+        ],
+        "rotationDeg": [
+          0.0,
+          3391.891845703125,
+          1356.7548828125
+        ],
+        "scale": [
+          1.350000023841858,
+          1.350000023841858,
+          1.350000023841858
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 4
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "assets/materials/africanhead.material.json",
+        "meshPath": "assets/models/african_head.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "AfricanHead_1"
+      },
+      "Transform": {
+        "position": [
+          1.5,
+          0.10000000149011612,
+          0.10000000149011612
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 5
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "assets/materials/cool.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "Floor_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          -1.649999976158142,
+          2.200000047683716
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          7.0,
+          0.25,
+          7.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 6
+    },
+    {
+      "Hierarchy": {
+        "children": [],
+        "parent": 4
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/warm.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "PyramidChild_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          1.2000000476837158,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.44999998807907104,
+          0.44999998807907104,
+          0.44999998807907104
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 7
+    }
+  ]
+}

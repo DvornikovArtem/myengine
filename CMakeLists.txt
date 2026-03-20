@@ -79,6 +79,81 @@ else()
   message(WARNING "DirectXTex static library not found. Texture loading through DirectXTex will fail at link time.")
 endif()
 
+set(MYENGINE_STB_ROOT "${CMAKE_SOURCE_DIR}/external/stb")
+set(MYENGINE_STB_INCLUDE_DIR "${MYENGINE_STB_ROOT}/Include/stb")
+set(MYENGINE_STB_HEADER "${MYENGINE_STB_INCLUDE_DIR}/stb_image.h")
+if(NOT EXISTS "${MYENGINE_STB_HEADER}")
+  message(FATAL_ERROR "stb_image.h not found: ${MYENGINE_STB_HEADER}")
+endif()
+add_library(myengine_stb INTERFACE)
+target_include_directories(myengine_stb
+  INTERFACE
+    "${MYENGINE_STB_INCLUDE_DIR}")
+
+set(MYENGINE_NLOHMANN_JSON_ROOT "${CMAKE_SOURCE_DIR}/external/nlohmann/Include")
+set(MYENGINE_NLOHMANN_JSON_HEADER "${MYENGINE_NLOHMANN_JSON_ROOT}/nlohmann/json.hpp")
+if(NOT EXISTS "${MYENGINE_NLOHMANN_JSON_HEADER}")
+  message(FATAL_ERROR "nlohmann/json.hpp not found: ${MYENGINE_NLOHMANN_JSON_HEADER}")
+endif()
+add_library(myengine_nlohmann_json INTERFACE)
+target_include_directories(myengine_nlohmann_json
+  INTERFACE
+    "${MYENGINE_NLOHMANN_JSON_ROOT}")
+
+set(MYENGINE_DIRECTX_HEADERS_ROOT "${CMAKE_SOURCE_DIR}/external/directx-headers/Include")
+set(MYENGINE_D3DX12_HEADER "${MYENGINE_DIRECTX_HEADERS_ROOT}/directx-headers/directx/d3dx12.h")
+if(NOT EXISTS "${MYENGINE_D3DX12_HEADER}")
+  message(FATAL_ERROR "d3dx12.h not found: ${MYENGINE_D3DX12_HEADER}")
+endif()
+add_library(myengine_directxheaders INTERFACE)
+target_include_directories(myengine_directxheaders
+  INTERFACE
+    "${MYENGINE_DIRECTX_HEADERS_ROOT}")
+
+set(MYENGINE_ASSIMP_ROOT "${CMAKE_SOURCE_DIR}/external/assimp")
+set(MYENGINE_ASSIMP_INCLUDE_DIR "${MYENGINE_ASSIMP_ROOT}/Include")
+set(MYENGINE_ASSIMP_HEADER "${MYENGINE_ASSIMP_INCLUDE_DIR}/assimp/Importer.hpp")
+set(MYENGINE_ASSIMP_LIB_DEBUG "${MYENGINE_ASSIMP_ROOT}/lib/Debug/assimp-vc143-mtd.lib")
+set(MYENGINE_ASSIMP_LIB_RELEASE "${MYENGINE_ASSIMP_ROOT}/lib/Release/assimp-vc143-mt.lib")
+
+if(NOT EXISTS "${MYENGINE_ASSIMP_HEADER}")
+  message(FATAL_ERROR "Assimp header not found: ${MYENGINE_ASSIMP_HEADER}")
+endif()
+
+add_library(myengine_assimp INTERFACE)
+target_include_directories(myengine_assimp
+  INTERFACE
+    "${MYENGINE_ASSIMP_INCLUDE_DIR}")
+
+if(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}" OR EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}")
+  add_library(myengine_assimp_lib UNKNOWN IMPORTED GLOBAL)
+  if(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_DEBUG "${MYENGINE_ASSIMP_LIB_DEBUG}")
+  endif()
+  if(EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELEASE "${MYENGINE_ASSIMP_LIB_RELEASE}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELWITHDEBINFO "${MYENGINE_ASSIMP_LIB_RELEASE}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_MINSIZEREL "${MYENGINE_ASSIMP_LIB_RELEASE}")
+  elseif(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELEASE "${MYENGINE_ASSIMP_LIB_DEBUG}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELWITHDEBINFO "${MYENGINE_ASSIMP_LIB_DEBUG}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_MINSIZEREL "${MYENGINE_ASSIMP_LIB_DEBUG}")
+  endif()
+  if(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION "${MYENGINE_ASSIMP_LIB_DEBUG}")
+  elseif(EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}")
+    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION "${MYENGINE_ASSIMP_LIB_RELEASE}")
+  endif()
+
+  if(NOT EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}" AND EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
+    message(WARNING "Assimp release library not found. Using Debug library for all configurations.")
+  endif()
+
+  target_link_libraries(myengine_assimp INTERFACE myengine_assimp_lib)
+else()
+  message(FATAL_ERROR "Assimp library not found in ${MYENGINE_ASSIMP_ROOT}/lib")
+endif()
+
 add_subdirectory(engine)
 add_subdirectory(app)
 

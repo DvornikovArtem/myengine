@@ -20,7 +20,6 @@ namespace myengine::ecs::systems
         void Render(World& world, const RenderFrameContext& context) override;
 
     private:
-        std::unordered_set<EntityId> textureWarningLogged_;
         std::unordered_set<EntityId> hierarchyCycleWarningLogged_;
     };
 }

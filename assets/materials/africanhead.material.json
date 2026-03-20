@@ -1,0 +1,5 @@
+{
+  "shader": "../shaders/textured_lit.shader.json",
+  "texture": "../textures/african_head_diffuse.dds",
+  "tint": [1.0, 1.0, 1.0, 1.0]
+}

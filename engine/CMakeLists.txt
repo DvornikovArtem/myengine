@@ -55,9 +55,7 @@ add_library(myengine_engine STATIC ${ENGINE_HEADERS} ${ENGINE_SOURCES})
 
 target_include_directories(myengine_engine
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 target_compile_definitions(myengine_engine
   PUBLIC
@@ -65,6 +63,10 @@ target_compile_definitions(myengine_engine
 
 target_link_libraries(myengine_engine
   PUBLIC
+    myengine_assimp
+    myengine_stb
+    myengine_nlohmann_json
+    myengine_directxheaders
     myengine_directxtk
     myengine_directxtex
     d3d12

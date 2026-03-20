@@ -7,6 +7,7 @@
         /W4
         /permissive-
         /EHsc
+        /FS
         /utf-8
         /Zc:__cplusplus
         /DWIN32_LEAN_AND_MEAN

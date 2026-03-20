@@ -15,6 +15,7 @@
 #include <myengine/ecs/World.h>
 #include <myengine/input/InputManager.h>
 #include <myengine/render/IRenderAdapter.h>
+#include <myengine/resource/ResourceManager.h>
 #include <myengine/state/StateMachine.h>
 
 namespace myengine::core
@@ -42,6 +43,7 @@ namespace myengine::core
         ecs::World& GetWorld();
         input::InputManager& GetInputManager();
         Logger& GetLogger();
+        resource::ResourceManager& GetResourceManager();
         void SetStateLabel(const std::string& label);
 
     private:
@@ -79,6 +81,7 @@ namespace myengine::core
         ecs::World world_;
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
+        std::unique_ptr<resource::ResourceManager> resourceManager_;
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;

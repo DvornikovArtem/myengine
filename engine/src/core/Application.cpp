@@ -23,8 +23,6 @@ namespace myengine::core
 {
     namespace
     {
-        constexpr float kControlledTriangleBehindCubeZ = 0.45f;
-
         std::wstring Utf8ToWide(const std::string& text)
         {
             if (text.empty())
@@ -84,6 +82,8 @@ namespace myengine::core
             return false;
         }
 
+        resourceManager_ = std::make_unique<resource::ResourceManager>(*renderAdapter_, logger_);
+
         WindowId nextWindowId = 1;
         windows_.reserve(config_.windows.size());
 
@@ -122,9 +122,14 @@ namespace myengine::core
         world_.AddUpdateSystem(std::make_unique<ecs::systems::CameraControlSystem>(input_, inputOwnerWindowId_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
-        sceneSavePath_ = std::filesystem::path(MYENGINE_SOURCE_DIR) / "assets/scenes/scene";
+        sceneSavePath_ = std::filesystem::path(MYENGINE_SOURCE_DIR) / "assets/scenes/scene.json";
 
-        if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
+        if (resourceManager_ != nullptr)
+        {
+            resourceManager_->LoadManifest("assets/manifests/demo_assets.json");
+        }
+
+        /*if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
         {
             BuildDemoScene();
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
@@ -132,7 +137,9 @@ namespace myengine::core
         else
         {
             RebindWindowControlledEntities();
-        }
+        }*/
+
+        BuildDemoScene();
 
         timer_.Reset();
         logger_.Info("Application initialization finished");
@@ -168,6 +175,10 @@ namespace myengine::core
 
             world_.UpdateSystems(deltaTime);
             stateMachine_.Update(*this, deltaTime);
+            if (resourceManager_ != nullptr)
+            {
+                resourceManager_->UpdateHotReload();
+            }
             RenderFrame();
 
             deltaLogAccumulator_ += deltaTime;
@@ -197,6 +208,8 @@ namespace myengine::core
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
+
+        resourceManager_.reset();
 
         if (renderAdapter_)
         {
@@ -290,10 +303,34 @@ namespace myengine::core
 
             case WM_KEYDOWN:
             {
-                input_.OnKeyDown(static_cast<std::uint32_t>(wparam));
+                const auto key = static_cast<std::uint32_t>(wparam);
+
+                input_.OnKeyDown(key);
                 event.type = InputEventType::KeyDown;
-                event.key = static_cast<std::uint32_t>(wparam);
+                event.key = key;
+
                 logger_.Debug("KeyDown window=" + std::to_string(event.windowId) + " key=" + std::to_string(event.key));
+
+                const bool firstPress = (lparam & (1 << 30)) == 0;
+                if (firstPress)
+                {
+                    if (key == 'L')
+                    {
+                        if (scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
+                        {
+                            RebindWindowControlledEntities();
+                            logger_.Info("Scene loaded successfully");
+                        }
+                    }
+                    else if (key == 'P')
+                    {
+                        if (scene::SaveWorldToJson(world_, sceneSavePath_, &logger_))
+                        {
+                            logger_.Info("Scene saved successfully");
+                        }
+                    }
+                }
+
                 stateMachine_.HandleEvent(*this, event);
                 return 0;
             }
@@ -410,6 +447,11 @@ namespace myengine::core
         return logger_;
     }
 
+    resource::ResourceManager& Application::GetResourceManager()
+    {
+        return *resourceManager_;
+    }
+
     void Application::SetStateLabel(const std::string& label)
     {
         const std::wstring suffix = L" [" + Utf8ToWide(label) + L"]";
@@ -514,14 +556,24 @@ namespace myengine::core
 
     void Application::BuildDemoScene()
     {
-        static constexpr std::array<Color, 5> kPalette =
+        static constexpr char kCubeMesh[] = "assets/models/crate.obj";
+        static constexpr char kPyramidMesh[] = "assets/models/pyramid.obj";
+        static constexpr char kAfricanHeadMesh[] = "assets/models/african_head.obj";
+        static constexpr char kDefaultMaterial[] = "assets/materials/default.material.json";
+        static constexpr char kWarmMaterial[] = "assets/materials/warm.material.json";
+        static constexpr char kCoolMaterial[] = "assets/materials/cool.material.json";
+        static constexpr char kAfricanHeadMaterial[] = "assets/materials/africanhead.material.json";
+
+        if (resourceManager_ != nullptr)
         {
-            Color{0.95f, 0.35f, 0.30f, 1.0f},
-            Color{0.22f, 0.75f, 0.42f, 1.0f},
-            Color{0.26f, 0.56f, 0.95f, 1.0f},
-            Color{0.97f, 0.82f, 0.26f, 1.0f},
-            Color{0.72f, 0.38f, 0.92f, 1.0f},
-        };
+            resourceManager_->Load<resource::MeshAsset>(kCubeMesh);
+            resourceManager_->Load<resource::MeshAsset>(kPyramidMesh);
+            resourceManager_->Load<resource::MeshAsset>(kAfricanHeadMesh);
+            resourceManager_->Load<resource::MaterialAsset>(kDefaultMaterial);
+            resourceManager_->Load<resource::MaterialAsset>(kWarmMaterial);
+            resourceManager_->Load<resource::MaterialAsset>(kCoolMaterial);
+            resourceManager_->Load<resource::MaterialAsset>(kAfricanHeadMaterial);
+        }
 
         for (std::size_t i = 0; i < windows_.size(); ++i)
         {
@@ -539,7 +591,7 @@ namespace myengine::core
                 tag.name = "Camera_" + std::to_string(windowId);
 
                 auto& camera = world_.Emplace<ecs::components::CameraComponent>(cameraEntity);
-                camera.position = {0.0f, 0.0f, -2.0f};
+                camera.position = {0.0f, 0.25f, -6.5f};
                 camera.rotationDeg = {0.0f, 0.0f, 0.0f};
                 camera.fovYDeg = 65.0f;
                 camera.orthographicHalfHeight = 1.0f;
@@ -564,145 +616,114 @@ namespace myengine::core
                 tag.name = "Controlled_" + std::to_string(windowId);
 
                 auto& transform = world_.Emplace<ecs::components::TransformComponent>(controlledEntity);
-                transform.position = {0.0f, 100.0f, kControlledTriangleBehindCubeZ};
-                transform.scale = {0.28f, 0.28f, 0.28f};
+                transform.position = {-1.7f, 0.0f, 2.2f};
+                transform.scale = {1.1f, 1.1f, 1.1f};
 
                 auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(controlledEntity);
-                renderer.primitive = render::PrimitiveType::Triangle;
-                renderer.color = kPalette[(i + 0) % kPalette.size()];
+                renderer.meshPath = kCubeMesh;
+                renderer.materialPath = kDefaultMaterial;
+
+                auto& motion = world_.Emplace<ecs::components::MotionComponent>(controlledEntity);
+                motion.angularVelocityDeg.y = 35.0f;
+                motion.angularVelocityDeg.x = 12.0f;
 
                 world_.Emplace<ecs::components::WindowBindingComponent>(controlledEntity).windowId = windowId;
             }
 
-            const ecs::EntityId parentEntity = world_.CreateEntity();
+            const ecs::EntityId sharedCubeEntity = world_.CreateEntity();
             {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(parentEntity);
-                tag.name = "ParentQuad_" + std::to_string(windowId);
+                auto& tag = world_.Emplace<ecs::components::TagComponent>(sharedCubeEntity);
+                tag.name = "SharedCrate_" + std::to_string(windowId);
 
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(parentEntity);
-                transform.position = {-0.45f, 0.35f, 0.0f};
-                transform.scale = {0.32f, 0.32f, 0.32f};
+                auto& transform = world_.Emplace<ecs::components::TransformComponent>(sharedCubeEntity);
+                transform.position = {1.7f, 0.0f, 2.2f};
+                transform.scale = {1.1f, 1.1f, 1.1f};
 
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(parentEntity);
-                renderer.primitive = render::PrimitiveType::Quad;
-                renderer.color = kPalette[(i + 1) % kPalette.size()];
+                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(sharedCubeEntity);
+                renderer.meshPath = kCubeMesh;
+                renderer.materialPath = kDefaultMaterial;
 
-                auto& motion = world_.Emplace<ecs::components::MotionComponent>(parentEntity);
-                motion.angularVelocityDeg.z = 35.0f + 8.0f * static_cast<float>(i);
+                auto& motion = world_.Emplace<ecs::components::MotionComponent>(sharedCubeEntity);
+                motion.linearVelocity.x = (i % 2 == 0) ? 0.25f : -0.25f;
+                motion.angularVelocityDeg.y = -28.0f;
 
-                world_.Emplace<ecs::components::WindowBindingComponent>(parentEntity).windowId = windowId;
+                world_.Emplace<ecs::components::WindowBindingComponent>(sharedCubeEntity).windowId = windowId;
+            }
+
+            const ecs::EntityId pyramidEntity = world_.CreateEntity();
+            {
+                auto& tag = world_.Emplace<ecs::components::TagComponent>(pyramidEntity);
+                tag.name = "Pyramid_" + std::to_string(windowId);
+
+                auto& transform = world_.Emplace<ecs::components::TransformComponent>(pyramidEntity);
+                transform.position = {0.0f, 0.6f, 0.3f};
+                transform.scale = {1.35f, 1.35f, 1.35f};
+
+                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(pyramidEntity);
+                renderer.meshPath = kPyramidMesh;
+                renderer.materialPath = kWarmMaterial;
+
+                auto& motion = world_.Emplace<ecs::components::MotionComponent>(pyramidEntity);
+                motion.angularVelocityDeg.y = 55.0f;
+                motion.angularVelocityDeg.z = 22.0f;
+
+                world_.Emplace<ecs::components::WindowBindingComponent>(pyramidEntity).windowId = windowId;
+            }
+
+            const ecs::EntityId africanHeadEntity = world_.CreateEntity();
+            {
+                auto& tag = world_.Emplace<ecs::components::TagComponent>(africanHeadEntity);
+                tag.name = "AfricanHead_" + std::to_string(windowId);
+
+                auto& transform = world_.Emplace<ecs::components::TransformComponent>(africanHeadEntity);
+                transform.position = { 1.5f, 0.1f, 0.1f };
+                transform.scale = { 1.0f, 1.0f, 1.0f };
+
+                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(africanHeadEntity);
+                renderer.meshPath = kAfricanHeadMesh;
+                renderer.materialPath = kAfricanHeadMaterial;
+
+                //auto& motion = world_.Emplace<ecs::components::MotionComponent>(africanHeadEntity);
+                //motion.angularVelocityDeg.y = 10.0f;
+                //motion.angularVelocityDeg.z = 10.0f;
+
+                world_.Emplace<ecs::components::WindowBindingComponent>(africanHeadEntity).windowId = windowId;
+            }
+
+            const ecs::EntityId floorEntity = world_.CreateEntity();
+            {
+                auto& tag = world_.Emplace<ecs::components::TagComponent>(floorEntity);
+                tag.name = "Floor_" + std::to_string(windowId);
+
+                auto& transform = world_.Emplace<ecs::components::TransformComponent>(floorEntity);
+                transform.position = {0.0f, -1.65f, 2.2f};
+                transform.scale = {7.0f, 0.25f, 7.0f};
+
+                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(floorEntity);
+                renderer.meshPath = kCubeMesh;
+                renderer.materialPath = kCoolMaterial;
+
+                world_.Emplace<ecs::components::WindowBindingComponent>(floorEntity).windowId = windowId;
             }
 
             const ecs::EntityId childEntity = world_.CreateEntity();
             {
                 auto& tag = world_.Emplace<ecs::components::TagComponent>(childEntity);
-                tag.name = "ChildLine_" + std::to_string(windowId);
+                tag.name = "PyramidChild_" + std::to_string(windowId);
 
                 auto& transform = world_.Emplace<ecs::components::TransformComponent>(childEntity);
-                transform.position = {0.55f, 0.0f, 0.0f};
-                transform.scale = {0.55f, 0.55f, 0.55f};
+                transform.position = {0.0f, 1.2f, 0.0f};
+                transform.scale = {0.45f, 0.45f, 0.45f};
 
                 auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(childEntity);
-                renderer.primitive = render::PrimitiveType::Line;
-                renderer.color = kPalette[(i + 2) % kPalette.size()];
+                renderer.meshPath = kCubeMesh;
+                renderer.materialPath = kWarmMaterial;
 
                 world_.Emplace<ecs::components::WindowBindingComponent>(childEntity).windowId = windowId;
-                world_.SetParent(childEntity, parentEntity);
+                world_.SetParent(childEntity, pyramidEntity);
             }
 
-            const ecs::EntityId cubeEntity = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(cubeEntity);
-                tag.name = "MovingCube_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(cubeEntity);
-                transform.position = {0.52f, -0.22f, 0.0f};
-                transform.scale = {0.23f, 0.23f, 0.23f};
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(cubeEntity);
-                renderer.primitive = render::PrimitiveType::Cube;
-                renderer.color = kPalette[(i + 3) % kPalette.size()];
-                renderer.texturePath = "assets/textures/african_head_diffuse.dds";
-
-                auto& motion = world_.Emplace<ecs::components::MotionComponent>(cubeEntity);
-                motion.linearVelocity.x = (i % 2 == 0) ? -0.35f : 0.35f;
-                motion.angularVelocityDeg.y = 45.0f;
-                motion.angularVelocityDeg.z = 65.0f;
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(cubeEntity).windowId = windowId;
-            }
-
-            const ecs::EntityId cubeChildEntity = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(cubeChildEntity);
-                tag.name = "CubeChild_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(cubeChildEntity);
-                transform.position = { 0.0f, 0.0f, 0.0f };
-                transform.scale = { 0.3f, 5.0f, 0.3f };
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(cubeChildEntity);
-                renderer.primitive = render::PrimitiveType::Cube;
-                renderer.color = kPalette[(i + 4) % kPalette.size()];
-                renderer.texturePath = "assets/textures/african_head_diffuse.dds";
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(cubeChildEntity).windowId = windowId;
-                world_.SetParent(cubeChildEntity, cubeEntity);
-            }
-
-            const ecs::EntityId cubeChildEntity2 = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(cubeChildEntity2);
-                tag.name = "CubeChild_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(cubeChildEntity2);
-                transform.position = { 0.0f, 0.0f, 0.0f };
-                transform.scale = { 5.0f, 0.3f, 0.3f };
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(cubeChildEntity2);
-                renderer.primitive = render::PrimitiveType::Cube;
-                renderer.color = kPalette[(i + 4) % kPalette.size()];
-                renderer.texturePath = "assets/textures/african_head_diffuse.dds";
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(cubeChildEntity2).windowId = windowId;
-                world_.SetParent(cubeChildEntity2, cubeEntity);
-            }
-
-            const ecs::EntityId cubeChildEntity3 = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(cubeChildEntity3);
-                tag.name = "CubeChild_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(cubeChildEntity3);
-                transform.position = { 0.0f, 0.0f, 0.0f };
-                transform.scale = { 0.3f, 0.3f, 5.0f };
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(cubeChildEntity3);
-                renderer.primitive = render::PrimitiveType::Cube;
-                renderer.color = kPalette[(i + 4) % kPalette.size()];
-                renderer.texturePath = "assets/textures/african_head_diffuse.dds";
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(cubeChildEntity3).windowId = windowId;
-                world_.SetParent(cubeChildEntity3, cubeEntity);
-            }
-
-            const ecs::EntityId accentEntity = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(accentEntity);
-                tag.name = "AccentTriangle_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(accentEntity);
-                transform.position = {-0.1f, -0.58f, 0.0f};
-                transform.scale = {0.22f, 0.22f, 0.22f};
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(accentEntity);
-                renderer.primitive = render::PrimitiveType::Triangle;
-                renderer.color = kPalette[(i + 5) % kPalette.size()];
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(accentEntity).windowId = windowId;
-            }
-
-            logger_.Info("ECS demo scene created for window id=" + std::to_string(windowId) + " (entities: 6)");
+            logger_.Info("Demo scene created for window id=" + std::to_string(windowId));
         }
     }
 
@@ -739,42 +760,6 @@ namespace myengine::core
                         runtime.controlledEntity = entity;
                     }
                 });
-
-            if (runtime.controlledEntity != ecs::kInvalidEntity)
-            {
-                auto* transform = world_.TryGet<ecs::components::TransformComponent>(runtime.controlledEntity);
-                const auto* renderer = world_.TryGet<ecs::components::MeshRendererComponent>(runtime.controlledEntity);
-                if (transform != nullptr &&
-                    renderer != nullptr &&
-                    renderer->primitive == render::PrimitiveType::Triangle)
-                {
-                    transform->position.z = kControlledTriangleBehindCubeZ;
-                }
-                continue;
-            }
-
-            world_.ForEach<ecs::components::TransformComponent, ecs::components::WindowBindingComponent>(
-                [&](const ecs::EntityId entity,
-                    ecs::components::TransformComponent&,
-                    ecs::components::WindowBindingComponent& binding)
-                {
-                    if (runtime.controlledEntity == ecs::kInvalidEntity && binding.windowId == windowId)
-                    {
-                        runtime.controlledEntity = entity;
-                    }
-                });
-
-            if (runtime.controlledEntity != ecs::kInvalidEntity)
-            {
-                auto* transform = world_.TryGet<ecs::components::TransformComponent>(runtime.controlledEntity);
-                const auto* renderer = world_.TryGet<ecs::components::MeshRendererComponent>(runtime.controlledEntity);
-                if (transform != nullptr &&
-                    renderer != nullptr &&
-                    renderer->primitive == render::PrimitiveType::Triangle)
-                {
-                    transform->position.z = kControlledTriangleBehindCubeZ;
-                }
-            }
         }
     }
 
@@ -797,6 +782,7 @@ namespace myengine::core
                 runtime.window->Width(),
                 runtime.window->Height(),
                 &logger_,
+                resourceManager_.get(),
             };
 
             world_.RenderSystems(context);

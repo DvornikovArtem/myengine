@@ -1,0 +1,5 @@
+{
+  "shader": "../shaders/textured_lit.shader.json",
+  "texture": "../textures/debug.bmp",
+  "tint": [1.0, 1.0, 1.0, 1.0]
+}

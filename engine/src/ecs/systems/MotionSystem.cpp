@@ -11,8 +11,8 @@ namespace myengine::ecs::systems
 {
     void MotionSystem::Update(World& world, const float deltaTime)
     {
-        constexpr float kMinPosition = -0.9f;
-        constexpr float kMaxPosition = 0.9f;
+        constexpr float kMinPosition = -2.4f;
+        constexpr float kMaxPosition = 2.4f;
 
         world.ForEach<components::TransformComponent, components::MotionComponent>(
             [deltaTime](const EntityId, components::TransformComponent& transform, components::MotionComponent& motion)
@@ -39,4 +39,3 @@ namespace myengine::ecs::systems
             });
     }
 }
-
