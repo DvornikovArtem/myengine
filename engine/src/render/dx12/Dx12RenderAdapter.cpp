@@ -1,8 +1,10 @@
 // Dx12RenderAdapter.cpp
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
 #include <vector>
 
@@ -17,11 +19,47 @@ namespace myengine::render::dx12
 {
     namespace
     {
+        bool IsEnvironmentEnabled(const char* variableName)
+        {
+            char* value = nullptr;
+            std::size_t valueLength = 0;
+            if (_dupenv_s(&value, &valueLength, variableName) != 0 || value == nullptr || value[0] == '\0')
+            {
+                if (value != nullptr)
+                {
+                    std::free(value);
+                }
+                return false;
+            }
+
+            const std::string normalized = value;
+            std::free(value);
+            return normalized == "1" || normalized == "true" || normalized == "TRUE" || normalized == "on" || normalized == "ON";
+        }
+
         std::string HrToString(const HRESULT hr)
         {
             std::ostringstream stream;
             stream << "0x" << std::hex << static_cast<unsigned long>(hr);
             return stream.str();
+        }
+
+        std::string WideToUtf8(const std::wstring& text)
+        {
+            if (text.empty())
+            {
+                return std::string();
+            }
+
+            const int requiredSize = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            if (requiredSize <= 0)
+            {
+                return std::string();
+            }
+
+            std::string result(static_cast<std::size_t>(requiredSize - 1), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, result.data(), requiredSize, nullptr, nullptr);
+            return result;
         }
 
         DirectX::XMMATRIX MatrixToXm(const Matrix4& matrix)
@@ -39,6 +77,21 @@ namespace myengine::render::dx12
             Matrix4 result{};
             std::memcpy(result.data.data(), &value, sizeof(float) * 16);
             return result;
+        }
+
+        std::filesystem::path ResolveSourcePath(const char* relativePath)
+        {
+            return std::filesystem::path(MYENGINE_SOURCE_DIR) / relativePath;
+        }
+
+        UINT64 AlignUp(const UINT64 value, const UINT64 alignment)
+        {
+            if (alignment <= 1)
+            {
+                return value;
+            }
+
+            return ((value + alignment - 1) / alignment) * alignment;
         }
     }
 
@@ -72,10 +125,24 @@ namespace myengine::render::dx12
         {
             return false;
         }
+        if (!BuildDebugLinePipeline())
+        {
+            return false;
+        }
         if (!BuildTextureDescriptorHeap())
         {
             return false;
         }
+        if (!BuildUiPipeline())
+        {
+            return false;
+        }
+        TextureData defaultWhiteTexture;
+        defaultWhiteTexture.width = 1;
+        defaultWhiteTexture.height = 1;
+        defaultWhiteTexture.channels = 4;
+        defaultWhiteTexture.pixelsRgba8 = {255, 255, 255, 255};
+        defaultWhiteTexture_ = CreateTexture(defaultWhiteTexture);
 
         logger_.Info("DX12 render adapter initialized");
         return true;
@@ -170,6 +237,16 @@ namespace myengine::render::dx12
         return TextureHandle{textureId};
     }
 
+    void Dx12RenderAdapter::DestroyTexture(const TextureHandle texture)
+    {
+        if (!texture.IsValid() || texture.value == defaultWhiteTexture_.value)
+        {
+            return;
+        }
+
+        textures_.erase(texture.value);
+    }
+
     ShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderProgramData& shaderProgram)
     {
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
@@ -240,6 +317,7 @@ namespace myengine::render::dx12
         swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         swapDesc.BufferCount = kBackBufferCount;
         swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        swapDesc.Flags = allowTearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
         Microsoft::WRL::ComPtr<IDXGISwapChain1> swapChain1;
         HRESULT hr = context_.factory->CreateSwapChainForHwnd(context_.commandQueue.Get(), hwnd, &swapDesc, nullptr, nullptr, swapChain1.GetAddressOf());
@@ -273,6 +351,18 @@ namespace myengine::render::dx12
             return {};
         }
 
+        for (UINT backBufferIndex = 0; backBufferIndex < kBackBufferCount; ++backBufferIndex)
+        {
+            hr = context_.device->CreateCommandAllocator(
+                D3D12_COMMAND_LIST_TYPE_DIRECT,
+                IID_PPV_ARGS(surface.frameAllocators[backBufferIndex].GetAddressOf()));
+            if (FAILED(hr))
+            {
+                logger_.Error("CreateCommandAllocator(frame) failed: " + HrToString(hr));
+                return {};
+            }
+        }
+
         surface.rtvDescriptorSize = context_.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         RebuildSurfaceBuffers(surface);
 
@@ -300,8 +390,17 @@ namespace myengine::render::dx12
         {
             backBuffer.Reset();
         }
+        for (auto& transientResources : surface->frameTransientResources)
+        {
+            transientResources.clear();
+        }
 
-        const HRESULT hr = surface->swapChain->ResizeBuffers(kBackBufferCount, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+        const HRESULT hr = surface->swapChain->ResizeBuffers(
+            kBackBufferCount,
+            width,
+            height,
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            allowTearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
         if (FAILED(hr))
         {
             logger_.Error("ResizeBuffers failed: " + HrToString(hr));
@@ -321,13 +420,33 @@ namespace myengine::render::dx12
             return false;
         }
 
-        if (!ResetCommandList())
+        surface->currentBackBuffer = surface->swapChain->GetCurrentBackBufferIndex();
+        const UINT backBufferIndex = surface->currentBackBuffer;
+
+        if (surface->frameFenceValues[backBufferIndex] != 0 &&
+            context_.fence->GetCompletedValue() < surface->frameFenceValues[backBufferIndex])
         {
+            WaitForFenceValue(surface->frameFenceValues[backBufferIndex]);
+        }
+
+        if (FAILED(surface->frameAllocators[backBufferIndex]->Reset()))
+        {
+            logger_.Error("Frame command allocator reset failed");
             return false;
         }
 
-        surface->currentBackBuffer = surface->swapChain->GetCurrentBackBufferIndex();
-        ID3D12Resource* backBuffer = surface->backBuffers[surface->currentBackBuffer].Get();
+        if (FAILED(context_.commandList->Reset(surface->frameAllocators[backBufferIndex].Get(), nullptr)))
+        {
+            logger_.Error("Frame command list reset failed");
+            return false;
+        }
+
+        surface->frameTransientResources[backBufferIndex].clear();
+        surface->uiVertexUploadBuffers[backBufferIndex].used = 0;
+        surface->uiIndexUploadBuffers[backBufferIndex].used = 0;
+        surface->debugVertexUploadBuffers[backBufferIndex].used = 0;
+
+        ID3D12Resource* backBuffer = surface->backBuffers[backBufferIndex].Get();
 
         const auto toRenderTarget = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
         context_.commandList->ResourceBarrier(1, &toRenderTarget);
@@ -345,6 +464,7 @@ namespace myengine::render::dx12
         context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
 
         activeSurface_ = surface;
+        activeFrameTransientResources_ = &surface->frameTransientResources[backBufferIndex];
         return true;
     }
 
@@ -424,6 +544,153 @@ namespace myengine::render::dx12
         context_.commandList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
     }
 
+    void Dx12RenderAdapter::DrawDebugLines(const RenderSurfaceHandle handle, const std::vector<DebugLine>& lines)
+    {
+        if (activeSurface_ == nullptr || debugLinePipelineState_ == nullptr || debugRootSignature_ == nullptr || lines.empty())
+        {
+            return;
+        }
+
+        auto* surface = FindSurface(handle);
+        if (surface == nullptr || surface != activeSurface_)
+        {
+            return;
+        }
+
+        std::vector<DxDebugVertex> vertices;
+        vertices.reserve(lines.size() * 2);
+
+        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(surface->viewProjection);
+
+        for (const auto& line : lines)
+        {
+            const auto appendVertex = [&](const Float3& position)
+            {
+                const DirectX::XMVECTOR clipPosition = DirectX::XMVector4Transform(
+                    DirectX::XMVectorSet(position.x, position.y, position.z, 1.0f),
+                    viewProjectionMatrix);
+
+                DirectX::XMFLOAT4 clip{};
+                DirectX::XMStoreFloat4(&clip, clipPosition);
+
+                vertices.push_back(DxDebugVertex{
+                    {clip.x, clip.y, clip.z, clip.w},
+                    {line.color.r, line.color.g, line.color.b, line.color.a},
+                });
+            };
+
+            appendVertex(line.start);
+            appendVertex(line.end);
+        }
+
+        const UINT64 vertexBufferSize = static_cast<UINT64>(vertices.size() * sizeof(DxDebugVertex));
+        FrameUploadBuffer& uploadBuffer = surface->debugVertexUploadBuffers[surface->currentBackBuffer];
+        D3D12_GPU_VIRTUAL_ADDRESS vertexBufferAddress = 0;
+        if (!AllocateFrameUploadData(uploadBuffer, vertices.data(), vertexBufferSize, 16, vertexBufferAddress))
+        {
+            return;
+        }
+
+        D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+        vertexBufferView.BufferLocation = vertexBufferAddress;
+        vertexBufferView.StrideInBytes = sizeof(DxDebugVertex);
+        vertexBufferView.SizeInBytes = static_cast<UINT>(vertexBufferSize);
+
+        context_.commandList->SetGraphicsRootSignature(debugRootSignature_.Get());
+        context_.commandList->SetPipelineState(debugLinePipelineState_.Get());
+        context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+        context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+        context_.commandList->DrawInstanced(static_cast<UINT>(vertices.size()), 1, 0, 0);
+
+        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
+    }
+
+    void Dx12RenderAdapter::DrawUiGeometry(const RenderSurfaceHandle handle, const UiDrawData& drawData)
+    {
+        if (activeSurface_ == nullptr || uiPipelineState_ == nullptr || uiRootSignature_ == nullptr)
+        {
+            return;
+        }
+
+        auto* surface = FindSurface(handle);
+        if (surface == nullptr ||
+            surface != activeSurface_ ||
+            drawData.vertices == nullptr ||
+            drawData.indices == nullptr ||
+            drawData.vertexCount == 0 ||
+            drawData.indexCount == 0)
+        {
+            return;
+        }
+
+        const TextureHandle textureHandle = drawData.texture.IsValid() ? drawData.texture : defaultWhiteTexture_;
+        const auto textureIt = textures_.find(textureHandle.value);
+        if (textureIt == textures_.end())
+        {
+            return;
+        }
+
+        static_assert(sizeof(DxUiVertex) == sizeof(UiVertex), "UI vertex layout mismatch");
+
+        const UINT64 vertexBufferSize = static_cast<UINT64>(drawData.vertexCount * sizeof(UiVertex));
+        const UINT64 indexBufferSize = static_cast<UINT64>(drawData.indexCount * sizeof(std::uint32_t));
+        FrameUploadBuffer& vertexUploadBuffer = surface->uiVertexUploadBuffers[surface->currentBackBuffer];
+        FrameUploadBuffer& indexUploadBuffer = surface->uiIndexUploadBuffers[surface->currentBackBuffer];
+        D3D12_GPU_VIRTUAL_ADDRESS vertexBufferAddress = 0;
+        D3D12_GPU_VIRTUAL_ADDRESS indexBufferAddress = 0;
+        if (!AllocateFrameUploadData(vertexUploadBuffer, drawData.vertices, vertexBufferSize, 16, vertexBufferAddress) ||
+            !AllocateFrameUploadData(indexUploadBuffer, drawData.indices, indexBufferSize, sizeof(std::uint32_t), indexBufferAddress))
+        {
+            return;
+        }
+
+        D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+        vertexBufferView.BufferLocation = vertexBufferAddress;
+        vertexBufferView.StrideInBytes = sizeof(DxUiVertex);
+        vertexBufferView.SizeInBytes = static_cast<UINT>(vertexBufferSize);
+
+        D3D12_INDEX_BUFFER_VIEW indexBufferView{};
+        indexBufferView.BufferLocation = indexBufferAddress;
+        indexBufferView.SizeInBytes = static_cast<UINT>(indexBufferSize);
+        indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+
+        const D3D12_RECT fullScissorRect = surface->scissorRect;
+        D3D12_RECT scissorRect = fullScissorRect;
+        if (drawData.scissorEnabled)
+        {
+            scissorRect.left = std::clamp(drawData.scissor.left, 0, static_cast<int>(surface->width));
+            scissorRect.top = std::clamp(drawData.scissor.top, 0, static_cast<int>(surface->height));
+            scissorRect.right = std::clamp(drawData.scissor.right, 0, static_cast<int>(surface->width));
+            scissorRect.bottom = std::clamp(drawData.scissor.bottom, 0, static_cast<int>(surface->height));
+        }
+
+        ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
+        context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
+        context_.commandList->SetGraphicsRootSignature(uiRootSignature_.Get());
+        context_.commandList->SetPipelineState(uiPipelineState_.Get());
+        context_.commandList->RSSetScissorRects(1, &scissorRect);
+        context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+        context_.commandList->IASetIndexBuffer(&indexBufferView);
+
+        const float uiConstants[4] =
+        {
+            std::max(1.0f, static_cast<float>(surface->width)),
+            std::max(1.0f, static_cast<float>(surface->height)),
+            drawData.translationX,
+            drawData.translationY,
+        };
+        context_.commandList->SetGraphicsRoot32BitConstants(0, 4, uiConstants, 0);
+
+        D3D12_GPU_DESCRIPTOR_HANDLE gpuTextureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
+        gpuTextureHandle.ptr += static_cast<UINT64>(textureIt->second.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+        context_.commandList->SetGraphicsRootDescriptorTable(1, gpuTextureHandle);
+        context_.commandList->DrawIndexedInstanced(static_cast<UINT>(drawData.indexCount), 1, 0, 0, 0);
+
+        context_.commandList->RSSetScissorRects(1, &fullScissorRect);
+        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
+    }
+
     void Dx12RenderAdapter::EndFrame(const RenderSurfaceHandle handle)
     {
         auto* surface = FindSurface(handle);
@@ -445,13 +712,34 @@ namespace myengine::render::dx12
         ID3D12CommandList* commandLists[] = {context_.commandList.Get()};
         context_.commandQueue->ExecuteCommandLists(1, commandLists);
 
-        const HRESULT presentResult = surface->swapChain->Present(1, 0);
+        const UINT syncInterval = vsyncEnabled_ ? 1u : 0u;
+        const UINT presentFlags = (!vsyncEnabled_ && allowTearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+        const HRESULT presentResult = surface->swapChain->Present(syncInterval, presentFlags);
         if (FAILED(presentResult))
         {
             logger_.Error("Present failed: " + HrToString(presentResult));
+            if (presentResult == DXGI_ERROR_DEVICE_REMOVED || presentResult == DXGI_ERROR_DEVICE_RESET)
+            {
+                logger_.Error("DX12 device removed reason: " + HrToString(context_.device->GetDeviceRemovedReason()));
+            }
+
+            activeFrameTransientResources_ = nullptr;
+            activeSurface_ = nullptr;
+            return;
         }
 
-        WaitForGpu();
+        ++context_.fenceValue;
+        const HRESULT signalResult = context_.commandQueue->Signal(context_.fence.Get(), context_.fenceValue);
+        if (FAILED(signalResult))
+        {
+            logger_.Error("Fence signal failed at EndFrame: " + HrToString(signalResult));
+        }
+        else
+        {
+            surface->frameFenceValues[surface->currentBackBuffer] = context_.fenceValue;
+        }
+
+        activeFrameTransientResources_ = nullptr;
         activeSurface_ = nullptr;
     }
 
@@ -464,11 +752,31 @@ namespace myengine::render::dx12
 
         WaitForGpu();
 
+        for (auto& [_, surface] : surfaces_)
+        {
+            for (auto& uploadBuffer : surface.uiVertexUploadBuffers)
+            {
+                ReleaseFrameUploadBuffer(uploadBuffer);
+            }
+            for (auto& uploadBuffer : surface.uiIndexUploadBuffers)
+            {
+                ReleaseFrameUploadBuffer(uploadBuffer);
+            }
+            for (auto& uploadBuffer : surface.debugVertexUploadBuffers)
+            {
+                ReleaseFrameUploadBuffer(uploadBuffer);
+            }
+        }
+
         surfaces_.clear();
         meshes_.clear();
         textures_.clear();
         shaders_.clear();
 
+        uiPipelineState_.Reset();
+        uiRootSignature_.Reset();
+        debugLinePipelineState_.Reset();
+        debugRootSignature_.Reset();
         textureSrvHeap_.Reset();
         rootSignature_.Reset();
 
@@ -488,48 +796,243 @@ namespace myengine::render::dx12
         textureSrvDescriptorSize_ = 0;
         nextTextureDescriptorIndex_ = 0;
         activeSurface_ = nullptr;
+        activeFrameTransientResources_ = nullptr;
+        defaultWhiteTexture_ = {};
 
         logger_.Info("DX12 render adapter shutdown complete");
     }
 
+    ID3D12Device* Dx12RenderAdapter::GetDevice() const
+    {
+        return context_.device.Get();
+    }
+
+    ID3D12CommandQueue* Dx12RenderAdapter::GetCommandQueue() const
+    {
+        return context_.commandQueue.Get();
+    }
+
+    ID3D12GraphicsCommandList* Dx12RenderAdapter::GetCommandList() const
+    {
+        return context_.commandList.Get();
+    }
+
+    DXGI_FORMAT Dx12RenderAdapter::GetBackBufferFormat() const
+    {
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+
+    DXGI_FORMAT Dx12RenderAdapter::GetDepthStencilFormat() const
+    {
+        return kDepthFormat;
+    }
+
+    UINT Dx12RenderAdapter::GetFramesInFlight() const
+    {
+        return kBackBufferCount;
+    }
+
     bool Dx12RenderAdapter::CreateDevice()
     {
+        UINT factoryFlags = 0;
 #if defined(_DEBUG)
-        Microsoft::WRL::ComPtr<ID3D12Debug> debugController;
-        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(debugController.GetAddressOf()))))
+        const bool enableDebugLayer = IsEnvironmentEnabled("MYENGINE_DX12_DEBUG");
+        if (enableDebugLayer)
         {
-            debugController->EnableDebugLayer();
+            Microsoft::WRL::ComPtr<ID3D12Debug> debugController;
+            if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(debugController.GetAddressOf()))))
+            {
+                debugController->EnableDebugLayer();
+                factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+                logger_.Info("DX12 debug layer enabled via MYENGINE_DX12_DEBUG");
+            }
+        }
+        else
+        {
+            logger_.Info("DX12 debug layer disabled. Set MYENGINE_DX12_DEBUG=1 to enable it.");
         }
 #endif
 
-        HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(context_.factory.GetAddressOf()));
+        HRESULT hr = CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(context_.factory.GetAddressOf()));
         if (FAILED(hr))
         {
-            logger_.Error("CreateDXGIFactory1 failed: " + HrToString(hr));
+            logger_.Error("CreateDXGIFactory2 failed: " + HrToString(hr));
             return false;
         }
 
-        hr = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(context_.device.GetAddressOf()));
-        if (FAILED(hr))
+        allowTearing_ = false;
+        Microsoft::WRL::ComPtr<IDXGIFactory5> factory5;
+        if (SUCCEEDED(context_.factory.As(&factory5)))
         {
-            logger_.Warning("Hardware device creation failed. Falling back to WARP.");
-
-            Microsoft::WRL::ComPtr<IDXGIAdapter> warpAdapter;
-            hr = context_.factory->EnumWarpAdapter(IID_PPV_ARGS(warpAdapter.GetAddressOf()));
-            if (FAILED(hr))
+            BOOL allowTearing = FALSE;
+            if (SUCCEEDED(factory5->CheckFeatureSupport(
+                DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+                &allowTearing,
+                sizeof(allowTearing))))
             {
-                logger_.Error("EnumWarpAdapter failed: " + HrToString(hr));
-                return false;
-            }
-
-            hr = D3D12CreateDevice(warpAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(context_.device.GetAddressOf()));
-            if (FAILED(hr))
-            {
-                logger_.Error("WARP device creation failed: " + HrToString(hr));
-                return false;
+                allowTearing_ = (allowTearing == TRUE);
             }
         }
 
+#if defined(_DEBUG)
+        vsyncEnabled_ = IsEnvironmentEnabled("MYENGINE_VSYNC");
+        if (vsyncEnabled_)
+        {
+            logger_.Info("DX12 present vsync enabled via MYENGINE_VSYNC.");
+        }
+        else
+        {
+            logger_.Info("DX12 present vsync disabled in Debug. Set MYENGINE_VSYNC=1 to enable it.");
+        }
+#else
+        vsyncEnabled_ = true;
+#endif
+
+        struct AdapterCandidate
+        {
+            Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+            DXGI_ADAPTER_DESC1 desc{};
+        };
+
+        std::vector<AdapterCandidate> candidates;
+
+        const auto registerCandidate =
+            [&](IDXGIAdapter1* adapter)
+        {
+            if (adapter == nullptr)
+            {
+                return;
+            }
+
+            DXGI_ADAPTER_DESC1 adapterDesc{};
+            adapter->GetDesc1(&adapterDesc);
+            if ((adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+            {
+                return;
+            }
+
+            if (FAILED(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+            {
+                return;
+            }
+
+            const bool alreadyRegistered = std::any_of(
+                candidates.begin(),
+                candidates.end(),
+                [&](const AdapterCandidate& candidate)
+                {
+                    return candidate.desc.AdapterLuid.LowPart == adapterDesc.AdapterLuid.LowPart &&
+                        candidate.desc.AdapterLuid.HighPart == adapterDesc.AdapterLuid.HighPart;
+                });
+            if (alreadyRegistered)
+            {
+                return;
+            }
+
+            candidates.push_back(AdapterCandidate{adapter, adapterDesc});
+        };
+
+        Microsoft::WRL::ComPtr<IDXGIFactory6> factory6;
+        if (SUCCEEDED(context_.factory.As(&factory6)))
+        {
+            for (UINT adapterIndex = 0;; ++adapterIndex)
+            {
+                Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+                hr = factory6->EnumAdapterByGpuPreference(
+                    adapterIndex,
+                    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+                    IID_PPV_ARGS(adapter.GetAddressOf()));
+                if (hr == DXGI_ERROR_NOT_FOUND)
+                {
+                    break;
+                }
+
+                if (FAILED(hr))
+                {
+                    logger_.Warning("EnumAdapterByGpuPreference failed: " + HrToString(hr));
+                    break;
+                }
+
+                registerCandidate(adapter.Get());
+            }
+        }
+
+        for (UINT adapterIndex = 0;; ++adapterIndex)
+        {
+            Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+            hr = context_.factory->EnumAdapters1(adapterIndex, adapter.GetAddressOf());
+            if (hr == DXGI_ERROR_NOT_FOUND)
+            {
+                break;
+            }
+
+            if (FAILED(hr))
+            {
+                logger_.Warning("EnumAdapters1 failed: " + HrToString(hr));
+                break;
+            }
+
+            registerCandidate(adapter.Get());
+        }
+
+        std::sort(
+            candidates.begin(),
+            candidates.end(),
+            [](const AdapterCandidate& left, const AdapterCandidate& right)
+            {
+                if (left.desc.DedicatedVideoMemory != right.desc.DedicatedVideoMemory)
+                {
+                    return left.desc.DedicatedVideoMemory > right.desc.DedicatedVideoMemory;
+                }
+
+                return left.desc.SharedSystemMemory > right.desc.SharedSystemMemory;
+            });
+
+        for (const AdapterCandidate& candidate : candidates)
+        {
+            logger_.Info(
+                "DX12 adapter candidate: " +
+                WideToUtf8(candidate.desc.Description) +
+                " | dedicated_vram_mb=" +
+                std::to_string(static_cast<unsigned long long>(candidate.desc.DedicatedVideoMemory / (1024ull * 1024ull))));
+
+            hr = D3D12CreateDevice(candidate.adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(context_.device.GetAddressOf()));
+            if (SUCCEEDED(hr))
+            {
+                logger_.Info(
+                    "DX12 hardware adapter selected: " +
+                    WideToUtf8(candidate.desc.Description) +
+                    " | dedicated_vram_mb=" +
+                    std::to_string(static_cast<unsigned long long>(candidate.desc.DedicatedVideoMemory / (1024ull * 1024ull))));
+                return true;
+            }
+        }
+
+        if (!candidates.empty())
+        {
+            logger_.Warning("All hardware adapter device creation attempts failed. Falling back to WARP.");
+        }
+        else
+        {
+            logger_.Warning("No supported hardware adapters found. Falling back to WARP.");
+        }
+
+        Microsoft::WRL::ComPtr<IDXGIAdapter> warpAdapter;
+        hr = context_.factory->EnumWarpAdapter(IID_PPV_ARGS(warpAdapter.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("EnumWarpAdapter failed: " + HrToString(hr));
+            return false;
+        }
+
+        hr = D3D12CreateDevice(warpAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(context_.device.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("WARP device creation failed: " + HrToString(hr));
+            return false;
+        }
+
+        logger_.Warning("DX12 is running on WARP software rasterizer.");
         return true;
     }
 
@@ -626,6 +1129,75 @@ namespace myengine::render::dx12
         return true;
     }
 
+    bool Dx12RenderAdapter::BuildDebugLinePipeline()
+    {
+        CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
+        rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+        HRESULT hr = D3D12SerializeRootSignature(
+            &rootSignatureDesc,
+            D3D_ROOT_SIGNATURE_VERSION_1,
+            serializedRootSignature.GetAddressOf(),
+            errorBlob.GetAddressOf());
+        if (FAILED(hr))
+        {
+            const char* errorText = errorBlob != nullptr ? static_cast<const char*>(errorBlob->GetBufferPointer()) : "unknown debug root signature error";
+            logger_.Error("D3D12SerializeRootSignature(debug) failed: " + std::string(errorText));
+            return false;
+        }
+
+        hr = context_.device->CreateRootSignature(
+            0,
+            serializedRootSignature->GetBufferPointer(),
+            serializedRootSignature->GetBufferSize(),
+            IID_PPV_ARGS(debugRootSignature_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateRootSignature(debug) failed: " + HrToString(hr));
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+        if (!CompileShaderBlob(ResolveSourcePath("assets/shaders/debug_line.hlsl"), "VSMain", "vs_5_0", vertexShader) ||
+            !CompileShaderBlob(ResolveSourcePath("assets/shaders/debug_line.hlsl"), "PSMain", "ps_5_0", pixelShader))
+        {
+            return false;
+        }
+
+        static constexpr D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, sizeof(float) * 4, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc{};
+        pipelineDesc.pRootSignature = debugRootSignature_.Get();
+        pipelineDesc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
+        pipelineDesc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
+        pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        pipelineDesc.SampleMask = UINT_MAX;
+        pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        pipelineDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        pipelineDesc.InputLayout = {inputLayout, static_cast<UINT>(std::size(inputLayout))};
+        pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+        pipelineDesc.NumRenderTargets = 1;
+        pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        pipelineDesc.DSVFormat = kDepthFormat;
+        pipelineDesc.SampleDesc.Count = 1;
+
+        hr = context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(debugLinePipelineState_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateGraphicsPipelineState(debug) failed: " + HrToString(hr));
+            return false;
+        }
+
+        return true;
+    }
+
     bool Dx12RenderAdapter::BuildTextureDescriptorHeap()
     {
         D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
@@ -645,6 +1217,113 @@ namespace myengine::render::dx12
         return true;
     }
 
+    bool Dx12RenderAdapter::BuildUiPipeline()
+    {
+        CD3DX12_DESCRIPTOR_RANGE descriptorRange;
+        descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+        CD3DX12_ROOT_PARAMETER rootParameters[2];
+        rootParameters[0].InitAsConstants(4, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
+        rootParameters[1].InitAsDescriptorTable(1, &descriptorRange, D3D12_SHADER_VISIBILITY_PIXEL);
+
+        CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
+            0,
+            D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+        CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
+        rootSignatureDesc.Init(
+            static_cast<UINT>(std::size(rootParameters)),
+            rootParameters,
+            1,
+            &samplerDesc,
+            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
+        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+        HRESULT hr = D3D12SerializeRootSignature(
+            &rootSignatureDesc,
+            D3D_ROOT_SIGNATURE_VERSION_1,
+            serializedRootSignature.GetAddressOf(),
+            errorBlob.GetAddressOf());
+        if (FAILED(hr))
+        {
+            const char* errorText = errorBlob != nullptr ? static_cast<const char*>(errorBlob->GetBufferPointer()) : "unknown ui root signature error";
+            logger_.Error("D3D12SerializeRootSignature(ui) failed: " + std::string(errorText));
+            return false;
+        }
+
+        hr = context_.device->CreateRootSignature(
+            0,
+            serializedRootSignature->GetBufferPointer(),
+            serializedRootSignature->GetBufferSize(),
+            IID_PPV_ARGS(uiRootSignature_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateRootSignature(ui) failed: " + HrToString(hr));
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+        if (!CompileShaderBlob(ResolveSourcePath("assets/shaders/ui_overlay.hlsl"), "VSMain", "vs_5_0", vertexShader) ||
+            !CompileShaderBlob(ResolveSourcePath("assets/shaders/ui_overlay.hlsl"), "PSMain", "ps_5_0", pixelShader))
+        {
+            return false;
+        }
+
+        static constexpr D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, sizeof(float) * 2, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, sizeof(float) * 2 + sizeof(std::uint8_t) * 4, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        };
+
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc{};
+        pipelineDesc.pRootSignature = uiRootSignature_.Get();
+        pipelineDesc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
+        pipelineDesc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
+
+        D3D12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        blendDesc.RenderTarget[0].BlendEnable = TRUE;
+        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        pipelineDesc.BlendState = blendDesc;
+
+        D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;
+        pipelineDesc.RasterizerState = rasterizerDesc;
+
+        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        depthStencilDesc.DepthEnable = FALSE;
+        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        pipelineDesc.DepthStencilState = depthStencilDesc;
+
+        pipelineDesc.SampleMask = UINT_MAX;
+        pipelineDesc.InputLayout = {inputLayout, static_cast<UINT>(std::size(inputLayout))};
+        pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        pipelineDesc.NumRenderTargets = 1;
+        pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        pipelineDesc.DSVFormat = kDepthFormat;
+        pipelineDesc.SampleDesc.Count = 1;
+
+        hr = context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(uiPipelineState_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateGraphicsPipelineState(ui) failed: " + HrToString(hr));
+            return false;
+        }
+
+        return true;
+    }
+
     bool Dx12RenderAdapter::ResetCommandList()
     {
         if (FAILED(context_.commandAllocator->Reset()))
@@ -660,6 +1339,153 @@ namespace myengine::render::dx12
         }
 
         return true;
+    }
+
+    bool Dx12RenderAdapter::CreateUploadBuffer(const void* data, const UINT64 dataSize, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer)
+    {
+        if (data == nullptr || dataSize == 0)
+        {
+            return false;
+        }
+
+        const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+        const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(dataSize);
+
+        const HRESULT hr = context_.device->CreateCommittedResource(
+            &heapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &resourceDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(outBuffer.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource(upload) failed: " + HrToString(hr));
+            return false;
+        }
+
+        void* mappedData = nullptr;
+        const CD3DX12_RANGE readRange(0, 0);
+        if (FAILED(outBuffer->Map(0, &readRange, &mappedData)))
+        {
+            logger_.Error("Upload buffer map failed");
+            outBuffer.Reset();
+            return false;
+        }
+
+        std::memcpy(mappedData, data, static_cast<std::size_t>(dataSize));
+        outBuffer->Unmap(0, nullptr);
+        return true;
+    }
+
+    bool Dx12RenderAdapter::EnsureFrameUploadBuffer(FrameUploadBuffer& buffer, const UINT64 requiredSize)
+    {
+        if (requiredSize == 0)
+        {
+            return false;
+        }
+
+        if (buffer.resource != nullptr && buffer.capacity >= requiredSize && buffer.mappedData != nullptr)
+        {
+            return true;
+        }
+
+        const UINT64 previousUsedSize = buffer.used;
+        Microsoft::WRL::ComPtr<ID3D12Resource> previousResource = buffer.resource;
+        std::uint8_t* previousMappedData = buffer.mappedData;
+        const UINT64 previousCapacity = buffer.capacity;
+
+        UINT64 capacity = std::max<UINT64>(64ull * 1024ull, requiredSize);
+        capacity = std::max(capacity, previousCapacity * 2ull);
+        capacity = AlignUp(capacity, 64ull * 1024ull);
+
+        const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+        const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(capacity);
+
+        Microsoft::WRL::ComPtr<ID3D12Resource> newResource;
+        const HRESULT hr = context_.device->CreateCommittedResource(
+            &heapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &resourceDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(newResource.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource(frame upload) failed: " + HrToString(hr));
+            return false;
+        }
+
+        void* mappedData = nullptr;
+        const CD3DX12_RANGE readRange(0, 0);
+        if (FAILED(newResource->Map(0, &readRange, &mappedData)))
+        {
+            logger_.Error("Map frame upload buffer failed");
+            return false;
+        }
+
+        auto* newMappedData = static_cast<std::uint8_t*>(mappedData);
+        if (previousMappedData != nullptr && previousUsedSize > 0)
+        {
+            std::memcpy(newMappedData, previousMappedData, static_cast<std::size_t>(previousUsedSize));
+        }
+
+        if (previousResource != nullptr)
+        {
+            if (previousMappedData != nullptr)
+            {
+                previousResource->Unmap(0, nullptr);
+            }
+
+            if (activeFrameTransientResources_ != nullptr)
+            {
+                activeFrameTransientResources_->push_back(previousResource);
+            }
+        }
+
+        buffer.resource = std::move(newResource);
+        buffer.mappedData = newMappedData;
+        buffer.capacity = capacity;
+        buffer.used = previousUsedSize;
+        return true;
+    }
+
+    bool Dx12RenderAdapter::AllocateFrameUploadData(
+        FrameUploadBuffer& buffer,
+        const void* data,
+        const UINT64 dataSize,
+        const UINT64 alignment,
+        D3D12_GPU_VIRTUAL_ADDRESS& outGpuAddress)
+    {
+        if (data == nullptr || dataSize == 0)
+        {
+            return false;
+        }
+
+        const UINT64 alignedOffset = AlignUp(buffer.used, alignment);
+        const UINT64 requiredSize = alignedOffset + dataSize;
+        if (!EnsureFrameUploadBuffer(buffer, requiredSize))
+        {
+            return false;
+        }
+
+        std::memcpy(buffer.mappedData + alignedOffset, data, static_cast<std::size_t>(dataSize));
+        outGpuAddress = buffer.resource->GetGPUVirtualAddress() + alignedOffset;
+        buffer.used = requiredSize;
+        return true;
+    }
+
+    void Dx12RenderAdapter::ReleaseFrameUploadBuffer(FrameUploadBuffer& buffer)
+    {
+        if (buffer.resource != nullptr && buffer.mappedData != nullptr)
+        {
+            buffer.resource->Unmap(0, nullptr);
+        }
+
+        buffer.resource.Reset();
+        buffer.mappedData = nullptr;
+        buffer.capacity = 0;
+        buffer.used = 0;
     }
 
     bool Dx12RenderAdapter::ExecuteCommandListAndWait(const char* contextLabel)
@@ -934,6 +1760,28 @@ namespace myengine::render::dx12
             }
             WaitForSingleObject(fenceEvent_, INFINITE);
         }
+    }
+
+    void Dx12RenderAdapter::WaitForFenceValue(const UINT64 fenceValue)
+    {
+        if (context_.fence == nullptr || fenceEvent_ == nullptr || fenceValue == 0)
+        {
+            return;
+        }
+
+        if (context_.fence->GetCompletedValue() >= fenceValue)
+        {
+            return;
+        }
+
+        const HRESULT eventResult = context_.fence->SetEventOnCompletion(fenceValue, fenceEvent_);
+        if (FAILED(eventResult))
+        {
+            logger_.Error("Fence SetEventOnCompletion failed: " + HrToString(eventResult));
+            return;
+        }
+
+        WaitForSingleObject(fenceEvent_, INFINITE);
     }
 
     Dx12RenderAdapter::SurfaceData* Dx12RenderAdapter::FindSurface(const RenderSurfaceHandle handle)

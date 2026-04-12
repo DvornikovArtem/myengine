@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -31,6 +32,22 @@ namespace myengine::render
         float x = 0.0f;
         float y = 0.0f;
         float z = 0.0f;
+    };
+
+    struct UByte4
+    {
+        std::uint8_t r = 255;
+        std::uint8_t g = 255;
+        std::uint8_t b = 255;
+        std::uint8_t a = 255;
+    };
+
+    struct IntRect
+    {
+        int left = 0;
+        int top = 0;
+        int right = 0;
+        int bottom = 0;
     };
 
     struct RenderSurfaceHandle
@@ -126,5 +143,32 @@ namespace myengine::render
         TextureHandle texture;
         Matrix4 model = Matrix4::Identity();
         core::Color color{1.0f, 1.0f, 1.0f, 1.0f};
+    };
+
+    struct DebugLine
+    {
+        Float3 start{};
+        Float3 end{};
+        core::Color color{1.0f, 0.3f, 0.2f, 1.0f};
+    };
+
+    struct UiVertex
+    {
+        Float2 position{};
+        UByte4 color{};
+        Float2 uv{};
+    };
+
+    struct UiDrawData
+    {
+        const UiVertex* vertices = nullptr;
+        std::size_t vertexCount = 0;
+        const std::uint32_t* indices = nullptr;
+        std::size_t indexCount = 0;
+        TextureHandle texture;
+        float translationX = 0.0f;
+        float translationY = 0.0f;
+        bool scissorEnabled = false;
+        IntRect scissor{};
     };
 }

@@ -22,6 +22,7 @@ namespace myengine::render
 
         virtual MeshHandle UploadMesh(const MeshData& meshData) = 0;
         virtual TextureHandle CreateTexture(const TextureData& textureData) = 0;
+        virtual void DestroyTexture(TextureHandle texture) = 0;
         virtual ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) = 0;
 
         virtual RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) = 0;
@@ -30,6 +31,8 @@ namespace myengine::render
         virtual bool BeginFrame(RenderSurfaceHandle surface, const core::Color& clearColor) = 0;
         virtual void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) = 0;
         virtual void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) = 0;
+        virtual void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) = 0;
+        virtual void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) = 0;
         virtual void EndFrame(RenderSurfaceHandle surface) = 0;
 
         virtual void Shutdown() = 0;

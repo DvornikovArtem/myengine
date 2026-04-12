@@ -11,9 +11,12 @@
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/CameraControllerComponent.h>
+#include <myengine/ecs/components/ColliderComponent.h>
 #include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/MotionComponent.h>
+#include <myengine/ecs/components/PlayerControllerComponent.h>
+#include <myengine/ecs/components/RigidbodyComponent.h>
 #include <myengine/ecs/components/TagComponent.h>
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
@@ -111,6 +114,46 @@ namespace myengine::scene
                 {
                     {"linearVelocity", VecToJson(motion->linearVelocity)},
                     {"angularVelocityDeg", VecToJson(motion->angularVelocityDeg)},
+                };
+            }
+
+            if (const auto* rigidbody = world.TryGet<ecs::components::RigidbodyComponent>(entity); rigidbody != nullptr)
+            {
+                entityJson["Rigidbody"] =
+                {
+                    {"velocity", VecToJson(rigidbody->velocity)},
+                    {"acceleration", VecToJson(rigidbody->acceleration)},
+                    {"mass", rigidbody->mass},
+                    {"gravityScale", rigidbody->gravityScale},
+                    {"linearDamping", rigidbody->linearDamping},
+                    {"sleepLinearSpeed", rigidbody->sleepLinearSpeed},
+                    {"useGravity", rigidbody->useGravity},
+                    {"isKinematic", rigidbody->isKinematic},
+                };
+            }
+
+            if (const auto* collider = world.TryGet<ecs::components::ColliderComponent>(entity); collider != nullptr)
+            {
+                entityJson["Collider"] =
+                {
+                    {"type", collider->type == ecs::components::ColliderType::Sphere ? "sphere" : "box"},
+                    {"halfExtents", VecToJson(collider->halfExtents)},
+                    {"radius", collider->radius},
+                    {"offset", VecToJson(collider->offset)},
+                    {"friction", collider->friction},
+                    {"bounciness", collider->bounciness},
+                    {"isTrigger", collider->isTrigger},
+                };
+            }
+
+            if (const auto* controller = world.TryGet<ecs::components::PlayerControllerComponent>(entity); controller != nullptr)
+            {
+                entityJson["PlayerController"] =
+                {
+                    {"windowId", controller->windowId},
+                    {"moveSpeed", controller->moveSpeed},
+                    {"jumpSpeed", controller->jumpSpeed},
+                    {"airControl", controller->airControl},
                 };
             }
 
@@ -242,6 +285,44 @@ namespace myengine::scene
                     const auto& motionJson = entityJson["Motion"];
                     motion.linearVelocity = VecFromJson(motionJson.value("linearVelocity", json::array()));
                     motion.angularVelocityDeg = VecFromJson(motionJson.value("angularVelocityDeg", json::array()));
+                }
+
+                if (entityJson.contains("Rigidbody"))
+                {
+                    auto& rigidbody = world.Emplace<ecs::components::RigidbodyComponent>(entity);
+                    const auto& rigidbodyJson = entityJson["Rigidbody"];
+                    rigidbody.velocity = VecFromJson(rigidbodyJson.value("velocity", json::array()));
+                    rigidbody.acceleration = VecFromJson(rigidbodyJson.value("acceleration", json::array()));
+                    rigidbody.mass = rigidbodyJson.value("mass", 1.0f);
+                    rigidbody.gravityScale = rigidbodyJson.value("gravityScale", 1.0f);
+                    rigidbody.linearDamping = rigidbodyJson.value("linearDamping", 0.14f);
+                    rigidbody.sleepLinearSpeed = rigidbodyJson.value("sleepLinearSpeed", 0.08f);
+                    rigidbody.useGravity = rigidbodyJson.value("useGravity", true);
+                    rigidbody.isKinematic = rigidbodyJson.value("isKinematic", false);
+                }
+
+                if (entityJson.contains("Collider"))
+                {
+                    auto& collider = world.Emplace<ecs::components::ColliderComponent>(entity);
+                    const auto& colliderJson = entityJson["Collider"];
+                    const std::string colliderType = colliderJson.value("type", std::string("box"));
+                    collider.type = colliderType == "sphere" ? ecs::components::ColliderType::Sphere : ecs::components::ColliderType::Box;
+                    collider.halfExtents = VecFromJson(colliderJson.value("halfExtents", json::array()), ecs::components::Vec3{0.5f, 0.5f, 0.5f});
+                    collider.radius = colliderJson.value("radius", 0.5f);
+                    collider.offset = VecFromJson(colliderJson.value("offset", json::array()));
+                    collider.friction = colliderJson.value("friction", 0.65f);
+                    collider.bounciness = colliderJson.value("bounciness", 0.12f);
+                    collider.isTrigger = colliderJson.value("isTrigger", false);
+                }
+
+                if (entityJson.contains("PlayerController"))
+                {
+                    auto& controller = world.Emplace<ecs::components::PlayerControllerComponent>(entity);
+                    const auto& controllerJson = entityJson["PlayerController"];
+                    controller.windowId = controllerJson.value("windowId", 0u);
+                    controller.moveSpeed = controllerJson.value("moveSpeed", 4.5f);
+                    controller.jumpSpeed = controllerJson.value("jumpSpeed", 6.25f);
+                    controller.airControl = controllerJson.value("airControl", 0.45f);
                 }
 
                 if (entityJson.contains("WindowBinding"))
