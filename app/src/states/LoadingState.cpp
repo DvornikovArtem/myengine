@@ -1,7 +1,7 @@
 // LoadingState.cpp
 
 #include <states/LoadingState.h>
-#include <states/MenuState.h>
+#include <states/GameplayState.h>
 
 #include <myengine/core/Application.h>
 
@@ -29,7 +29,8 @@ namespace myengine::appstate
         elapsed_ += deltaTime;
         if (elapsed_ > 0.5f)
         {
-            app.GetStateMachine().ChangeState(std::make_unique<MenuState>(), app);
+            //app.GetStateMachine().ChangeState(std::make_unique<MenuState>(), app);
+            app.GetStateMachine().ChangeState(std::make_unique<GameplayState>(), app);
         }
     }
 

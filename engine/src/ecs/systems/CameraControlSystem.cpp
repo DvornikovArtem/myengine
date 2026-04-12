@@ -58,12 +58,12 @@ namespace myengine::ecs::systems
                     controller.moveSpeed = std::clamp(controller.moveSpeed * speedMultiplier, kMinMoveSpeed, kMaxMoveSpeed);
                 }
 
-                const bool moveLeft = input_.IsKeyDown('A') || input_.IsKeyDown(VK_LEFT);
-                const bool moveRight = input_.IsKeyDown('D') || input_.IsKeyDown(VK_RIGHT);
-                const bool moveUp = input_.IsKeyDown('W') || input_.IsKeyDown(VK_UP);
-                const bool moveDown = input_.IsKeyDown('S') || input_.IsKeyDown(VK_DOWN);
-                const bool moveWorldUp = input_.IsKeyDown(VK_SPACE);
-                const bool moveWorldDown = input_.IsKeyDown(VK_SHIFT) || input_.IsKeyDown(VK_LSHIFT);
+                const bool moveLeft = input_.IsActionDown("camera_left");
+                const bool moveRight = input_.IsActionDown("camera_right");
+                const bool moveUp = input_.IsActionDown("camera_forward");
+                const bool moveDown = input_.IsActionDown("camera_backward");
+                const bool moveWorldUp = input_.IsActionDown("camera_up");
+                const bool moveWorldDown = input_.IsActionDown("camera_down");
 
                 camera.rotationDeg.y += static_cast<float>(mouseDeltaX) * controller.mouseSensitivityDeg;
                 camera.rotationDeg.x += static_cast<float>(mouseDeltaY) * controller.mouseSensitivityDeg;

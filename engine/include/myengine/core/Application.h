@@ -17,6 +17,7 @@
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/state/StateMachine.h>
+#include <myengine/ui/UiManager.h>
 
 namespace myengine::core
 {
@@ -65,7 +66,16 @@ namespace myengine::core
         void SetInputOwnerWindow(WindowId id);
         void SetCursorVisible(bool visible);
         void WarpCursorToWindowCenter(const Window& window);
+        void ConfigureInputBindings();
+        void BindRuntimeEventListeners();
         void BuildDemoScene();
+        void ResetDemoScene();
+        void SpawnDemoBox(WindowId windowId);
+        void SpawnDemoSphere(WindowId windowId);
+        void SpawnDemoBurst(WindowId windowId);
+        void TogglePhysicsPause();
+        void TogglePhysicsDebugDraw();
+        void AdjustGravity(float delta);
         void RebindWindowControlledEntities();
         void RenderFrame();
 
@@ -82,11 +92,13 @@ namespace myengine::core
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;
+        ui::UiManager uiManager_;
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
         bool cameraControlActive_ = false;
         bool cursorHidden_ = false;
+        bool runtimeEventsBound_ = false;
 
         float deltaLogAccumulator_ = 0.0f;
     };

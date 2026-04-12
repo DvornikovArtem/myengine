@@ -2,20 +2,31 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 #include <myengine/core/Application.h>
+#include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/CameraControllerComponent.h>
+#include <myengine/ecs/components/ColliderComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/MotionComponent.h>
+#include <myengine/ecs/components/PlayerControllerComponent.h>
+#include <myengine/ecs/components/RigidbodyComponent.h>
 #include <myengine/ecs/components/TagComponent.h>
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
 #include <myengine/ecs/systems/CameraControlSystem.h>
+#include <myengine/ecs/systems/DebugRenderSystem.h>
 #include <myengine/ecs/systems/MotionSystem.h>
+#include <myengine/ecs/systems/PhysicsSystem.h>
+#include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
+#include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/scene/SceneSerializer.h>
 
@@ -119,10 +130,44 @@ namespace myengine::core
             windows_.push_back(std::move(runtime));
         }
 
+        ConfigureInputBindings();
+
+        ui::UiCallbacks uiCallbacks;
+        uiCallbacks.spawnBox = [this](const WindowId windowId) { SpawnDemoBox(windowId); };
+        uiCallbacks.spawnSphere = [this](const WindowId windowId) { SpawnDemoSphere(windowId); };
+        uiCallbacks.spawnBurst = [this](const WindowId windowId) { SpawnDemoBurst(windowId); };
+        uiCallbacks.resetScene = [this]() { ResetDemoScene(); };
+        uiCallbacks.togglePause = [this]() { TogglePhysicsPause(); };
+        uiCallbacks.toggleDebugDraw = [this]() { TogglePhysicsDebugDraw(); };
+        uiCallbacks.adjustGravity = [this](const float delta) { AdjustGravity(delta); };
+        if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(uiCallbacks)))
+        {
+            logger_.Error("UI manager initialization failed");
+            return false;
+        }
+
+        for (const auto& runtime : windows_)
+        {
+            if (runtime.window != nullptr && runtime.surface.IsValid())
+            {
+                uiManager_.RegisterWindow(
+                    runtime.window->Id(),
+                    runtime.window->Handle(),
+                    runtime.surface,
+                    runtime.window->Width(),
+                    runtime.window->Height());
+            }
+        }
+
         world_.AddUpdateSystem(std::make_unique<ecs::systems::CameraControlSystem>(input_, inputOwnerWindowId_));
+        world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
+        world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
+        world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
         sceneSavePath_ = std::filesystem::path(MYENGINE_SOURCE_DIR) / "assets/scenes/scene.json";
+
+        BindRuntimeEventListeners();
 
         if (resourceManager_ != nullptr)
         {
@@ -149,11 +194,23 @@ namespace myengine::core
     int Application::Run()
     {
         MSG msg{};
+        struct FrameTimingStats
+        {
+            double worldUpdateMs = 0.0;
+            double stateUpdateMs = 0.0;
+            double hotReloadMs = 0.0;
+            double uiUpdateMs = 0.0;
+            double renderMs = 0.0;
+            double totalMs = 0.0;
+            std::uint32_t frames = 0;
+        } frameTimingStats;
 
         logger_.Info("Main loop started");
 
         while (!quitRequested_)
         {
+            input_.BeginFrame();
+
             while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
             {
                 TranslateMessage(&msg);
@@ -172,20 +229,64 @@ namespace myengine::core
 
             timer_.Tick();
             const float deltaTime = timer_.DeltaTime();
+            const auto frameStartTime = std::chrono::steady_clock::now();
 
+            const auto worldUpdateStartTime = std::chrono::steady_clock::now();
             world_.UpdateSystems(deltaTime);
+            const auto worldUpdateEndTime = std::chrono::steady_clock::now();
+
+            const auto stateUpdateStartTime = std::chrono::steady_clock::now();
             stateMachine_.Update(*this, deltaTime);
+            const auto stateUpdateEndTime = std::chrono::steady_clock::now();
+
+            const auto hotReloadStartTime = std::chrono::steady_clock::now();
             if (resourceManager_ != nullptr)
             {
                 resourceManager_->UpdateHotReload();
             }
+            const auto hotReloadEndTime = std::chrono::steady_clock::now();
+
+            const auto uiUpdateStartTime = std::chrono::steady_clock::now();
+            uiManager_.Update(deltaTime);
+            const auto uiUpdateEndTime = std::chrono::steady_clock::now();
+
+            const auto renderStartTime = std::chrono::steady_clock::now();
             RenderFrame();
+            const auto renderEndTime = std::chrono::steady_clock::now();
+
+            const auto millisecondsBetween =
+                [](const std::chrono::steady_clock::time_point start, const std::chrono::steady_clock::time_point end)
+                {
+                    return std::chrono::duration<double, std::milli>(end - start).count();
+                };
+
+            frameTimingStats.worldUpdateMs += millisecondsBetween(worldUpdateStartTime, worldUpdateEndTime);
+            frameTimingStats.stateUpdateMs += millisecondsBetween(stateUpdateStartTime, stateUpdateEndTime);
+            frameTimingStats.hotReloadMs += millisecondsBetween(hotReloadStartTime, hotReloadEndTime);
+            frameTimingStats.uiUpdateMs += millisecondsBetween(uiUpdateStartTime, uiUpdateEndTime);
+            frameTimingStats.renderMs += millisecondsBetween(renderStartTime, renderEndTime);
+            frameTimingStats.totalMs += millisecondsBetween(frameStartTime, renderEndTime);
+            frameTimingStats.frames += 1;
 
             deltaLogAccumulator_ += deltaTime;
-            if (deltaLogAccumulator_ >= 1.0f)
+            if (deltaLogAccumulator_ >= 1.0f && frameTimingStats.frames > 0)
             {
-                logger_.Debug("deltaTime=" + std::to_string(deltaTime));
+                const double inverseFrameCount = 1.0 / static_cast<double>(frameTimingStats.frames);
+                std::ostringstream timingMessage;
+                timingMessage.setf(std::ios::fixed);
+                timingMessage.precision(2);
+                timingMessage
+                    << "FrameTimes avg_ms total=" << frameTimingStats.totalMs * inverseFrameCount
+                    << " world=" << frameTimingStats.worldUpdateMs * inverseFrameCount
+                    << " state=" << frameTimingStats.stateUpdateMs * inverseFrameCount
+                    << " hot_reload=" << frameTimingStats.hotReloadMs * inverseFrameCount
+                    << " ui=" << frameTimingStats.uiUpdateMs * inverseFrameCount
+                    << " render=" << frameTimingStats.renderMs * inverseFrameCount
+                    << " | deltaTime=" << deltaTime;
+                logger_.Debug(timingMessage.str());
+
                 deltaLogAccumulator_ = 0.0f;
+                frameTimingStats = {};
             }
 
             if (AllWindowsClosed())
@@ -209,6 +310,7 @@ namespace myengine::core
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
 
+        uiManager_.Shutdown();
         resourceManager_.reset();
 
         if (renderAdapter_)
@@ -232,6 +334,24 @@ namespace myengine::core
         InputEvent event;
         event.windowId = window.Id();
 
+        const bool bypassUiForCamera =
+            msg == WM_RBUTTONDOWN ||
+            msg == WM_RBUTTONUP ||
+            msg == WM_RBUTTONDBLCLK ||
+            msg == WM_MBUTTONDOWN ||
+            msg == WM_MBUTTONUP ||
+            msg == WM_MBUTTONDBLCLK ||
+            ((cameraControlActive_ || input_.IsMouseDown(MouseButton::Right)) &&
+                (msg == WM_MOUSEMOVE || msg == WM_MOUSEWHEEL));
+
+        if (!bypassUiForCamera)
+        {
+            uiManager_.HandleWindowMessage(window.Id(), window.Handle(), msg, wparam, lparam);
+        }
+
+        const bool uiWantsMouseCapture = !bypassUiForCamera && uiManager_.WantsMouseCapture(window.Id());
+        const bool uiWantsKeyboardCapture = uiManager_.WantsKeyboardCapture(window.Id());
+
         switch (msg)
         {
             case WM_CLOSE:
@@ -247,6 +367,7 @@ namespace myengine::core
                     runtime->closed = true;
                     runtime->controlledEntity = ecs::kInvalidEntity;
                 }
+                uiManager_.UnregisterWindow(window.Id());
                 if (inputOwnerWindowId_ == window.Id())
                 {
                     cameraControlActive_ = false;
@@ -305,6 +426,12 @@ namespace myengine::core
             {
                 const auto key = static_cast<std::uint32_t>(wparam);
 
+                if (uiWantsKeyboardCapture && key != VK_F3)
+                {
+                    return 0;
+                }
+
+                input_.SetActiveWindow(window.Id());
                 input_.OnKeyDown(key);
                 event.type = InputEventType::KeyDown;
                 event.key = key;
@@ -329,6 +456,10 @@ namespace myengine::core
                             logger_.Info("Scene saved successfully");
                         }
                     }
+                    else if (key == VK_F3)
+                    {
+                        TogglePhysicsDebugDraw();
+                    }
                 }
 
                 stateMachine_.HandleEvent(*this, event);
@@ -337,6 +468,12 @@ namespace myengine::core
 
             case WM_KEYUP:
             {
+                if (uiWantsKeyboardCapture)
+                {
+                    return 0;
+                }
+
+                input_.SetActiveWindow(window.Id());
                 input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
                 event.type = InputEventType::KeyUp;
                 event.key = static_cast<std::uint32_t>(wparam);
@@ -347,6 +484,12 @@ namespace myengine::core
             case WM_LBUTTONDOWN:
             case WM_LBUTTONDBLCLK:
             {
+                if (uiWantsMouseCapture)
+                {
+                    return 0;
+                }
+
+                input_.SetActiveWindow(window.Id());
                 input_.OnMouseDown(MouseButton::Left);
                 event.type = InputEventType::MouseDown;
                 event.mouseButton = MouseButton::Left;
@@ -356,6 +499,12 @@ namespace myengine::core
 
             case WM_LBUTTONUP:
             {
+                if (uiWantsMouseCapture)
+                {
+                    return 0;
+                }
+
+                input_.SetActiveWindow(window.Id());
                 input_.OnMouseUp(MouseButton::Left);
                 event.type = InputEventType::MouseUp;
                 event.mouseButton = MouseButton::Left;
@@ -365,6 +514,7 @@ namespace myengine::core
 
             case WM_RBUTTONDOWN:
             {
+                input_.SetActiveWindow(window.Id());
                 SetInputOwnerWindow(window.Id());
                 cameraControlActive_ = true;
                 SetCapture(window.Handle());
@@ -379,6 +529,7 @@ namespace myengine::core
 
             case WM_RBUTTONUP:
             {
+                input_.SetActiveWindow(window.Id());
                 cameraControlActive_ = false;
                 ReleaseCapture();
                 input_.OnMouseUp(MouseButton::Right);
@@ -392,6 +543,12 @@ namespace myengine::core
 
             case WM_MOUSEWHEEL:
             {
+                if (uiWantsMouseCapture)
+                {
+                    return 0;
+                }
+
+                input_.SetActiveWindow(window.Id());
                 if (cameraControlActive_ && inputOwnerWindowId_ == window.Id())
                 {
                     const int wheelDelta = GET_WHEEL_DELTA_WPARAM(wparam);
@@ -402,6 +559,11 @@ namespace myengine::core
 
             case WM_MOUSEMOVE:
             {
+                if (uiWantsMouseCapture)
+                {
+                    return 0;
+                }
+
                 if (cameraControlActive_ && inputOwnerWindowId_ == window.Id() && input_.IsMouseDown(MouseButton::Right))
                 {
                     const int mouseX = static_cast<int>(static_cast<short>(LOWORD(lparam)));
@@ -462,6 +624,8 @@ namespace myengine::core
                 runtime.window->SetTitle(runtime.baseTitle + suffix);
             }
         }
+
+        uiManager_.SetStateLabel(label);
     }
 
     Application::WindowRuntime* Application::FindWindow(const WindowId id)
@@ -554,26 +718,196 @@ namespace myengine::core
         input_.SetMousePositionReference(centerX, centerY);
     }
 
+    void Application::ConfigureInputBindings()
+    {
+        input_.BindAction("camera_forward", 'W');
+        input_.BindAction("camera_forward", VK_UP);
+        input_.BindAction("camera_backward", 'S');
+        input_.BindAction("camera_backward", VK_DOWN);
+        input_.BindAction("camera_left", 'A');
+        input_.BindAction("camera_left", VK_LEFT);
+        input_.BindAction("camera_right", 'D');
+        input_.BindAction("camera_right", VK_RIGHT);
+        input_.BindAction("camera_up", VK_SPACE);
+        input_.BindAction("camera_down", VK_SHIFT);
+        input_.BindAction("camera_down", VK_LSHIFT);
+
+        input_.BindAction("player_forward", 'W');
+        input_.BindAction("player_forward", VK_UP);
+        input_.BindAction("player_backward", 'S');
+        input_.BindAction("player_backward", VK_DOWN);
+        input_.BindAction("player_left", 'A');
+        input_.BindAction("player_left", VK_LEFT);
+        input_.BindAction("player_right", 'D');
+        input_.BindAction("player_right", VK_RIGHT);
+        input_.BindAction("player_jump", VK_SPACE);
+    }
+
+    void Application::BindRuntimeEventListeners()
+    {
+        if (runtimeEventsBound_)
+        {
+            return;
+        }
+
+        runtimeEventsBound_ = true;
+
+        core::ServiceLocator::GetEventBus().Subscribe<physics::CollisionEvent>(
+            [this](const physics::CollisionEvent& event)
+            {
+                std::ostringstream message;
+                message.setf(std::ios::fixed);
+                message.precision(2);
+                message << "Collision " << event.entityA << " vs " << event.entityB
+                        << " | impulse=" << event.impulse
+                        << " | point=(" << event.point.x << ", " << event.point.y << ", " << event.point.z << ")";
+
+                core::ServiceLocator::GetPhysicsWorldState().PushRecentEvent(message.str());
+                logger_.Info(message.str());
+            });
+
+        core::ServiceLocator::GetEventBus().Subscribe<physics::TriggerEvent>(
+            [this](const physics::TriggerEvent& event)
+            {
+                std::ostringstream message;
+                message.setf(std::ios::fixed);
+                message.precision(2);
+                message << "Trigger " << event.triggerEntity << " -> " << event.otherEntity
+                        << " | point=(" << event.point.x << ", " << event.point.y << ", " << event.point.z << ")";
+
+                core::ServiceLocator::GetPhysicsWorldState().PushRecentEvent(message.str());
+                logger_.Info(message.str());
+            });
+    }
+
+    void Application::ResetDemoScene()
+    {
+        world_.ClearEntities();
+        core::ServiceLocator::GetPhysicsWorldState().recentEvents.clear();
+        BuildDemoScene();
+    }
+
+    void Application::SpawnDemoBox(const WindowId windowId)
+    {
+        const auto* runtime = FindWindow(windowId);
+        if (runtime == nullptr)
+        {
+            return;
+        }
+
+        static constexpr char kCubeMesh[] = "assets/models/crate.obj";
+        static constexpr char kWarmMaterial[] = "assets/materials/warm.material.json";
+
+        const std::size_t bodyIndex = world_.GetEntities().size() + 1u;
+        const float laneOffset = static_cast<float>(bodyIndex % 5u) * 0.7f - 1.4f;
+
+        const ecs::EntityId entity = world_.CreateEntity();
+        world_.Emplace<ecs::components::TagComponent>(entity).name = "SpawnedBox_" + std::to_string(entity);
+        auto& transform = world_.Emplace<ecs::components::TransformComponent>(entity);
+        transform.position = {laneOffset, 4.8f + static_cast<float>(bodyIndex % 3u) * 0.55f, 3.8f};
+        transform.scale = {0.85f, 0.85f, 0.85f};
+        auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(entity);
+        renderer.meshPath = kCubeMesh;
+        renderer.materialPath = kWarmMaterial;
+        renderer.visible = true;
+        world_.Emplace<ecs::components::WindowBindingComponent>(entity).windowId = runtime->window->Id();
+
+        auto& rigidbody = world_.Emplace<ecs::components::RigidbodyComponent>(entity);
+        rigidbody.mass = 1.0f;
+        rigidbody.useGravity = true;
+
+        auto& collider = world_.Emplace<ecs::components::ColliderComponent>(entity);
+        collider.type = ecs::components::ColliderType::Box;
+        collider.halfExtents = {0.5f, 0.5f, 0.5f};
+        collider.friction = 0.55f;
+        collider.bounciness = 0.12f;
+    }
+
+    void Application::SpawnDemoSphere(const WindowId windowId)
+    {
+        const auto* runtime = FindWindow(windowId);
+        if (runtime == nullptr)
+        {
+            return;
+        }
+
+        static constexpr char kSphereMesh[] = "assets/models/sphere.obj";
+        static constexpr char kCoolMaterial[] = "assets/materials/cool.material.json";
+
+        const std::size_t bodyIndex = world_.GetEntities().size() + 1u;
+        const float laneOffset = static_cast<float>(bodyIndex % 5u) * 0.65f - 1.3f;
+
+        const ecs::EntityId entity = world_.CreateEntity();
+        world_.Emplace<ecs::components::TagComponent>(entity).name = "SpawnedSphere_" + std::to_string(entity);
+        auto& transform = world_.Emplace<ecs::components::TransformComponent>(entity);
+        transform.position = {laneOffset, 5.2f + static_cast<float>(bodyIndex % 2u) * 0.6f, 2.6f};
+        transform.scale = {0.78f, 0.78f, 0.78f};
+        auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(entity);
+        renderer.meshPath = kSphereMesh;
+        renderer.materialPath = kCoolMaterial;
+        renderer.visible = true;
+        world_.Emplace<ecs::components::WindowBindingComponent>(entity).windowId = runtime->window->Id();
+
+        auto& rigidbody = world_.Emplace<ecs::components::RigidbodyComponent>(entity);
+        rigidbody.mass = 0.65f;
+        rigidbody.useGravity = true;
+
+        auto& collider = world_.Emplace<ecs::components::ColliderComponent>(entity);
+        collider.type = ecs::components::ColliderType::Sphere;
+        collider.radius = 0.5f;
+        collider.friction = 0.28f;
+        collider.bounciness = 0.18f;
+    }
+
+    void Application::SpawnDemoBurst(const WindowId windowId)
+    {
+        for (int index = 0; index < 3; ++index)
+        {
+            SpawnDemoBox(windowId);
+            SpawnDemoSphere(windowId);
+        }
+    }
+
+    void Application::TogglePhysicsPause()
+    {
+        auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
+        physicsState.physicsPaused = !physicsState.physicsPaused;
+    }
+
+    void Application::TogglePhysicsDebugDraw()
+    {
+        auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
+        physicsState.debugDrawEnabled = !physicsState.debugDrawEnabled;
+    }
+
+    void Application::AdjustGravity(const float delta)
+    {
+        auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
+        physicsState.gravityStrength = std::clamp(physicsState.gravityStrength + delta, 0.0f, 30.0f);
+    }
+
     void Application::BuildDemoScene()
     {
         static constexpr char kCubeMesh[] = "assets/models/crate.obj";
-        static constexpr char kPyramidMesh[] = "assets/models/pyramid.obj";
-        static constexpr char kAfricanHeadMesh[] = "assets/models/african_head.obj";
+        static constexpr char kSphereMesh[] = "assets/models/sphere.obj";
         static constexpr char kDefaultMaterial[] = "assets/materials/default.material.json";
         static constexpr char kWarmMaterial[] = "assets/materials/warm.material.json";
         static constexpr char kCoolMaterial[] = "assets/materials/cool.material.json";
-        static constexpr char kAfricanHeadMaterial[] = "assets/materials/africanhead.material.json";
 
         if (resourceManager_ != nullptr)
         {
             resourceManager_->Load<resource::MeshAsset>(kCubeMesh);
-            resourceManager_->Load<resource::MeshAsset>(kPyramidMesh);
-            resourceManager_->Load<resource::MeshAsset>(kAfricanHeadMesh);
+            resourceManager_->Load<resource::MeshAsset>(kSphereMesh);
             resourceManager_->Load<resource::MaterialAsset>(kDefaultMaterial);
             resourceManager_->Load<resource::MaterialAsset>(kWarmMaterial);
             resourceManager_->Load<resource::MaterialAsset>(kCoolMaterial);
-            resourceManager_->Load<resource::MaterialAsset>(kAfricanHeadMaterial);
         }
+
+        auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
+        physicsState.physicsPaused = false;
+        physicsState.debugDrawEnabled = false;
+        physicsState.gravityStrength = 9.81f;
+        physicsState.recentEvents.clear();
 
         for (std::size_t i = 0; i < windows_.size(); ++i)
         {
@@ -591,9 +925,9 @@ namespace myengine::core
                 tag.name = "Camera_" + std::to_string(windowId);
 
                 auto& camera = world_.Emplace<ecs::components::CameraComponent>(cameraEntity);
-                camera.position = {0.0f, 0.25f, -6.5f};
-                camera.rotationDeg = {0.0f, 0.0f, 0.0f};
-                camera.fovYDeg = 65.0f;
+                camera.position = {0.0f, 3.0f, -10.5f};
+                camera.rotationDeg = {8.0f, 0.0f, 0.0f};
+                camera.fovYDeg = 60.0f;
                 camera.orthographicHalfHeight = 1.0f;
                 camera.nearPlane = 0.01f;
                 camera.farPlane = 200.0f;
@@ -616,112 +950,117 @@ namespace myengine::core
                 tag.name = "Controlled_" + std::to_string(windowId);
 
                 auto& transform = world_.Emplace<ecs::components::TransformComponent>(controlledEntity);
-                transform.position = {-1.7f, 0.0f, 2.2f};
-                transform.scale = {1.1f, 1.1f, 1.1f};
+                transform.position = {-2.2f, 0.2f, 2.0f};
+                transform.scale = {0.95f, 0.95f, 0.95f};
 
                 auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(controlledEntity);
                 renderer.meshPath = kCubeMesh;
                 renderer.materialPath = kDefaultMaterial;
 
-                auto& motion = world_.Emplace<ecs::components::MotionComponent>(controlledEntity);
-                motion.angularVelocityDeg.y = 35.0f;
-                motion.angularVelocityDeg.x = 12.0f;
+                auto& rigidbody = world_.Emplace<ecs::components::RigidbodyComponent>(controlledEntity);
+                rigidbody.mass = 1.0f;
+                rigidbody.useGravity = true;
+
+                auto& collider = world_.Emplace<ecs::components::ColliderComponent>(controlledEntity);
+                collider.type = ecs::components::ColliderType::Box;
+                collider.halfExtents = {0.5f, 0.5f, 0.5f};
+                collider.friction = 0.75f;
+                collider.bounciness = 0.08f;
+
+                auto& controller = world_.Emplace<ecs::components::PlayerControllerComponent>(controlledEntity);
+                controller.windowId = windowId;
+                controller.moveSpeed = 5.3f;
+                controller.jumpSpeed = 6.7f;
+                controller.airControl = 0.42f;
 
                 world_.Emplace<ecs::components::WindowBindingComponent>(controlledEntity).windowId = windowId;
             }
 
-            const ecs::EntityId sharedCubeEntity = world_.CreateEntity();
+            const auto createBoxBody =
+                [&](const std::string& tagName,
+                    const ecs::components::Vec3& position,
+                    const ecs::components::Vec3& scale,
+                    const char* materialPath,
+                    const float mass,
+                    const bool isTrigger = false)
             {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(sharedCubeEntity);
-                tag.name = "SharedCrate_" + std::to_string(windowId);
+                const ecs::EntityId entity = world_.CreateEntity();
+                world_.Emplace<ecs::components::TagComponent>(entity).name = tagName;
 
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(sharedCubeEntity);
-                transform.position = {1.7f, 0.0f, 2.2f};
-                transform.scale = {1.1f, 1.1f, 1.1f};
+                auto& transform = world_.Emplace<ecs::components::TransformComponent>(entity);
+                transform.position = position;
+                transform.scale = scale;
 
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(sharedCubeEntity);
+                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(entity);
                 renderer.meshPath = kCubeMesh;
-                renderer.materialPath = kDefaultMaterial;
+                renderer.materialPath = materialPath;
 
-                auto& motion = world_.Emplace<ecs::components::MotionComponent>(sharedCubeEntity);
-                motion.linearVelocity.x = (i % 2 == 0) ? 0.25f : -0.25f;
-                motion.angularVelocityDeg.y = -28.0f;
+                auto& collider = world_.Emplace<ecs::components::ColliderComponent>(entity);
+                collider.type = ecs::components::ColliderType::Box;
+                collider.halfExtents = {0.5f, 0.5f, 0.5f};
+                collider.isTrigger = isTrigger;
+                collider.friction = mass > 0.0f ? 0.58f : 0.85f;
+                collider.bounciness = mass > 0.0f ? 0.12f : 0.02f;
 
-                world_.Emplace<ecs::components::WindowBindingComponent>(sharedCubeEntity).windowId = windowId;
-            }
+                if (mass > 0.0f)
+                {
+                    auto& rigidbody = world_.Emplace<ecs::components::RigidbodyComponent>(entity);
+                    rigidbody.mass = mass;
+                    rigidbody.useGravity = true;
+                }
 
-            const ecs::EntityId pyramidEntity = world_.CreateEntity();
+                world_.Emplace<ecs::components::WindowBindingComponent>(entity).windowId = windowId;
+                return entity;
+            };
+
+            const auto createSphereBody =
+                [&](const std::string& tagName,
+                    const ecs::components::Vec3& position,
+                    const ecs::components::Vec3& scale,
+                    const char* materialPath,
+                    const float mass)
             {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(pyramidEntity);
-                tag.name = "Pyramid_" + std::to_string(windowId);
+                const ecs::EntityId entity = world_.CreateEntity();
+                world_.Emplace<ecs::components::TagComponent>(entity).name = tagName;
 
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(pyramidEntity);
-                transform.position = {0.0f, 0.6f, 0.3f};
-                transform.scale = {1.35f, 1.35f, 1.35f};
+                auto& transform = world_.Emplace<ecs::components::TransformComponent>(entity);
+                transform.position = position;
+                transform.scale = scale;
 
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(pyramidEntity);
-                renderer.meshPath = kPyramidMesh;
-                renderer.materialPath = kWarmMaterial;
-
-                auto& motion = world_.Emplace<ecs::components::MotionComponent>(pyramidEntity);
-                motion.angularVelocityDeg.y = 55.0f;
-                motion.angularVelocityDeg.z = 22.0f;
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(pyramidEntity).windowId = windowId;
-            }
-
-            const ecs::EntityId africanHeadEntity = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(africanHeadEntity);
-                tag.name = "AfricanHead_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(africanHeadEntity);
-                transform.position = { 1.5f, 0.1f, 0.1f };
-                transform.scale = { 1.0f, 1.0f, 1.0f };
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(africanHeadEntity);
-                renderer.meshPath = kAfricanHeadMesh;
-                renderer.materialPath = kAfricanHeadMaterial;
+                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(entity);
+                renderer.meshPath = kSphereMesh;
+                renderer.materialPath = materialPath;
 
                 //auto& motion = world_.Emplace<ecs::components::MotionComponent>(africanHeadEntity);
                 //motion.angularVelocityDeg.y = 10.0f;
                 //motion.angularVelocityDeg.z = 10.0f;
 
-                world_.Emplace<ecs::components::WindowBindingComponent>(africanHeadEntity).windowId = windowId;
-            }
+                auto& rigidbody = world_.Emplace<ecs::components::RigidbodyComponent>(entity);
+                rigidbody.mass = mass;
+                rigidbody.useGravity = true;
 
-            const ecs::EntityId floorEntity = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(floorEntity);
-                tag.name = "Floor_" + std::to_string(windowId);
+                auto& collider = world_.Emplace<ecs::components::ColliderComponent>(entity);
+                collider.type = ecs::components::ColliderType::Sphere;
+                collider.radius = 0.5f;
+                collider.friction = 0.22f;
+                collider.bounciness = 0.18f;
 
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(floorEntity);
-                transform.position = {0.0f, -1.65f, 2.2f};
-                transform.scale = {7.0f, 0.25f, 7.0f};
+                world_.Emplace<ecs::components::WindowBindingComponent>(entity).windowId = windowId;
+                return entity;
+            };
 
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(floorEntity);
-                renderer.meshPath = kCubeMesh;
-                renderer.materialPath = kCoolMaterial;
+            createBoxBody("Floor_" + std::to_string(windowId), {0.0f, -1.55f, 3.0f}, {8.5f, 1.0f, 8.5f}, kCoolMaterial, 0.0f);
+            createBoxBody("Platform_" + std::to_string(windowId), {2.6f, 0.0f, 3.8f}, {2.6f, 0.55f, 2.0f}, kCoolMaterial, 0.0f);
+            createBoxBody("WallLeft_" + std::to_string(windowId), {-5.0f, 0.1f, 3.0f}, {0.5f, 2.2f, 6.6f}, kCoolMaterial, 0.0f);
+            createBoxBody("WallRight_" + std::to_string(windowId), {5.0f, 0.1f, 3.0f}, {0.5f, 2.2f, 6.6f}, kCoolMaterial, 0.0f);
+            createBoxBody("TriggerGate_" + std::to_string(windowId), {0.0f, 0.15f, 5.8f}, {2.2f, 1.6f, 0.55f}, kWarmMaterial, 0.0f, true);
 
-                world_.Emplace<ecs::components::WindowBindingComponent>(floorEntity).windowId = windowId;
-            }
+            createBoxBody("BoxStackA_" + std::to_string(windowId), {-0.2f, -0.45f, 3.4f}, {0.9f, 0.9f, 0.9f}, kWarmMaterial, 1.0f);
+            createBoxBody("BoxStackB_" + std::to_string(windowId), {-0.2f, 0.55f, 3.4f}, {0.9f, 0.9f, 0.9f}, kWarmMaterial, 1.0f);
+            createBoxBody("BoxStackC_" + std::to_string(windowId), {-0.2f, 1.55f, 3.4f}, {0.9f, 0.9f, 0.9f}, kWarmMaterial, 1.0f);
 
-            const ecs::EntityId childEntity = world_.CreateEntity();
-            {
-                auto& tag = world_.Emplace<ecs::components::TagComponent>(childEntity);
-                tag.name = "PyramidChild_" + std::to_string(windowId);
-
-                auto& transform = world_.Emplace<ecs::components::TransformComponent>(childEntity);
-                transform.position = {0.0f, 1.2f, 0.0f};
-                transform.scale = {0.45f, 0.45f, 0.45f};
-
-                auto& renderer = world_.Emplace<ecs::components::MeshRendererComponent>(childEntity);
-                renderer.meshPath = kCubeMesh;
-                renderer.materialPath = kWarmMaterial;
-
-                world_.Emplace<ecs::components::WindowBindingComponent>(childEntity).windowId = windowId;
-                world_.SetParent(childEntity, pyramidEntity);
-            }
+            createSphereBody("SphereA_" + std::to_string(windowId), {1.8f, 2.6f, 2.6f}, {0.85f, 0.85f, 0.85f}, kDefaultMaterial, 0.7f);
+            createSphereBody("SphereB_" + std::to_string(windowId), {2.6f, 4.1f, 2.8f}, {0.72f, 0.72f, 0.72f}, kDefaultMaterial, 0.55f);
 
             logger_.Info("Demo scene created for window id=" + std::to_string(windowId));
         }
@@ -774,6 +1113,11 @@ namespace myengine::core
                 continue;
             }
 
+            if (!renderAdapter_->BeginFrame(runtime.surface, runtime.clearColor))
+            {
+                continue;
+            }
+
             ecs::RenderFrameContext context{
                 *renderAdapter_,
                 runtime.surface,
@@ -786,6 +1130,8 @@ namespace myengine::core
             };
 
             world_.RenderSystems(context);
+            uiManager_.RenderWindow(runtime.window->Id());
+            renderAdapter_->EndFrame(runtime.surface);
         }
     }
 }

@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <future>
 #include <memory>
@@ -218,6 +219,8 @@ namespace myengine::resource
         ResourceHandle<TextureAsset> fallbackTexture_;
         ResourceHandle<ShaderAsset> fallbackShader_;
         ResourceHandle<MaterialAsset> fallbackMaterial_;
+        std::chrono::steady_clock::time_point lastHotReloadScanTime_{};
+        std::chrono::milliseconds hotReloadInterval_{500};
     };
 
     template <typename T>

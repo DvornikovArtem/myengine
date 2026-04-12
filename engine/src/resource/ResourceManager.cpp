@@ -54,6 +54,11 @@ namespace myengine::resource
         constexpr bool kTextureUseDirectXTexFirst = true;
         constexpr int kTextureRequestedChannels = STBI_rgb_alpha;
         constexpr bool kTextureForceSrgb = true;
+        constexpr std::uint64_t kProceduralSphereMeshVersion = 1;
+        constexpr std::uint32_t kProceduralSphereLatitudeSegments = 24;
+        constexpr std::uint32_t kProceduralSphereLongitudeSegments = 48;
+        constexpr float kProceduralSphereRadius = 0.5f;
+        constexpr float kPi = 3.14159265358979323846f;
 
         constexpr std::uint64_t kHashOffsetBasis = 14695981039346656037ull;
         constexpr std::uint64_t kHashPrime = 1099511628211ull;
@@ -116,6 +121,7 @@ namespace myengine::resource
             hash = HashCombine(hash, static_cast<std::uint64_t>(kMeshFlipUvY ? 1u : 0u));
             hash = HashCombine(hash, static_cast<std::uint64_t>(kMeshReverseWinding ? 1u : 0u));
             hash = HashCombine(hash, static_cast<std::uint64_t>(sizeof(render::MeshVertex)));
+            hash = HashCombine(hash, kProceduralSphereMeshVersion);
             return hash;
         }
 
@@ -153,6 +159,16 @@ namespace myengine::resource
         bool IsMeshBinaryPath(const std::filesystem::path& path)
         {
             return ToLower(path.extension().string()) == ".myemesh";
+        }
+
+        bool IsBuiltinSpherePath(const std::filesystem::path& path)
+        {
+            constexpr char kSphereSuffix[] = "assets/models/sphere.obj";
+            constexpr std::size_t kSphereSuffixLength = sizeof(kSphereSuffix) - 1;
+
+            const std::string normalizedPath = ToLower(path.generic_string());
+            return normalizedPath.size() >= kSphereSuffixLength &&
+                normalizedPath.compare(normalizedPath.size() - kSphereSuffixLength, kSphereSuffixLength, kSphereSuffix) == 0;
         }
 
         bool IsTextureBinaryPath(const std::filesystem::path& path)
@@ -392,6 +408,80 @@ namespace myengine::resource
 
         MeshCpuAsset LoadMeshFromSource(const std::filesystem::path& path)
         {
+            if (IsBuiltinSpherePath(path))
+            {
+                MeshCpuAsset asset;
+                asset.dependencies.push_back(path);
+
+                auto& meshData = asset.data;
+                const std::uint32_t latitudeSegments = std::max<std::uint32_t>(kProceduralSphereLatitudeSegments, 3);
+                const std::uint32_t longitudeSegments = std::max<std::uint32_t>(kProceduralSphereLongitudeSegments, 6);
+                const std::uint32_t stride = longitudeSegments + 1;
+
+                meshData.vertices.reserve(static_cast<std::size_t>(latitudeSegments + 1) * static_cast<std::size_t>(stride));
+                meshData.indices.reserve(static_cast<std::size_t>(latitudeSegments - 1) * static_cast<std::size_t>(longitudeSegments) * 6);
+
+                for (std::uint32_t latitude = 0; latitude <= latitudeSegments; ++latitude)
+                {
+                    const float v = static_cast<float>(latitude) / static_cast<float>(latitudeSegments);
+                    const float phi = v * kPi;
+                    const float sinPhi = std::sin(phi);
+                    const float cosPhi = std::cos(phi);
+
+                    for (std::uint32_t longitude = 0; longitude <= longitudeSegments; ++longitude)
+                    {
+                        const float u = static_cast<float>(longitude) / static_cast<float>(longitudeSegments);
+                        const float theta = u * (2.0f * kPi);
+                        const float sinTheta = std::sin(theta);
+                        const float cosTheta = std::cos(theta);
+
+                        const render::Float3 normal{
+                            cosTheta * sinPhi,
+                            cosPhi,
+                            sinTheta * sinPhi,
+                        };
+
+                        render::MeshVertex vertex{};
+                        vertex.position =
+                        {
+                            normal.x * kProceduralSphereRadius,
+                            normal.y * kProceduralSphereRadius,
+                            normal.z * kProceduralSphereRadius,
+                        };
+                        vertex.normal = normal;
+                        vertex.uv = {u, 1.0f - v};
+                        meshData.vertices.push_back(vertex);
+                    }
+                }
+
+                for (std::uint32_t latitude = 0; latitude < latitudeSegments; ++latitude)
+                {
+                    for (std::uint32_t longitude = 0; longitude < longitudeSegments; ++longitude)
+                    {
+                        const std::uint32_t topLeft = latitude * stride + longitude;
+                        const std::uint32_t bottomLeft = topLeft + stride;
+                        const std::uint32_t topRight = topLeft + 1;
+                        const std::uint32_t bottomRight = bottomLeft + 1;
+
+                        if (latitude != 0)
+                        {
+                            meshData.indices.push_back(topLeft);
+                            meshData.indices.push_back(bottomLeft);
+                            meshData.indices.push_back(topRight);
+                        }
+
+                        if (latitude + 1 != latitudeSegments)
+                        {
+                            meshData.indices.push_back(topRight);
+                            meshData.indices.push_back(bottomLeft);
+                            meshData.indices.push_back(bottomRight);
+                        }
+                    }
+                }
+
+                return asset;
+            }
+
             Assimp::Importer importer;
             const aiScene* scene = importer.ReadFile(path.string(), kMeshImportFlags);
 
@@ -809,6 +899,7 @@ namespace myengine::resource
     ResourceManager::ResourceManager(render::IRenderAdapter& renderAdapter, core::Logger& logger)
         : renderAdapter_(renderAdapter), logger_(logger)
     {
+        lastHotReloadScanTime_ = std::chrono::steady_clock::now();
         fallbackMesh_ = CreateFallbackMesh();
         fallbackTexture_ = CreateFallbackTexture();
         fallbackShader_ = CreateFallbackShader();
@@ -882,6 +973,14 @@ namespace myengine::resource
     void ResourceManager::UpdateHotReload()
     {
         PumpAsyncLoads();
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastHotReloadScanTime_ < hotReloadInterval_)
+        {
+            return;
+        }
+
+        lastHotReloadScanTime_ = now;
         ReloadChangedShaders();
         ReloadChangedMaterials();
         ReloadChangedMeshes();
@@ -919,11 +1018,6 @@ namespace myengine::resource
         const std::filesystem::path resolvedPath = ResolvePath(path);
         const std::string key = NormalizeKey(resolvedPath);
 
-        if (const auto ready = TryFinalizeMeshLoad(key); ready != nullptr)
-        {
-            return ready;
-        }
-
         if (const auto it = meshCache_.find(key); it != meshCache_.end())
         {
             return it->second;
@@ -939,11 +1033,6 @@ namespace myengine::resource
     {
         const std::filesystem::path resolvedPath = ResolvePath(path);
         const std::string key = NormalizeKey(resolvedPath);
-
-        if (const auto ready = TryFinalizeTextureLoad(key); ready != nullptr)
-        {
-            return ready;
-        }
 
         if (const auto it = textureCache_.find(key); it != textureCache_.end())
         {

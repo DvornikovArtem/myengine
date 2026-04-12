@@ -13,8 +13,10 @@ set(APP_CPP
 
 set(APP_SHADER_FILES
   ${CMAKE_SOURCE_DIR}/assets/shaders/primitive.hlsl
+  ${CMAKE_SOURCE_DIR}/assets/shaders/debug_line.hlsl
   ${CMAKE_SOURCE_DIR}/assets/shaders/textured_lit.hlsl
   ${CMAKE_SOURCE_DIR}/assets/shaders/textured_lit.shader.json
+  ${CMAKE_SOURCE_DIR}/assets/shaders/ui_overlay.hlsl
 )
 
 set_source_files_properties(${APP_SHADER_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
