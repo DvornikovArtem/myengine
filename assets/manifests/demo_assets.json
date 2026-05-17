@@ -1,10 +1,12 @@
 {
   "meshes": [
     "../models/crate.obj",
-    "../models/pyramid.obj"
+    "../models/pyramid.obj",
+    "../models/african_head.obj"
   ],
   "textures": [
-    "../textures/debug.bmp"
+    "../textures/debug.bmp",
+    "../textures/african_head_diffuse.dds"
   ],
   "shaders": [
     "../shaders/textured_lit.shader.json"
@@ -12,6 +14,7 @@
   "materials": [
     "../materials/default.material.json",
     "../materials/warm.material.json",
-    "../materials/cool.material.json"
+    "../materials/cool.material.json",
+    "../materials/africanhead.material.json"
   ]
 }

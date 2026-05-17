@@ -12,6 +12,7 @@
 #include <DirectXMath.h>
 
 #include <myengine/core/Logger.h>
+#include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/ColliderComponent.h>
@@ -21,6 +22,7 @@
 #include <myengine/ecs/components/WindowBindingComponent.h>
 #include <myengine/ecs/systems/RenderSystem.h>
 #include <myengine/resource/ResourceManager.h>
+#include <myengine/scene/TransformUtils.h>
 #include <myengine/spatial/Octree.h>
 
 namespace myengine::ecs::systems
@@ -28,6 +30,8 @@ namespace myengine::ecs::systems
     namespace
     {
         constexpr float kDefaultRenderableRadius = 0.8660254f;
+        constexpr char kPreviewCubeMesh[] = "assets/models/crate.obj";
+        constexpr char kPreviewSphereMesh[] = "assets/models/sphere.obj";
 
         struct RenderableEntry
         {
@@ -36,96 +40,6 @@ namespace myengine::ecs::systems
             DirectX::XMMATRIX worldMatrix = DirectX::XMMatrixIdentity();
             DirectX::BoundingSphere bounds{};
         };
-
-        render::Matrix4 ToRenderMatrix(const DirectX::XMMATRIX& matrix)
-        {
-            DirectX::XMFLOAT4X4 value{};
-            DirectX::XMStoreFloat4x4(&value, matrix);
-
-            render::Matrix4 result{};
-            std::memcpy(result.data.data(), &value, sizeof(float) * 16);
-            return result;
-        }
-
-        DirectX::XMMATRIX BuildLocalMatrix(const components::TransformComponent& transform)
-        {
-            return DirectX::XMMatrixScaling(transform.scale.x, transform.scale.y, transform.scale.z) *
-                DirectX::XMMatrixRotationRollPitchYaw(
-                    DirectX::XMConvertToRadians(transform.rotationDeg.x),
-                    DirectX::XMConvertToRadians(transform.rotationDeg.y),
-                    DirectX::XMConvertToRadians(transform.rotationDeg.z)) *
-                DirectX::XMMatrixTranslation(transform.position.x, transform.position.y, transform.position.z);
-        }
-
-        DirectX::XMMATRIX ResolveWorldMatrix(
-            const EntityId entity,
-            World& world,
-            std::unordered_map<EntityId, DirectX::XMFLOAT4X4>& cache,
-            std::unordered_set<EntityId>& visiting,
-            std::unordered_set<EntityId>& cycleWarningLogged,
-            const RenderFrameContext& context)
-        {
-            if (const auto cacheIt = cache.find(entity); cacheIt != cache.end())
-            {
-                return DirectX::XMLoadFloat4x4(&cacheIt->second);
-            }
-
-            const auto* transform = world.TryGet<components::TransformComponent>(entity);
-            if (transform == nullptr)
-            {
-                return DirectX::XMMatrixIdentity();
-            }
-
-            if (!visiting.insert(entity).second)
-            {
-                if (context.logger != nullptr && cycleWarningLogged.insert(entity).second)
-                {
-                    context.logger->Warning(
-                        "RenderSystem: hierarchy cycle detected for entity=" + std::to_string(entity) + ". Local transform is used.");
-                }
-                return BuildLocalMatrix(*transform);
-            }
-
-            const DirectX::XMMATRIX local = BuildLocalMatrix(*transform);
-            DirectX::XMMATRIX worldMatrix = local;
-
-            if (const auto* hierarchy = world.TryGet<components::HierarchyComponent>(entity);
-                hierarchy != nullptr && hierarchy->parent != kInvalidEntity)
-            {
-                const EntityId parent = hierarchy->parent;
-                if (world.IsAlive(parent) && world.Has<components::TransformComponent>(parent))
-                {
-                    if (visiting.find(parent) != visiting.end())
-                    {
-                        if (context.logger != nullptr && cycleWarningLogged.insert(entity).second)
-                        {
-                            context.logger->Warning(
-                                "RenderSystem: parent loop detected for entity=" + std::to_string(entity) + ". Local transform is used.");
-                        }
-                    }
-                    else
-                    {
-                        const DirectX::XMMATRIX parentWorld =
-                            ResolveWorldMatrix(parent, world, cache, visiting, cycleWarningLogged, context);
-                        worldMatrix = DirectX::XMMatrixMultiply(local, parentWorld);
-                    }
-                }
-            }
-
-            visiting.erase(entity);
-
-            DirectX::XMFLOAT4X4 cached{};
-            DirectX::XMStoreFloat4x4(&cached, worldMatrix);
-            cache[entity] = cached;
-            return worldMatrix;
-        }
-
-        DirectX::XMFLOAT3 ExtractTranslation(const DirectX::XMMATRIX& matrix)
-        {
-            DirectX::XMFLOAT4X4 value{};
-            DirectX::XMStoreFloat4x4(&value, matrix);
-            return {value._41, value._42, value._43};
-        }
 
         DirectX::BoundingSphere BuildRenderableBounds(World& world, const EntityId entity, const DirectX::XMMATRIX& worldMatrix)
         {
@@ -234,6 +148,11 @@ namespace myengine::ecs::systems
             viewFrustum.Transform(worldFrustum, inverseView);
             return worldFrustum;
         }
+
+        const char* PreviewMeshPath(const editor::MaterialPreviewShape shape)
+        {
+            return shape == editor::MaterialPreviewShape::Cube ? kPreviewCubeMesh : kPreviewSphereMesh;
+        }
     }
 
     void RenderSystem::Render(World& world, const RenderFrameContext& context)
@@ -249,6 +168,10 @@ namespace myengine::ecs::systems
 
         DirectX::XMMATRIX viewMatrix = DirectX::XMMatrixIdentity();
         DirectX::XMMATRIX projectionMatrix = DirectX::XMMatrixIdentity();
+        DirectX::XMVECTOR cameraEye = DirectX::XMVectorZero();
+        DirectX::XMVECTOR cameraForward = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+        DirectX::XMVECTOR cameraUp = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+        float cameraFovYDeg = 60.0f;
 
         bool cameraFound = false;
         world.ForEach<components::CameraComponent, components::WindowBindingComponent>(
@@ -263,6 +186,7 @@ namespace myengine::ecs::systems
                 const float fovYRad = DirectX::XMConvertToRadians(clampedFovYDeg);
                 const float nearPlane = std::max(camera.nearPlane, 0.001f);
                 const float farPlane = std::max(camera.farPlane, nearPlane + 0.1f);
+                cameraFovYDeg = clampedFovYDeg;
 
                 const DirectX::XMMATRIX rotation = DirectX::XMMatrixRotationRollPitchYaw(
                     DirectX::XMConvertToRadians(camera.rotationDeg.x),
@@ -278,6 +202,9 @@ namespace myengine::ecs::systems
                 up = DirectX::XMVector3Normalize(up);
 
                 const DirectX::XMVECTOR eye = DirectX::XMVectorSet(camera.position.x, camera.position.y, camera.position.z, 1.0f);
+                cameraEye = eye;
+                cameraForward = forward;
+                cameraUp = up;
                 viewMatrix = DirectX::XMMatrixLookToLH(eye, forward, up);
 
                 projectionMatrix = DirectX::XMMatrixPerspectiveFovLH(
@@ -308,7 +235,13 @@ namespace myengine::ecs::systems
                     return;
                 }
 
-                const DirectX::XMMATRIX worldMatrix = ResolveWorldMatrix(entity, world, worldMatrixCache, visiting, hierarchyCycleWarningLogged_, context);
+                const DirectX::XMMATRIX worldMatrix = scene::ResolveWorldMatrix(
+                    world,
+                    entity,
+                    worldMatrixCache,
+                    visiting,
+                    &hierarchyCycleWarningLogged_,
+                    context.logger);
                 renderables.push_back(RenderableEntry{
                     entity,
                     &renderer,
@@ -347,6 +280,43 @@ namespace myengine::ecs::systems
             }
         }
 
+        const auto appendDrawItem =
+            [&](const std::string& meshPath, const std::string& materialPath, const DirectX::XMMATRIX& modelMatrix)
+            {
+                if (context.resourceManager == nullptr)
+                {
+                    return;
+                }
+
+                auto meshResource = context.resourceManager->Load<resource::MeshAsset>(meshPath);
+                auto materialResource = context.resourceManager->Load<resource::MaterialAsset>(materialPath);
+                if (meshResource == nullptr || materialResource == nullptr)
+                {
+                    return;
+                }
+
+                auto shaderResource = context.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
+                auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
+                if (shaderResource == nullptr || textureResource == nullptr)
+                {
+                    return;
+                }
+                if (!meshResource->asset.gpuHandle.IsValid() ||
+                    !shaderResource->asset.gpuHandle.IsValid() ||
+                    !textureResource->asset.gpuHandle.IsValid())
+                {
+                    return;
+                }
+
+                render::DrawItem drawItem;
+                drawItem.mesh = meshResource->asset.gpuHandle;
+                drawItem.shader = shaderResource->asset.gpuHandle;
+                drawItem.texture = textureResource->asset.gpuHandle;
+                drawItem.model = scene::ToRenderMatrix(modelMatrix);
+                drawItem.color = materialResource->asset.tint;
+                drawItems.push_back(drawItem);
+            };
+
         if (context.resourceManager != nullptr)
         {
             for (const std::size_t visibleIndex : visibleIndices)
@@ -358,38 +328,60 @@ namespace myengine::ecs::systems
 
                 const RenderableEntry& entry = renderables[visibleIndex];
                 auto& renderer = *entry.renderer;
-
-                auto meshResource = context.resourceManager->Load<resource::MeshAsset>(renderer.meshPath);
-                auto materialResource = context.resourceManager->Load<resource::MaterialAsset>(renderer.materialPath);
-                if (meshResource == nullptr || materialResource == nullptr)
-                {
-                    continue;
-                }
-
-                auto shaderResource = context.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
-                auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
-                if (shaderResource == nullptr || textureResource == nullptr)
-                {
-                    continue;
-                }
-                if (!meshResource->asset.gpuHandle.IsValid() ||
-                    !shaderResource->asset.gpuHandle.IsValid() ||
-                    !textureResource->asset.gpuHandle.IsValid())
-                {
-                    continue;
-                }
-
-                render::DrawItem drawItem;
-                drawItem.mesh = meshResource->asset.gpuHandle;
-                drawItem.shader = shaderResource->asset.gpuHandle;
-                drawItem.texture = textureResource->asset.gpuHandle;
-                drawItem.model = ToRenderMatrix(entry.worldMatrix);
-                drawItem.color = materialResource->asset.tint;
-                drawItems.push_back(drawItem);
+                appendDrawItem(renderer.meshPath, renderer.materialPath, entry.worldMatrix);
             }
         }
 
-        context.renderAdapter.SetViewProjection(context.surface, ToRenderMatrix(viewMatrix), ToRenderMatrix(projectionMatrix));
+        auto& editorWindowState = core::ServiceLocator::GetEditorRuntimeState().GetOrCreateWindowState(context.windowId);
+        editorWindowState.renderStats.totalEntities = static_cast<std::uint32_t>(world.GetEntities().size());
+        editorWindowState.renderStats.renderableEntities = static_cast<std::uint32_t>(renderables.size());
+        editorWindowState.renderStats.renderedEntities = static_cast<std::uint32_t>(drawItems.size());
+        editorWindowState.renderStats.activeCollisions = core::ServiceLocator::GetPhysicsWorldState().stats.collisionPairs;
+        editorWindowState.renderStats.resourceMemoryBytes =
+            context.resourceManager != nullptr ? context.resourceManager->EstimateResourceMemoryUsageBytes() : 0ull;
+        editorWindowState.renderStats.camera.available = cameraFound;
+        editorWindowState.renderStats.camera.view = scene::ToRenderMatrix(viewMatrix);
+        editorWindowState.renderStats.camera.projection = scene::ToRenderMatrix(projectionMatrix);
+
+        if (cameraFound &&
+            editorWindowState.materialPreviewEnabled &&
+            !editorWindowState.materialPreviewMaterialPath.empty())
+        {
+            const float previewDistance = 3.2f;
+            const float verticalHalf = std::tan(cameraFovYDeg * 0.5f * DirectX::XM_PI / 180.0f) * previewDistance;
+            const float horizontalHalf = verticalHalf * std::max(aspect, 0.01f);
+            const DirectX::XMVECTOR cameraRight = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(cameraUp, cameraForward));
+
+            const DirectX::XMVECTOR previewPosition = DirectX::XMVectorSubtract(
+                DirectX::XMVectorAdd(
+                    DirectX::XMVectorAdd(
+                        cameraEye,
+                        DirectX::XMVectorScale(cameraForward, previewDistance)),
+                    DirectX::XMVectorScale(cameraRight, horizontalHalf * 0.55f)),
+                DirectX::XMVectorScale(cameraUp, verticalHalf * 0.48f));
+
+            DirectX::XMFLOAT3 previewTranslation{};
+            DirectX::XMStoreFloat3(&previewTranslation, previewPosition);
+
+            const float previewScale = editorWindowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 0.55f : 0.7f;
+            const DirectX::XMMATRIX previewWorld =
+                DirectX::XMMatrixScaling(previewScale, previewScale, previewScale) *
+                DirectX::XMMatrixRotationRollPitchYaw(
+                    DirectX::XMConvertToRadians(-18.0f),
+                    DirectX::XMConvertToRadians(32.0f),
+                    0.0f) *
+                DirectX::XMMatrixTranslation(previewTranslation.x, previewTranslation.y, previewTranslation.z);
+
+            appendDrawItem(
+                PreviewMeshPath(editorWindowState.materialPreviewShape),
+                editorWindowState.materialPreviewMaterialPath,
+                previewWorld);
+        }
+
+        context.renderAdapter.SetViewProjection(
+            context.surface,
+            scene::ToRenderMatrix(viewMatrix),
+            scene::ToRenderMatrix(projectionMatrix));
 
         for (const auto& drawItem : drawItems)
         {

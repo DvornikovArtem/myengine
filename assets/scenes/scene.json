@@ -1,6 +1,72 @@
 {
   "entities": [
     {
+      "Collider": {
+        "bounciness": 0.11999999731779099,
+        "friction": 0.5799999833106995,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/warm.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Rigidbody": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gravityScale": 1.0,
+        "isKinematic": false,
+        "linearDamping": 0.14000000059604645,
+        "mass": 1.0,
+        "sleepLinearSpeed": 0.07999999821186066,
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "BoxStackB_1"
+      },
+      "Transform": {
+        "position": [
+          -0.91846764087677,
+          -0.6010030508041382,
+          5.741525173187256
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.8999999761581421,
+          0.8999999761581421,
+          0.8999999761581421
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 9
+    },
+    {
       "Camera": {
         "farPlane": 200.0,
         "fovYDeg": 60.0,
@@ -8,19 +74,19 @@
         "nearPlane": 0.009999999776482582,
         "orthographicHalfHeight": 1.0,
         "position": [
-          -1.099787712097168,
-          2.6360511779785156,
-          -8.301281929016113
+          42.40043258666992,
+          10.765473365783691,
+          -18.127893447875977
         ],
         "rotationDeg": [
-          13.940000534057617,
-          11.159955024719238,
+          11.420010566711426,
+          -81.18016815185547,
           0.0
         ]
       },
       "CameraController": {
         "mouseSensitivityDeg": 0.18000000715255737,
-        "moveSpeed": 3.909689426422119,
+        "moveSpeed": 30.0,
         "rotateSpeedDeg": 84.0,
         "zoomSpeed": 0.699999988079071
       },
@@ -31,6 +97,72 @@
         "windowId": 1
       },
       "id": 1
+    },
+    {
+      "Collider": {
+        "bounciness": 0.11999999731779099,
+        "friction": 0.5799999833106995,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/warm.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Rigidbody": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gravityScale": 1.0,
+        "isKinematic": false,
+        "linearDamping": 0.14000000059604645,
+        "mass": 1.0,
+        "sleepLinearSpeed": 0.07999999821186066,
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "BoxStackC_1"
+      },
+      "Transform": {
+        "position": [
+          -0.006054348312318325,
+          -0.6010030508041382,
+          3.943526268005371
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.8999999761581421,
+          0.8999999761581421,
+          0.8999999761581421
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 10
     },
     {
       "Collider": {
@@ -128,54 +260,6 @@
         "visible": true
       },
       "Tag": {
-        "name": "Floor_1"
-      },
-      "Transform": {
-        "position": [
-          0.0,
-          -1.5499999523162842,
-          3.0
-        ],
-        "rotationDeg": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "scale": [
-          8.5,
-          1.0,
-          8.5
-        ]
-      },
-      "WindowBinding": {
-        "windowId": 1
-      },
-      "id": 3
-    },
-    {
-      "Collider": {
-        "bounciness": 0.019999999552965164,
-        "friction": 0.8500000238418579,
-        "halfExtents": [
-          0.5,
-          0.5,
-          0.5
-        ],
-        "isTrigger": false,
-        "offset": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "radius": 0.5,
-        "type": "box"
-      },
-      "MeshRenderer": {
-        "materialPath": "assets/materials/cool.material.json",
-        "meshPath": "assets/models/crate.obj",
-        "visible": true
-      },
-      "Tag": {
         "name": "Platform_1"
       },
       "Transform": {
@@ -224,71 +308,23 @@
         "visible": true
       },
       "Tag": {
-        "name": "WallLeft_1"
-      },
-      "Transform": {
-        "position": [
-          -5.0,
-          0.10000000149011612,
-          3.0
-        ],
-        "rotationDeg": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "scale": [
-          0.5,
-          2.200000047683716,
-          6.599999904632568
-        ]
-      },
-      "WindowBinding": {
-        "windowId": 1
-      },
-      "id": 5
-    },
-    {
-      "Collider": {
-        "bounciness": 0.019999999552965164,
-        "friction": 0.8500000238418579,
-        "halfExtents": [
-          0.5,
-          0.5,
-          0.5
-        ],
-        "isTrigger": false,
-        "offset": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "radius": 0.5,
-        "type": "box"
-      },
-      "MeshRenderer": {
-        "materialPath": "assets/materials/cool.material.json",
-        "meshPath": "assets/models/crate.obj",
-        "visible": true
-      },
-      "Tag": {
         "name": "WallRight_1"
       },
       "Transform": {
         "position": [
-          5.0,
-          0.10000000149011612,
-          3.0
+          5.824418544769287,
+          0.5188241004943848,
+          9.331389427185059
         ],
         "rotationDeg": [
+          -27.018896102905273,
           0.0,
-          0.0,
-          0.0
+          -0.0
         ],
         "scale": [
           0.5,
-          2.200000047683716,
-          6.599999904632568
+          2.1999998092651367,
+          6.600000381469727
         ]
       },
       "WindowBinding": {
@@ -325,13 +361,13 @@
       "Transform": {
         "position": [
           0.0,
-          0.15000000596046448,
+          0.0015484243631362915,
           5.800000190734863
         ],
         "rotationDeg": [
           0.0,
           0.0,
-          0.0
+          -0.0
         ],
         "scale": [
           2.200000047683716,
@@ -343,204 +379,6 @@
         "windowId": 1
       },
       "id": 7
-    },
-    {
-      "Collider": {
-        "bounciness": 0.11999999731779099,
-        "friction": 0.5799999833106995,
-        "halfExtents": [
-          0.5,
-          0.5,
-          0.5
-        ],
-        "isTrigger": false,
-        "offset": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "radius": 0.5,
-        "type": "box"
-      },
-      "MeshRenderer": {
-        "materialPath": "assets/materials/warm.material.json",
-        "meshPath": "assets/models/crate.obj",
-        "visible": true
-      },
-      "Rigidbody": {
-        "acceleration": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "gravityScale": 1.0,
-        "isKinematic": false,
-        "linearDamping": 0.14000000059604645,
-        "mass": 1.0,
-        "sleepLinearSpeed": 0.07999999821186066,
-        "useGravity": true,
-        "velocity": [
-          0.0,
-          0.0,
-          0.0
-        ]
-      },
-      "Tag": {
-        "name": "BoxStackA_1"
-      },
-      "Transform": {
-        "position": [
-          -0.5106096863746643,
-          -0.6010030508041382,
-          4.842525959014893
-        ],
-        "rotationDeg": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "scale": [
-          0.8999999761581421,
-          0.8999999761581421,
-          0.8999999761581421
-        ]
-      },
-      "WindowBinding": {
-        "windowId": 1
-      },
-      "id": 8
-    },
-    {
-      "Collider": {
-        "bounciness": 0.11999999731779099,
-        "friction": 0.5799999833106995,
-        "halfExtents": [
-          0.5,
-          0.5,
-          0.5
-        ],
-        "isTrigger": false,
-        "offset": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "radius": 0.5,
-        "type": "box"
-      },
-      "MeshRenderer": {
-        "materialPath": "assets/materials/warm.material.json",
-        "meshPath": "assets/models/crate.obj",
-        "visible": true
-      },
-      "Rigidbody": {
-        "acceleration": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "gravityScale": 1.0,
-        "isKinematic": false,
-        "linearDamping": 0.14000000059604645,
-        "mass": 1.0,
-        "sleepLinearSpeed": 0.07999999821186066,
-        "useGravity": true,
-        "velocity": [
-          0.0,
-          0.0,
-          0.0
-        ]
-      },
-      "Tag": {
-        "name": "BoxStackB_1"
-      },
-      "Transform": {
-        "position": [
-          -0.91846764087677,
-          -0.6010030508041382,
-          5.741525173187256
-        ],
-        "rotationDeg": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "scale": [
-          0.8999999761581421,
-          0.8999999761581421,
-          0.8999999761581421
-        ]
-      },
-      "WindowBinding": {
-        "windowId": 1
-      },
-      "id": 9
-    },
-    {
-      "Collider": {
-        "bounciness": 0.11999999731779099,
-        "friction": 0.5799999833106995,
-        "halfExtents": [
-          0.5,
-          0.5,
-          0.5
-        ],
-        "isTrigger": false,
-        "offset": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "radius": 0.5,
-        "type": "box"
-      },
-      "MeshRenderer": {
-        "materialPath": "assets/materials/warm.material.json",
-        "meshPath": "assets/models/crate.obj",
-        "visible": true
-      },
-      "Rigidbody": {
-        "acceleration": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "gravityScale": 1.0,
-        "isKinematic": false,
-        "linearDamping": 0.14000000059604645,
-        "mass": 1.0,
-        "sleepLinearSpeed": 0.07999999821186066,
-        "useGravity": true,
-        "velocity": [
-          0.0,
-          0.0,
-          0.0
-        ]
-      },
-      "Tag": {
-        "name": "BoxStackC_1"
-      },
-      "Transform": {
-        "position": [
-          -0.006054348312318325,
-          -0.6010030508041382,
-          3.943526268005371
-        ],
-        "rotationDeg": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "scale": [
-          0.8999999761581421,
-          0.8999999761581421,
-          0.8999999761581421
-        ]
-      },
-      "WindowBinding": {
-        "windowId": 1
-      },
-      "id": 10
     },
     {
       "Collider": {
@@ -561,7 +399,7 @@
         "type": "sphere"
       },
       "MeshRenderer": {
-        "materialPath": "assets/materials/default.material.json",
+        "materialPath": "d:/itmo/6 semester/gea/myengine/assets/materials/default.material.json",
         "meshPath": "assets/models/sphere.obj",
         "visible": true
       },
@@ -572,7 +410,7 @@
           0.0
         ],
         "gravityScale": 1.0,
-        "isKinematic": false,
+        "isKinematic": true,
         "linearDamping": 0.14000000059604645,
         "mass": 0.699999988079071,
         "sleepLinearSpeed": 0.07999999821186066,
@@ -588,19 +426,19 @@
       },
       "Transform": {
         "position": [
-          1.9432284832000732,
-          -0.6260030269622803,
-          2.0531201362609863
+          -36.170841217041016,
+          -1.6471264362335205,
+          -32.84044647216797
         ],
         "rotationDeg": [
           0.0,
           0.0,
-          0.0
+          -0.0
         ],
         "scale": [
-          0.8500000238418579,
-          0.8500000238418579,
-          0.8500000238418579
+          3.443000078201294,
+          4.1267499923706055,
+          9.694037437438965
         ]
       },
       "WindowBinding": {
@@ -919,13 +757,13 @@
       "Transform": {
         "position": [
           2.592010974884033,
-          -0.661003053188324,
+          -0.8182376623153687,
           0.7596922516822815
         ],
         "rotationDeg": [
           0.0,
           0.0,
-          0.0
+          -0.0
         ],
         "scale": [
           0.7799999713897705,
@@ -937,72 +775,6 @@
         "windowId": 1
       },
       "id": 16
-    },
-    {
-      "Collider": {
-        "bounciness": 0.11999999731779099,
-        "friction": 0.550000011920929,
-        "halfExtents": [
-          0.5,
-          0.5,
-          0.5
-        ],
-        "isTrigger": false,
-        "offset": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "radius": 0.5,
-        "type": "box"
-      },
-      "MeshRenderer": {
-        "materialPath": "assets/materials/warm.material.json",
-        "meshPath": "assets/models/crate.obj",
-        "visible": true
-      },
-      "Rigidbody": {
-        "acceleration": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "gravityScale": 1.0,
-        "isKinematic": false,
-        "linearDamping": 0.14000000059604645,
-        "mass": 1.0,
-        "sleepLinearSpeed": 0.07999999821186066,
-        "useGravity": true,
-        "velocity": [
-          0.0,
-          0.0,
-          0.0
-        ]
-      },
-      "Tag": {
-        "name": "SpawnedBox_17"
-      },
-      "Transform": {
-        "position": [
-          0.36339038610458374,
-          0.22253243625164032,
-          5.165661334991455
-        ],
-        "rotationDeg": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "scale": [
-          0.8500000238418579,
-          0.8500000238418579,
-          0.8500000238418579
-        ]
-      },
-      "WindowBinding": {
-        "windowId": 1
-      },
-      "id": 17
     },
     {
       "Collider": {
@@ -1201,6 +973,192 @@
         "windowId": 1
       },
       "id": 20
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "d:/itmo/6 semester/gea/myengine/assets/materials/africanhead.material.json",
+        "meshPath": "d:/itmo/6 semester/gea/myengine/assets/models/african_head.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "african_head_21"
+      },
+      "Transform": {
+        "position": [
+          21.866689682006836,
+          5.572426795959473,
+          -16.531396865844727
+        ],
+        "rotationDeg": [
+          16.64214515686035,
+          -51.57129669189453,
+          12.74032211303711
+        ],
+        "scale": [
+          0.9999996423721313,
+          0.9999991655349731,
+          0.9999999403953552
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 21
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "assets/materials/generated/african_head_diffuse.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "crate_22"
+      },
+      "Transform": {
+        "position": [
+          24.450334548950195,
+          4.271665096282959,
+          -14.068882942199707
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 22
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "d:/itmo/6 semester/gea/myengine/assets/materials/africanhead.material.json",
+        "meshPath": "d:/itmo/6 semester/gea/myengine/assets/models/african_head.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "african_head_23"
+      },
+      "Transform": {
+        "position": [
+          5.509182929992676,
+          8.005369186401367,
+          -40.41584396362305
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 23
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "d:/itmo/6 semester/gea/myengine/assets/materials/africanhead.material.json",
+        "meshPath": "d:/itmo/6 semester/gea/myengine/assets/models/crate.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "crate_24"
+      },
+      "Transform": {
+        "position": [
+          8.052404403686523,
+          8.005369186401367,
+          -38.05815887451172
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 24
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "d:/itmo/6 semester/gea/myengine/assets/materials/africanhead.material.json",
+        "meshPath": "d:/itmo/6 semester/gea/myengine/assets/models/pyramid.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "pyramid_25"
+      },
+      "Transform": {
+        "position": [
+          7.04189395904541,
+          8.005369186401367,
+          -38.05815887451172
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 25
+    },
+    {
+      "MeshRenderer": {
+        "materialPath": "d:/itmo/6 semester/gea/myengine/assets/materials/warm.material.json",
+        "meshPath": "d:/itmo/6 semester/gea/myengine/assets/models/sphere.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "sphere_26"
+      },
+      "Transform": {
+        "position": [
+          5.509182929992676,
+          8.005369186401367,
+          -38.68210983276367
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 26
     }
   ]
 }

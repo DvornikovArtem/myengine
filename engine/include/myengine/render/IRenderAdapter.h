@@ -29,6 +29,7 @@ namespace myengine::render
         virtual void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) = 0;
 
         virtual bool BeginFrame(RenderSurfaceHandle surface, const core::Color& clearColor) = 0;
+        virtual void SetRenderRegion(RenderSurfaceHandle surface, const IntRect* region) = 0;
         virtual void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) = 0;
         virtual void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) = 0;
         virtual void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) = 0;

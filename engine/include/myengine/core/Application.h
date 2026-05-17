@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <cstdint>
 #include <vector>
 
 #include <myengine/config/AppConfig.h>
@@ -45,7 +47,12 @@ namespace myengine::core
         input::InputManager& GetInputManager();
         Logger& GetLogger();
         resource::ResourceManager& GetResourceManager();
+        const std::filesystem::path& GetSceneSavePath() const;
         void SetStateLabel(const std::string& label);
+        bool SaveSceneToDisk();
+        bool LoadSceneFromDisk();
+        std::string CaptureSceneSnapshot() const;
+        bool RestoreSceneSnapshot(std::string_view snapshotJson);
 
     private:
         struct WindowRuntime
@@ -73,6 +80,14 @@ namespace myengine::core
         void SpawnDemoBox(WindowId windowId);
         void SpawnDemoSphere(WindowId windowId);
         void SpawnDemoBurst(WindowId windowId);
+        void PublishFrameStatistics(
+            float deltaTime,
+            double worldUpdateMs,
+            double stateUpdateMs,
+            double hotReloadMs,
+            double uiUpdateMs,
+            double renderMs,
+            double frameMs);
         void TogglePhysicsPause();
         void TogglePhysicsDebugDraw();
         void AdjustGravity(float delta);
@@ -101,5 +116,8 @@ namespace myengine::core
         bool runtimeEventsBound_ = false;
 
         float deltaLogAccumulator_ = 0.0f;
+        float fpsAccumulatorTime_ = 0.0f;
+        std::uint32_t fpsAccumulatorFrames_ = 0;
+        float averagedFps_ = 0.0f;
     };
 }

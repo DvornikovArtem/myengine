@@ -19,31 +19,27 @@ namespace myengine::ecs::systems
             lines.push_back(render::DebugLine{ToFloat3(start), ToFloat3(end), color});
         }
 
-        void AddAabb(std::vector<render::DebugLine>& lines, const physics::DebugAabb& aabb)
+        void AddBox(std::vector<render::DebugLine>& lines, const std::array<components::Vec3, 8>& corners, const core::Color& color)
         {
-            const components::Vec3 v0{aabb.min.x, aabb.min.y, aabb.min.z};
-            const components::Vec3 v1{aabb.max.x, aabb.min.y, aabb.min.z};
-            const components::Vec3 v2{aabb.max.x, aabb.max.y, aabb.min.z};
-            const components::Vec3 v3{aabb.min.x, aabb.max.y, aabb.min.z};
-            const components::Vec3 v4{aabb.min.x, aabb.min.y, aabb.max.z};
-            const components::Vec3 v5{aabb.max.x, aabb.min.y, aabb.max.z};
-            const components::Vec3 v6{aabb.max.x, aabb.max.y, aabb.max.z};
-            const components::Vec3 v7{aabb.min.x, aabb.max.y, aabb.max.z};
+            AddLine(lines, corners[0], corners[1], color);
+            AddLine(lines, corners[1], corners[2], color);
+            AddLine(lines, corners[2], corners[3], color);
+            AddLine(lines, corners[3], corners[0], color);
 
-            AddLine(lines, v0, v1, aabb.color);
-            AddLine(lines, v1, v2, aabb.color);
-            AddLine(lines, v2, v3, aabb.color);
-            AddLine(lines, v3, v0, aabb.color);
+            AddLine(lines, corners[4], corners[5], color);
+            AddLine(lines, corners[5], corners[6], color);
+            AddLine(lines, corners[6], corners[7], color);
+            AddLine(lines, corners[7], corners[4], color);
 
-            AddLine(lines, v4, v5, aabb.color);
-            AddLine(lines, v5, v6, aabb.color);
-            AddLine(lines, v6, v7, aabb.color);
-            AddLine(lines, v7, v4, aabb.color);
+            AddLine(lines, corners[0], corners[4], color);
+            AddLine(lines, corners[1], corners[5], color);
+            AddLine(lines, corners[2], corners[6], color);
+            AddLine(lines, corners[3], corners[7], color);
+        }
 
-            AddLine(lines, v0, v4, aabb.color);
-            AddLine(lines, v1, v5, aabb.color);
-            AddLine(lines, v2, v6, aabb.color);
-            AddLine(lines, v3, v7, aabb.color);
+        void AddOrientedBox(std::vector<render::DebugLine>& lines, const physics::DebugOrientedBox& box)
+        {
+            AddBox(lines, box.corners, box.color);
         }
 
         void AddSphere(std::vector<render::DebugLine>& lines, const physics::DebugSphere& sphere)
@@ -100,11 +96,11 @@ namespace myengine::ecs::systems
         }
 
         std::vector<render::DebugLine> lines;
-        lines.reserve(physicsState.debugAabbs.size() * 12 + physicsState.debugSpheres.size() * 54 + physicsState.debugVectors.size());
+        lines.reserve(physicsState.debugBoxes.size() * 12 + physicsState.debugSpheres.size() * 54 + physicsState.debugVectors.size());
 
-        for (const auto& aabb : physicsState.debugAabbs)
+        for (const auto& box : physicsState.debugBoxes)
         {
-            AddAabb(lines, aabb);
+            AddOrientedBox(lines, box);
         }
 
         for (const auto& sphere : physicsState.debugSpheres)

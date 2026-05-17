@@ -144,8 +144,14 @@ namespace myengine::resource
 
         bool LoadManifest(const std::filesystem::path& path);
         void UpdateHotReload();
+        bool SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset);
 
         std::filesystem::path ResolvePath(const std::filesystem::path& path) const;
+        std::vector<std::string> GetKnownMeshKeys() const;
+        std::vector<std::string> GetKnownTextureKeys() const;
+        std::vector<std::string> GetKnownShaderKeys() const;
+        std::vector<std::string> GetKnownMaterialKeys() const;
+        std::uint64_t EstimateResourceMemoryUsageBytes() const;
 
     private:
         template <typename T>

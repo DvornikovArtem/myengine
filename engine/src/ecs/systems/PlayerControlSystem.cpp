@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/PlayerControllerComponent.h>
@@ -23,6 +24,11 @@ namespace myengine::ecs::systems
 
     void PlayerControlSystem::Update(World& world, const float deltaTime)
     {
+        if (core::ServiceLocator::GetEditorRuntimeState().mode != editor::RuntimeMode::Play)
+        {
+            return;
+        }
+
         const core::WindowId activeWindowId = input_.GetActiveWindowId();
         if (activeWindowId == 0 || input_.IsMouseDown(core::MouseButton::Right))
         {

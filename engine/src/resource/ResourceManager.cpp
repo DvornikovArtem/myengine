@@ -894,6 +894,21 @@ namespace myengine::resource
             color.a = value[3].get<float>();
             return color;
         }
+
+        template <typename Cache>
+        std::vector<std::string> CollectSortedKeys(const Cache& cache)
+        {
+            std::vector<std::string> keys;
+            keys.reserve(cache.size());
+            for (const auto& [key, _] : cache)
+            {
+                keys.push_back(key);
+            }
+
+            std::sort(keys.begin(), keys.end());
+            keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+            return keys;
+        }
     }
 
     ResourceManager::ResourceManager(render::IRenderAdapter& renderAdapter, core::Logger& logger)
@@ -987,6 +1002,61 @@ namespace myengine::resource
         ReloadChangedTextures();
     }
 
+    bool ResourceManager::SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset)
+    {
+        const std::filesystem::path resolvedPath = ResolvePath(path);
+        const std::filesystem::path materialDirectory = resolvedPath.parent_path();
+
+        auto makeRelativeAssetPath =
+            [this, &materialDirectory](const std::string& normalizedPath)
+            {
+                const std::filesystem::path assetPath = ResolvePath(normalizedPath);
+                std::error_code ec;
+                std::filesystem::path relativePath = std::filesystem::relative(assetPath, materialDirectory, ec);
+                if (ec || relativePath.empty())
+                {
+                    relativePath = assetPath;
+                }
+
+                return relativePath.generic_string();
+            };
+
+        json descriptor;
+        descriptor["shader"] = makeRelativeAssetPath(asset.shaderPath);
+        descriptor["texture"] = makeRelativeAssetPath(asset.texturePath);
+        descriptor["tint"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+
+        try
+        {
+            std::filesystem::create_directories(materialDirectory);
+            std::ofstream stream(resolvedPath);
+            if (!stream.is_open())
+            {
+                logger_.Warning("ResourceManager: material save open failed: " + resolvedPath.string());
+                return false;
+            }
+
+            stream << descriptor.dump(2);
+            if (!stream.good())
+            {
+                logger_.Warning("ResourceManager: material save write failed: " + resolvedPath.string());
+                return false;
+            }
+
+            logger_.Info("ResourceManager: material saved " + resolvedPath.string());
+            Reload<MaterialAsset>(resolvedPath);
+            return true;
+        }
+        catch (const std::exception& ex)
+        {
+            logger_.Warning(
+                "ResourceManager: material save failed: " +
+                resolvedPath.string() +
+                " error=" + ex.what());
+            return false;
+        }
+    }
+
     std::filesystem::path ResourceManager::ResolvePath(const std::filesystem::path& path) const
     {
         std::error_code ec;
@@ -1011,6 +1081,56 @@ namespace myengine::resource
         }
 
         return projectRelative.lexically_normal();
+    }
+
+    std::vector<std::string> ResourceManager::GetKnownMeshKeys() const
+    {
+        return CollectSortedKeys(meshCache_);
+    }
+
+    std::vector<std::string> ResourceManager::GetKnownTextureKeys() const
+    {
+        return CollectSortedKeys(textureCache_);
+    }
+
+    std::vector<std::string> ResourceManager::GetKnownShaderKeys() const
+    {
+        return CollectSortedKeys(shaderCache_);
+    }
+
+    std::vector<std::string> ResourceManager::GetKnownMaterialKeys() const
+    {
+        return CollectSortedKeys(materialCache_);
+    }
+
+    std::uint64_t ResourceManager::EstimateResourceMemoryUsageBytes() const
+    {
+        std::uint64_t totalBytes = 0;
+
+        for (const auto& [_, resource] : meshCache_)
+        {
+            if (resource == nullptr)
+            {
+                continue;
+            }
+
+            totalBytes += static_cast<std::uint64_t>(resource->asset.data.vertices.size()) * sizeof(render::MeshVertex);
+            totalBytes += static_cast<std::uint64_t>(resource->asset.data.indices.size()) * sizeof(std::uint32_t);
+        }
+
+        for (const auto& [_, resource] : textureCache_)
+        {
+            if (resource == nullptr)
+            {
+                continue;
+            }
+
+            totalBytes += static_cast<std::uint64_t>(resource->asset.data.pixelsRgba8.size());
+        }
+
+        totalBytes += static_cast<std::uint64_t>(shaderCache_.size()) * 4096ull;
+        totalBytes += static_cast<std::uint64_t>(materialCache_.size()) * 512ull;
+        return totalBytes;
     }
 
     ResourceHandle<MeshAsset> ResourceManager::LoadMesh(const std::filesystem::path& path)

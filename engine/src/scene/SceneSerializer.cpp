@@ -1,7 +1,9 @@
 // SceneSerializer.cpp
 
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -62,169 +64,138 @@ namespace myengine::scene
             result.z = value[2].get<float>();
             return result;
         }
-    }
 
-    bool SaveWorldToJson(const ecs::World& world, const std::filesystem::path& path, core::Logger* logger)
-    {
-        json root;
-        root["entities"] = json::array();
-
-        for (const ecs::EntityId entity : world.GetEntities())
-        {
-            json entityJson;
-            entityJson["id"] = entity;
-
-            if (const auto* tag = world.TryGet<ecs::components::TagComponent>(entity); tag != nullptr)
-            {
-                entityJson["Tag"] = {{"name", tag->name}};
-            }
-
-            if (const auto* transform = world.TryGet<ecs::components::TransformComponent>(entity); transform != nullptr)
-            {
-                entityJson["Transform"] =
-                {
-                    {"position", VecToJson(transform->position)},
-                    {"rotationDeg", VecToJson(transform->rotationDeg)},
-                    {"scale", VecToJson(transform->scale)},
-                };
-            }
-
-            if (const auto* renderer = world.TryGet<ecs::components::MeshRendererComponent>(entity); renderer != nullptr)
-            {
-                entityJson["MeshRenderer"] =
-                {
-                    {"meshPath", renderer->meshPath},
-                    {"materialPath", renderer->materialPath},
-                    {"visible", renderer->visible},
-                };
-            }
-
-            if (const auto* hierarchy = world.TryGet<ecs::components::HierarchyComponent>(entity); hierarchy != nullptr)
-            {
-                entityJson["Hierarchy"] =
-                {
-                    {"parent", hierarchy->parent},
-                    {"children", hierarchy->children},
-                };
-            }
-
-            if (const auto* motion = world.TryGet<ecs::components::MotionComponent>(entity); motion != nullptr)
-            {
-                entityJson["Motion"] =
-                {
-                    {"linearVelocity", VecToJson(motion->linearVelocity)},
-                    {"angularVelocityDeg", VecToJson(motion->angularVelocityDeg)},
-                };
-            }
-
-            if (const auto* rigidbody = world.TryGet<ecs::components::RigidbodyComponent>(entity); rigidbody != nullptr)
-            {
-                entityJson["Rigidbody"] =
-                {
-                    {"velocity", VecToJson(rigidbody->velocity)},
-                    {"acceleration", VecToJson(rigidbody->acceleration)},
-                    {"mass", rigidbody->mass},
-                    {"gravityScale", rigidbody->gravityScale},
-                    {"linearDamping", rigidbody->linearDamping},
-                    {"sleepLinearSpeed", rigidbody->sleepLinearSpeed},
-                    {"useGravity", rigidbody->useGravity},
-                    {"isKinematic", rigidbody->isKinematic},
-                };
-            }
-
-            if (const auto* collider = world.TryGet<ecs::components::ColliderComponent>(entity); collider != nullptr)
-            {
-                entityJson["Collider"] =
-                {
-                    {"type", collider->type == ecs::components::ColliderType::Sphere ? "sphere" : "box"},
-                    {"halfExtents", VecToJson(collider->halfExtents)},
-                    {"radius", collider->radius},
-                    {"offset", VecToJson(collider->offset)},
-                    {"friction", collider->friction},
-                    {"bounciness", collider->bounciness},
-                    {"isTrigger", collider->isTrigger},
-                };
-            }
-
-            if (const auto* controller = world.TryGet<ecs::components::PlayerControllerComponent>(entity); controller != nullptr)
-            {
-                entityJson["PlayerController"] =
-                {
-                    {"windowId", controller->windowId},
-                    {"moveSpeed", controller->moveSpeed},
-                    {"jumpSpeed", controller->jumpSpeed},
-                    {"airControl", controller->airControl},
-                };
-            }
-
-            if (const auto* binding = world.TryGet<ecs::components::WindowBindingComponent>(entity); binding != nullptr)
-            {
-                entityJson["WindowBinding"] = {{"windowId", binding->windowId}};
-            }
-
-            if (const auto* camera = world.TryGet<ecs::components::CameraComponent>(entity); camera != nullptr)
-            {
-                entityJson["Camera"] =
-                {
-                    {"position", VecToJson(camera->position)},
-                    {"rotationDeg", VecToJson(camera->rotationDeg)},
-                    {"fovYDeg", camera->fovYDeg},
-                    {"orthographicHalfHeight", camera->orthographicHalfHeight},
-                    {"nearPlane", camera->nearPlane},
-                    {"farPlane", camera->farPlane},
-                    {"isPrimary", camera->isPrimary},
-                };
-            }
-
-            if (const auto* controller = world.TryGet<ecs::components::CameraControllerComponent>(entity); controller != nullptr)
-            {
-                entityJson["CameraController"] =
-                {
-                    {"moveSpeed", controller->moveSpeed},
-                    {"zoomSpeed", controller->zoomSpeed},
-                    {"rotateSpeedDeg", controller->rotateSpeedDeg},
-                    {"mouseSensitivityDeg", controller->mouseSensitivityDeg},
-                };
-            }
-
-            root["entities"].push_back(std::move(entityJson));
-        }
-
-        try
-        {
-            std::filesystem::create_directories(path.parent_path());
-            std::ofstream file(path);
-            if (!file.is_open())
-            {
-                LogWarning(logger, "SceneSerializer: failed to open file for save: " + path.string());
-                return false;
-            }
-
-            file << root.dump(2);
-            Log(logger, "SceneSerializer: scene saved to " + path.string());
-            return true;
-        }
-        catch (const std::exception& ex)
-        {
-            LogWarning(logger, "SceneSerializer: save failed: " + std::string(ex.what()));
-            return false;
-        }
-    }
-
-    bool LoadWorldFromJson(ecs::World& world, const std::filesystem::path& path, core::Logger* logger)
-    {
-        std::ifstream file(path);
-        if (!file.is_open())
-        {
-            LogWarning(logger, "SceneSerializer: failed to open file for load: " + path.string());
-            return false;
-        }
-
-        try
+        json SerializeWorld(const ecs::World& world)
         {
             json root;
-            file >> root;
+            root["entities"] = json::array();
 
+            for (const ecs::EntityId entity : world.GetEntities())
+            {
+                json entityJson;
+                entityJson["id"] = entity;
+
+                if (const auto* tag = world.TryGet<ecs::components::TagComponent>(entity); tag != nullptr)
+                {
+                    entityJson["Tag"] = {{"name", tag->name}};
+                }
+
+                if (const auto* transform = world.TryGet<ecs::components::TransformComponent>(entity); transform != nullptr)
+                {
+                    entityJson["Transform"] =
+                    {
+                        {"position", VecToJson(transform->position)},
+                        {"rotationDeg", VecToJson(transform->rotationDeg)},
+                        {"scale", VecToJson(transform->scale)},
+                    };
+                }
+
+                if (const auto* renderer = world.TryGet<ecs::components::MeshRendererComponent>(entity); renderer != nullptr)
+                {
+                    entityJson["MeshRenderer"] =
+                    {
+                        {"meshPath", renderer->meshPath},
+                        {"materialPath", renderer->materialPath},
+                        {"visible", renderer->visible},
+                    };
+                }
+
+                if (const auto* hierarchy = world.TryGet<ecs::components::HierarchyComponent>(entity); hierarchy != nullptr)
+                {
+                    entityJson["Hierarchy"] =
+                    {
+                        {"parent", hierarchy->parent},
+                        {"children", hierarchy->children},
+                    };
+                }
+
+                if (const auto* motion = world.TryGet<ecs::components::MotionComponent>(entity); motion != nullptr)
+                {
+                    entityJson["Motion"] =
+                    {
+                        {"linearVelocity", VecToJson(motion->linearVelocity)},
+                        {"angularVelocityDeg", VecToJson(motion->angularVelocityDeg)},
+                    };
+                }
+
+                if (const auto* rigidbody = world.TryGet<ecs::components::RigidbodyComponent>(entity); rigidbody != nullptr)
+                {
+                    entityJson["Rigidbody"] =
+                    {
+                        {"velocity", VecToJson(rigidbody->velocity)},
+                        {"acceleration", VecToJson(rigidbody->acceleration)},
+                        {"mass", rigidbody->mass},
+                        {"gravityScale", rigidbody->gravityScale},
+                        {"linearDamping", rigidbody->linearDamping},
+                        {"sleepLinearSpeed", rigidbody->sleepLinearSpeed},
+                        {"useGravity", rigidbody->useGravity},
+                        {"isKinematic", rigidbody->isKinematic},
+                    };
+                }
+
+                if (const auto* collider = world.TryGet<ecs::components::ColliderComponent>(entity); collider != nullptr)
+                {
+                    entityJson["Collider"] =
+                    {
+                        {"type", collider->type == ecs::components::ColliderType::Sphere ? "sphere" : "box"},
+                        {"halfExtents", VecToJson(collider->halfExtents)},
+                        {"radius", collider->radius},
+                        {"offset", VecToJson(collider->offset)},
+                        {"friction", collider->friction},
+                        {"bounciness", collider->bounciness},
+                        {"isTrigger", collider->isTrigger},
+                    };
+                }
+
+                if (const auto* controller = world.TryGet<ecs::components::PlayerControllerComponent>(entity); controller != nullptr)
+                {
+                    entityJson["PlayerController"] =
+                    {
+                        {"windowId", controller->windowId},
+                        {"moveSpeed", controller->moveSpeed},
+                        {"jumpSpeed", controller->jumpSpeed},
+                        {"airControl", controller->airControl},
+                    };
+                }
+
+                if (const auto* binding = world.TryGet<ecs::components::WindowBindingComponent>(entity); binding != nullptr)
+                {
+                    entityJson["WindowBinding"] = {{"windowId", binding->windowId}};
+                }
+
+                if (const auto* camera = world.TryGet<ecs::components::CameraComponent>(entity); camera != nullptr)
+                {
+                    entityJson["Camera"] =
+                    {
+                        {"position", VecToJson(camera->position)},
+                        {"rotationDeg", VecToJson(camera->rotationDeg)},
+                        {"fovYDeg", camera->fovYDeg},
+                        {"orthographicHalfHeight", camera->orthographicHalfHeight},
+                        {"nearPlane", camera->nearPlane},
+                        {"farPlane", camera->farPlane},
+                        {"isPrimary", camera->isPrimary},
+                    };
+                }
+
+                if (const auto* controller = world.TryGet<ecs::components::CameraControllerComponent>(entity); controller != nullptr)
+                {
+                    entityJson["CameraController"] =
+                    {
+                        {"moveSpeed", controller->moveSpeed},
+                        {"zoomSpeed", controller->zoomSpeed},
+                        {"rotateSpeedDeg", controller->rotateSpeedDeg},
+                        {"mouseSensitivityDeg", controller->mouseSensitivityDeg},
+                    };
+                }
+
+                root["entities"].push_back(std::move(entityJson));
+            }
+
+            return root;
+        }
+
+        bool DeserializeWorld(ecs::World& world, const json& root, core::Logger* logger)
+        {
             if (!root.contains("entities") || !root["entities"].is_array())
             {
                 LogWarning(logger, "SceneSerializer: invalid scene JSON (entities array is missing)");
@@ -369,12 +340,87 @@ namespace myengine::scene
                 world.SetParent(child, parent);
             }
 
+            return true;
+        }
+    }
+
+    bool SaveWorldToJson(const ecs::World& world, const std::filesystem::path& path, core::Logger* logger)
+    {
+        const json root = SerializeWorld(world);
+
+        try
+        {
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream file(path);
+            if (!file.is_open())
+            {
+                LogWarning(logger, "SceneSerializer: failed to open file for save: " + path.string());
+                return false;
+            }
+
+            file << root.dump(2);
+            Log(logger, "SceneSerializer: scene saved to " + path.string());
+            return true;
+        }
+        catch (const std::exception& ex)
+        {
+            LogWarning(logger, "SceneSerializer: save failed: " + std::string(ex.what()));
+            return false;
+        }
+    }
+
+    bool LoadWorldFromJson(ecs::World& world, const std::filesystem::path& path, core::Logger* logger)
+    {
+        std::ifstream file(path);
+        if (!file.is_open())
+        {
+            LogWarning(logger, "SceneSerializer: failed to open file for load: " + path.string());
+            return false;
+        }
+
+        try
+        {
+            json root;
+            file >> root;
+            if (!DeserializeWorld(world, root, logger))
+            {
+                return false;
+            }
+
             Log(logger, "SceneSerializer: scene loaded from " + path.string());
             return true;
         }
         catch (const std::exception& ex)
         {
             LogWarning(logger, "SceneSerializer: load failed: " + std::string(ex.what()));
+            return false;
+        }
+    }
+
+    std::string SerializeWorldToString(const ecs::World& world)
+    {
+        return SerializeWorld(world).dump(2);
+    }
+
+    bool LoadWorldFromString(ecs::World& world, const std::string_view jsonText, core::Logger* logger)
+    {
+        try
+        {
+            std::istringstream stream{std::string(jsonText)};
+            json root;
+            stream >> root;
+
+            if (!DeserializeWorld(world, root, logger))
+            {
+                return false;
+            }
+
+            Log(logger, "SceneSerializer: scene restored from in-memory snapshot");
+            return true;
+        }
+        catch (const std::exception& ex)
+        {
+            LogWarning(logger, "SceneSerializer: snapshot restore failed: " + std::string(ex.what()));
             return false;
         }
     }

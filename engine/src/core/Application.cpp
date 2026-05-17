@@ -10,6 +10,7 @@
 
 #include <myengine/core/Application.h>
 #include <myengine/core/ServiceLocator.h>
+#include <myengine/editor/EditorState.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/CameraControllerComponent.h>
 #include <myengine/ecs/components/ColliderComponent.h>
@@ -57,6 +58,42 @@ namespace myengine::core
             wchar_t modulePath[MAX_PATH]{};
             GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
             return std::filesystem::path(modulePath).parent_path();
+        }
+
+        bool TryBuildEditorRenderRegion(
+            const Window& window,
+            render::IntRect& outRegion,
+            std::uint32_t& outWidth,
+            std::uint32_t& outHeight)
+        {
+            const auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+            if (!editorState.showViewport)
+            {
+                return false;
+            }
+
+            const auto* windowState = editorState.FindWindowState(window.Id());
+            if (windowState == nullptr || !windowState->viewport.IsValid())
+            {
+                return false;
+            }
+
+            const int windowWidth = static_cast<int>(window.Width());
+            const int windowHeight = static_cast<int>(window.Height());
+            const int left = std::clamp(static_cast<int>(std::floor(windowState->viewport.x)), 0, windowWidth);
+            const int top = std::clamp(static_cast<int>(std::floor(windowState->viewport.y)), 0, windowHeight);
+            const int right = std::clamp(static_cast<int>(std::ceil(windowState->viewport.x + windowState->viewport.width)), 0, windowWidth);
+            const int bottom = std::clamp(static_cast<int>(std::ceil(windowState->viewport.y + windowState->viewport.height)), 0, windowHeight);
+
+            if (right <= left || bottom <= top)
+            {
+                return false;
+            }
+
+            outRegion = {left, top, right, bottom};
+            outWidth = static_cast<std::uint32_t>(right - left);
+            outHeight = static_cast<std::uint32_t>(bottom - top);
+            return true;
         }
     }
 
@@ -132,15 +169,16 @@ namespace myengine::core
 
         ConfigureInputBindings();
 
-        ui::UiCallbacks uiCallbacks;
-        uiCallbacks.spawnBox = [this](const WindowId windowId) { SpawnDemoBox(windowId); };
-        uiCallbacks.spawnSphere = [this](const WindowId windowId) { SpawnDemoSphere(windowId); };
-        uiCallbacks.spawnBurst = [this](const WindowId windowId) { SpawnDemoBurst(windowId); };
-        uiCallbacks.resetScene = [this]() { ResetDemoScene(); };
-        uiCallbacks.togglePause = [this]() { TogglePhysicsPause(); };
-        uiCallbacks.toggleDebugDraw = [this]() { TogglePhysicsDebugDraw(); };
-        uiCallbacks.adjustGravity = [this](const float delta) { AdjustGravity(delta); };
-        if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(uiCallbacks)))
+        ui::SceneEditorServices sceneEditorServices;
+        sceneEditorServices.world = &world_;
+        sceneEditorServices.resourceManager = resourceManager_.get();
+        sceneEditorServices.logger = &logger_;
+        sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
+        sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
+        sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };
+        sceneEditorServices.captureSceneSnapshot = [this]() { return CaptureSceneSnapshot(); };
+        sceneEditorServices.restoreSceneSnapshot = [this](std::string_view snapshot) { return RestoreSceneSnapshot(snapshot); };
+        if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");
             return false;
@@ -174,7 +212,7 @@ namespace myengine::core
             resourceManager_->LoadManifest("assets/manifests/demo_assets.json");
         }
 
-        /*if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
+        if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
         {
             BuildDemoScene();
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
@@ -182,9 +220,12 @@ namespace myengine::core
         else
         {
             RebindWindowControlledEntities();
-        }*/
-
-        BuildDemoScene();
+        }
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        editorState.mode = editor::RuntimeMode::Edit;
+        editorState.selectedEntity = ecs::kInvalidEntity;
+        editorState.playModeSnapshot.clear();
+        core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
 
         timer_.Reset();
         logger_.Info("Application initialization finished");
@@ -268,6 +309,15 @@ namespace myengine::core
             frameTimingStats.totalMs += millisecondsBetween(frameStartTime, renderEndTime);
             frameTimingStats.frames += 1;
 
+            PublishFrameStatistics(
+                deltaTime,
+                millisecondsBetween(worldUpdateStartTime, worldUpdateEndTime),
+                millisecondsBetween(stateUpdateStartTime, stateUpdateEndTime),
+                millisecondsBetween(hotReloadStartTime, hotReloadEndTime),
+                millisecondsBetween(uiUpdateStartTime, uiUpdateEndTime),
+                millisecondsBetween(renderStartTime, renderEndTime),
+                millisecondsBetween(frameStartTime, renderEndTime));
+
             deltaLogAccumulator_ += deltaTime;
             if (deltaLogAccumulator_ >= 1.0f && frameTimingStats.frames > 0)
             {
@@ -305,6 +355,15 @@ namespace myengine::core
         cameraControlActive_ = false;
         SetCursorVisible(true);
 
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (editorState.mode == editor::RuntimeMode::Play && !editorState.playModeSnapshot.empty())
+        {
+            RestoreSceneSnapshot(editorState.playModeSnapshot);
+            editorState.mode = editor::RuntimeMode::Edit;
+            editorState.playModeSnapshot.clear();
+            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
+        }
+
         if (!sceneSavePath_.empty() && !world_.GetEntities().empty())
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
@@ -334,15 +393,34 @@ namespace myengine::core
         InputEvent event;
         event.windowId = window.Id();
 
-        const bool bypassUiForCamera =
+        const bool hasMouseClientPosition =
+            msg == WM_MOUSEMOVE ||
+            msg == WM_LBUTTONDOWN ||
+            msg == WM_LBUTTONUP ||
+            msg == WM_LBUTTONDBLCLK ||
             msg == WM_RBUTTONDOWN ||
             msg == WM_RBUTTONUP ||
             msg == WM_RBUTTONDBLCLK ||
             msg == WM_MBUTTONDOWN ||
             msg == WM_MBUTTONUP ||
-            msg == WM_MBUTTONDBLCLK ||
-            ((cameraControlActive_ || input_.IsMouseDown(MouseButton::Right)) &&
-                (msg == WM_MOUSEMOVE || msg == WM_MOUSEWHEEL));
+            msg == WM_MBUTTONDBLCLK;
+        const float mouseClientX = hasMouseClientPosition
+            ? static_cast<float>(static_cast<short>(LOWORD(lparam)))
+            : 0.0f;
+        const float mouseClientY = hasMouseClientPosition
+            ? static_cast<float>(static_cast<short>(HIWORD(lparam)))
+            : 0.0f;
+        const bool startSceneNavigationNow =
+            (msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) &&
+            uiManager_.CanStartSceneNavigation(window.Id(), mouseClientX, mouseClientY);
+        const bool bypassUiForCamera =
+            startSceneNavigationNow ||
+            cameraControlActive_ &&
+            (msg == WM_RBUTTONDOWN ||
+                msg == WM_RBUTTONUP ||
+                msg == WM_RBUTTONDBLCLK ||
+                msg == WM_MOUSEMOVE ||
+                msg == WM_MOUSEWHEEL);
 
         if (!bypassUiForCamera)
         {
@@ -351,6 +429,10 @@ namespace myengine::core
 
         const bool uiWantsMouseCapture = !bypassUiForCamera && uiManager_.WantsMouseCapture(window.Id());
         const bool uiWantsKeyboardCapture = uiManager_.WantsKeyboardCapture(window.Id());
+        const bool cameraConsumesKeyboard = cameraControlActive_ && inputOwnerWindowId_ == window.Id();
+        const bool uiAllowsSceneNavigation =
+            startSceneNavigationNow ||
+            uiManager_.CanStartSceneNavigation(window.Id(), mouseClientX, mouseClientY);
 
         switch (msg)
         {
@@ -426,7 +508,7 @@ namespace myengine::core
             {
                 const auto key = static_cast<std::uint32_t>(wparam);
 
-                if (uiWantsKeyboardCapture && key != VK_F3)
+                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3)
                 {
                     return 0;
                 }
@@ -441,22 +523,7 @@ namespace myengine::core
                 const bool firstPress = (lparam & (1 << 30)) == 0;
                 if (firstPress)
                 {
-                    if (key == 'L')
-                    {
-                        if (scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
-                        {
-                            RebindWindowControlledEntities();
-                            logger_.Info("Scene loaded successfully");
-                        }
-                    }
-                    else if (key == 'P')
-                    {
-                        if (scene::SaveWorldToJson(world_, sceneSavePath_, &logger_))
-                        {
-                            logger_.Info("Scene saved successfully");
-                        }
-                    }
-                    else if (key == VK_F3)
+                    if (key == VK_F3)
                     {
                         TogglePhysicsDebugDraw();
                     }
@@ -468,7 +535,7 @@ namespace myengine::core
 
             case WM_KEYUP:
             {
-                if (uiWantsKeyboardCapture)
+                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard)
                 {
                     return 0;
                 }
@@ -514,6 +581,11 @@ namespace myengine::core
 
             case WM_RBUTTONDOWN:
             {
+                if (!uiAllowsSceneNavigation)
+                {
+                    return 0;
+                }
+
                 input_.SetActiveWindow(window.Id());
                 SetInputOwnerWindow(window.Id());
                 cameraControlActive_ = true;
@@ -529,6 +601,11 @@ namespace myengine::core
 
             case WM_RBUTTONUP:
             {
+                if (!cameraControlActive_)
+                {
+                    return 0;
+                }
+
                 input_.SetActiveWindow(window.Id());
                 cameraControlActive_ = false;
                 ReleaseCapture();
@@ -614,6 +691,11 @@ namespace myengine::core
         return *resourceManager_;
     }
 
+    const std::filesystem::path& Application::GetSceneSavePath() const
+    {
+        return sceneSavePath_;
+    }
+
     void Application::SetStateLabel(const std::string& label)
     {
         const std::wstring suffix = L" [" + Utf8ToWide(label) + L"]";
@@ -626,6 +708,48 @@ namespace myengine::core
         }
 
         uiManager_.SetStateLabel(label);
+    }
+
+    bool Application::SaveSceneToDisk()
+    {
+        if (sceneSavePath_.empty())
+        {
+            return false;
+        }
+
+        return scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
+    }
+
+    bool Application::LoadSceneFromDisk()
+    {
+        if (sceneSavePath_.empty())
+        {
+            return false;
+        }
+
+        if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
+        {
+            return false;
+        }
+
+        RebindWindowControlledEntities();
+        return true;
+    }
+
+    std::string Application::CaptureSceneSnapshot() const
+    {
+        return scene::SerializeWorldToString(world_);
+    }
+
+    bool Application::RestoreSceneSnapshot(const std::string_view snapshotJson)
+    {
+        if (!scene::LoadWorldFromString(world_, snapshotJson, &logger_))
+        {
+            return false;
+        }
+
+        RebindWindowControlledEntities();
+        return true;
     }
 
     Application::WindowRuntime* Application::FindWindow(const WindowId id)
@@ -886,6 +1010,48 @@ namespace myengine::core
         physicsState.gravityStrength = std::clamp(physicsState.gravityStrength + delta, 0.0f, 30.0f);
     }
 
+    void Application::PublishFrameStatistics(
+        const float deltaTime,
+        const double worldUpdateMs,
+        const double stateUpdateMs,
+        const double hotReloadMs,
+        const double uiUpdateMs,
+        const double renderMs,
+        const double frameMs)
+    {
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        fpsAccumulatorTime_ += deltaTime;
+        fpsAccumulatorFrames_ += 1;
+        if (fpsAccumulatorTime_ >= 1.0f)
+        {
+            averagedFps_ = fpsAccumulatorFrames_ / std::max(fpsAccumulatorTime_, 0.0001f);
+            fpsAccumulatorTime_ = 0.0f;
+            fpsAccumulatorFrames_ = 0;
+        }
+
+        const float averageFps = averagedFps_ > 0.0f
+            ? averagedFps_
+            : (frameMs > 0.0001 ? static_cast<float>(1000.0 / frameMs) : 0.0f);
+
+        for (auto& runtime : windows_)
+        {
+            if (runtime.window == nullptr)
+            {
+                continue;
+            }
+
+            auto& windowState = editorState.GetOrCreateWindowState(runtime.window->Id());
+            windowState.timings.deltaTime = deltaTime;
+            windowState.timings.averageFps = averageFps;
+            windowState.timings.frameMs = frameMs;
+            windowState.timings.worldUpdateMs = worldUpdateMs;
+            windowState.timings.stateUpdateMs = stateUpdateMs;
+            windowState.timings.hotReloadMs = hotReloadMs;
+            windowState.timings.uiUpdateMs = uiUpdateMs;
+            windowState.timings.renderMs = renderMs;
+        }
+    }
+
     void Application::BuildDemoScene()
     {
         static constexpr char kCubeMesh[] = "assets/models/crate.obj";
@@ -1118,18 +1284,27 @@ namespace myengine::core
                 continue;
             }
 
+            render::IntRect renderRegion{};
+            std::uint32_t renderWidth = runtime.window->Width();
+            std::uint32_t renderHeight = runtime.window->Height();
+            const bool hasEditorRenderRegion =
+                runtime.window != nullptr &&
+                TryBuildEditorRenderRegion(*runtime.window, renderRegion, renderWidth, renderHeight);
+            renderAdapter_->SetRenderRegion(runtime.surface, hasEditorRenderRegion ? &renderRegion : nullptr);
+
             ecs::RenderFrameContext context{
                 *renderAdapter_,
                 runtime.surface,
                 runtime.clearColor,
                 runtime.window->Id(),
-                runtime.window->Width(),
-                runtime.window->Height(),
+                renderWidth,
+                renderHeight,
                 &logger_,
                 resourceManager_.get(),
             };
 
             world_.RenderSystems(context);
+            renderAdapter_->SetRenderRegion(runtime.surface, nullptr);
             uiManager_.RenderWindow(runtime.window->Id());
             renderAdapter_->EndFrame(runtime.surface);
         }

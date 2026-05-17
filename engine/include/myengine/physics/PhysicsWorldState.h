@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -14,6 +15,12 @@ namespace myengine::physics
     {
         ecs::components::Vec3 min{};
         ecs::components::Vec3 max{};
+        core::Color color{0.17f, 0.80f, 0.95f, 1.0f};
+    };
+
+    struct DebugOrientedBox
+    {
+        std::array<ecs::components::Vec3, 8> corners{};
         core::Color color{0.17f, 0.80f, 0.95f, 1.0f};
     };
 
@@ -47,14 +54,14 @@ namespace myengine::physics
         float gravityStrength = 9.81f;
         float fixedTimeStep = 1.0f / 60.0f;
         PhysicsStats stats{};
-        std::vector<DebugAabb> debugAabbs;
+        std::vector<DebugOrientedBox> debugBoxes;
         std::vector<DebugSphere> debugSpheres;
         std::vector<DebugVector> debugVectors;
         std::vector<std::string> recentEvents;
 
         void ClearDebugGeometry()
         {
-            debugAabbs.clear();
+            debugBoxes.clear();
             debugSpheres.clear();
             debugVectors.clear();
         }
