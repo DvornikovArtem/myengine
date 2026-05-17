@@ -1,3 +1,4 @@
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -6,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include <DirectXMath.h>
+
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/ColliderComponent.h>
@@ -13,6 +16,7 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
+#include <myengine/scene/TransformUtils.h>
 #include <myengine/spatial/UniformGrid3D.h>
 
 namespace myengine::ecs::systems
@@ -45,6 +49,17 @@ namespace myengine::ecs::systems
             float radius = 0.5f;
         };
 
+        struct WorldObb
+        {
+            Vec3 center{};
+            std::array<Vec3, 3> axes{{
+                Vec3{1.0f, 0.0f, 0.0f},
+                Vec3{0.0f, 1.0f, 0.0f},
+                Vec3{0.0f, 0.0f, 1.0f},
+            }};
+            Vec3 halfExtents{0.5f, 0.5f, 0.5f};
+        };
+
         struct ContactManifold
         {
             bool hasCollision = false;
@@ -61,6 +76,7 @@ namespace myengine::ecs::systems
             ColliderComponent* collider = nullptr;
             WorldAabb aabb{};
             WorldSphere sphere{};
+            WorldObb obb{};
             float inverseMass = 0.0f;
         };
 
@@ -91,15 +107,49 @@ namespace myengine::ecs::systems
             return 1.0f / rigidbody->mass;
         }
 
-        Vec3 GetColliderWorldCenter(const TransformComponent& transform, const ColliderComponent& collider)
+        Vec3 TransformPoint(const DirectX::XMMATRIX& matrix, const Vec3& point)
         {
-            return transform.position + HadamardMul(collider.offset, transform.scale);
+            const DirectX::XMVECTOR transformed = DirectX::XMVector3TransformCoord(
+                DirectX::XMVectorSet(point.x, point.y, point.z, 1.0f),
+                matrix);
+            DirectX::XMFLOAT3 result{};
+            DirectX::XMStoreFloat3(&result, transformed);
+            return {result.x, result.y, result.z};
+        }
+
+        Vec3 TransformDirectionNormalized(const DirectX::XMMATRIX& matrix, const Vec3& direction)
+        {
+            const DirectX::XMVECTOR transformed = DirectX::XMVector3Normalize(
+                DirectX::XMVector3TransformNormal(
+                    DirectX::XMVectorSet(direction.x, direction.y, direction.z, 0.0f),
+                    matrix));
+            DirectX::XMFLOAT3 result{};
+            DirectX::XMStoreFloat3(&result, transformed);
+            return {result.x, result.y, result.z};
         }
 
         Vec3 GetScaledHalfExtents(const TransformComponent& transform, const ColliderComponent& collider)
         {
             const Vec3 safeScale = Max(Abs(transform.scale), Vec3{0.001f, 0.001f, 0.001f});
             return HadamardMul(collider.halfExtents, safeScale);
+        }
+
+        Vec3 GetColliderWorldCenter(const TransformComponent& transform, const ColliderComponent& collider)
+        {
+            return TransformPoint(scene::BuildLocalMatrix(transform), collider.offset);
+        }
+
+        WorldObb BuildObb(const TransformComponent& transform, const ColliderComponent& collider)
+        {
+            const DirectX::XMMATRIX worldMatrix = scene::BuildLocalMatrix(transform);
+
+            WorldObb obb;
+            obb.center = TransformPoint(worldMatrix, collider.offset);
+            obb.axes[0] = TransformDirectionNormalized(worldMatrix, {1.0f, 0.0f, 0.0f});
+            obb.axes[1] = TransformDirectionNormalized(worldMatrix, {0.0f, 1.0f, 0.0f});
+            obb.axes[2] = TransformDirectionNormalized(worldMatrix, {0.0f, 0.0f, 1.0f});
+            obb.halfExtents = GetScaledHalfExtents(transform, collider);
+            return obb;
         }
 
         float GetScaledRadius(const TransformComponent& transform, const ColliderComponent& collider)
@@ -109,11 +159,20 @@ namespace myengine::ecs::systems
             return collider.radius * maxScale;
         }
 
-        WorldAabb BuildAabb(const TransformComponent& transform, const ColliderComponent& collider)
+        WorldAabb BuildAabb(const WorldObb& obb)
         {
-            const Vec3 center = GetColliderWorldCenter(transform, collider);
-            const Vec3 extents = GetScaledHalfExtents(transform, collider);
-            return {center - extents, center + extents};
+            const Vec3 extents{
+                std::abs(obb.axes[0].x) * obb.halfExtents.x + std::abs(obb.axes[1].x) * obb.halfExtents.y + std::abs(obb.axes[2].x) * obb.halfExtents.z,
+                std::abs(obb.axes[0].y) * obb.halfExtents.x + std::abs(obb.axes[1].y) * obb.halfExtents.y + std::abs(obb.axes[2].y) * obb.halfExtents.z,
+                std::abs(obb.axes[0].z) * obb.halfExtents.x + std::abs(obb.axes[1].z) * obb.halfExtents.y + std::abs(obb.axes[2].z) * obb.halfExtents.z,
+            };
+            return {obb.center - extents, obb.center + extents};
+        }
+
+        WorldAabb BuildAabb(const WorldSphere& sphere)
+        {
+            const Vec3 extents{sphere.radius, sphere.radius, sphere.radius};
+            return {sphere.center - extents, sphere.center + extents};
         }
 
         WorldSphere BuildSphere(const TransformComponent& transform, const ColliderComponent& collider)
@@ -128,13 +187,87 @@ namespace myengine::ecs::systems
                 return;
             }
 
-            body.aabb = BuildAabb(*body.transform, *body.collider);
-            body.sphere = BuildSphere(*body.transform, *body.collider);
+            if (body.collider->type == ColliderType::Box)
+            {
+                body.obb = BuildObb(*body.transform, *body.collider);
+                body.aabb = BuildAabb(body.obb);
+                body.sphere = {body.obb.center, Length(body.obb.halfExtents)};
+            }
+            else
+            {
+                body.sphere = BuildSphere(*body.transform, *body.collider);
+                body.aabb = BuildAabb(body.sphere);
+                body.obb = {};
+            }
         }
 
         Vec3 GetAabbCenter(const WorldAabb& aabb)
         {
             return (aabb.min + aabb.max) * 0.5f;
+        }
+
+        float ProjectObbRadius(const WorldObb& obb, const Vec3& axis)
+        {
+            return
+                obb.halfExtents.x * std::abs(Dot(axis, obb.axes[0])) +
+                obb.halfExtents.y * std::abs(Dot(axis, obb.axes[1])) +
+                obb.halfExtents.z * std::abs(Dot(axis, obb.axes[2]));
+        }
+
+        Vec3 ClosestPointOnObb(const Vec3& point, const WorldObb& obb)
+        {
+            const Vec3 delta = point - obb.center;
+            Vec3 result = obb.center;
+
+            const float distances[3]{
+                Dot(delta, obb.axes[0]),
+                Dot(delta, obb.axes[1]),
+                Dot(delta, obb.axes[2]),
+            };
+            const float halfExtents[3]{
+                obb.halfExtents.x,
+                obb.halfExtents.y,
+                obb.halfExtents.z,
+            };
+
+            for (int axisIndex = 0; axisIndex < 3; ++axisIndex)
+            {
+                const float clampedDistance = std::clamp(distances[axisIndex], -halfExtents[axisIndex], halfExtents[axisIndex]);
+                result += obb.axes[axisIndex] * clampedDistance;
+            }
+
+            return result;
+        }
+
+        bool TestObbAxis(
+            const Vec3& axisCandidate,
+            const Vec3& centerDelta,
+            const WorldObb& a,
+            const WorldObb& b,
+            float& minimumPenetration,
+            Vec3& separatingNormal)
+        {
+            const float axisLengthSquared = LengthSquared(axisCandidate);
+            if (axisLengthSquared <= kCollisionEpsilon)
+            {
+                return true;
+            }
+
+            const Vec3 axis = axisCandidate / std::sqrt(axisLengthSquared);
+            const float centerDistance = std::abs(Dot(centerDelta, axis));
+            const float overlap = ProjectObbRadius(a, axis) + ProjectObbRadius(b, axis) - centerDistance;
+            if (overlap <= 0.0f)
+            {
+                return false;
+            }
+
+            if (overlap < minimumPenetration)
+            {
+                minimumPenetration = overlap;
+                separatingNormal = Dot(centerDelta, axis) >= 0.0f ? axis : -axis;
+            }
+
+            return true;
         }
 
         ContactManifold IntersectAabbAabb(const WorldAabb& a, const WorldAabb& b)
@@ -197,6 +330,46 @@ namespace myengine::ecs::systems
             return manifold;
         }
 
+        ContactManifold IntersectObbObb(const WorldObb& a, const WorldObb& b)
+        {
+            const Vec3 centerDelta = b.center - a.center;
+            float minimumPenetration = std::numeric_limits<float>::max();
+            Vec3 collisionNormal{};
+
+            for (int axisIndex = 0; axisIndex < 3; ++axisIndex)
+            {
+                if (!TestObbAxis(a.axes[axisIndex], centerDelta, a, b, minimumPenetration, collisionNormal))
+                {
+                    return {};
+                }
+
+                if (!TestObbAxis(b.axes[axisIndex], centerDelta, a, b, minimumPenetration, collisionNormal))
+                {
+                    return {};
+                }
+            }
+
+            for (int axisA = 0; axisA < 3; ++axisA)
+            {
+                for (int axisB = 0; axisB < 3; ++axisB)
+                {
+                    if (!TestObbAxis(Cross(a.axes[axisA], b.axes[axisB]), centerDelta, a, b, minimumPenetration, collisionNormal))
+                    {
+                        return {};
+                    }
+                }
+            }
+
+            ContactManifold manifold;
+            manifold.hasCollision = true;
+            manifold.normal = collisionNormal;
+            manifold.penetration = minimumPenetration;
+            const Vec3 pointOnA = ClosestPointOnObb(b.center, a);
+            const Vec3 pointOnB = ClosestPointOnObb(a.center, b);
+            manifold.point = (pointOnA + pointOnB) * 0.5f;
+            return manifold;
+        }
+
         ContactManifold IntersectSphereSphere(const WorldSphere& a, const WorldSphere& b)
         {
             const Vec3 delta = b.center - a.center;
@@ -214,6 +387,65 @@ namespace myengine::ecs::systems
             manifold.normal = (distance > kCollisionEpsilon) ? delta / distance : Vec3{0.0f, 1.0f, 0.0f};
             manifold.penetration = radiusSum - distance;
             manifold.point = a.center + manifold.normal * (a.radius - manifold.penetration * 0.5f);
+            return manifold;
+        }
+
+        ContactManifold IntersectSphereObb(const WorldSphere& sphere, const WorldObb& obb)
+        {
+            const Vec3 closestPoint = ClosestPointOnObb(sphere.center, obb);
+            const Vec3 delta = closestPoint - sphere.center;
+            const float distanceSquared = LengthSquared(delta);
+            if (distanceSquared > sphere.radius * sphere.radius)
+            {
+                return {};
+            }
+
+            ContactManifold manifold;
+            manifold.hasCollision = true;
+
+            const float distance = std::sqrt(std::max(distanceSquared, kCollisionEpsilon));
+            if (distance > kCollisionEpsilon)
+            {
+                manifold.normal = delta / distance;
+                manifold.penetration = sphere.radius - distance;
+                const Vec3 pointOnSphere = sphere.center + manifold.normal * sphere.radius;
+                manifold.point = (pointOnSphere + closestPoint) * 0.5f;
+                return manifold;
+            }
+
+            const Vec3 local{
+                Dot(sphere.center - obb.center, obb.axes[0]),
+                Dot(sphere.center - obb.center, obb.axes[1]),
+                Dot(sphere.center - obb.center, obb.axes[2]),
+            };
+
+            const Vec3 distances{
+                obb.halfExtents.x - std::abs(local.x),
+                obb.halfExtents.y - std::abs(local.y),
+                obb.halfExtents.z - std::abs(local.z),
+            };
+
+            manifold.penetration = distances.x + sphere.radius;
+            manifold.normal = obb.axes[0] * (local.x >= 0.0f ? 1.0f : -1.0f);
+            float distanceToFace = distances.x;
+
+            if (distances.y < manifold.penetration - sphere.radius)
+            {
+                manifold.penetration = distances.y + sphere.radius;
+                manifold.normal = obb.axes[1] * (local.y >= 0.0f ? 1.0f : -1.0f);
+                distanceToFace = distances.y;
+            }
+
+            if (distances.z < manifold.penetration - sphere.radius)
+            {
+                manifold.penetration = distances.z + sphere.radius;
+                manifold.normal = obb.axes[2] * (local.z >= 0.0f ? 1.0f : -1.0f);
+                distanceToFace = distances.z;
+            }
+
+            const Vec3 pointOnSphere = sphere.center + manifold.normal * sphere.radius;
+            const Vec3 pointOnBox = sphere.center + manifold.normal * distanceToFace;
+            manifold.point = (pointOnSphere + pointOnBox) * 0.5f;
             return manifold;
         }
 
@@ -282,7 +514,7 @@ namespace myengine::ecs::systems
 
             if (a.collider->type == ColliderType::Box && b.collider->type == ColliderType::Box)
             {
-                return IntersectAabbAabb(a.aabb, b.aabb);
+                return IntersectObbObb(a.obb, b.obb);
             }
 
             if (a.collider->type == ColliderType::Sphere && b.collider->type == ColliderType::Sphere)
@@ -292,12 +524,12 @@ namespace myengine::ecs::systems
 
             if (a.collider->type == ColliderType::Sphere && b.collider->type == ColliderType::Box)
             {
-                return IntersectSphereAabb(a.sphere, b.aabb);
+                return IntersectSphereObb(a.sphere, b.obb);
             }
 
             if (a.collider->type == ColliderType::Box && b.collider->type == ColliderType::Sphere)
             {
-                ContactManifold manifold = IntersectSphereAabb(b.sphere, a.aabb);
+                ContactManifold manifold = IntersectSphereObb(b.sphere, a.obb);
                 if (manifold.hasCollision)
                 {
                     manifold.normal = -manifold.normal;
@@ -445,9 +677,28 @@ namespace myengine::ecs::systems
             return impulseScalar;
         }
 
+        physics::DebugOrientedBox BuildDebugBox(const WorldObb& obb, const core::Color& color)
+        {
+            const Vec3 axisX = obb.axes[0] * obb.halfExtents.x;
+            const Vec3 axisY = obb.axes[1] * obb.halfExtents.y;
+            const Vec3 axisZ = obb.axes[2] * obb.halfExtents.z;
+
+            physics::DebugOrientedBox result;
+            result.color = color;
+            result.corners[0] = obb.center - axisX - axisY - axisZ;
+            result.corners[1] = obb.center + axisX - axisY - axisZ;
+            result.corners[2] = obb.center + axisX + axisY - axisZ;
+            result.corners[3] = obb.center - axisX + axisY - axisZ;
+            result.corners[4] = obb.center - axisX - axisY + axisZ;
+            result.corners[5] = obb.center + axisX - axisY + axisZ;
+            result.corners[6] = obb.center + axisX + axisY + axisZ;
+            result.corners[7] = obb.center - axisX + axisY + axisZ;
+            return result;
+        }
+
         void RebuildDebugGeometry(World& world, physics::PhysicsWorldState& state)
         {
-            state.debugAabbs.clear();
+            state.debugBoxes.clear();
             state.debugSpheres.clear();
 
             world.ForEach<TransformComponent, ColliderComponent>(
@@ -458,8 +709,9 @@ namespace myengine::ecs::systems
 
                     if (collider.type == ColliderType::Box)
                     {
-                        const WorldAabb aabb = BuildAabb(transform, collider);
-                        state.debugAabbs.push_back({aabb.min, aabb.max, collider.isTrigger ? triggerColor : solidColor});
+                        state.debugBoxes.push_back(BuildDebugBox(
+                            BuildObb(transform, collider),
+                            collider.isTrigger ? triggerColor : solidColor));
                     }
                     else
                     {
@@ -532,8 +784,7 @@ namespace myengine::ecs::systems
                     body.collider = &collider;
                     body.rigidbody = world.TryGet<RigidbodyComponent>(entity);
                     body.inverseMass = ComputeInverseMass(body.rigidbody);
-                    body.aabb = BuildAabb(transform, collider);
-                    body.sphere = BuildSphere(transform, collider);
+                    RefreshCollisionBodyBounds(body);
                     broadPhaseGrid.Insert(entity, body.aabb.min.x, body.aabb.min.y, body.aabb.min.z, body.aabb.max.x, body.aabb.max.y, body.aabb.max.z);
                     bodyIndexByEntity[entity] = bodies.size();
                     bodies.push_back(body);

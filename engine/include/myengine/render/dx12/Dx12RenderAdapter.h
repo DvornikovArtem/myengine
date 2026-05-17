@@ -40,6 +40,7 @@ namespace myengine::render::dx12
         void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) override;
 
         bool BeginFrame(RenderSurfaceHandle surface, const core::Color& clearColor) override;
+        void SetRenderRegion(RenderSurfaceHandle surface, const IntRect* region) override;
         void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) override;
         void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) override;
         void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) override;

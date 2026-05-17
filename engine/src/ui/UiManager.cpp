@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,7 +12,6 @@
 
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
-#include <myengine/physics/PhysicsWorldState.h>
 #include <myengine/ui/UiManager.h>
 
 namespace myengine::ui
@@ -30,75 +28,159 @@ namespace myengine::ui
             return render::TextureHandle{static_cast<std::uint32_t>(static_cast<ImU64>(textureId))};
         }
 
+        ImGuiKey VirtualKeyToImGuiKey(const WPARAM wparam)
+        {
+            switch (wparam)
+            {
+                case VK_TAB: return ImGuiKey_Tab;
+                case VK_LEFT: return ImGuiKey_LeftArrow;
+                case VK_RIGHT: return ImGuiKey_RightArrow;
+                case VK_UP: return ImGuiKey_UpArrow;
+                case VK_DOWN: return ImGuiKey_DownArrow;
+                case VK_PRIOR: return ImGuiKey_PageUp;
+                case VK_NEXT: return ImGuiKey_PageDown;
+                case VK_HOME: return ImGuiKey_Home;
+                case VK_END: return ImGuiKey_End;
+                case VK_INSERT: return ImGuiKey_Insert;
+                case VK_DELETE: return ImGuiKey_Delete;
+                case VK_BACK: return ImGuiKey_Backspace;
+                case VK_SPACE: return ImGuiKey_Space;
+                case VK_RETURN: return ImGuiKey_Enter;
+                case VK_ESCAPE: return ImGuiKey_Escape;
+                case VK_OEM_7: return ImGuiKey_Apostrophe;
+                case VK_OEM_COMMA: return ImGuiKey_Comma;
+                case VK_OEM_MINUS: return ImGuiKey_Minus;
+                case VK_OEM_PERIOD: return ImGuiKey_Period;
+                case VK_OEM_2: return ImGuiKey_Slash;
+                case VK_OEM_1: return ImGuiKey_Semicolon;
+                case VK_OEM_PLUS: return ImGuiKey_Equal;
+                case VK_OEM_4: return ImGuiKey_LeftBracket;
+                case VK_OEM_5: return ImGuiKey_Backslash;
+                case VK_OEM_6: return ImGuiKey_RightBracket;
+                case VK_OEM_3: return ImGuiKey_GraveAccent;
+                case VK_CAPITAL: return ImGuiKey_CapsLock;
+                case VK_SCROLL: return ImGuiKey_ScrollLock;
+                case VK_NUMLOCK: return ImGuiKey_NumLock;
+                case VK_SNAPSHOT: return ImGuiKey_PrintScreen;
+                case VK_PAUSE: return ImGuiKey_Pause;
+                case VK_NUMPAD0: return ImGuiKey_Keypad0;
+                case VK_NUMPAD1: return ImGuiKey_Keypad1;
+                case VK_NUMPAD2: return ImGuiKey_Keypad2;
+                case VK_NUMPAD3: return ImGuiKey_Keypad3;
+                case VK_NUMPAD4: return ImGuiKey_Keypad4;
+                case VK_NUMPAD5: return ImGuiKey_Keypad5;
+                case VK_NUMPAD6: return ImGuiKey_Keypad6;
+                case VK_NUMPAD7: return ImGuiKey_Keypad7;
+                case VK_NUMPAD8: return ImGuiKey_Keypad8;
+                case VK_NUMPAD9: return ImGuiKey_Keypad9;
+                case VK_DECIMAL: return ImGuiKey_KeypadDecimal;
+                case VK_DIVIDE: return ImGuiKey_KeypadDivide;
+                case VK_MULTIPLY: return ImGuiKey_KeypadMultiply;
+                case VK_SUBTRACT: return ImGuiKey_KeypadSubtract;
+                case VK_ADD: return ImGuiKey_KeypadAdd;
+                case VK_LSHIFT: return ImGuiKey_LeftShift;
+                case VK_LCONTROL: return ImGuiKey_LeftCtrl;
+                case VK_LMENU: return ImGuiKey_LeftAlt;
+                case VK_LWIN: return ImGuiKey_LeftSuper;
+                case VK_RSHIFT: return ImGuiKey_RightShift;
+                case VK_RCONTROL: return ImGuiKey_RightCtrl;
+                case VK_RMENU: return ImGuiKey_RightAlt;
+                case VK_RWIN: return ImGuiKey_RightSuper;
+                case VK_APPS: return ImGuiKey_Menu;
+                case '0': return ImGuiKey_0;
+                case '1': return ImGuiKey_1;
+                case '2': return ImGuiKey_2;
+                case '3': return ImGuiKey_3;
+                case '4': return ImGuiKey_4;
+                case '5': return ImGuiKey_5;
+                case '6': return ImGuiKey_6;
+                case '7': return ImGuiKey_7;
+                case '8': return ImGuiKey_8;
+                case '9': return ImGuiKey_9;
+                case 'A': return ImGuiKey_A;
+                case 'B': return ImGuiKey_B;
+                case 'C': return ImGuiKey_C;
+                case 'D': return ImGuiKey_D;
+                case 'E': return ImGuiKey_E;
+                case 'F': return ImGuiKey_F;
+                case 'G': return ImGuiKey_G;
+                case 'H': return ImGuiKey_H;
+                case 'I': return ImGuiKey_I;
+                case 'J': return ImGuiKey_J;
+                case 'K': return ImGuiKey_K;
+                case 'L': return ImGuiKey_L;
+                case 'M': return ImGuiKey_M;
+                case 'N': return ImGuiKey_N;
+                case 'O': return ImGuiKey_O;
+                case 'P': return ImGuiKey_P;
+                case 'Q': return ImGuiKey_Q;
+                case 'R': return ImGuiKey_R;
+                case 'S': return ImGuiKey_S;
+                case 'T': return ImGuiKey_T;
+                case 'U': return ImGuiKey_U;
+                case 'V': return ImGuiKey_V;
+                case 'W': return ImGuiKey_W;
+                case 'X': return ImGuiKey_X;
+                case 'Y': return ImGuiKey_Y;
+                case 'Z': return ImGuiKey_Z;
+                case VK_F1: return ImGuiKey_F1;
+                case VK_F2: return ImGuiKey_F2;
+                case VK_F3: return ImGuiKey_F3;
+                case VK_F4: return ImGuiKey_F4;
+                case VK_F5: return ImGuiKey_F5;
+                case VK_F6: return ImGuiKey_F6;
+                case VK_F7: return ImGuiKey_F7;
+                case VK_F8: return ImGuiKey_F8;
+                case VK_F9: return ImGuiKey_F9;
+                case VK_F10: return ImGuiKey_F10;
+                case VK_F11: return ImGuiKey_F11;
+                case VK_F12: return ImGuiKey_F12;
+                default: return ImGuiKey_None;
+            }
+        }
+
+        void UpdateKeyModifiers(ImGuiIO& io)
+        {
+            io.AddKeyEvent(ImGuiMod_Ctrl, (GetKeyState(VK_CONTROL) & 0x8000) != 0);
+            io.AddKeyEvent(ImGuiMod_Shift, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+            io.AddKeyEvent(ImGuiMod_Alt, (GetKeyState(VK_MENU) & 0x8000) != 0);
+            io.AddKeyEvent(ImGuiMod_Super, (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0);
+        }
+
         void ConfigureStyle()
         {
             ImGuiStyle& style = ImGui::GetStyle();
-            style.WindowRounding = 14.0f;
-            style.ChildRounding = 12.0f;
-            style.FrameRounding = 10.0f;
-            style.PopupRounding = 10.0f;
-            style.GrabRounding = 10.0f;
-            style.ScrollbarRounding = 12.0f;
-            style.TabRounding = 10.0f;
-            style.WindowPadding = ImVec2(16.0f, 16.0f);
-            style.FramePadding = ImVec2(10.0f, 8.0f);
-            style.ItemSpacing = ImVec2(8.0f, 8.0f);
-            style.ItemInnerSpacing = ImVec2(8.0f, 6.0f);
-            style.CellPadding = ImVec2(8.0f, 8.0f);
-            style.ScrollbarSize = 14.0f;
-            style.IndentSpacing = 16.0f;
-            style.SeparatorTextBorderSize = 1.0f;
-            style.SeparatorTextPadding = ImVec2(0.0f, 4.0f);
-            style.Colors[ImGuiCol_WindowBg] = ImVec4(0.05f, 0.09f, 0.15f, 0.95f);
-            style.Colors[ImGuiCol_ChildBg] = ImVec4(0.08f, 0.14f, 0.22f, 0.82f);
-            style.Colors[ImGuiCol_PopupBg] = ImVec4(0.08f, 0.13f, 0.21f, 0.98f);
-            style.Colors[ImGuiCol_Border] = ImVec4(0.26f, 0.41f, 0.56f, 0.65f);
-            style.Colors[ImGuiCol_FrameBg] = ImVec4(0.11f, 0.21f, 0.33f, 0.95f);
-            style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.16f, 0.30f, 0.45f, 1.0f);
-            style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.19f, 0.36f, 0.53f, 1.0f);
-            style.Colors[ImGuiCol_Button] = ImVec4(0.13f, 0.28f, 0.42f, 1.0f);
-            style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.17f, 0.36f, 0.54f, 1.0f);
-            style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.22f, 0.45f, 0.64f, 1.0f);
-            style.Colors[ImGuiCol_Header] = ImVec4(0.11f, 0.24f, 0.36f, 0.95f);
-            style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.15f, 0.31f, 0.47f, 1.0f);
-            style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.19f, 0.39f, 0.58f, 1.0f);
-            style.Colors[ImGuiCol_TitleBg] = ImVec4(0.05f, 0.09f, 0.15f, 1.0f);
-            style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.07f, 0.12f, 0.19f, 1.0f);
-            style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.03f, 0.06f, 0.10f, 0.65f);
-            style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.16f, 0.30f, 0.44f, 1.0f);
-            style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.20f, 0.38f, 0.55f, 1.0f);
-            style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.24f, 0.45f, 0.63f, 1.0f);
-            style.Colors[ImGuiCol_CheckMark] = ImVec4(0.47f, 0.84f, 0.91f, 1.0f);
-            style.Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.28f, 0.51f, 0.70f, 0.35f);
-        }
-
-        void DrawMetricCard(const char* label, const std::string& value)
-        {
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.14f, 0.22f, 0.92f));
-            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12.0f);
-            ImGui::BeginChild(label, ImVec2(0.0f, 62.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-            ImGui::TextDisabled("%s", label);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 2.0f);
-            ImGui::Text("%s", value.c_str());
-            ImGui::EndChild();
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor();
-        }
-
-        void DrawControlRow(const char* key, const char* description)
-        {
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.04f, 0.09f, 0.14f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.04f, 0.09f, 0.14f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.04f, 0.09f, 0.14f, 1.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 7.0f);
-            ImGui::Button(key, ImVec2(-FLT_MIN, 0.0f));
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor(3);
-
-            ImGui::TableSetColumnIndex(1);
-            ImGui::TextWrapped("%s", description);
+            style.WindowRounding = 8.0f;
+            style.ChildRounding = 6.0f;
+            style.FrameRounding = 5.0f;
+            style.GrabRounding = 5.0f;
+            style.PopupRounding = 6.0f;
+            style.TabRounding = 5.0f;
+            style.ScrollbarRounding = 8.0f;
+            style.WindowPadding = ImVec2(12.0f, 10.0f);
+            style.FramePadding = ImVec2(8.0f, 6.0f);
+            style.ItemSpacing = ImVec2(8.0f, 6.0f);
+            style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
+            style.Colors[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.09f, 0.11f, 0.96f);
+            style.Colors[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.11f, 0.14f, 0.98f);
+            style.Colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.17f, 0.20f, 1.0f);
+            style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.26f, 0.31f, 1.0f);
+            style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.27f, 0.33f, 0.39f, 1.0f);
+            style.Colors[ImGuiCol_Header] = ImVec4(0.21f, 0.27f, 0.33f, 1.0f);
+            style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.27f, 0.35f, 0.42f, 1.0f);
+            style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.31f, 0.41f, 0.50f, 1.0f);
+            style.Colors[ImGuiCol_Button] = ImVec4(0.22f, 0.28f, 0.34f, 1.0f);
+            style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.29f, 0.37f, 0.45f, 1.0f);
+            style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.35f, 0.44f, 0.53f, 1.0f);
+            style.Colors[ImGuiCol_Tab] = ImVec4(0.15f, 0.18f, 0.22f, 1.0f);
+            style.Colors[ImGuiCol_TabHovered] = ImVec4(0.22f, 0.28f, 0.34f, 1.0f);
+            style.Colors[ImGuiCol_TabSelected] = ImVec4(0.24f, 0.30f, 0.37f, 1.0f);
+            style.Colors[ImGuiCol_TitleBg] = ImVec4(0.07f, 0.08f, 0.10f, 1.0f);
+            style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.10f, 0.12f, 0.15f, 1.0f);
+            style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.08f, 0.09f, 0.11f, 1.0f);
+            style.Colors[ImGuiCol_Separator] = ImVec4(0.25f, 0.30f, 0.36f, 1.0f);
+            style.Colors[ImGuiCol_CheckMark] = ImVec4(0.90f, 0.67f, 0.26f, 1.0f);
+            style.Colors[ImGuiCol_DockingPreview] = ImVec4(0.90f, 0.67f, 0.26f, 0.65f);
         }
     }
 
@@ -118,8 +200,6 @@ namespace myengine::ui
         std::vector<std::uint32_t> scratchCommandIndices;
         bool wantMouseCapture = false;
         bool wantKeyboardCapture = false;
-
-        ~WindowUiContext() = default;
     };
 
     UiManager::UiManager() = default;
@@ -129,7 +209,7 @@ namespace myengine::ui
         Shutdown();
     }
 
-    bool UiManager::Initialize(render::IRenderAdapter& renderAdapter, core::Logger& logger, UiCallbacks callbacks)
+    bool UiManager::Initialize(render::IRenderAdapter& renderAdapter, core::Logger& logger, SceneEditorServices services)
     {
         if (initialized_)
         {
@@ -139,9 +219,9 @@ namespace myengine::ui
         IMGUI_CHECKVERSION();
         renderAdapter_ = &renderAdapter;
         logger_ = &logger;
-        callbacks_ = std::move(callbacks);
+        sceneEditor_.Initialize(std::move(services));
         initialized_ = true;
-        logger_->Info("UiManager: ImGui initialized");
+        logger_->Info("UiManager: initialized");
         return true;
     }
 
@@ -151,6 +231,8 @@ namespace myengine::ui
         {
             return;
         }
+
+        sceneEditor_.Shutdown();
 
         for (auto& [_, windowContext] : windows_)
         {
@@ -177,7 +259,6 @@ namespace myengine::ui
         windows_.clear();
         renderAdapter_ = nullptr;
         logger_ = nullptr;
-        callbacks_ = {};
         initialized_ = false;
     }
 
@@ -229,7 +310,12 @@ namespace myengine::ui
         ImGui::SetCurrentContext(nullptr);
     }
 
-    void UiManager::HandleWindowMessage(const core::WindowId windowId, const HWND hwnd, const UINT message, const WPARAM wparam, const LPARAM lparam)
+    void UiManager::HandleWindowMessage(
+        const core::WindowId windowId,
+        const HWND hwnd,
+        const UINT message,
+        const WPARAM wparam,
+        const LPARAM lparam)
     {
         if (!initialized_)
         {
@@ -247,6 +333,7 @@ namespace myengine::ui
         auto& windowContext = *it->second;
         ImGui::SetCurrentContext(windowContext.imguiContext);
         ImGuiIO& io = ImGui::GetIO();
+        UpdateKeyModifiers(io);
 
         switch (message)
         {
@@ -263,62 +350,81 @@ namespace myengine::ui
             }
 
             case WM_MOUSEMOVE:
-            {
                 io.AddMousePosEvent(
                     static_cast<float>(static_cast<short>(LOWORD(lparam))),
                     static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 break;
-            }
 
             case WM_MOUSELEAVE:
-            {
                 io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
                 break;
-            }
 
             case WM_LBUTTONDOWN:
             case WM_LBUTTONDBLCLK:
-            {
                 io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
                 break;
-            }
 
             case WM_LBUTTONUP:
-            {
                 io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
                 break;
-            }
+
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONDBLCLK:
+                io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+                break;
+
+            case WM_RBUTTONUP:
+                io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+                break;
+
+            case WM_MBUTTONDOWN:
+            case WM_MBUTTONDBLCLK:
+                io.AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+                break;
+
+            case WM_MBUTTONUP:
+                io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+                break;
 
             case WM_MOUSEWHEEL:
-            {
                 io.AddMouseWheelEvent(0.0f, static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA));
                 break;
-            }
 
             case WM_MOUSEHWHEEL:
-            {
                 io.AddMouseWheelEvent(
                     -static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / static_cast<float>(WHEEL_DELTA),
                     0.0f);
                 break;
-            }
 
             case WM_SETFOCUS:
-            {
                 io.AddFocusEvent(true);
                 break;
-            }
 
             case WM_KILLFOCUS:
-            {
                 io.AddFocusEvent(false);
+                break;
+
+            case WM_CHAR:
+                io.AddInputCharacterUTF16(static_cast<unsigned short>(wparam));
+                break;
+
+            case WM_KEYDOWN:
+            case WM_SYSKEYDOWN:
+            case WM_KEYUP:
+            case WM_SYSKEYUP:
+            {
+                const bool down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+                const ImGuiKey key = VirtualKeyToImGuiKey(wparam);
+                if (key != ImGuiKey_None)
+                {
+                    io.AddKeyEvent(key, down);
+                }
+                UpdateKeyModifiers(io);
                 break;
             }
 
             default:
-            {
                 break;
-            }
         }
     }
 
@@ -329,7 +435,7 @@ namespace myengine::ui
             return;
         }
 
-        for (auto& [_, windowContextPtr] : windows_)
+        for (auto& [windowId, windowContextPtr] : windows_)
         {
             if (windowContextPtr == nullptr || windowContextPtr->imguiContext == nullptr)
             {
@@ -345,9 +451,13 @@ namespace myengine::ui
             io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
             io.DeltaTime = std::max(deltaTime, 1.0f / 600.0f);
             ImGui::NewFrame();
-            BuildWindowUi(windowContext, deltaTime);
-            windowContext.wantMouseCapture = io.WantCaptureMouse;
-            windowContext.wantKeyboardCapture = false;
+
+            BuildWindowUi(windowContext);
+
+            const auto* editorWindowState = core::ServiceLocator::GetEditorRuntimeState().FindWindowState(windowId);
+            const bool gizmoCapture = editorWindowState != nullptr && (editorWindowState->gizmoHovered || editorWindowState->gizmoActive);
+            windowContext.wantMouseCapture = io.WantCaptureMouse || gizmoCapture;
+            windowContext.wantKeyboardCapture = io.WantCaptureKeyboard || io.WantTextInput;
             ImGui::Render();
         }
     }
@@ -513,6 +623,11 @@ namespace myengine::ui
         return it != windows_.end() && it->second != nullptr ? it->second->wantKeyboardCapture : false;
     }
 
+    bool UiManager::CanStartSceneNavigation(const core::WindowId windowId, const float mouseX, const float mouseY) const
+    {
+        return sceneEditor_.CanStartSceneNavigation(windowId, mouseX, mouseY);
+    }
+
     std::unique_ptr<UiManager::WindowUiContext> UiManager::CreateWindowContext(
         const core::WindowId windowId,
         const HWND hwnd,
@@ -540,6 +655,7 @@ namespace myengine::ui
         ImGui::SetCurrentContext(windowContext->imguiContext);
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigWindowsMoveFromTitleBarOnly = true;
         io.IniFilename = nullptr;
         io.LogFilename = nullptr;
@@ -601,166 +717,14 @@ namespace myengine::ui
         return windowContext;
     }
 
-    void UiManager::BuildWindowUi(WindowUiContext& windowContext, const float deltaTime) const
+    void UiManager::BuildWindowUi(WindowUiContext& windowContext)
     {
-        const auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
-        const float fps = deltaTime > 0.0001f ? 1.0f / deltaTime : 0.0f;
-
-        std::ostringstream gravityStream;
-        gravityStream.setf(std::ios::fixed);
-        gravityStream.precision(2);
-        gravityStream << physicsState.gravityStrength;
-
-        const float margin = 18.0f;
-        const float viewportWidth = static_cast<float>(std::max<std::uint32_t>(windowContext.width, 480u));
-        const float viewportHeight = static_cast<float>(std::max<std::uint32_t>(windowContext.height, 360u));
-        const float panelWidth = std::clamp(viewportWidth * 0.27f, 320.0f, 380.0f);
-        const float eventPanelHeight = std::min(200.0f, std::max(132.0f, viewportHeight * 0.22f));
-        const float controlPanelHeight = std::max(320.0f, viewportHeight - eventPanelHeight - margin * 3.0f);
-
-        const ImGuiWindowFlags panelFlags =
-            ImGuiWindowFlags_NoDocking |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoSavedSettings;
-
-        ImGui::SetNextWindowPos(ImVec2(margin, margin), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(panelWidth, controlPanelHeight), ImGuiCond_Always);
-        if (ImGui::Begin("Physics Control Deck", nullptr, panelFlags))
-        {
-            ImGui::TextColored(ImVec4(0.48f, 0.85f, 0.91f, 1.0f), "MYENGINE PHYSICS");
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.97f, 1.0f, 1.0f));
-            ImGui::SetWindowFontScale(1.18f);
-            ImGui::TextUnformatted("Control Deck");
-            ImGui::SetWindowFontScale(1.0f);
-            ImGui::PopStyleColor();
-            ImGui::TextDisabled("%s", stateLabel_.c_str());
-            ImGui::Spacing();
-
-            if (ImGui::BeginTable("runtime_metrics", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings))
-            {
-                const std::array<std::pair<const char*, std::string>, 6> metrics = {{
-                    {"FPS", std::to_string(static_cast<int>(fps + 0.5f))},
-                    {"Bodies", std::to_string(physicsState.stats.rigidbodyCount)},
-                    {"Collisions", std::to_string(physicsState.stats.collisionPairs)},
-                    {"Triggers", std::to_string(physicsState.stats.triggerPairs)},
-                    {"Gravity", gravityStream.str()},
-                    {"Physics", physicsState.physicsPaused ? "Paused" : "Running"},
-                }};
-
-                for (const auto& [label, value] : metrics)
-                {
-                    ImGui::TableNextColumn();
-                    DrawMetricCard(label, value);
-                }
-                ImGui::EndTable();
-            }
-
-            ImGui::Spacing();
-            ImGui::SeparatorText("Spawn");
-            if (ImGui::Button("Spawn Box", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.spawnBox)
-            {
-                callbacks_.spawnBox(windowContext.windowId);
-            }
-            if (ImGui::Button("Spawn Sphere", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.spawnSphere)
-            {
-                callbacks_.spawnSphere(windowContext.windowId);
-            }
-            if (ImGui::Button("Spawn Burst", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.spawnBurst)
-            {
-                callbacks_.spawnBurst(windowContext.windowId);
-            }
-
-            ImGui::Spacing();
-            ImGui::SeparatorText("Scene");
-            if (ImGui::BeginTable("scene_buttons", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings))
-            {
-                ImGui::TableNextColumn();
-                if (ImGui::Button(physicsState.physicsPaused ? "Resume Physics" : "Pause Physics", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.togglePause)
-                {
-                    callbacks_.togglePause();
-                }
-
-                ImGui::TableNextColumn();
-                if (ImGui::Button("Toggle Debug", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.toggleDebugDraw)
-                {
-                    callbacks_.toggleDebugDraw();
-                }
-
-                ImGui::TableNextColumn();
-                if (ImGui::Button("Gravity -", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.adjustGravity)
-                {
-                    callbacks_.adjustGravity(-1.0f);
-                }
-
-                ImGui::TableNextColumn();
-                if (ImGui::Button("Gravity +", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.adjustGravity)
-                {
-                    callbacks_.adjustGravity(1.0f);
-                }
-
-                ImGui::EndTable();
-            }
-
-            if (ImGui::Button("Reset Scene", ImVec2(-FLT_MIN, 0.0f)) && callbacks_.resetScene)
-            {
-                callbacks_.resetScene();
-            }
-
-            ImGui::Spacing();
-            ImGui::SeparatorText("Controls");
-            if (ImGui::BeginTable("control_hints", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings))
-            {
-                ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, 88.0f);
-                ImGui::TableSetupColumn("hint", ImGuiTableColumnFlags_WidthStretch);
-                DrawControlRow("WASD", "move the physics box");
-                DrawControlRow("SPACE", "apply upward movement");
-                DrawControlRow("RMB", "hold for free camera");
-                DrawControlRow("F3", "toggle debug draw");
-                ImGui::EndTable();
-            }
-        }
-        ImGui::End();
-
-        ImGui::SetNextWindowPos(ImVec2(margin, margin * 2.0f + controlPanelHeight), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(panelWidth, eventPanelHeight), ImGuiCond_Always);
-        if (ImGui::Begin("Physics Events", nullptr, panelFlags))
-        {
-            ImGui::TextDisabled("latest collision and trigger messages");
-            ImGui::Separator();
-
-            if (windowContext.monoFont != nullptr)
-            {
-                ImGui::PushFont(windowContext.monoFont);
-            }
-
-            if (ImGui::BeginChild("event_log_child", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
-            {
-                if (physicsState.recentEvents.empty())
-                {
-                    ImGui::TextDisabled("No collision events yet.");
-                }
-                else
-                {
-                    for (const auto& eventText : physicsState.recentEvents)
-                    {
-                        ImGui::TextUnformatted(eventText.c_str());
-                    }
-
-                    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-                    {
-                        ImGui::SetScrollHereY(1.0f);
-                    }
-                }
-            }
-            ImGui::EndChild();
-
-            if (windowContext.monoFont != nullptr)
-            {
-                ImGui::PopFont();
-            }
-        }
-        ImGui::End();
+        SceneEditorWindowContext context;
+        context.windowId = windowContext.windowId;
+        context.width = windowContext.width;
+        context.height = windowContext.height;
+        context.monoFont = windowContext.monoFont;
+        context.stateLabel = stateLabel_;
+        sceneEditor_.BuildWindowUi(context);
     }
 }

@@ -7,6 +7,7 @@
 
 #include <myengine/core/Types.h>
 #include <myengine/render/IRenderAdapter.h>
+#include <myengine/ui/SceneEditor.h>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -20,24 +21,13 @@ namespace myengine::core
 
 namespace myengine::ui
 {
-    struct UiCallbacks
-    {
-        std::function<void(core::WindowId)> spawnBox;
-        std::function<void(core::WindowId)> spawnSphere;
-        std::function<void(core::WindowId)> spawnBurst;
-        std::function<void()> resetScene;
-        std::function<void()> togglePause;
-        std::function<void()> toggleDebugDraw;
-        std::function<void(float)> adjustGravity;
-    };
-
     class UiManager
     {
     public:
         UiManager();
         ~UiManager();
 
-        bool Initialize(render::IRenderAdapter& renderAdapter, core::Logger& logger, UiCallbacks callbacks);
+        bool Initialize(render::IRenderAdapter& renderAdapter, core::Logger& logger, SceneEditorServices services);
         void Shutdown();
 
         bool RegisterWindow(core::WindowId windowId, HWND hwnd, render::RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height);
@@ -50,18 +40,19 @@ namespace myengine::ui
         void SetStateLabel(std::string stateLabel);
         bool WantsMouseCapture(core::WindowId windowId) const;
         bool WantsKeyboardCapture(core::WindowId windowId) const;
+        bool CanStartSceneNavigation(core::WindowId windowId, float mouseX, float mouseY) const;
 
     private:
         struct WindowUiContext;
 
         std::unique_ptr<WindowUiContext> CreateWindowContext(core::WindowId windowId, HWND hwnd, render::RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height);
-        void BuildWindowUi(WindowUiContext& windowContext, float deltaTime) const;
+        void BuildWindowUi(WindowUiContext& windowContext);
 
         render::IRenderAdapter* renderAdapter_ = nullptr;
         core::Logger* logger_ = nullptr;
-        UiCallbacks callbacks_{};
         std::string stateLabel_ = "Gameplay";
         bool initialized_ = false;
         std::unordered_map<core::WindowId, std::unique_ptr<WindowUiContext>> windows_;
+        SceneEditor sceneEditor_;
     };
 }

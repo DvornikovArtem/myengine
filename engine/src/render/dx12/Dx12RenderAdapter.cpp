@@ -93,6 +93,7 @@ namespace myengine::render::dx12
 
             return ((value + alignment - 1) / alignment) * alignment;
         }
+
     }
 
     Dx12RenderAdapter::Dx12RenderAdapter(core::Logger& logger)
@@ -466,6 +467,58 @@ namespace myengine::render::dx12
         activeSurface_ = surface;
         activeFrameTransientResources_ = &surface->frameTransientResources[backBufferIndex];
         return true;
+    }
+
+    void Dx12RenderAdapter::SetRenderRegion(const RenderSurfaceHandle handle, const IntRect* region)
+    {
+        auto* surface = FindSurface(handle);
+        if (surface == nullptr)
+        {
+            return;
+        }
+
+        if (region == nullptr)
+        {
+            surface->viewport = {
+                0.0f,
+                0.0f,
+                static_cast<float>(surface->width),
+                static_cast<float>(surface->height),
+                0.0f,
+                1.0f,
+            };
+            surface->scissorRect = {
+                0,
+                0,
+                static_cast<LONG>(surface->width),
+                static_cast<LONG>(surface->height),
+            };
+        }
+        else
+        {
+            const int left = std::clamp(region->left, 0, static_cast<int>(surface->width));
+            const int top = std::clamp(region->top, 0, static_cast<int>(surface->height));
+            const int right = std::clamp(region->right, left + 1, static_cast<int>(surface->width));
+            const int bottom = std::clamp(region->bottom, top + 1, static_cast<int>(surface->height));
+
+            surface->viewport = {
+                static_cast<float>(left),
+                static_cast<float>(top),
+                static_cast<float>(right - left),
+                static_cast<float>(bottom - top),
+                0.0f,
+                1.0f,
+            };
+            surface->scissorRect = {left, top, right, bottom};
+        }
+
+        if (activeSurface_ == nullptr || surface != activeSurface_)
+        {
+            return;
+        }
+
+        context_.commandList->RSSetViewports(1, &surface->viewport);
+        context_.commandList->RSSetScissorRects(1, &surface->scissorRect);
     }
 
     void Dx12RenderAdapter::SetViewProjection(const RenderSurfaceHandle handle, const Matrix4& view, const Matrix4& projection)
