@@ -131,7 +131,6 @@ target_compile_definitions(myengine_engine
 
 target_link_libraries(myengine_engine
   PUBLIC
-    myengine_assimp
     myengine_stb
     myengine_nlohmann_json
     myengine_directxheaders

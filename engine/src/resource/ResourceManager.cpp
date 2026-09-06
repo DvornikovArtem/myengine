@@ -6,19 +6,19 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <fstream>
 #include <future>
 #include <limits>
+#include <sstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
-#include <assimp/Importer.hpp>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
 #include <directxtex/DirectXTex.h>
 #include <nlohmann/json.hpp>
 
@@ -40,17 +40,10 @@ namespace myengine::resource
         constexpr std::uint32_t kMeshBinaryVersion = 2;
         constexpr std::uint32_t kTextureBinaryVersion = 2;
 
-        constexpr unsigned int kMeshImportFlags =
-            aiProcess_Triangulate |
-            aiProcess_JoinIdenticalVertices |
-            aiProcess_ImproveCacheLocality |
-            aiProcess_GenSmoothNormals |
-            aiProcess_PreTransformVertices |
-            aiProcess_ConvertToLeftHanded |
-            aiProcess_ValidateDataStructure;
-
-        constexpr bool kMeshFlipUvY = false;
-        constexpr bool kMeshReverseWinding = false;
+        // Match the coordinate conversion previously supplied by Assimp's
+        // aiProcess_ConvertToLeftHanded flag for the repository's OBJ assets.
+        constexpr bool kMeshFlipUvY = true;
+        constexpr bool kMeshReverseWinding = true;
         constexpr bool kTextureUseDirectXTexFirst = true;
         constexpr int kTextureRequestedChannels = STBI_rgb_alpha;
         constexpr bool kTextureForceSrgb = true;
@@ -116,8 +109,7 @@ namespace myengine::resource
 
         constexpr std::uint64_t BuildMeshPipelineSignature()
         {
-            std::uint64_t hash = HashString("mesh-import-pipeline");
-            hash = HashCombine(hash, static_cast<std::uint64_t>(kMeshImportFlags));
+            std::uint64_t hash = HashString("mesh-import-pipeline-obj");
             hash = HashCombine(hash, static_cast<std::uint64_t>(kMeshFlipUvY ? 1u : 0u));
             hash = HashCombine(hash, static_cast<std::uint64_t>(kMeshReverseWinding ? 1u : 0u));
             hash = HashCombine(hash, static_cast<std::uint64_t>(sizeof(render::MeshVertex)));
@@ -287,6 +279,106 @@ namespace myengine::resource
             return outStream.good();
         }
 
+        bool IsValidMeshData(const render::MeshData& meshData)
+        {
+            if (meshData.vertices.empty() || meshData.indices.empty())
+            {
+                return false;
+            }
+
+            return std::all_of(
+                meshData.indices.begin(),
+                meshData.indices.end(),
+                [&meshData](const std::uint32_t index)
+                {
+                    return static_cast<std::size_t>(index) < meshData.vertices.size();
+                });
+        }
+
+        bool GetMeshBinaryPayloadSizes(
+            const std::filesystem::path& binaryPath,
+            const MeshBinaryHeader& header,
+            std::size_t& outVertexCount,
+            std::size_t& outIndexCount,
+            std::size_t& outVertexBytes,
+            std::size_t& outIndexBytes)
+        {
+            const std::size_t maxSize = std::numeric_limits<std::size_t>::max();
+            if (header.vertexCount == 0 ||
+                header.indexCount == 0 ||
+                header.vertexCount > maxSize ||
+                header.indexCount > maxSize ||
+                header.vertexCount > maxSize / sizeof(render::MeshVertex) ||
+                header.indexCount > maxSize / sizeof(std::uint32_t))
+            {
+                return false;
+            }
+
+            outVertexCount = static_cast<std::size_t>(header.vertexCount);
+            outIndexCount = static_cast<std::size_t>(header.indexCount);
+            outVertexBytes = outVertexCount * sizeof(render::MeshVertex);
+            outIndexBytes = outIndexCount * sizeof(std::uint32_t);
+            if (outVertexBytes > maxSize - outIndexBytes)
+            {
+                return false;
+            }
+
+            std::error_code ec;
+            const std::uintmax_t fileSize = std::filesystem::file_size(binaryPath, ec);
+            if (ec || fileSize < sizeof(MeshBinaryHeader))
+            {
+                return false;
+            }
+
+            const std::uintmax_t payloadBytes =
+                static_cast<std::uintmax_t>(outVertexBytes + outIndexBytes);
+            return payloadBytes <= fileSize - sizeof(MeshBinaryHeader);
+        }
+
+        bool GetTextureBinaryPayloadSize(
+            const std::filesystem::path& binaryPath,
+            const TextureBinaryHeader& header,
+            std::size_t& outPixelBytes)
+        {
+            constexpr std::size_t kRgba8Channels = 4;
+            const std::size_t maxSize = std::numeric_limits<std::size_t>::max();
+            if (header.width == 0 ||
+                header.height == 0 ||
+                header.channels != kRgba8Channels ||
+                header.srgb > 1 ||
+                static_cast<std::size_t>(header.width) > maxSize / kRgba8Channels)
+            {
+                return false;
+            }
+
+            const std::size_t rowBytes = static_cast<std::size_t>(header.width) * kRgba8Channels;
+            if (static_cast<std::size_t>(header.height) > maxSize / rowBytes)
+            {
+                return false;
+            }
+
+            const std::size_t expectedPixelBytes = rowBytes * static_cast<std::size_t>(header.height);
+            if (header.pixelBytes != expectedPixelBytes)
+            {
+                return false;
+            }
+
+            std::error_code ec;
+            const std::uintmax_t fileSize = std::filesystem::file_size(binaryPath, ec);
+            if (ec || fileSize < sizeof(TextureBinaryHeader))
+            {
+                return false;
+            }
+
+            if (static_cast<std::uintmax_t>(expectedPixelBytes) > fileSize - sizeof(TextureBinaryHeader))
+            {
+                return false;
+            }
+
+            outPixelBytes = expectedPixelBytes;
+            return true;
+        }
+
         bool CopyRgba8Image(const DirectX::Image& image, render::TextureData& outTexture)
         {
             if (image.width == 0 || image.height == 0 || image.pixels == nullptr)
@@ -406,6 +498,93 @@ namespace myengine::resource
             return true;
         }
 
+        struct ObjVertexKey
+        {
+            int position = -1;
+            int uv = -1;
+            int normal = -1;
+
+            bool operator==(const ObjVertexKey& other) const
+            {
+                return position == other.position && uv == other.uv && normal == other.normal;
+            }
+        };
+
+        struct ObjVertexKeyHash
+        {
+            std::size_t operator()(const ObjVertexKey& key) const
+            {
+                std::size_t hash = std::hash<int>{}(key.position);
+                hash ^= std::hash<int>{}(key.uv) + static_cast<std::size_t>(0x9e3779b9) + (hash << 6) + (hash >> 2);
+                hash ^= std::hash<int>{}(key.normal) + static_cast<std::size_t>(0x9e3779b9) + (hash << 6) + (hash >> 2);
+                return hash;
+            }
+        };
+
+        int ResolveObjIndex(const int rawIndex, const std::size_t valueCount)
+        {
+            if (rawIndex > 0)
+            {
+                const std::size_t index = static_cast<std::size_t>(rawIndex - 1);
+                return index < valueCount ? static_cast<int>(index) : -1;
+            }
+
+            if (rawIndex < 0)
+            {
+                const auto index = static_cast<std::ptrdiff_t>(valueCount) + rawIndex;
+                return index >= 0 && index < static_cast<std::ptrdiff_t>(valueCount) ? static_cast<int>(index) : -1;
+            }
+
+            return -1;
+        }
+
+        ObjVertexKey ParseObjVertexKey(
+            const std::string& token,
+            const std::size_t positionCount,
+            const std::size_t uvCount,
+            const std::size_t normalCount)
+        {
+            ObjVertexKey key;
+            std::istringstream tokenStream(token);
+            std::string field;
+            int fieldIndex = 0;
+
+            while (std::getline(tokenStream, field, '/'))
+            {
+                if (!field.empty())
+                {
+                    try
+                    {
+                        const int rawIndex = std::stoi(field);
+                        if (fieldIndex == 0)
+                        {
+                            key.position = ResolveObjIndex(rawIndex, positionCount);
+                        }
+                        else if (fieldIndex == 1)
+                        {
+                            key.uv = ResolveObjIndex(rawIndex, uvCount);
+                        }
+                        else if (fieldIndex == 2)
+                        {
+                            key.normal = ResolveObjIndex(rawIndex, normalCount);
+                        }
+                    }
+                    catch (const std::exception&)
+                    {
+                        throw std::runtime_error("Invalid OBJ face index: " + token);
+                    }
+                }
+                ++fieldIndex;
+            }
+
+            if (key.position < 0)
+            {
+                throw std::runtime_error("OBJ face references a missing vertex: " + token);
+            }
+
+            return key;
+        }
+
         MeshCpuAsset LoadMeshFromSource(const std::filesystem::path& path)
         {
             if (IsBuiltinSpherePath(path))
@@ -482,75 +661,182 @@ namespace myengine::resource
                 return asset;
             }
 
-            Assimp::Importer importer;
-            const aiScene* scene = importer.ReadFile(path.string(), kMeshImportFlags);
-
-            if (scene == nullptr || scene->mNumMeshes == 0)
+            if (ToLower(path.extension().string()) != ".obj")
             {
-                throw std::runtime_error("Assimp failed to load scene: " + std::string(importer.GetErrorString()));
+                throw std::runtime_error("Unsupported mesh format without Assimp runtime: " + path.string());
+            }
+
+            std::ifstream stream(path);
+            if (!stream.is_open())
+            {
+                throw std::runtime_error("Failed to open OBJ mesh: " + path.string());
             }
 
             MeshCpuAsset asset;
             asset.dependencies.push_back(path);
+            std::vector<render::Float3> positions;
+            std::vector<render::Float2> uvs;
+            std::vector<render::Float3> normals;
+            std::unordered_map<ObjVertexKey, std::uint32_t, ObjVertexKeyHash> vertexMap;
+            std::vector<bool> hasNormal;
+            std::string line;
+            std::size_t lineNumber = 0;
 
-            for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
+            const auto addVertex = [&](const ObjVertexKey key) -> std::uint32_t
             {
-                const aiMesh* mesh = scene->mMeshes[meshIndex];
-                if (mesh == nullptr || mesh->mNumVertices == 0)
+                const auto found = vertexMap.find(key);
+                if (found != vertexMap.end())
+                {
+                    return found->second;
+                }
+
+                render::MeshVertex vertex{};
+                const auto& position = positions[static_cast<std::size_t>(key.position)];
+                vertex.position = {position.x, position.y, -position.z};
+                if (key.uv >= 0)
+                {
+                    const auto& uv = uvs[static_cast<std::size_t>(key.uv)];
+                    vertex.uv = {uv.x, kMeshFlipUvY ? (1.0f - uv.y) : uv.y};
+                }
+                if (key.normal >= 0)
+                {
+                    const auto& normal = normals[static_cast<std::size_t>(key.normal)];
+                    vertex.normal = {normal.x, normal.y, -normal.z};
+                }
+
+                const auto index = static_cast<std::uint32_t>(asset.data.vertices.size());
+                vertexMap.emplace(key, index);
+                asset.data.vertices.push_back(vertex);
+                hasNormal.push_back(key.normal >= 0);
+                return index;
+            };
+
+            while (std::getline(stream, line))
+            {
+                ++lineNumber;
+                std::istringstream lineStream(line);
+                std::string type;
+                lineStream >> type;
+                if (type.empty() || type.front() == '#')
                 {
                     continue;
                 }
 
-                const std::uint32_t baseVertex = static_cast<std::uint32_t>(asset.data.vertices.size());
-                asset.data.vertices.reserve(asset.data.vertices.size() + mesh->mNumVertices);
-
-                for (unsigned int vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex)
+                if (type == "v")
                 {
-                    render::MeshVertex vertex{};
-
-                    const aiVector3D& position = mesh->mVertices[vertexIndex];
-                    vertex.position = {position.x, position.y, position.z};
-
-                    if (mesh->HasNormals())
+                    render::Float3 position{};
+                    if (!(lineStream >> position.x >> position.y >> position.z))
                     {
-                        const aiVector3D& normal = mesh->mNormals[vertexIndex];
-                        vertex.normal = {normal.x, normal.y, normal.z};
+                        throw std::runtime_error("Invalid OBJ vertex at line " + std::to_string(lineNumber));
                     }
-
-                    if (mesh->HasTextureCoords(0))
-                    {
-                        const aiVector3D& uv = mesh->mTextureCoords[0][vertexIndex];
-                        vertex.uv = {uv.x, kMeshFlipUvY ? (1.0f - uv.y) : uv.y};
-                    }
-
-                    asset.data.vertices.push_back(vertex);
+                    positions.push_back(position);
+                    continue;
                 }
 
-                for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
+                if (type == "vt")
                 {
-                    const aiFace& face = mesh->mFaces[faceIndex];
-                    if (face.mNumIndices != 3)
+                    render::Float2 uv{};
+                    if (!(lineStream >> uv.x >> uv.y))
                     {
-                        continue;
+                        throw std::runtime_error("Invalid OBJ texture coordinate at line " + std::to_string(lineNumber));
                     }
+                    uvs.push_back(uv);
+                    continue;
+                }
 
-                    asset.data.indices.push_back(baseVertex + face.mIndices[0]);
+                if (type == "vn")
+                {
+                    render::Float3 normal{};
+                    if (!(lineStream >> normal.x >> normal.y >> normal.z))
+                    {
+                        throw std::runtime_error("Invalid OBJ normal at line " + std::to_string(lineNumber));
+                    }
+                    normals.push_back(normal);
+                    continue;
+                }
+
+                if (type != "f")
+                {
+                    continue;
+                }
+
+                std::vector<ObjVertexKey> face;
+                std::string token;
+                while (lineStream >> token)
+                {
+                    face.push_back(ParseObjVertexKey(token, positions.size(), uvs.size(), normals.size()));
+                }
+
+                if (face.size() < 3)
+                {
+                    throw std::runtime_error("OBJ face has fewer than three vertices at line " + std::to_string(lineNumber));
+                }
+
+                for (std::size_t index = 1; index + 1 < face.size(); ++index)
+                {
+                    const std::uint32_t first = addVertex(face[0]);
+                    const std::uint32_t second = addVertex(face[index]);
+                    const std::uint32_t third = addVertex(face[index + 1]);
+                    asset.data.indices.push_back(first);
                     if constexpr (kMeshReverseWinding)
                     {
-                        asset.data.indices.push_back(baseVertex + face.mIndices[2]);
-                        asset.data.indices.push_back(baseVertex + face.mIndices[1]);
+                        asset.data.indices.push_back(third);
+                        asset.data.indices.push_back(second);
                     }
                     else
                     {
-                        asset.data.indices.push_back(baseVertex + face.mIndices[1]);
-                        asset.data.indices.push_back(baseVertex + face.mIndices[2]);
+                        asset.data.indices.push_back(second);
+                        asset.data.indices.push_back(third);
                     }
+                }
+            }
+
+            for (std::size_t index = 0; index + 2 < asset.data.indices.size(); index += 3)
+            {
+                const auto first = asset.data.indices[index];
+                const auto second = asset.data.indices[index + 1];
+                const auto third = asset.data.indices[index + 2];
+                if (hasNormal[first] && hasNormal[second] && hasNormal[third])
+                {
+                    continue;
+                }
+
+                const auto& a = asset.data.vertices[first].position;
+                const auto& b = asset.data.vertices[second].position;
+                const auto& c = asset.data.vertices[third].position;
+                const render::Float3 ab{b.x - a.x, b.y - a.y, b.z - a.z};
+                const render::Float3 ac{c.x - a.x, c.y - a.y, c.z - a.z};
+                const render::Float3 faceNormal{
+                    ab.y * ac.z - ab.z * ac.y,
+                    ab.z * ac.x - ab.x * ac.z,
+                    ab.x * ac.y - ab.y * ac.x,
+                };
+
+                if (!hasNormal[first]) asset.data.vertices[first].normal = faceNormal;
+                if (!hasNormal[second]) asset.data.vertices[second].normal = faceNormal;
+                if (!hasNormal[third]) asset.data.vertices[third].normal = faceNormal;
+            }
+
+            for (std::size_t index = 0; index < asset.data.vertices.size(); ++index)
+            {
+                if (hasNormal[index])
+                {
+                    continue;
+                }
+
+                auto& normal = asset.data.vertices[index].normal;
+                const float length = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+                if (length > std::numeric_limits<float>::epsilon())
+                {
+                    normal.x /= length;
+                    normal.y /= length;
+                    normal.z /= length;
                 }
             }
 
             if (asset.data.vertices.empty() || asset.data.indices.empty())
             {
-                throw std::runtime_error("Mesh contains no renderable triangles");
+                throw std::runtime_error("OBJ contains no renderable triangles: " + path.string());
             }
 
             return asset;
@@ -664,27 +950,33 @@ namespace myengine::resource
                 throw std::runtime_error("Invalid mesh binary header");
             }
 
+            std::size_t vertexCount = 0;
+            std::size_t indexCount = 0;
+            std::size_t vertexBytes = 0;
+            std::size_t indexBytes = 0;
+            if (!GetMeshBinaryPayloadSizes(
+                    binaryPath,
+                    header,
+                    vertexCount,
+                    indexCount,
+                    vertexBytes,
+                    indexBytes))
+            {
+                throw std::runtime_error("Invalid mesh binary payload size");
+            }
+
             MeshCpuAsset asset;
             asset.loadedFromBinaryCache = true;
             asset.dependencies.push_back(binaryPath);
-            asset.data.vertices.resize(static_cast<std::size_t>(header.vertexCount));
-            asset.data.indices.resize(static_cast<std::size_t>(header.indexCount));
+            asset.data.vertices.resize(vertexCount);
+            asset.data.indices.resize(indexCount);
 
-            const std::size_t vertexBytes = asset.data.vertices.size() * sizeof(render::MeshVertex);
-            const std::size_t indexBytes = asset.data.indices.size() * sizeof(std::uint32_t);
+            stream.read(reinterpret_cast<char*>(asset.data.vertices.data()), static_cast<std::streamsize>(vertexBytes));
+            stream.read(reinterpret_cast<char*>(asset.data.indices.data()), static_cast<std::streamsize>(indexBytes));
 
-            if (vertexBytes > 0)
+            if (!stream || !IsValidMeshData(asset.data))
             {
-                stream.read(reinterpret_cast<char*>(asset.data.vertices.data()), static_cast<std::streamsize>(vertexBytes));
-            }
-            if (indexBytes > 0)
-            {
-                stream.read(reinterpret_cast<char*>(asset.data.indices.data()), static_cast<std::streamsize>(indexBytes));
-            }
-
-            if (!stream.good() && !stream.eof())
-            {
-                throw std::runtime_error("Failed to read mesh binary payload");
+                throw std::runtime_error("Invalid mesh binary payload");
             }
 
             return asset;
@@ -723,24 +1015,37 @@ namespace myengine::resource
                 return false;
             }
 
-            outAsset.loadedFromBinaryCache = true;
-            outAsset.dependencies = {binaryPath};
-            outAsset.data.vertices.resize(static_cast<std::size_t>(header.vertexCount));
-            outAsset.data.indices.resize(static_cast<std::size_t>(header.indexCount));
-
-            const std::size_t vertexBytes = outAsset.data.vertices.size() * sizeof(render::MeshVertex);
-            const std::size_t indexBytes = outAsset.data.indices.size() * sizeof(std::uint32_t);
-
-            if (vertexBytes > 0)
+            std::size_t vertexCount = 0;
+            std::size_t indexCount = 0;
+            std::size_t vertexBytes = 0;
+            std::size_t indexBytes = 0;
+            if (!GetMeshBinaryPayloadSizes(
+                    binaryPath,
+                    header,
+                    vertexCount,
+                    indexCount,
+                    vertexBytes,
+                    indexBytes))
             {
-                stream.read(reinterpret_cast<char*>(outAsset.data.vertices.data()), static_cast<std::streamsize>(vertexBytes));
-            }
-            if (indexBytes > 0)
-            {
-                stream.read(reinterpret_cast<char*>(outAsset.data.indices.data()), static_cast<std::streamsize>(indexBytes));
+                return false;
             }
 
-            return stream.good() || stream.eof();
+            MeshCpuAsset cachedAsset;
+            cachedAsset.loadedFromBinaryCache = true;
+            cachedAsset.dependencies = {binaryPath};
+            cachedAsset.data.vertices.resize(vertexCount);
+            cachedAsset.data.indices.resize(indexCount);
+
+            stream.read(reinterpret_cast<char*>(cachedAsset.data.vertices.data()), static_cast<std::streamsize>(vertexBytes));
+            stream.read(reinterpret_cast<char*>(cachedAsset.data.indices.data()), static_cast<std::streamsize>(indexBytes));
+
+            if (!stream || !IsValidMeshData(cachedAsset.data))
+            {
+                return false;
+            }
+
+            outAsset = std::move(cachedAsset);
+            return true;
         }
 
         TextureCpuAsset ReadTextureBinary(const std::filesystem::path& binaryPath)
@@ -757,6 +1062,12 @@ namespace myengine::resource
                 throw std::runtime_error("Invalid texture binary header");
             }
 
+            std::size_t pixelBytes = 0;
+            if (!GetTextureBinaryPayloadSize(binaryPath, header, pixelBytes))
+            {
+                throw std::runtime_error("Invalid texture binary payload size");
+            }
+
             TextureCpuAsset asset;
             asset.loadedFromBinaryCache = true;
             asset.dependencies.push_back(binaryPath);
@@ -764,16 +1075,13 @@ namespace myengine::resource
             asset.data.height = header.height;
             asset.data.channels = header.channels;
             asset.data.srgb = header.srgb != 0;
-            asset.data.pixelsRgba8.resize(static_cast<std::size_t>(header.pixelBytes));
+            asset.data.pixelsRgba8.resize(pixelBytes);
 
-            if (!asset.data.pixelsRgba8.empty())
-            {
-                stream.read(
-                    reinterpret_cast<char*>(asset.data.pixelsRgba8.data()),
-                    static_cast<std::streamsize>(asset.data.pixelsRgba8.size()));
-            }
+            stream.read(
+                reinterpret_cast<char*>(asset.data.pixelsRgba8.data()),
+                static_cast<std::streamsize>(asset.data.pixelsRgba8.size()));
 
-            if (!stream.good() && !stream.eof())
+            if (!stream)
             {
                 throw std::runtime_error("Failed to read texture binary payload");
             }
@@ -814,22 +1122,32 @@ namespace myengine::resource
                 return false;
             }
 
-            outAsset.loadedFromBinaryCache = true;
-            outAsset.dependencies = {binaryPath};
-            outAsset.data.width = header.width;
-            outAsset.data.height = header.height;
-            outAsset.data.channels = header.channels;
-            outAsset.data.srgb = header.srgb != 0;
-            outAsset.data.pixelsRgba8.resize(static_cast<std::size_t>(header.pixelBytes));
-
-            if (!outAsset.data.pixelsRgba8.empty())
+            std::size_t pixelBytes = 0;
+            if (!GetTextureBinaryPayloadSize(binaryPath, header, pixelBytes))
             {
-                stream.read(
-                    reinterpret_cast<char*>(outAsset.data.pixelsRgba8.data()),
-                    static_cast<std::streamsize>(outAsset.data.pixelsRgba8.size()));
+                return false;
             }
 
-            return stream.good() || stream.eof();
+            TextureCpuAsset cachedAsset;
+            cachedAsset.loadedFromBinaryCache = true;
+            cachedAsset.dependencies = {binaryPath};
+            cachedAsset.data.width = header.width;
+            cachedAsset.data.height = header.height;
+            cachedAsset.data.channels = header.channels;
+            cachedAsset.data.srgb = header.srgb != 0;
+            cachedAsset.data.pixelsRgba8.resize(pixelBytes);
+
+            stream.read(
+                reinterpret_cast<char*>(cachedAsset.data.pixelsRgba8.data()),
+                static_cast<std::streamsize>(cachedAsset.data.pixelsRgba8.size()));
+
+            if (!stream)
+            {
+                return false;
+            }
+
+            outAsset = std::move(cachedAsset);
+            return true;
         }
 
         MeshCpuAsset LoadMeshCpuAsset(const std::filesystem::path& resolvedPath)
@@ -880,6 +1198,8 @@ namespace myengine::resource
             return sourceAsset;
         }
 
+        std::filesystem::path GetExecutableDirectory();
+
         core::Color ParseColor(const json& value, const core::Color& fallback)
         {
             if (!value.is_array() || value.size() != 4)
@@ -902,12 +1222,60 @@ namespace myengine::resource
             keys.reserve(cache.size());
             for (const auto& [key, _] : cache)
             {
-                keys.push_back(key);
+                // NormalizeKey stores native Windows narrow path text.  Do
+                // not feed it to u8path(): a non-ASCII user directory can be
+                // encoded with the active Windows code page and would throw
+                // a conversion system_error.  The native path constructor
+                // performs the matching code-page conversion.
+                const std::filesystem::path assetPath(key);
+                std::string stableKey;
+                const std::array<std::filesystem::path, 2> roots{
+                    std::filesystem::u8path(MYENGINE_SOURCE_DIR),
+                    GetExecutableDirectory(),
+                };
+
+                for (const auto& root : roots)
+                {
+                    if (root.empty())
+                    {
+                        continue;
+                    }
+
+                    std::error_code ec;
+                    const std::filesystem::path relativePath = std::filesystem::relative(assetPath, root, ec);
+                    if (ec || relativePath.empty() || relativePath.is_absolute())
+                    {
+                        continue;
+                    }
+
+                    const std::string relativeText = relativePath.generic_string();
+                    if (relativeText == ".." || relativeText.rfind("../", 0) == 0)
+                    {
+                        continue;
+                    }
+
+                    stableKey = relativeText;
+                    break;
+                }
+
+                keys.push_back(ToLower(stableKey.empty() ? assetPath.lexically_normal().generic_string() : stableKey));
             }
 
             std::sort(keys.begin(), keys.end());
             keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
             return keys;
+        }
+
+        std::filesystem::path GetExecutableDirectory()
+        {
+            wchar_t modulePath[MAX_PATH]{};
+            const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+            if (length == 0 || length >= MAX_PATH)
+            {
+                return {};
+            }
+
+            return std::filesystem::path(modulePath).parent_path();
         }
     }
 
@@ -1067,17 +1435,27 @@ namespace myengine::resource
             return ec ? path.lexically_normal() : canonical;
         }
 
-        const std::filesystem::path projectRelative = std::filesystem::path(MYENGINE_SOURCE_DIR) / path;
+        const auto normalizeExisting = [&](const std::filesystem::path& candidate)
+        {
+            const auto canonical = std::filesystem::weakly_canonical(candidate, ec);
+            return ec ? candidate.lexically_normal() : canonical;
+        };
+
+        const std::filesystem::path projectRelative = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / path;
         if (std::filesystem::exists(projectRelative, ec))
         {
-            const auto canonical = std::filesystem::weakly_canonical(projectRelative, ec);
-            return ec ? projectRelative.lexically_normal() : canonical;
+            return normalizeExisting(projectRelative);
         }
 
         if (std::filesystem::exists(path, ec))
         {
-            const auto canonical = std::filesystem::weakly_canonical(path, ec);
-            return ec ? path.lexically_normal() : canonical;
+            return normalizeExisting(path);
+        }
+
+        const std::filesystem::path executableRelative = GetExecutableDirectory() / path;
+        if (!executableRelative.empty() && std::filesystem::exists(executableRelative, ec))
+        {
+            return normalizeExisting(executableRelative);
         }
 
         return projectRelative.lexically_normal();
@@ -1476,6 +1854,12 @@ namespace myengine::resource
         const std::filesystem::path& path,
         MeshCpuAsset cpuAsset)
     {
+        if (!IsValidMeshData(cpuAsset.data))
+        {
+            logger_.Warning("ResourceManager: invalid mesh data for " + path.string());
+            return nullptr;
+        }
+
         MeshAsset asset;
         asset.data = std::move(cpuAsset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);

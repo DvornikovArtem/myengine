@@ -57,10 +57,15 @@ namespace myengine::editor
 
     bool TransformGizmo::DrawAndHandle(const Context& context)
     {
+        // Keep an active manipulation alive while the pointer crosses an editor
+        // overlay (for example the viewport toolbar). ImGuizmo::Enable(false)
+        // clears its internal mouse/handle state, so disabling it mid-drag
+        // makes the gizmo disappear until the mouse button is released.
+        const bool wasUsing = using_ || ImGuizmo::IsUsing();
         hovered_ = false;
         using_ = false;
 
-        if (!context.enabled ||
+        if ((!context.enabled && !wasUsing) ||
             context.entity == ecs::kInvalidEntity ||
             !context.viewport.IsValid() ||
             !context.world.IsAlive(context.entity) ||
@@ -83,7 +88,6 @@ namespace myengine::editor
         auto view = StoreMatrix(context.viewMatrix);
         auto projection = StoreMatrix(context.projectionMatrix);
         auto model = StoreMatrix(worldMatrix);
-        ImGuizmo::BeginFrame();
         ImGuizmo::Enable(true);
         ImGuizmo::SetDrawlist();
         ImGuizmo::SetOrthographic(false);

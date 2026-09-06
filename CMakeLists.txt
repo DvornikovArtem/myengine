@@ -6,7 +6,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_CMake")
 set(CMAKE_SUPPRESS_REGENERATION ON)
 
-option(MYENGINE_COPY_RUNTIME_ASSETS "Copy assets/config to target output directory" OFF)
+option(MYENGINE_COPY_RUNTIME_ASSETS "Copy assets/config to target output directory" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -119,50 +119,6 @@ add_library(myengine_directxheaders INTERFACE)
 target_include_directories(myengine_directxheaders
   INTERFACE
     "${MYENGINE_DIRECTX_HEADERS_ROOT}")
-
-set(MYENGINE_ASSIMP_ROOT "${CMAKE_SOURCE_DIR}/external/assimp")
-set(MYENGINE_ASSIMP_INCLUDE_DIR "${MYENGINE_ASSIMP_ROOT}/Include")
-set(MYENGINE_ASSIMP_HEADER "${MYENGINE_ASSIMP_INCLUDE_DIR}/assimp/Importer.hpp")
-set(MYENGINE_ASSIMP_LIB_DEBUG "${MYENGINE_ASSIMP_ROOT}/lib/Debug/assimp-vc143-mtd.lib")
-set(MYENGINE_ASSIMP_LIB_RELEASE "${MYENGINE_ASSIMP_ROOT}/lib/Release/assimp-vc143-mt.lib")
-
-if(NOT EXISTS "${MYENGINE_ASSIMP_HEADER}")
-  message(FATAL_ERROR "Assimp header not found: ${MYENGINE_ASSIMP_HEADER}")
-endif()
-
-add_library(myengine_assimp INTERFACE)
-target_include_directories(myengine_assimp
-  INTERFACE
-    "${MYENGINE_ASSIMP_INCLUDE_DIR}")
-
-if(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}" OR EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}")
-  add_library(myengine_assimp_lib UNKNOWN IMPORTED GLOBAL)
-  if(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_DEBUG "${MYENGINE_ASSIMP_LIB_DEBUG}")
-  endif()
-  if(EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELEASE "${MYENGINE_ASSIMP_LIB_RELEASE}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELWITHDEBINFO "${MYENGINE_ASSIMP_LIB_RELEASE}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_MINSIZEREL "${MYENGINE_ASSIMP_LIB_RELEASE}")
-  elseif(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELEASE "${MYENGINE_ASSIMP_LIB_DEBUG}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_RELWITHDEBINFO "${MYENGINE_ASSIMP_LIB_DEBUG}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION_MINSIZEREL "${MYENGINE_ASSIMP_LIB_DEBUG}")
-  endif()
-  if(EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION "${MYENGINE_ASSIMP_LIB_DEBUG}")
-  elseif(EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}")
-    set_property(TARGET myengine_assimp_lib PROPERTY IMPORTED_LOCATION "${MYENGINE_ASSIMP_LIB_RELEASE}")
-  endif()
-
-  if(NOT EXISTS "${MYENGINE_ASSIMP_LIB_RELEASE}" AND EXISTS "${MYENGINE_ASSIMP_LIB_DEBUG}")
-    message(WARNING "Assimp release library not found. Using Debug library for all configurations.")
-  endif()
-
-  target_link_libraries(myengine_assimp INTERFACE myengine_assimp_lib)
-else()
-  message(FATAL_ERROR "Assimp library not found in ${MYENGINE_ASSIMP_ROOT}/lib")
-endif()
 
 add_subdirectory(engine)
 add_subdirectory(app)

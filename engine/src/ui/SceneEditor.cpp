@@ -94,6 +94,19 @@ namespace myengine::ui
             return std::filesystem::path(path).filename().string();
         }
 
+        bool ResourcePathsEqual(
+            const resource::ResourceManager& resourceManager,
+            const std::string& lhs,
+            const std::string& rhs)
+        {
+            if (lhs.empty() || rhs.empty())
+            {
+                return lhs == rhs;
+            }
+
+            return resourceManager.ResolvePath(lhs) == resourceManager.ResolvePath(rhs);
+        }
+
         std::string FormatBytes(const std::uint64_t bytes)
         {
             static constexpr std::array<const char*, 4> units{"B", "KB", "MB", "GB"};
@@ -931,7 +944,7 @@ namespace myengine::ui
                     {
                         for (const auto& meshKey : meshKeys)
                         {
-                            const bool selected = meshKey == renderer->meshPath;
+                            const bool selected = ResourcePathsEqual(*services_.resourceManager, meshKey, renderer->meshPath);
                             if (ImGui::Selectable(FileNameLabel(meshKey).c_str(), selected))
                             {
                                 const std::string beforeMeshSnapshot = CaptureSceneSnapshot();
@@ -950,7 +963,7 @@ namespace myengine::ui
                     {
                         for (const auto& materialKey : materialKeys)
                         {
-                            const bool selected = materialKey == renderer->materialPath;
+                            const bool selected = ResourcePathsEqual(*services_.resourceManager, materialKey, renderer->materialPath);
                             if (ImGui::Selectable(FileNameLabel(materialKey).c_str(), selected))
                             {
                                 const std::string beforeMaterialSnapshot = CaptureSceneSnapshot();
@@ -977,7 +990,7 @@ namespace myengine::ui
                         {
                             for (const auto& textureKey : textureKeys)
                             {
-                                const bool selected = textureKey == materialResource->asset.texturePath;
+                                const bool selected = ResourcePathsEqual(*services_.resourceManager, textureKey, materialResource->asset.texturePath);
                                 if (ImGui::Selectable(FileNameLabel(textureKey).c_str(), selected))
                                 {
                                     materialResource->asset.texturePath = textureKey;
@@ -1447,7 +1460,7 @@ namespace myengine::ui
             {
                 for (const auto& shaderKey : shaderKeys)
                 {
-                    const bool selected = shaderKey == materialResource->asset.shaderPath;
+                    const bool selected = ResourcePathsEqual(*services_.resourceManager, shaderKey, materialResource->asset.shaderPath);
                     if (ImGui::Selectable(FileNameLabel(shaderKey).c_str(), selected))
                     {
                         materialResource->asset.shaderPath = shaderKey;
@@ -1471,7 +1484,7 @@ namespace myengine::ui
             {
                 for (const auto& textureKey : textureKeys)
                 {
-                    const bool selected = textureKey == materialResource->asset.texturePath;
+                    const bool selected = ResourcePathsEqual(*services_.resourceManager, textureKey, materialResource->asset.texturePath);
                     if (ImGui::Selectable(FileNameLabel(textureKey).c_str(), selected))
                     {
                         materialResource->asset.texturePath = textureKey;

@@ -6,6 +6,8 @@ This repository contains:
 - `myengine_engine` - static library with reusable engine runtime systems
 - `myengine` - executable application that uses the engine
 
+Архитектура, порядок инициализации и UML-диаграммы: [`docs/architecture.md`](docs/architecture.md).
+
 ## 1. What This Project Demonstrates
 
 - Win32 application lifecycle (`Initialize -> Run -> Shutdown`)
@@ -28,7 +30,7 @@ This repository contains:
 ## 2. Requirements
 
 - Windows 10/11
-- Visual Studio 2022 (Desktop C++)
+- Visual Studio 2026 (Visual Studio 18) or Visual Studio 2022 (Visual Studio 17), with Desktop development with C++
 - CMake 3.24+
 - Windows SDK with DX12 libraries
 
@@ -44,6 +46,8 @@ From repository root:
 ```bat
 setup.bat
 ```
+
+`setup.bat` detects Visual Studio 18 (2026) first and falls back to Visual Studio 17 (2022). A build directory configured with a different generator is not removed automatically; use a new build directory or remove its cache manually.
 
 2. Build Debug:
 ```bat
@@ -70,7 +74,8 @@ clean.bat
 ## 4. Manual Build Commands
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DMYENGINE_COPY_RUNTIME_ASSETS=ON
+# Use "Visual Studio 17 2022" when Visual Studio 18 is not installed.
 cmake --build build --config Debug --target myengine
 ./build/app/Debug/myengine.exe
 ```
@@ -81,7 +86,7 @@ Startup:
 1. `app/src/main.cpp` loads config (`config/app.json`)
 2. `Application::Initialize` creates logger, render adapter, windows and DX12 surfaces
 3. ECS systems are registered (`CameraControlSystem`, `MotionSystem`, `RenderSystem`)
-4. Scene path is set to `assets/scenes/scene`
+4. Scene path is set to `assets/scenes/scene.json`
 5. If scene file exists -> load JSON; otherwise build demo scene and save it
 6. Main loop starts
 
@@ -93,7 +98,7 @@ Per frame (`Application::Run`):
 5. Render each active window through `RenderSystem`
 
 Shutdown:
-1. Save scene back to `assets/scenes/scene`
+1. Save scene back to `assets/scenes/scene.json`
 2. Shutdown render adapter and release runtime objects
 
 ## 6. Input and Controls (Current)
@@ -187,7 +192,7 @@ DX12 implementation (`Dx12RenderAdapter`):
 ## 9. Scene Serialization
 
 Scene is stored in:
-- `assets/scenes/scene`
+- `assets/scenes/scene.json`
 
 `SceneSerializer` persists:
 - entity ids
@@ -239,7 +244,7 @@ Notes:
 - `app/src/...` - application entry point and states
 - `assets/shaders/primitive.hlsl` - shader used by renderer
 - `assets/textures/debug.bmp` - sample texture
-- `assets/scenes/scene` - serialized scene file
+- `assets/scenes/scene.json` - serialized scene file
 - `config/app.json` - runtime config
 
 ## 13. Runtime Files

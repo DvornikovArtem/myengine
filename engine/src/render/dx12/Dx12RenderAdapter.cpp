@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -81,7 +83,25 @@ namespace myengine::render::dx12
 
         std::filesystem::path ResolveSourcePath(const char* relativePath)
         {
-            return std::filesystem::path(MYENGINE_SOURCE_DIR) / relativePath;
+            std::error_code ec;
+            const std::filesystem::path relative = relativePath;
+            if (std::filesystem::exists(relative, ec))
+            {
+                return std::filesystem::weakly_canonical(relative, ec);
+            }
+
+            wchar_t modulePath[MAX_PATH]{};
+            const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+            if (length > 0 && length < MAX_PATH)
+            {
+                const auto executableRelative = std::filesystem::path(modulePath).parent_path() / relative;
+                if (std::filesystem::exists(executableRelative, ec))
+                {
+                    return std::filesystem::weakly_canonical(executableRelative, ec);
+                }
+            }
+
+            return std::filesystem::u8path(MYENGINE_SOURCE_DIR) / relative;
         }
 
         UINT64 AlignUp(const UINT64 value, const UINT64 alignment)
@@ -157,6 +177,19 @@ namespace myengine::render::dx12
             return {};
         }
 
+        const auto invalidIndex = std::find_if(
+            meshData.indices.begin(),
+            meshData.indices.end(),
+            [&meshData](const std::uint32_t index)
+            {
+                return static_cast<std::size_t>(index) >= meshData.vertices.size();
+            });
+        if (invalidIndex != meshData.indices.end())
+        {
+            logger_.Warning("UploadMesh failed: mesh index is outside the vertex buffer");
+            return {};
+        }
+
         std::vector<DxVertex> vertices;
         vertices.reserve(meshData.vertices.size());
         for (const auto& vertex : meshData.vertices)
@@ -203,9 +236,28 @@ namespace myengine::render::dx12
             logger_.Warning("CreateTexture failed: SRV heap is not initialized");
             return {};
         }
-        if (textureData.width == 0 || textureData.height == 0 || textureData.pixelsRgba8.empty())
+        constexpr std::size_t kRgba8Channels = 4;
+        const std::size_t maxSize = std::numeric_limits<std::size_t>::max();
+        if (textureData.width == 0 ||
+            textureData.height == 0 ||
+            textureData.channels != kRgba8Channels ||
+            static_cast<std::uint64_t>(textureData.width) > maxSize / kRgba8Channels)
         {
             logger_.Warning("CreateTexture failed: invalid texture data");
+            return {};
+        }
+
+        const std::size_t rowBytes = static_cast<std::size_t>(textureData.width) * kRgba8Channels;
+        if (static_cast<std::uint64_t>(textureData.height) > maxSize / rowBytes)
+        {
+            logger_.Warning("CreateTexture failed: texture dimensions overflow pixel buffer size");
+            return {};
+        }
+
+        const std::size_t expectedPixelBytes = rowBytes * static_cast<std::size_t>(textureData.height);
+        if (textureData.pixelsRgba8.size() != expectedPixelBytes)
+        {
+            logger_.Warning("CreateTexture failed: pixel buffer size does not match texture dimensions");
             return {};
         }
         if (nextTextureDescriptorIndex_ >= kMaxTextureDescriptors)
@@ -1680,13 +1732,31 @@ namespace myengine::render::dx12
     {
         Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
 
+        std::ifstream sourceFile(sourcePath, std::ios::binary);
+        if (!sourceFile.is_open())
+        {
+            logger_.Error("Shader source file could not be opened: " + sourcePath.string());
+            return false;
+        }
+
+        const std::string source(
+            (std::istreambuf_iterator<char>(sourceFile)),
+            std::istreambuf_iterator<char>());
+        if (source.empty())
+        {
+            logger_.Error("Shader source file is empty: " + sourcePath.string());
+            return false;
+        }
+
         UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
         compileFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
 
-        const HRESULT hr = D3DCompileFromFile(
-            sourcePath.c_str(),
+        const HRESULT hr = D3DCompile(
+            source.data(),
+            source.size(),
+            sourcePath.string().c_str(),
             nullptr,
             D3D_COMPILE_STANDARD_FILE_INCLUDE,
             entryPoint.c_str(),
@@ -1705,6 +1775,7 @@ namespace myengine::render::dx12
                 sourcePath.string() +
                 " entry=" + entryPoint +
                 " profile=" + profile +
+                " hr=" + HrToString(hr) +
                 " error=" + errorText);
             return false;
         }

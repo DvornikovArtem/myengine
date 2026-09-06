@@ -15,7 +15,7 @@ namespace myengine::ecs::systems
         constexpr float kMaxPosition = 2.4f;
 
         world.ForEach<components::TransformComponent, components::MotionComponent>(
-            [deltaTime](const EntityId, components::TransformComponent& transform, components::MotionComponent& motion)
+            [deltaTime, kMinPosition, kMaxPosition](const EntityId, components::TransformComponent& transform, components::MotionComponent& motion)
             {
                 transform.position.x += motion.linearVelocity.x * deltaTime;
                 transform.position.y += motion.linearVelocity.y * deltaTime;

@@ -3,12 +3,15 @@
 #include <cfloat>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <imgui/imgui.h>
+#include "ImGuizmo.h"
 
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
@@ -181,6 +184,93 @@ namespace myengine::ui
             style.Colors[ImGuiCol_Separator] = ImVec4(0.25f, 0.30f, 0.36f, 1.0f);
             style.Colors[ImGuiCol_CheckMark] = ImVec4(0.90f, 0.67f, 0.26f, 1.0f);
             style.Colors[ImGuiCol_DockingPreview] = ImVec4(0.90f, 0.67f, 0.26f, 0.65f);
+        }
+
+        ImFont* LoadFontFromPath(
+            ImFontAtlas& atlas,
+            const std::filesystem::path& path,
+            const float sizePixels,
+            const ImWchar* glyphRanges)
+        {
+            std::ifstream fontFile(path, std::ios::binary | std::ios::ate);
+            if (!fontFile.is_open())
+            {
+                return nullptr;
+            }
+
+            const std::streampos fileSize = fontFile.tellg();
+            if (fileSize <= 0 || fileSize > static_cast<std::streampos>(std::numeric_limits<int>::max()))
+            {
+                return nullptr;
+            }
+
+            const auto dataSize = static_cast<std::size_t>(fileSize);
+            void* fontData = IM_ALLOC(dataSize);
+            if (fontData == nullptr)
+            {
+                return nullptr;
+            }
+
+            fontFile.seekg(0, std::ios::beg);
+            fontFile.read(static_cast<char*>(fontData), static_cast<std::streamsize>(dataSize));
+            if (!fontFile)
+            {
+                IM_FREE(fontData);
+                return nullptr;
+            }
+
+            // AddFontFromMemoryTTF takes ownership of IM_ALLOC memory and releases it with IM_FREE.
+            return atlas.AddFontFromMemoryTTF(
+                fontData,
+                static_cast<int>(dataSize),
+                sizePixels,
+                nullptr,
+                glyphRanges);
+        }
+
+        std::filesystem::path GetExecutableDirectory()
+        {
+            wchar_t modulePath[MAX_PATH]{};
+            const DWORD pathLength = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+            if (pathLength == 0)
+            {
+                return {};
+            }
+
+            return std::filesystem::path(modulePath).parent_path();
+        }
+
+        bool HasFontFiles(const std::filesystem::path& root)
+        {
+            std::error_code ec;
+            const bool hasBodyFont = std::filesystem::exists(root / "Inter-Regular.ttf", ec);
+            ec.clear();
+            const bool hasMonoFont = std::filesystem::exists(root / "JetBrainsMono-Regular.ttf", ec);
+            return hasBodyFont && hasMonoFont;
+        }
+
+        std::filesystem::path ResolveFontRoot()
+        {
+            const std::filesystem::path sourceRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/fonts";
+            if (HasFontFiles(sourceRoot))
+            {
+                return sourceRoot;
+            }
+
+            const std::filesystem::path executableRoot = GetExecutableDirectory() / "assets/fonts";
+            if (HasFontFiles(executableRoot))
+            {
+                return executableRoot;
+            }
+
+            std::error_code ec;
+            const std::filesystem::path currentRoot = std::filesystem::current_path(ec) / "assets/fonts";
+            if (!ec && HasFontFiles(currentRoot))
+            {
+                return currentRoot;
+            }
+
+            return sourceRoot;
         }
     }
 
@@ -451,6 +541,7 @@ namespace myengine::ui
             io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
             io.DeltaTime = std::max(deltaTime, 1.0f / 600.0f);
             ImGui::NewFrame();
+            ImGuizmo::BeginFrame();
 
             BuildWindowUi(windowContext);
 
@@ -663,12 +754,16 @@ namespace myengine::ui
         ConfigureStyle();
 
         const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesCyrillic();
-        const auto fontRoot = std::filesystem::path(MYENGINE_SOURCE_DIR) / "assets/fonts";
-        const auto interRegularPath = (fontRoot / "Inter-Regular.ttf").string();
-        const auto jetBrainsMonoPath = (fontRoot / "JetBrainsMono-Regular.ttf").string();
+        const auto fontRoot = ResolveFontRoot();
 
-        windowContext->bodyFont = io.Fonts->AddFontFromFileTTF(interRegularPath.c_str(), 17.0f, nullptr, glyphRanges);
-        windowContext->monoFont = io.Fonts->AddFontFromFileTTF(jetBrainsMonoPath.c_str(), 15.0f, nullptr, glyphRanges);
+        windowContext->bodyFont = LoadFontFromPath(*io.Fonts, fontRoot / "Inter-Regular.ttf", 17.0f, glyphRanges);
+        windowContext->monoFont = LoadFontFromPath(*io.Fonts, fontRoot / "JetBrainsMono-Regular.ttf", 15.0f, glyphRanges);
+        const bool customBodyFont = windowContext->bodyFont != nullptr;
+        const bool customMonoFont = windowContext->monoFont != nullptr;
+        if (windowContext->bodyFont == nullptr)
+        {
+            windowContext->bodyFont = io.Fonts->AddFontDefault();
+        }
         if (windowContext->bodyFont != nullptr)
         {
             io.FontDefault = windowContext->bodyFont;
@@ -676,6 +771,13 @@ namespace myengine::ui
         if (windowContext->monoFont == nullptr)
         {
             windowContext->monoFont = io.FontDefault;
+        }
+
+        if (logger_ != nullptr)
+        {
+            logger_->Info(
+                "UiManager: fonts ready (body=" + std::string(customBodyFont ? "custom" : "fallback") +
+                ", mono=" + std::string(customMonoFont ? "custom" : "fallback") + ")");
         }
 
         unsigned char* fontPixels = nullptr;

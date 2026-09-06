@@ -203,7 +203,12 @@ namespace myengine::core
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
-        sceneSavePath_ = std::filesystem::path(MYENGINE_SOURCE_DIR) / "assets/scenes/scene.json";
+        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/scene.json";
+        const auto executableScenePath = GetExecutableDirectory() / "assets/scenes/scene.json";
+        std::error_code scenePathError;
+        sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
+            ? sourceScenePath
+            : executableScenePath;
 
         BindRuntimeEventListeners();
 

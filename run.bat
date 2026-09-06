@@ -13,7 +13,7 @@ set "EXE=%BUILD_DIR%\app\%CONFIG%\myengine.exe"
 
 if not exist "%EXE%" (
   echo [RUN] Executable not found: %EXE%
-  call build.bat %CONFIG% myengine %BUILD_DIR%
+  call build.bat "%CONFIG%" myengine "%BUILD_DIR%"
   if errorlevel 1 exit /b 1
 )
 

@@ -22,7 +22,7 @@ namespace
         std::vector<std::filesystem::path> candidates;
 
     #ifdef MYENGINE_SOURCE_DIR
-        candidates.emplace_back(std::filesystem::path(MYENGINE_SOURCE_DIR) / "config/app.json");
+        candidates.emplace_back(std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "config/app.json");
     #endif
 
         wchar_t modulePath[MAX_PATH]{};
