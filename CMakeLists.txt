@@ -124,6 +124,8 @@ target_include_directories(myengine_directxheaders
   INTERFACE
     "${MYENGINE_DIRECTX_HEADERS_ROOT}")
 
+add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
+target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE>)
 add_subdirectory(engine)
 add_subdirectory(app)
 
