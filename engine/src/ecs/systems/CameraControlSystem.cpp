@@ -12,6 +12,8 @@
 #include <myengine/ecs/systems/CameraControlSystem.h>
 #include <myengine/input/InputManager.h>
 
+#include <tracy/Tracy.hpp>
+
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +33,8 @@ namespace myengine::ecs::systems
 
     void CameraControlSystem::Update(World& world, const float deltaTime)
     {
+        ZoneScoped;
+
         if (activeWindowId_ == 0)
         {
             return;

@@ -144,7 +144,8 @@ target_link_libraries(myengine_engine
     user32
     dwmapi
     gdi32
-    shell32)
+    shell32
+    TracyClient)
 
 myengine_apply_compiler_options(myengine_engine)
 

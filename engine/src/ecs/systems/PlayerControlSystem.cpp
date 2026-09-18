@@ -10,6 +10,8 @@
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/input/InputManager.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::ecs::systems
 {
     namespace
@@ -24,6 +26,8 @@ namespace myengine::ecs::systems
 
     void PlayerControlSystem::Update(World& world, const float deltaTime)
     {
+        ZoneScoped;
+
         if (core::ServiceLocator::GetEditorRuntimeState().mode != editor::RuntimeMode::Play)
         {
             return;

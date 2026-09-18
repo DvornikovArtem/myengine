@@ -31,6 +31,8 @@
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/scene/SceneSerializer.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::core
 {
     namespace
@@ -203,8 +205,8 @@ namespace myengine::core
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
-        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/scene.json";
-        const auto executableScenePath = GetExecutableDirectory() / "assets/scenes/scene.json";
+        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/benchmark.json";
+        const auto executableScenePath = GetExecutableDirectory() / "assets/scenes/benchmark.json";
         std::error_code scenePathError;
         sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
             ? sourceScenePath
@@ -227,10 +229,14 @@ namespace myengine::core
             RebindWindowControlledEntities();
         }
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        editorState.mode = editor::RuntimeMode::Edit;
+        //editorState.mode = editor::RuntimeMode::Edit;
+        //editorState.selectedEntity = ecs::kInvalidEntity;
+        //editorState.playModeSnapshot.clear();
+        //core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         editorState.selectedEntity = ecs::kInvalidEntity;
-        editorState.playModeSnapshot.clear();
-        core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
+        editorState.playModeSnapshot = CaptureSceneSnapshot();
+        editorState.mode = editor::RuntimeMode::Play;
+        core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
 
         timer_.Reset();
         logger_.Info("Application initialization finished");
@@ -278,27 +284,47 @@ namespace myengine::core
             const auto frameStartTime = std::chrono::steady_clock::now();
 
             const auto worldUpdateStartTime = std::chrono::steady_clock::now();
-            world_.UpdateSystems(deltaTime);
+            {
+                ZoneScopedN("World::UpdateSystems");
+                world_.UpdateSystems(deltaTime);
+            }
             const auto worldUpdateEndTime = std::chrono::steady_clock::now();
 
+
             const auto stateUpdateStartTime = std::chrono::steady_clock::now();
-            stateMachine_.Update(*this, deltaTime);
+            {
+                ZoneScopedN("StateMachine::Update");
+                stateMachine_.Update(*this, deltaTime);
+            }
             const auto stateUpdateEndTime = std::chrono::steady_clock::now();
+            
 
             const auto hotReloadStartTime = std::chrono::steady_clock::now();
-            if (resourceManager_ != nullptr)
             {
-                resourceManager_->UpdateHotReload();
+                ZoneScopedN("ResourceManager::UpdateHotReload");
+                if (resourceManager_ != nullptr)
+                {
+                    resourceManager_->UpdateHotReload();
+                }
             }
             const auto hotReloadEndTime = std::chrono::steady_clock::now();
 
+            
             const auto uiUpdateStartTime = std::chrono::steady_clock::now();
-            uiManager_.Update(deltaTime);
+            {
+                ZoneScopedN("UiManager::Update");
+                uiManager_.Update(deltaTime);
+            }
             const auto uiUpdateEndTime = std::chrono::steady_clock::now();
 
+            
             const auto renderStartTime = std::chrono::steady_clock::now();
-            RenderFrame();
+            {
+                ZoneScopedN("RenderFrame");
+                RenderFrame();
+            }
             const auto renderEndTime = std::chrono::steady_clock::now();
+
 
             const auto millisecondsBetween =
                 [](const std::chrono::steady_clock::time_point start, const std::chrono::steady_clock::time_point end)
@@ -349,6 +375,8 @@ namespace myengine::core
                 RequestQuit();
                 PostQuitMessage(0);
             }
+
+            FrameMark;
         }
 
         logger_.Info("Main loop finished");

@@ -5,6 +5,8 @@
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/systems/DebugRenderSystem.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::ecs::systems
 {
     namespace
@@ -87,6 +89,8 @@ namespace myengine::ecs::systems
 
     void DebugRenderSystem::Render(World& world, const RenderFrameContext& context)
     {
+        ZoneScoped;
+
         static_cast<void>(world);
 
         auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();

@@ -17,6 +17,8 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ui/UiManager.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::ui
 {
     namespace
@@ -555,6 +557,8 @@ namespace myengine::ui
 
     void UiManager::RenderWindow(const core::WindowId windowId)
     {
+        ZoneScoped;
+
         if (!initialized_ || renderAdapter_ == nullptr)
         {
             return;

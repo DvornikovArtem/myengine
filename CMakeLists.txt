@@ -29,7 +29,8 @@ endif()
 set(MYENGINE_DIRECTXTK_ROOT "${CMAKE_SOURCE_DIR}/external/directxtk")
 set(MYENGINE_DIRECTXTK_INCLUDE_DIR "${MYENGINE_DIRECTXTK_ROOT}/Include")
 set(MYENGINE_DIRECTXTK_SIMPLEMATH_HEADER "${MYENGINE_DIRECTXTK_INCLUDE_DIR}/directxtk/SimpleMath.h")
-set(MYENGINE_DIRECTXTK_LIB_PATH "${MYENGINE_DIRECTXTK_ROOT}/lib/x64/DirectXTK12.lib")
+set(MYENGINE_DIRECTXTK_LIB_DEBUG   "${MYENGINE_DIRECTXTK_ROOT}/lib/x64/Debug/DirectXTK12.lib")
+set(MYENGINE_DIRECTXTK_LIB_RELEASE "${MYENGINE_DIRECTXTK_ROOT}/lib/x64/Release/DirectXTK12.lib")
 
 if(NOT EXISTS "${MYENGINE_DIRECTXTK_SIMPLEMATH_HEADER}")
   message(FATAL_ERROR "DirectXTK SimpleMath header not found: ${MYENGINE_DIRECTXTK_SIMPLEMATH_HEADER}")
@@ -40,13 +41,16 @@ target_include_directories(myengine_directxtk
   INTERFACE
     "${MYENGINE_DIRECTXTK_INCLUDE_DIR}")
 
-if(EXISTS "${MYENGINE_DIRECTXTK_LIB_PATH}")
+if(EXISTS "${MYENGINE_DIRECTXTK_LIB_DEBUG}" AND EXISTS "${MYENGINE_DIRECTXTK_LIB_RELEASE}")
   add_library(myengine_directxtk12 STATIC IMPORTED GLOBAL)
   set_target_properties(myengine_directxtk12 PROPERTIES
-    IMPORTED_LOCATION "${MYENGINE_DIRECTXTK_LIB_PATH}")
+    IMPORTED_LOCATION_DEBUG "${MYENGINE_DIRECTXTK_LIB_DEBUG}"
+    IMPORTED_LOCATION_RELEASE "${MYENGINE_DIRECTXTK_LIB_RELEASE}"
+    IMPORTED_LOCATION_RELWITHDEBINFO "${MYENGINE_DIRECTXTK_LIB_RELEASE}"
+    IMPORTED_LOCATION_MINSIZEREL "${MYENGINE_DIRECTXTK_LIB_RELEASE}")
   target_link_libraries(myengine_directxtk INTERFACE myengine_directxtk12)
 else()
-  message(WARNING "DirectXTK12.lib not found at ${MYENGINE_DIRECTXTK_LIB_PATH}. Header-only parts will still be available.")
+  message(WARNING "DirectXTK12.lib (Debug/Release) not found in ${MYENGINE_DIRECTXTK_ROOT}/lib/x64")
 endif()
 
 set(MYENGINE_DIRECTXTEX_ROOT "${CMAKE_SOURCE_DIR}/external/directxtex")
@@ -120,6 +124,8 @@ target_include_directories(myengine_directxheaders
   INTERFACE
     "${MYENGINE_DIRECTX_HEADERS_ROOT}")
 
+add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
+target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE>)
 add_subdirectory(engine)
 add_subdirectory(app)
 
