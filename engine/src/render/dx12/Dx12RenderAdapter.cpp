@@ -17,6 +17,8 @@
 #include <myengine/core/Logger.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::render::dx12
 {
     namespace
@@ -467,6 +469,8 @@ namespace myengine::render::dx12
 
     bool Dx12RenderAdapter::BeginFrame(const RenderSurfaceHandle handle, const core::Color& clearColor)
     {
+        ZoneScoped;
+
         auto* surface = FindSurface(handle);
         if (surface == nullptr || surface->dsvHeap == nullptr || surface->depthStencil == nullptr)
         {
@@ -586,6 +590,8 @@ namespace myengine::render::dx12
 
     void Dx12RenderAdapter::Draw(const RenderSurfaceHandle handle, const DrawItem& drawItem)
     {
+        ZoneScoped;
+
         if (activeSurface_ == nullptr || !handle.IsValid())
         {
             return;
@@ -712,6 +718,8 @@ namespace myengine::render::dx12
 
     void Dx12RenderAdapter::DrawUiGeometry(const RenderSurfaceHandle handle, const UiDrawData& drawData)
     {
+        ZoneScoped;
+
         if (activeSurface_ == nullptr || uiPipelineState_ == nullptr || uiRootSignature_ == nullptr)
         {
             return;
@@ -798,6 +806,8 @@ namespace myengine::render::dx12
 
     void Dx12RenderAdapter::EndFrame(const RenderSurfaceHandle handle)
     {
+        ZoneScoped;
+
         auto* surface = FindSurface(handle);
         if (surface == nullptr || surface != activeSurface_)
         {
@@ -817,20 +827,23 @@ namespace myengine::render::dx12
         ID3D12CommandList* commandLists[] = {context_.commandList.Get()};
         context_.commandQueue->ExecuteCommandLists(1, commandLists);
 
-        const UINT syncInterval = vsyncEnabled_ ? 1u : 0u;
-        const UINT presentFlags = (!vsyncEnabled_ && allowTearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
-        const HRESULT presentResult = surface->swapChain->Present(syncInterval, presentFlags);
-        if (FAILED(presentResult))
         {
-            logger_.Error("Present failed: " + HrToString(presentResult));
-            if (presentResult == DXGI_ERROR_DEVICE_REMOVED || presentResult == DXGI_ERROR_DEVICE_RESET)
+            ZoneScopedN("Present");
+            const UINT syncInterval = vsyncEnabled_ ? 1u : 0u;
+            const UINT presentFlags = (!vsyncEnabled_ && allowTearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+            const HRESULT presentResult = surface->swapChain->Present(syncInterval, presentFlags);
+            if (FAILED(presentResult))
             {
-                logger_.Error("DX12 device removed reason: " + HrToString(context_.device->GetDeviceRemovedReason()));
-            }
+                logger_.Error("Present failed: " + HrToString(presentResult));
+                if (presentResult == DXGI_ERROR_DEVICE_REMOVED || presentResult == DXGI_ERROR_DEVICE_RESET)
+                {
+                    logger_.Error("DX12 device removed reason: " + HrToString(context_.device->GetDeviceRemovedReason()));
+                }
 
-            activeFrameTransientResources_ = nullptr;
-            activeSurface_ = nullptr;
-            return;
+                activeFrameTransientResources_ = nullptr;
+                activeSurface_ = nullptr;
+                return;
+            }
         }
 
         ++context_.fenceValue;
@@ -990,7 +1003,7 @@ namespace myengine::render::dx12
             logger_.Info("DX12 present vsync disabled in Debug. Set MYENGINE_VSYNC=1 to enable it.");
         }
 #else
-        vsyncEnabled_ = true;
+        vsyncEnabled_ = IsEnvironmentEnabled("MYENGINE_VSYNC");
 #endif
 
         struct AdapterCandidate
@@ -1888,6 +1901,8 @@ namespace myengine::render::dx12
 
     void Dx12RenderAdapter::WaitForFenceValue(const UINT64 fenceValue)
     {
+        ZoneScoped;
+
         if (context_.fence == nullptr || fenceEvent_ == nullptr || fenceValue == 0)
         {
             return;

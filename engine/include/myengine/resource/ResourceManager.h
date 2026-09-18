@@ -221,6 +221,16 @@ namespace myengine::resource
         std::unordered_map<std::string, MeshLoadJob> pendingMeshLoads_;
         std::unordered_map<std::string, TextureLoadJob> pendingTextureLoads_;
 
+        struct ResolvedRequest
+        {
+            std::filesystem::path path;
+            std::string key;
+        };
+
+        const ResolvedRequest& ResolveRequest(const std::filesystem::path& path);
+
+        std::unordered_map<std::string, ResolvedRequest> resolvedRequests_;
+
         ResourceHandle<MeshAsset> fallbackMesh_;
         ResourceHandle<TextureAsset> fallbackTexture_;
         ResourceHandle<ShaderAsset> fallbackShader_;

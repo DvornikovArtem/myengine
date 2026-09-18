@@ -19,6 +19,8 @@
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/spatial/UniformGrid3D.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::ecs::systems
 {
     namespace
@@ -724,6 +726,8 @@ namespace myengine::ecs::systems
 
     void PhysicsSystem::Update(World& world, const float deltaTime)
     {
+        ZoneScoped;
+
         auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
         physicsState.stats = {};
         physicsState.debugVectors.clear();

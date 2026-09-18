@@ -29,6 +29,8 @@
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::resource
 {
     namespace
@@ -1427,6 +1429,8 @@ namespace myengine::resource
 
     std::filesystem::path ResourceManager::ResolvePath(const std::filesystem::path& path) const
     {
+        ZoneScoped;
+
         std::error_code ec;
 
         if (path.is_absolute())
@@ -1513,73 +1517,89 @@ namespace myengine::resource
 
     ResourceHandle<MeshAsset> ResourceManager::LoadMesh(const std::filesystem::path& path)
     {
-        const std::filesystem::path resolvedPath = ResolvePath(path);
-        const std::string key = NormalizeKey(resolvedPath);
+        const auto& request = ResolveRequest(path);
+        if (const auto it = meshCache_.find(request.key); it != meshCache_.end())
+        {
+            return it->second;
+        }
+        ScheduleMeshLoad(request.key, request.path);
 
-        if (const auto it = meshCache_.find(key); it != meshCache_.end())
+        if (const auto it = meshCache_.find(request.key); it != meshCache_.end())
         {
             return it->second;
         }
 
-        ScheduleMeshLoad(key, resolvedPath);
-        auto placeholder = BuildMeshPlaceholder(key, resolvedPath);
-        meshCache_.insert_or_assign(key, placeholder);
+        ScheduleMeshLoad(request.key, request.path);
+        auto placeholder = BuildMeshPlaceholder(request.key, request.path);
+        meshCache_.insert_or_assign(request.key, placeholder);
         return placeholder;
     }
 
     ResourceHandle<TextureAsset> ResourceManager::LoadTexture(const std::filesystem::path& path)
     {
-        const std::filesystem::path resolvedPath = ResolvePath(path);
-        const std::string key = NormalizeKey(resolvedPath);
+        const auto& request = ResolveRequest(path);
+        if (const auto it = textureCache_.find(request.key); it != textureCache_.end())
+        {
+            return it->second;
+        }
+        ScheduleMeshLoad(request.key, request.path);
 
-        if (const auto it = textureCache_.find(key); it != textureCache_.end())
+        if (const auto it = textureCache_.find(request.key); it != textureCache_.end())
         {
             return it->second;
         }
 
-        ScheduleTextureLoad(key, resolvedPath);
-        auto placeholder = BuildTexturePlaceholder(key, resolvedPath);
-        textureCache_.insert_or_assign(key, placeholder);
+        ScheduleTextureLoad(request.key, request.path);
+        auto placeholder = BuildTexturePlaceholder(request.key, request.path);
+        textureCache_.insert_or_assign(request.key, placeholder);
         return placeholder;
     }
 
     ResourceHandle<ShaderAsset> ResourceManager::LoadShader(const std::filesystem::path& path)
     {
-        const std::filesystem::path resolvedPath = ResolvePath(path);
-        const std::string key = NormalizeKey(resolvedPath);
+        const auto& request = ResolveRequest(path);
+        if (const auto it = shaderCache_.find(request.key); it != shaderCache_.end())
+        {
+            return it->second;
+        }
+        ScheduleMeshLoad(request.key, request.path);
 
-        if (const auto it = shaderCache_.find(key); it != shaderCache_.end())
+        if (const auto it = shaderCache_.find(request.key); it != shaderCache_.end())
         {
             return it->second;
         }
 
-        auto resource = LoadShaderInternal(key, resolvedPath);
+        auto resource = LoadShaderInternal(request.key, request.path);
         if (resource == nullptr)
         {
-            resource = BuildShaderFallback(key, resolvedPath);
+            resource = BuildShaderFallback(request.key, request.path);
         }
 
-        shaderCache_.insert_or_assign(key, resource);
+        shaderCache_.insert_or_assign(request.key, resource);
         return resource;
     }
 
     ResourceHandle<MaterialAsset> ResourceManager::LoadMaterial(const std::filesystem::path& path)
     {
-        const std::filesystem::path resolvedPath = ResolvePath(path);
-        const std::string key = NormalizeKey(resolvedPath);
+        const auto& request = ResolveRequest(path);
+        if (const auto it = materialCache_.find(request.key); it != materialCache_.end())
+        {
+            return it->second;
+        }
+        ScheduleMeshLoad(request.key, request.path);
 
-        if (const auto it = materialCache_.find(key); it != materialCache_.end())
+        if (const auto it = materialCache_.find(request.key); it != materialCache_.end())
         {
             return it->second;
         }
 
-        auto resource = LoadMaterialInternal(key, resolvedPath);
+        auto resource = LoadMaterialInternal(request.key, request.path);
         if (resource == nullptr)
         {
-            resource = BuildMaterialFallback(key, resolvedPath);
+            resource = BuildMaterialFallback(request.key, request.path);
         }
 
-        materialCache_.insert_or_assign(key, resource);
+        materialCache_.insert_or_assign(request.key, resource);
         return resource;
     }
 
@@ -2184,5 +2204,18 @@ namespace myengine::resource
         asset.tint = core::Color{1.0f, 0.5f, 1.0f, 1.0f};
 
         return CreateResource("__fallback_material__", {}, std::move(asset));
+    }
+
+    const ResourceManager::ResolvedRequest& ResourceManager::ResolveRequest(const std::filesystem::path& path)
+    {
+        const std::string requested = path.generic_string();
+        if (const auto it = resolvedRequests_.find(requested); it != resolvedRequests_.end())
+        {
+            return it->second;
+        }
+
+        const std::filesystem::path resolvedPath = ResolvePath(path);
+        const auto [it, inserted] = resolvedRequests_.emplace(requested, ResolvedRequest{ resolvedPath, NormalizeKey(resolvedPath) });
+        return it->second;
     }
 }

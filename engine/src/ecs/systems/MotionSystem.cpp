@@ -7,10 +7,14 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/systems/MotionSystem.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::ecs::systems
 {
     void MotionSystem::Update(World& world, const float deltaTime)
     {
+        ZoneScoped;
+
         constexpr float kMinPosition = -2.4f;
         constexpr float kMaxPosition = 2.4f;
 

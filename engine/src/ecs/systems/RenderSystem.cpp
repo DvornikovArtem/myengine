@@ -25,6 +25,8 @@
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/spatial/Octree.h>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::ecs::systems
 {
     namespace
@@ -157,6 +159,8 @@ namespace myengine::ecs::systems
 
     void RenderSystem::Render(World& world, const RenderFrameContext& context)
     {
+        ZoneScoped;
+
         if (!context.surface.IsValid())
         {
             return;
@@ -221,161 +225,173 @@ namespace myengine::ecs::systems
         std::vector<RenderableEntry> renderables;
         std::vector<render::DrawItem> drawItems;
 
-        world.ForEach<components::TransformComponent, components::MeshRendererComponent>(
-            [&](const EntityId entity, components::TransformComponent&, components::MeshRendererComponent& renderer)
-            {
-                if (const auto* binding = world.TryGet<components::WindowBindingComponent>(entity);
-                    binding != nullptr && binding->windowId != context.windowId)
+        {
+            ZoneScopedN("CollectRenderables");
+            world.ForEach<components::TransformComponent, components::MeshRendererComponent>(
+                [&](const EntityId entity, components::TransformComponent&, components::MeshRendererComponent& renderer)
                 {
-                    return;
-                }
+                    if (const auto* binding = world.TryGet<components::WindowBindingComponent>(entity);
+                        binding != nullptr && binding->windowId != context.windowId)
+                    {
+                        return;
+                    }
 
-                if (!renderer.visible || renderer.meshPath.empty() || renderer.materialPath.empty())
-                {
-                    return;
-                }
+                    if (!renderer.visible || renderer.meshPath.empty() || renderer.materialPath.empty())
+                    {
+                        return;
+                    }
 
-                const DirectX::XMMATRIX worldMatrix = scene::ResolveWorldMatrix(
-                    world,
-                    entity,
-                    worldMatrixCache,
-                    visiting,
-                    &hierarchyCycleWarningLogged_,
-                    context.logger);
-                renderables.push_back(RenderableEntry{
-                    entity,
-                    &renderer,
-                    worldMatrix,
-                    BuildRenderableBounds(world, entity, worldMatrix),
+                    const DirectX::XMMATRIX worldMatrix = scene::ResolveWorldMatrix(
+                        world,
+                        entity,
+                        worldMatrixCache,
+                        visiting,
+                        &hierarchyCycleWarningLogged_,
+                        context.logger);
+                    renderables.push_back(RenderableEntry{
+                        entity,
+                        &renderer,
+                        worldMatrix,
+                        BuildRenderableBounds(world, entity, worldMatrix),
+                        });
                 });
-            });
+        }
 
         std::vector<std::size_t> visibleIndices;
         visibleIndices.reserve(renderables.size());
 
-        if (cameraFound && !renderables.empty())
         {
-            const DirectX::BoundingBox rootBounds = BuildOctreeRootBounds(renderables);
-            spatial::Octree<std::size_t> octree(rootBounds, 8, 6);
-            for (std::size_t index = 0; index < renderables.size(); ++index)
+            ZoneScopedN("FrustumCulling");
+            if (cameraFound && !renderables.empty())
             {
-                octree.Insert(index, renderables[index].bounds);
+                const DirectX::BoundingBox rootBounds = BuildOctreeRootBounds(renderables);
+                spatial::Octree<std::size_t> octree(rootBounds, 8, 6);
+                for (std::size_t index = 0; index < renderables.size(); ++index)
+                {
+                    octree.Insert(index, renderables[index].bounds);
+                }
+
+                const DirectX::BoundingFrustum worldFrustum = BuildWorldFrustum(viewMatrix, projectionMatrix);
+                octree.Query(worldFrustum, [&](const std::size_t index)
+                    {
+                        visibleIndices.push_back(index);
+                    });
+
+                std::sort(visibleIndices.begin(), visibleIndices.end());
+                visibleIndices.erase(std::unique(visibleIndices.begin(), visibleIndices.end()), visibleIndices.end());
             }
-
-            const DirectX::BoundingFrustum worldFrustum = BuildWorldFrustum(viewMatrix, projectionMatrix);
-            octree.Query(worldFrustum, [&](const std::size_t index)
+            else
             {
-                visibleIndices.push_back(index);
-            });
-
-            std::sort(visibleIndices.begin(), visibleIndices.end());
-            visibleIndices.erase(std::unique(visibleIndices.begin(), visibleIndices.end()), visibleIndices.end());
-        }
-        else
-        {
-            visibleIndices.resize(renderables.size());
-            for (std::size_t index = 0; index < renderables.size(); ++index)
-            {
-                visibleIndices[index] = index;
-            }
-        }
-
-        const auto appendDrawItem =
-            [&](const std::string& meshPath, const std::string& materialPath, const DirectX::XMMATRIX& modelMatrix)
-            {
-                if (context.resourceManager == nullptr)
+                visibleIndices.resize(renderables.size());
+                for (std::size_t index = 0; index < renderables.size(); ++index)
                 {
-                    return;
+                    visibleIndices[index] = index;
                 }
-
-                auto meshResource = context.resourceManager->Load<resource::MeshAsset>(meshPath);
-                auto materialResource = context.resourceManager->Load<resource::MaterialAsset>(materialPath);
-                if (meshResource == nullptr || materialResource == nullptr)
-                {
-                    return;
-                }
-
-                auto shaderResource = context.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
-                auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
-                if (shaderResource == nullptr || textureResource == nullptr)
-                {
-                    return;
-                }
-                if (!meshResource->asset.gpuHandle.IsValid() ||
-                    !shaderResource->asset.gpuHandle.IsValid() ||
-                    !textureResource->asset.gpuHandle.IsValid())
-                {
-                    return;
-                }
-
-                render::DrawItem drawItem;
-                drawItem.mesh = meshResource->asset.gpuHandle;
-                drawItem.shader = shaderResource->asset.gpuHandle;
-                drawItem.texture = textureResource->asset.gpuHandle;
-                drawItem.model = scene::ToRenderMatrix(modelMatrix);
-                drawItem.color = materialResource->asset.tint;
-                drawItems.push_back(drawItem);
-            };
-
-        if (context.resourceManager != nullptr)
-        {
-            for (const std::size_t visibleIndex : visibleIndices)
-            {
-                if (visibleIndex >= renderables.size())
-                {
-                    continue;
-                }
-
-                const RenderableEntry& entry = renderables[visibleIndex];
-                auto& renderer = *entry.renderer;
-                appendDrawItem(renderer.meshPath, renderer.materialPath, entry.worldMatrix);
             }
         }
 
-        auto& editorWindowState = core::ServiceLocator::GetEditorRuntimeState().GetOrCreateWindowState(context.windowId);
-        editorWindowState.renderStats.totalEntities = static_cast<std::uint32_t>(world.GetEntities().size());
-        editorWindowState.renderStats.renderableEntities = static_cast<std::uint32_t>(renderables.size());
-        editorWindowState.renderStats.renderedEntities = static_cast<std::uint32_t>(drawItems.size());
-        editorWindowState.renderStats.activeCollisions = core::ServiceLocator::GetPhysicsWorldState().stats.collisionPairs;
-        editorWindowState.renderStats.resourceMemoryBytes =
-            context.resourceManager != nullptr ? context.resourceManager->EstimateResourceMemoryUsageBytes() : 0ull;
-        editorWindowState.renderStats.camera.available = cameraFound;
-        editorWindowState.renderStats.camera.view = scene::ToRenderMatrix(viewMatrix);
-        editorWindowState.renderStats.camera.projection = scene::ToRenderMatrix(projectionMatrix);
-
-        if (cameraFound &&
-            editorWindowState.materialPreviewEnabled &&
-            !editorWindowState.materialPreviewMaterialPath.empty())
         {
-            const float previewDistance = 3.2f;
-            const float verticalHalf = std::tan(cameraFovYDeg * 0.5f * DirectX::XM_PI / 180.0f) * previewDistance;
-            const float horizontalHalf = verticalHalf * std::max(aspect, 0.01f);
-            const DirectX::XMVECTOR cameraRight = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(cameraUp, cameraForward));
+            ZoneScopedN("BuildDrawItems");
+            const auto appendDrawItem =
+                [&](const std::string& meshPath, const std::string& materialPath, const DirectX::XMMATRIX& modelMatrix)
+                {
+                    if (context.resourceManager == nullptr)
+                    {
+                        return;
+                    }
 
-            const DirectX::XMVECTOR previewPosition = DirectX::XMVectorSubtract(
-                DirectX::XMVectorAdd(
-                    DirectX::XMVectorAdd(
-                        cameraEye,
-                        DirectX::XMVectorScale(cameraForward, previewDistance)),
-                    DirectX::XMVectorScale(cameraRight, horizontalHalf * 0.55f)),
-                DirectX::XMVectorScale(cameraUp, verticalHalf * 0.48f));
+                    auto meshResource = context.resourceManager->Load<resource::MeshAsset>(meshPath);
+                    auto materialResource = context.resourceManager->Load<resource::MaterialAsset>(materialPath);
+                    if (meshResource == nullptr || materialResource == nullptr)
+                    {
+                        return;
+                    }
 
-            DirectX::XMFLOAT3 previewTranslation{};
-            DirectX::XMStoreFloat3(&previewTranslation, previewPosition);
+                    auto shaderResource = context.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
+                    auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
+                    if (shaderResource == nullptr || textureResource == nullptr)
+                    {
+                        return;
+                    }
+                    if (!meshResource->asset.gpuHandle.IsValid() ||
+                        !shaderResource->asset.gpuHandle.IsValid() ||
+                        !textureResource->asset.gpuHandle.IsValid())
+                    {
+                        return;
+                    }
 
-            const float previewScale = editorWindowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 0.55f : 0.7f;
-            const DirectX::XMMATRIX previewWorld =
-                DirectX::XMMatrixScaling(previewScale, previewScale, previewScale) *
-                DirectX::XMMatrixRotationRollPitchYaw(
-                    DirectX::XMConvertToRadians(-18.0f),
-                    DirectX::XMConvertToRadians(32.0f),
-                    0.0f) *
-                DirectX::XMMatrixTranslation(previewTranslation.x, previewTranslation.y, previewTranslation.z);
+                    render::DrawItem drawItem;
+                    drawItem.mesh = meshResource->asset.gpuHandle;
+                    drawItem.shader = shaderResource->asset.gpuHandle;
+                    drawItem.texture = textureResource->asset.gpuHandle;
+                    drawItem.model = scene::ToRenderMatrix(modelMatrix);
+                    drawItem.color = materialResource->asset.tint;
+                    drawItems.push_back(drawItem);
+                };
 
-            appendDrawItem(
-                PreviewMeshPath(editorWindowState.materialPreviewShape),
-                editorWindowState.materialPreviewMaterialPath,
-                previewWorld);
+            if (context.resourceManager != nullptr)
+            {
+                for (const std::size_t visibleIndex : visibleIndices)
+                {
+                    if (visibleIndex >= renderables.size())
+                    {
+                        continue;
+                    }
+
+                    const RenderableEntry& entry = renderables[visibleIndex];
+                    auto& renderer = *entry.renderer;
+                    appendDrawItem(renderer.meshPath, renderer.materialPath, entry.worldMatrix);
+                }
+            }
+
+            {
+                ZoneScopedN("UpdateEditorRenderStats");
+                auto& editorWindowState = core::ServiceLocator::GetEditorRuntimeState().GetOrCreateWindowState(context.windowId);
+                editorWindowState.renderStats.totalEntities = static_cast<std::uint32_t>(world.GetEntities().size());
+                editorWindowState.renderStats.renderableEntities = static_cast<std::uint32_t>(renderables.size());
+                editorWindowState.renderStats.renderedEntities = static_cast<std::uint32_t>(drawItems.size());
+                editorWindowState.renderStats.activeCollisions = core::ServiceLocator::GetPhysicsWorldState().stats.collisionPairs;
+                editorWindowState.renderStats.resourceMemoryBytes =
+                    context.resourceManager != nullptr ? context.resourceManager->EstimateResourceMemoryUsageBytes() : 0ull;
+                editorWindowState.renderStats.camera.available = cameraFound;
+                editorWindowState.renderStats.camera.view = scene::ToRenderMatrix(viewMatrix);
+                editorWindowState.renderStats.camera.projection = scene::ToRenderMatrix(projectionMatrix);
+
+                if (cameraFound &&
+                    editorWindowState.materialPreviewEnabled &&
+                    !editorWindowState.materialPreviewMaterialPath.empty())
+                {
+                    const float previewDistance = 3.2f;
+                    const float verticalHalf = std::tan(cameraFovYDeg * 0.5f * DirectX::XM_PI / 180.0f) * previewDistance;
+                    const float horizontalHalf = verticalHalf * std::max(aspect, 0.01f);
+                    const DirectX::XMVECTOR cameraRight = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(cameraUp, cameraForward));
+
+                    const DirectX::XMVECTOR previewPosition = DirectX::XMVectorSubtract(
+                        DirectX::XMVectorAdd(
+                            DirectX::XMVectorAdd(
+                                cameraEye,
+                                DirectX::XMVectorScale(cameraForward, previewDistance)),
+                            DirectX::XMVectorScale(cameraRight, horizontalHalf * 0.55f)),
+                        DirectX::XMVectorScale(cameraUp, verticalHalf * 0.48f));
+
+                    DirectX::XMFLOAT3 previewTranslation{};
+                    DirectX::XMStoreFloat3(&previewTranslation, previewPosition);
+
+                    const float previewScale = editorWindowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 0.55f : 0.7f;
+                    const DirectX::XMMATRIX previewWorld =
+                        DirectX::XMMatrixScaling(previewScale, previewScale, previewScale) *
+                        DirectX::XMMatrixRotationRollPitchYaw(
+                            DirectX::XMConvertToRadians(-18.0f),
+                            DirectX::XMConvertToRadians(32.0f),
+                            0.0f) *
+                        DirectX::XMMatrixTranslation(previewTranslation.x, previewTranslation.y, previewTranslation.z);
+
+                    appendDrawItem(
+                        PreviewMeshPath(editorWindowState.materialPreviewShape),
+                        editorWindowState.materialPreviewMaterialPath,
+                        previewWorld);
+                }
+            }
         }
 
         context.renderAdapter.SetViewProjection(
@@ -383,9 +399,12 @@ namespace myengine::ecs::systems
             scene::ToRenderMatrix(viewMatrix),
             scene::ToRenderMatrix(projectionMatrix));
 
-        for (const auto& drawItem : drawItems)
         {
-            context.renderAdapter.Draw(context.surface, drawItem);
+            ZoneScopedN("SubmitDraws");
+            for (const auto& drawItem : drawItems)
+            {
+                context.renderAdapter.Draw(context.surface, drawItem);
+            }
         }
     }
 }
