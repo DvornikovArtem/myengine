@@ -27,6 +27,7 @@
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
+#include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/scene/SceneSerializer.h>
@@ -124,6 +125,11 @@ namespace myengine::core
         }
 
         logger_.Info("Configured windows count: " + std::to_string(config_.windows.size()));
+
+        // Before any subsystem that may schedule jobs (ResourceManager, PhysicsSystem)
+        jobs::Initialize();
+        logger_.Info("Job system initialized: " + std::to_string(jobs::GetWorkerCount(jobs::Priority::High)) + " high, " + 
+            std::to_string(jobs::GetWorkerCount(jobs::Priority::Streaming)) + " streaming worker(s)");
 
         renderAdapter_ = std::make_unique<render::dx12::Dx12RenderAdapter>(logger_);
         if (!renderAdapter_->Initialize())
@@ -407,6 +413,9 @@ namespace myengine::core
 
         uiManager_.Shutdown();
         resourceManager_.reset();
+
+        // After ResourceManager: it waits for its loading jobs in the destructor
+        jobs::Shutdown();
 
         if (renderAdapter_)
         {
