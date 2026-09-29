@@ -700,6 +700,8 @@ namespace myengine::ecs::systems
 
         void RebuildDebugGeometry(World& world, physics::PhysicsWorldState& state)
         {
+            ZoneScopedN("Physics::RebuildDebugGeometry");
+
             state.debugBoxes.clear();
             state.debugSpheres.clear();
 
@@ -743,6 +745,8 @@ namespace myengine::ecs::systems
 
         while (accumulator_ >= fixedTimeStep)
         {
+            ZoneScopedN("Physics::Step");
+
             accumulator_ -= fixedTimeStep;
             physicsState.stats.fixedStepCount += 1;
             physicsState.stats.rigidbodyCount = 0;
@@ -750,55 +754,65 @@ namespace myengine::ecs::systems
             physicsState.stats.collisionPairs = 0;
             physicsState.stats.triggerPairs = 0;
 
-            world.ForEach<TransformComponent, RigidbodyComponent>(
-                [&](const EntityId, TransformComponent& transform, RigidbodyComponent& rigidbody)
-                {
-                    rigidbody.isGrounded = false;
-                    if (rigidbody.isKinematic || rigidbody.mass <= 0.0f)
+            {
+                ZoneScopedN("Physics::Integrate");
+                world.ForEach<TransformComponent, RigidbodyComponent>(
+                    [&](const EntityId, TransformComponent& transform, RigidbodyComponent& rigidbody)
                     {
-                        return;
-                    }
+                        rigidbody.isGrounded = false;
+                        if (rigidbody.isKinematic || rigidbody.mass <= 0.0f)
+                        {
+                            return;
+                        }
 
-                    Vec3 acceleration = rigidbody.acceleration;
-                    if (rigidbody.useGravity)
-                    {
-                        acceleration.y -= physicsState.gravityStrength * rigidbody.gravityScale;
-                    }
+                        Vec3 acceleration = rigidbody.acceleration;
+                        if (rigidbody.useGravity)
+                        {
+                            acceleration.y -= physicsState.gravityStrength * rigidbody.gravityScale;
+                        }
 
-                    rigidbody.velocity += acceleration * fixedTimeStep;
-                    const float dampingFactor = std::clamp(1.0f - rigidbody.linearDamping * fixedTimeStep, 0.0f, 1.0f);
-                    rigidbody.velocity *= dampingFactor;
+                        rigidbody.velocity += acceleration * fixedTimeStep;
+                        const float dampingFactor = std::clamp(1.0f - rigidbody.linearDamping * fixedTimeStep, 0.0f, 1.0f);
+                        rigidbody.velocity *= dampingFactor;
 
-                    transform.position += rigidbody.velocity * fixedTimeStep;
-                    physicsState.stats.rigidbodyCount += 1;
-                });
+                        transform.position += rigidbody.velocity * fixedTimeStep;
+                        physicsState.stats.rigidbodyCount += 1;
+                    });
+            }
 
             std::vector<CollisionBody> bodies;
-            bodies.reserve(world.GetEntities().size());
             std::unordered_map<EntityId, std::size_t> bodyIndexByEntity;
-            bodyIndexByEntity.reserve(world.GetEntities().size());
             spatial::UniformGrid3D broadPhaseGrid(1.4f);
+            std::vector<std::pair<EntityId, EntityId>> candidatePairs;
 
-            world.ForEach<TransformComponent, ColliderComponent>(
-                [&](const EntityId entity, TransformComponent& transform, ColliderComponent& collider)
-                {
-                    CollisionBody body;
-                    body.entity = entity;
-                    body.transform = &transform;
-                    body.collider = &collider;
-                    body.rigidbody = world.TryGet<RigidbodyComponent>(entity);
-                    body.inverseMass = ComputeInverseMass(body.rigidbody);
-                    RefreshCollisionBodyBounds(body);
-                    broadPhaseGrid.Insert(entity, body.aabb.min.x, body.aabb.min.y, body.aabb.min.z, body.aabb.max.x, body.aabb.max.y, body.aabb.max.z);
-                    bodyIndexByEntity[entity] = bodies.size();
-                    bodies.push_back(body);
-                });
+            {
+                ZoneScopedN("Physics::BroadPhase");
+                bodies.reserve(world.GetEntities().size());
+                bodyIndexByEntity.reserve(world.GetEntities().size());
+
+                world.ForEach<TransformComponent, ColliderComponent>(
+                    [&](const EntityId entity, TransformComponent& transform, ColliderComponent& collider)
+                    {
+                        CollisionBody body;
+                        body.entity = entity;
+                        body.transform = &transform;
+                        body.collider = &collider;
+                        body.rigidbody = world.TryGet<RigidbodyComponent>(entity);
+                        body.inverseMass = ComputeInverseMass(body.rigidbody);
+                        RefreshCollisionBodyBounds(body);
+                        broadPhaseGrid.Insert(entity, body.aabb.min.x, body.aabb.min.y, body.aabb.min.z, body.aabb.max.x, body.aabb.max.y, body.aabb.max.z);
+                        bodyIndexByEntity[entity] = bodies.size();
+                        bodies.push_back(body);
+                    });
+
+                candidatePairs = broadPhaseGrid.BuildCandidatePairs();
+            }
 
             std::unordered_set<std::uint64_t> currentCollisionPairs;
             std::unordered_set<std::uint64_t> currentTriggerPairs;
-            const auto candidatePairs = broadPhaseGrid.BuildCandidatePairs();
             physicsState.stats.broadPhasePairs = static_cast<std::uint32_t>(candidatePairs.size());
 
+            ZoneNamedN(solverZone, "Physics::NarrowPhaseAndSolve", true);
             for (std::uint32_t solverIteration = 0; solverIteration < kSolverIterations; ++solverIteration)
             {
                 const bool collectContactState = (solverIteration == 0);
@@ -873,6 +887,14 @@ namespace myengine::ecs::systems
 
             activeCollisionPairs_ = std::move(currentCollisionPairs);
             activeTriggerPairs_ = std::move(currentTriggerPairs);
+        }
+
+        TracyPlot("Physics/StepsPerFrame", static_cast<std::int64_t>(physicsState.stats.fixedStepCount));
+        if (physicsState.stats.fixedStepCount > 0)
+        {
+            TracyPlot("Physics/Rigidbodies", static_cast<std::int64_t>(physicsState.stats.rigidbodyCount));
+            TracyPlot("Physics/BroadPhasePairs", static_cast<std::int64_t>(physicsState.stats.broadPhasePairs));
+            TracyPlot("Physics/CollisionPairs", static_cast<std::int64_t>(physicsState.stats.collisionPairs));
         }
 
         RebuildDebugGeometry(world, physicsState);

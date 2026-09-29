@@ -1154,6 +1154,12 @@ namespace myengine::resource
 
         MeshCpuAsset LoadMeshCpuAsset(const std::filesystem::path& resolvedPath)
         {
+            ZoneScoped;
+#ifdef TRACY_ENABLE
+            const std::string zonePath = resolvedPath.filename().string();
+            ZoneText(zonePath.c_str(), zonePath.size());
+#endif
+
             if (IsMeshBinaryPath(resolvedPath))
             {
                 return ReadMeshBinary(resolvedPath);
@@ -1178,6 +1184,12 @@ namespace myengine::resource
 
         TextureCpuAsset LoadTextureCpuAsset(const std::filesystem::path& resolvedPath, core::Logger& logger)
         {
+            ZoneScoped;
+#ifdef TRACY_ENABLE
+            const std::string zonePath = resolvedPath.filename().string();
+            ZoneText(zonePath.c_str(), zonePath.size());
+#endif
+
             if (IsTextureBinaryPath(resolvedPath))
             {
                 return ReadTextureBinary(resolvedPath);
@@ -1651,8 +1663,13 @@ namespace myengine::resource
 
     void ResourceManager::PumpAsyncLoads()
     {
+        ZoneScoped;
+
         FinalizePendingMeshes();
         FinalizePendingTextures();
+
+        TracyPlot("Resources/PendingMeshLoads", static_cast<std::int64_t>(pendingMeshLoads_.size()));
+        TracyPlot("Resources/PendingTextureLoads", static_cast<std::int64_t>(pendingTextureLoads_.size()));
     }
 
     void ResourceManager::FinalizePendingMeshes()
@@ -1822,6 +1839,8 @@ namespace myengine::resource
             return cacheIt != meshCache_.end() ? cacheIt->second : nullptr;
         }
 
+        ZoneScopedN("ResourceManager::FinalizeMesh");
+
         try
         {
             MeshCpuAsset cpuAsset = jobIt->second.future.get();
@@ -1849,6 +1868,8 @@ namespace myengine::resource
             const auto cacheIt = textureCache_.find(key);
             return cacheIt != textureCache_.end() ? cacheIt->second : nullptr;
         }
+
+        ZoneScopedN("ResourceManager::FinalizeTexture");
 
         try
         {

@@ -258,9 +258,12 @@ namespace myengine::core
         } frameTimingStats;
 
         logger_.Info("Main loop started");
+        tracy::SetThreadName("Main");
 
         while (!quitRequested_)
         {
+            ZoneScopedN("Frame");
+
             input_.BeginFrame();
 
             while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
