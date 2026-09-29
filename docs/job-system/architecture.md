@@ -27,11 +27,11 @@
 ```
 engine/include/myengine/jobs/
     JobSystem.h - публичный API (единственное, что подключают системы движка)
+    SmallFunction.h - функция фиксированного размера без аллокаций
 engine/src/jobs/
     JobSystem.cpp - пулы, воркеры, планировщик, Wait, shutdown
     JobQueue.h/.cpp - очередь задач (сначала на мьютексе, потом Чейз–Лев)
     Fiber.h/.cpp - обёртка над Win32 fibers и пул fibers
-    SmallFunction.h - функция фиксированного размера без аллокаций
 ```
 
 Пространство имён пусть везде будет `myengine::jobs`.
