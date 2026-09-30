@@ -34,6 +34,8 @@
   include/myengine/ecs/systems/RenderSystem.h
   include/myengine/events/EventBus.h
   include/myengine/input/InputManager.h
+  include/myengine/jobs/JobSystem.h
+  include/myengine/jobs/SmallFunction.h
   include/myengine/physics/PhysicsEvents.h
   include/myengine/physics/PhysicsWorldState.h
   include/myengine/render/IRenderAdapter.h
@@ -68,6 +70,9 @@ set(ENGINE_SOURCES
   src/ecs/systems/PlayerControlSystem.cpp
   src/ecs/systems/RenderSystem.cpp
   src/input/InputManager.cpp
+  src/jobs/JobQueue.cpp
+  src/jobs/JobQueue.h
+  src/jobs/JobSystem.cpp
   src/render/dx12/Dx12RenderAdapter.cpp
   src/resource/ResourceManager.cpp
   src/scene/SceneSerializer.cpp

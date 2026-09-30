@@ -173,6 +173,8 @@ namespace myengine::render::dx12
 
     MeshHandle Dx12RenderAdapter::UploadMesh(const MeshData& meshData)
     {
+        ZoneScoped;
+
         if (meshData.vertices.empty() || meshData.indices.empty())
         {
             logger_.Warning("UploadMesh failed: mesh is empty");
@@ -233,6 +235,8 @@ namespace myengine::render::dx12
 
     TextureHandle Dx12RenderAdapter::CreateTexture(const TextureData& textureData)
     {
+        ZoneScoped;
+
         if (textureSrvHeap_ == nullptr)
         {
             logger_.Warning("CreateTexture failed: SRV heap is not initialized");
@@ -1874,6 +1878,8 @@ namespace myengine::render::dx12
 
     void Dx12RenderAdapter::WaitForGpu()
     {
+        ZoneScoped;
+
         if (context_.commandQueue == nullptr || context_.fence == nullptr || fenceEvent_ == nullptr)
         {
             return;

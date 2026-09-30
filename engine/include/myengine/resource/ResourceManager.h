@@ -2,16 +2,21 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
-#include <future>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <myengine/core/Types.h>
+#include <myengine/jobs/JobSystem.h>
 #include <myengine/render/RenderTypes.h>
 
 namespace myengine::core
@@ -91,6 +96,7 @@ namespace myengine::resource
     {
     public:
         ResourceManager(render::IRenderAdapter& renderAdapter, core::Logger& logger);
+        ~ResourceManager();
 
         template <typename T>
         ResourceHandle<T> Load(const std::filesystem::path& path)
@@ -157,6 +163,29 @@ namespace myengine::resource
         template <typename T>
         using ResourceCache = std::unordered_map<std::string, ResourceHandle<T>>;
 
+        struct LoadRequest
+        {
+            std::string key;
+            std::filesystem::path path;
+            std::uint64_t generation = 0;
+        };
+
+        struct MeshLoadResult
+        {
+            std::shared_ptr<const LoadRequest> request;
+            std::optional<MeshCpuAsset> cpuAsset;
+            std::string error;
+        };
+
+        struct TextureLoadResult
+        {
+            std::shared_ptr<const LoadRequest> request;
+            std::optional<TextureCpuAsset> cpuAsset;
+            std::string error;
+        };
+
+        using ReadyLoad = std::variant<MeshLoadResult, TextureLoadResult>;
+
         ResourceHandle<MeshAsset> LoadMesh(const std::filesystem::path& path);
         ResourceHandle<TextureAsset> LoadTexture(const std::filesystem::path& path);
         ResourceHandle<ShaderAsset> LoadShader(const std::filesystem::path& path);
@@ -167,16 +196,14 @@ namespace myengine::resource
         ResourceHandle<MaterialAsset> ReloadMaterial(const std::filesystem::path& path);
 
         void PumpAsyncLoads();
-        void FinalizePendingMeshes();
-        void FinalizePendingTextures();
+        void FinalizeMeshLoad(MeshLoadResult result);
+        void FinalizeTextureLoad(TextureLoadResult result);
         void ReloadChangedMeshes();
         void ReloadChangedTextures();
         void ReloadChangedShaders();
         void ReloadChangedMaterials();
         void ScheduleMeshLoad(const std::string& key, const std::filesystem::path& path);
         void ScheduleTextureLoad(const std::string& key, const std::filesystem::path& path);
-        ResourceHandle<MeshAsset> TryFinalizeMeshLoad(const std::string& key);
-        ResourceHandle<TextureAsset> TryFinalizeTextureLoad(const std::string& key);
         ResourceHandle<MeshAsset> BuildMeshResource(const std::string& key, const std::filesystem::path& path, MeshCpuAsset cpuAsset);
         ResourceHandle<TextureAsset> BuildTextureResource(const std::string& key, const std::filesystem::path& path, TextureCpuAsset cpuAsset);
         ResourceHandle<MeshAsset> BuildMeshPlaceholder(const std::string& key, const std::filesystem::path& path);
@@ -206,20 +233,14 @@ namespace myengine::resource
         ResourceCache<ShaderAsset> shaderCache_;
         ResourceCache<MaterialAsset> materialCache_;
 
-        struct MeshLoadJob
-        {
-            std::filesystem::path path;
-            std::future<MeshCpuAsset> future;
-        };
-
-        struct TextureLoadJob
-        {
-            std::filesystem::path path;
-            std::future<TextureCpuAsset> future;
-        };
-
-        std::unordered_map<std::string, MeshLoadJob> pendingMeshLoads_;
-        std::unordered_map<std::string, TextureLoadJob> pendingTextureLoads_;
+        std::unordered_map<std::string, std::uint64_t> pendingMeshLoads_;
+        std::unordered_map<std::string, std::uint64_t> pendingTextureLoads_;
+        std::unordered_map<std::string, std::uint64_t> meshLoadGenerations_;
+        std::unordered_map<std::string, std::uint64_t> textureLoadGenerations_;
+        std::mutex readyLoadsMutex_;
+        std::vector<ReadyLoad> readyLoads_;
+        jobs::Context streamingContext_;
+        std::atomic<bool> shuttingDown_{ false };
 
         struct ResolvedRequest
         {
