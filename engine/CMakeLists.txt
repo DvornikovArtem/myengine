@@ -70,6 +70,8 @@ set(ENGINE_SOURCES
   src/ecs/systems/PlayerControlSystem.cpp
   src/ecs/systems/RenderSystem.cpp
   src/input/InputManager.cpp
+  src/jobs/Fiber.cpp
+  src/jobs/Fiber.h
   src/jobs/JobQueue.cpp
   src/jobs/JobQueue.h
   src/jobs/JobSystem.cpp
