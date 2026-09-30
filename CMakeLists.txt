@@ -7,6 +7,7 @@ set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "_CMake")
 set(CMAKE_SUPPRESS_REGENERATION ON)
 
 option(MYENGINE_COPY_RUNTIME_ASSETS "Copy assets/config to target output directory" ON)
+option(MYENGINE_BUILD_TESTS "Build myengine tests" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -128,5 +129,10 @@ add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
 target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE> $<$<CONFIG:RelWithDebInfo>:TRACY_FIBERS>)
 add_subdirectory(engine)
 add_subdirectory(app)
+
+if(MYENGINE_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT myengine)
