@@ -48,7 +48,7 @@ namespace myengine::jobs
 			// One queue per worker: only its owner pushes and pops, the others steal
 			std::unique_ptr<JobQueue[]> workerQueues;
 			// Jobs from the threads that are not workers of this pool (the main thread, the other pool)
-			JobQueue sharedQueue;
+			SharedJobQueue sharedQueue;
 			// Jobs in all the queues of the pool. Grows under sleepMutex, so that a worker cannot miss new work
 			std::atomic<std::uint32_t> queuedJobCount{ 0 };
 
@@ -127,12 +127,14 @@ namespace myengine::jobs
 		{
 			if (tCurrentPool == &pool)
 			{
-				pool.workerQueues[tWorkerIndex].Push(std::move(job));
+				if (pool.workerQueues[tWorkerIndex].Push(std::move(job)))
+				{
+					return;
+				}
 			}
-			else
-			{
-				pool.sharedQueue.Push(std::move(job));
-			}
+
+			// External submissions and the rare local overflow go through the multi-producer queue
+			pool.sharedQueue.Push(std::move(job));
 		}
 
 		// Order: own queue, then the shared one, then stealing from the other workers in a circle
