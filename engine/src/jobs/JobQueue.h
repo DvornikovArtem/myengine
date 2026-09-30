@@ -2,8 +2,10 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -27,17 +29,48 @@ namespace myengine::jobs
 
 #pragma warning(pop)
 
-	// Queue of jobs protected by a mutex
-	// The owner works with the back (newest jobs), other threads steal from the front (oldest jobs)
+	// Bounded Chase-Lev deque. One owner pushes and pops at the bottom, other threads steal at the top
+#pragma warning(push)
+#pragma warning(disable : 4324) // top and bottom intentionally live on separate cache lines
+
 	class JobQueue
 	{
 	public:
-		void Push(Job&& job);
+		JobQueue();
+
+		// Returns false when the bounded deque cannot accept the job. The caller keeps ownership of it
+		bool Push(Job&& job);
 
 		// Takes the newest job. Returns false if the queue is empty
 		bool TryPop(Job& job);
 
 		// Takes the oldest job. Returns false if the queue is empty
+		bool TrySteal(Job& job);
+
+	private:
+		static constexpr std::size_t kCapacity = 1024;
+
+		struct Slot
+		{
+			// Logical index that may be written into this slot. index + 1 means that the job is ready
+			std::atomic<std::size_t> sequence{ 0 };
+			Job job;
+		};
+
+		void Take(std::size_t index, Job& job);
+
+		std::unique_ptr<Slot[]> slots_;
+		alignas(64) std::atomic<std::size_t> top_{ 0 };
+		alignas(64) std::atomic<std::size_t> bottom_{ 0 };
+	};
+
+#pragma warning(pop)
+
+	// Jobs submitted from outside a pool have no single owner, so this queue stays on a mutex
+	class SharedJobQueue
+	{
+	public:
+		void Push(Job&& job);
 		bool TrySteal(Job& job);
 
 	private:
