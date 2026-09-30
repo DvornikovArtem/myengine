@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -15,6 +16,7 @@
 #include <myengine/ecs/components/RigidbodyComponent.h>
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/systems/PhysicsSystem.h>
+#include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/spatial/UniformGrid3D.h>
@@ -82,6 +84,26 @@ namespace myengine::ecs::systems
             float inverseMass = 0.0f;
         };
 
+        struct IntegrationBody
+        {
+            TransformComponent* transform = nullptr;
+            RigidbodyComponent* rigidbody = nullptr;
+        };
+
+        struct SolverPair
+        {
+            std::size_t bodyAIndex = 0;
+            std::size_t bodyBIndex = 0;
+        };
+
+        struct ContactResult
+        {
+            ContactManifold manifold{};
+            float normalImpulse = 0.0f;
+            bool hasCollision = false;
+            bool isTrigger = false;
+        };
+
         constexpr float kCollisionEpsilon = 1e-5f;
         constexpr float kPositionCorrectionPercent = 0.8f;
         constexpr float kPositionCorrectionSlop = 0.001f;
@@ -90,6 +112,7 @@ namespace myengine::ecs::systems
         constexpr float kGroundSnapVelocity = 0.08f;
         constexpr float kCollisionEventImpulseThreshold = 0.35f;
         constexpr std::uint32_t kSolverIterations = 4;
+        constexpr std::uint32_t kPhysicsJobGroupSize = 64;
         constexpr float kMinimumSupportOverlapRatio = 0.35f;
 
         std::uint64_t MakePairKey(const EntityId a, const EntityId b)
@@ -107,6 +130,52 @@ namespace myengine::ecs::systems
             }
 
             return 1.0f / rigidbody->mass;
+        }
+
+        std::vector<std::vector<std::size_t>> BuildSolverColors(
+            const std::vector<SolverPair>& solverPairs,
+            const std::vector<CollisionBody>& bodies)
+        {
+            std::vector<std::vector<std::size_t>> colors;
+            std::vector<std::unordered_set<std::size_t>> mutableBodiesByColor;
+
+            for (std::size_t pairIndex = 0; pairIndex < solverPairs.size(); ++pairIndex)
+            {
+                const SolverPair& pair = solverPairs[pairIndex];
+                // Static colliders are only read, so they can be shared by pairs of the same color
+                const bool bodyAIsMutable = bodies[pair.bodyAIndex].rigidbody != nullptr;
+                const bool bodyBIsMutable = bodies[pair.bodyBIndex].rigidbody != nullptr;
+
+                std::size_t colorIndex = 0;
+                for (; colorIndex < colors.size(); ++colorIndex)
+                {
+                    const auto& mutableBodies = mutableBodiesByColor[colorIndex];
+                    const bool bodyAConflict = bodyAIsMutable && mutableBodies.find(pair.bodyAIndex) != mutableBodies.end();
+                    const bool bodyBConflict = bodyBIsMutable && mutableBodies.find(pair.bodyBIndex) != mutableBodies.end();
+                    if (!bodyAConflict && !bodyBConflict)
+                    {
+                        break;
+                    }
+                }
+
+                if (colorIndex == colors.size())
+                {
+                    colors.emplace_back();
+                    mutableBodiesByColor.emplace_back();
+                }
+
+                colors[colorIndex].push_back(pairIndex);
+                if (bodyAIsMutable)
+                {
+                    mutableBodiesByColor[colorIndex].insert(pair.bodyAIndex);
+                }
+                if (bodyBIsMutable)
+                {
+                    mutableBodiesByColor[colorIndex].insert(pair.bodyBIndex);
+                }
+            }
+
+            return colors;
         }
 
         Vec3 TransformPoint(const DirectX::XMMATRIX& matrix, const Vec3& point)
@@ -175,6 +244,14 @@ namespace myengine::ecs::systems
         {
             const Vec3 extents{sphere.radius, sphere.radius, sphere.radius};
             return {sphere.center - extents, sphere.center + extents};
+        }
+
+        bool Overlaps(const WorldAabb& a, const WorldAabb& b)
+        {
+            return
+                a.max.x > b.min.x && a.min.x < b.max.x &&
+                a.max.y > b.min.y && a.min.y < b.max.y &&
+                a.max.z > b.min.z && a.min.z < b.max.z;
         }
 
         WorldSphere BuildSphere(const TransformComponent& transform, const ColliderComponent& collider)
@@ -756,9 +833,30 @@ namespace myengine::ecs::systems
 
             {
                 ZoneScopedN("Physics::Integrate");
+
+                // Snapshot stable component pointers before any worker starts reading the registry
+                std::vector<IntegrationBody> integrationBodies;
+                integrationBodies.reserve(world.GetEntities().size());
                 world.ForEach<TransformComponent, RigidbodyComponent>(
                     [&](const EntityId, TransformComponent& transform, RigidbodyComponent& rigidbody)
                     {
+                        integrationBodies.push_back({&transform, &rigidbody});
+                    });
+
+                const std::uint32_t integrationBodyCount = static_cast<std::uint32_t>(integrationBodies.size());
+                const std::uint32_t integrationGroupCount =
+                    (integrationBodyCount + kPhysicsJobGroupSize - 1) / kPhysicsJobGroupSize;
+                std::vector<std::uint32_t> integratedBodiesByGroup(integrationGroupCount, 0);
+
+                jobs::Context integrationContext;
+                jobs::Dispatch(
+                    integrationContext,
+                    integrationBodyCount,
+                    kPhysicsJobGroupSize,
+                    [&](const jobs::JobArgs args)
+                    {
+                        IntegrationBody& body = integrationBodies[args.jobIndex];
+                        RigidbodyComponent& rigidbody = *body.rigidbody;
                         rigidbody.isGrounded = false;
                         if (rigidbody.isKinematic || rigidbody.mass <= 0.0f)
                         {
@@ -774,10 +872,15 @@ namespace myengine::ecs::systems
                         rigidbody.velocity += acceleration * fixedTimeStep;
                         const float dampingFactor = std::clamp(1.0f - rigidbody.linearDamping * fixedTimeStep, 0.0f, 1.0f);
                         rigidbody.velocity *= dampingFactor;
-
-                        transform.position += rigidbody.velocity * fixedTimeStep;
-                        physicsState.stats.rigidbodyCount += 1;
+                        body.transform->position += rigidbody.velocity * fixedTimeStep;
+                        integratedBodiesByGroup[args.groupId] += 1;
                     });
+                jobs::Wait(integrationContext);
+
+                for (const std::uint32_t integratedBodyCount : integratedBodiesByGroup)
+                {
+                    physicsState.stats.rigidbodyCount += integratedBodyCount;
+                }
             }
 
             std::vector<CollisionBody> bodies;
@@ -799,11 +902,32 @@ namespace myengine::ecs::systems
                         body.collider = &collider;
                         body.rigidbody = world.TryGet<RigidbodyComponent>(entity);
                         body.inverseMass = ComputeInverseMass(body.rigidbody);
-                        RefreshCollisionBodyBounds(body);
-                        broadPhaseGrid.Insert(entity, body.aabb.min.x, body.aabb.min.y, body.aabb.min.z, body.aabb.max.x, body.aabb.max.y, body.aabb.max.z);
                         bodyIndexByEntity[entity] = bodies.size();
                         bodies.push_back(body);
                     });
+
+                jobs::Context boundsContext;
+                jobs::Dispatch(
+                    boundsContext,
+                    static_cast<std::uint32_t>(bodies.size()),
+                    kPhysicsJobGroupSize,
+                    [&](const jobs::JobArgs args)
+                    {
+                        RefreshCollisionBodyBounds(bodies[args.jobIndex]);
+                    });
+                jobs::Wait(boundsContext);
+
+                for (const CollisionBody& body : bodies)
+                {
+                    broadPhaseGrid.Insert(
+                        body.entity,
+                        body.aabb.min.x,
+                        body.aabb.min.y,
+                        body.aabb.min.z,
+                        body.aabb.max.x,
+                        body.aabb.max.y,
+                        body.aabb.max.z);
+                }
 
                 candidatePairs = broadPhaseGrid.BuildCandidatePairs();
             }
@@ -813,75 +937,126 @@ namespace myengine::ecs::systems
             physicsState.stats.broadPhasePairs = static_cast<std::uint32_t>(candidatePairs.size());
 
             ZoneNamedN(solverZone, "Physics::NarrowPhaseAndSolve", true);
+            std::vector<SolverPair> solverPairs;
+            solverPairs.reserve(candidatePairs.size());
+            for (const auto& [entityA, entityB] : candidatePairs)
+            {
+                const auto bodyAIndexIt = bodyIndexByEntity.find(entityA);
+                const auto bodyBIndexIt = bodyIndexByEntity.find(entityB);
+                if (bodyAIndexIt == bodyIndexByEntity.end() || bodyBIndexIt == bodyIndexByEntity.end())
+                {
+                    continue;
+                }
+
+                const std::size_t bodyAIndex = bodyAIndexIt->second;
+                const std::size_t bodyBIndex = bodyBIndexIt->second;
+                if (Overlaps(bodies[bodyAIndex].aabb, bodies[bodyBIndex].aabb))
+                {
+                    solverPairs.push_back({bodyAIndex, bodyBIndex});
+                }
+            }
+
+            const std::vector<std::vector<std::size_t>> solverColors = BuildSolverColors(solverPairs, bodies);
+            std::vector<ContactResult> contactResults(solverPairs.size());
+            TracyPlot("Physics/SolverPairs", static_cast<std::int64_t>(solverPairs.size()));
+            TracyPlot("Physics/SolverColors", static_cast<std::int64_t>(solverColors.size()));
+
             for (std::uint32_t solverIteration = 0; solverIteration < kSolverIterations; ++solverIteration)
             {
                 const bool collectContactState = (solverIteration == 0);
 
-                for (const auto& [entityA, entityB] : candidatePairs)
+                for (const std::vector<std::size_t>& color : solverColors)
                 {
-                    const auto bodyAIndexIt = bodyIndexByEntity.find(entityA);
-                    const auto bodyBIndexIt = bodyIndexByEntity.find(entityB);
-                    if (bodyAIndexIt == bodyIndexByEntity.end() || bodyBIndexIt == bodyIndexByEntity.end())
-                    {
-                        continue;
-                    }
-
-                    CollisionBody& bodyA = bodies[bodyAIndexIt->second];
-                    CollisionBody& bodyB = bodies[bodyBIndexIt->second];
-                    const ContactManifold manifold = Intersect(bodyA, bodyB);
-                    if (!manifold.hasCollision)
-                    {
-                        continue;
-                    }
-
-                    const std::uint64_t pairKey = MakePairKey(bodyA.entity, bodyB.entity);
-
-                    if ((bodyA.collider != nullptr && bodyA.collider->isTrigger) || (bodyB.collider != nullptr && bodyB.collider->isTrigger))
-                    {
-                        if (!collectContactState)
+                    jobs::Context solverContext;
+                    jobs::Dispatch(
+                        solverContext,
+                        static_cast<std::uint32_t>(color.size()),
+                        kPhysicsJobGroupSize,
+                        [&](const jobs::JobArgs args)
                         {
-                            continue;
-                        }
+                            const std::size_t pairIndex = color[args.jobIndex];
+                            const SolverPair& pair = solverPairs[pairIndex];
+                            CollisionBody& bodyA = bodies[pair.bodyAIndex];
+                            CollisionBody& bodyB = bodies[pair.bodyBIndex];
 
-                        currentTriggerPairs.insert(pairKey);
-                        physicsState.stats.triggerPairs += 1;
-
-                        if (activeTriggerPairs_.find(pairKey) == activeTriggerPairs_.end())
-                        {
-                            if (bodyA.collider != nullptr && bodyA.collider->isTrigger)
+                            const ContactManifold manifold = Intersect(bodyA, bodyB);
+                            if (!manifold.hasCollision)
                             {
-                                core::ServiceLocator::GetEventBus().Publish(physics::TriggerEvent{bodyA.entity, bodyB.entity, manifold.point});
+                                return;
                             }
-                            if (bodyB.collider != nullptr && bodyB.collider->isTrigger)
+
+                            const bool isTrigger =
+                                (bodyA.collider != nullptr && bodyA.collider->isTrigger) ||
+                                (bodyB.collider != nullptr && bodyB.collider->isTrigger);
+                            const float normalImpulse = isTrigger ? 0.0f : ResolveCollision(bodyA, bodyB, manifold);
+
+                            if (collectContactState)
                             {
-                                core::ServiceLocator::GetEventBus().Publish(physics::TriggerEvent{bodyB.entity, bodyA.entity, manifold.point});
+                                ContactResult& result = contactResults[pairIndex];
+                                result.manifold = manifold;
+                                result.normalImpulse = normalImpulse;
+                                result.hasCollision = true;
+                                result.isTrigger = isTrigger;
                             }
-                        }
-
-                        continue;
-                    }
-
-                    const float normalImpulse = ResolveCollision(bodyA, bodyB, manifold);
-                    if (!collectContactState)
-                    {
-                        continue;
-                    }
-
-                    currentCollisionPairs.insert(pairKey);
-                    physicsState.stats.collisionPairs += 1;
-                    physicsState.debugVectors.push_back({manifold.point, manifold.point + manifold.normal * 0.45f, core::Color{1.0f, 0.35f, 0.25f, 1.0f}});
-
-                    if (activeCollisionPairs_.find(pairKey) == activeCollisionPairs_.end() &&
-                        normalImpulse >= kCollisionEventImpulseThreshold)
-                    {
-                        core::ServiceLocator::GetEventBus().Publish(physics::CollisionEvent{
-                            bodyA.entity,
-                            bodyB.entity,
-                            manifold.point,
-                            manifold.normal,
-                            normalImpulse,
                         });
+                    jobs::Wait(solverContext);
+                }
+            }
+
+            // EventBus and frame statistics stay on the main thread
+            for (std::size_t pairIndex = 0; pairIndex < solverPairs.size(); ++pairIndex)
+            {
+                const ContactResult& result = contactResults[pairIndex];
+                if (!result.hasCollision)
+                {
+                    continue;
+                }
+
+                const SolverPair& pair = solverPairs[pairIndex];
+                const CollisionBody& bodyA = bodies[pair.bodyAIndex];
+                const CollisionBody& bodyB = bodies[pair.bodyBIndex];
+                const std::uint64_t pairKey = MakePairKey(bodyA.entity, bodyB.entity);
+
+                if (result.isTrigger)
+                {
+                    currentTriggerPairs.insert(pairKey);
+                    physicsState.stats.triggerPairs += 1;
+
+                    if (activeTriggerPairs_.find(pairKey) == activeTriggerPairs_.end())
+                    {
+                        if (bodyA.collider != nullptr && bodyA.collider->isTrigger)
+                        {
+                            core::ServiceLocator::GetEventBus().Publish(
+                                physics::TriggerEvent{bodyA.entity, bodyB.entity, result.manifold.point});
+                        }
+                        if (bodyB.collider != nullptr && bodyB.collider->isTrigger)
+                        {
+                            core::ServiceLocator::GetEventBus().Publish(
+                                physics::TriggerEvent{bodyB.entity, bodyA.entity, result.manifold.point});
+                        }
                     }
+
+                    continue;
+                }
+
+                currentCollisionPairs.insert(pairKey);
+                physicsState.stats.collisionPairs += 1;
+                physicsState.debugVectors.push_back({
+                    result.manifold.point,
+                    result.manifold.point + result.manifold.normal * 0.45f,
+                    core::Color{1.0f, 0.35f, 0.25f, 1.0f},
+                });
+
+                if (activeCollisionPairs_.find(pairKey) == activeCollisionPairs_.end() &&
+                    result.normalImpulse >= kCollisionEventImpulseThreshold)
+                {
+                    core::ServiceLocator::GetEventBus().Publish(physics::CollisionEvent{
+                        bodyA.entity,
+                        bodyB.entity,
+                        result.manifold.point,
+                        result.manifold.normal,
+                        result.normalImpulse,
+                    });
                 }
             }
 
