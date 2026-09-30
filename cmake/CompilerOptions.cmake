@@ -10,6 +10,7 @@
         /FS
         /utf-8
         /Zc:__cplusplus
+        /GT
         /DWIN32_LEAN_AND_MEAN
         /DNOMINMAX)
 
