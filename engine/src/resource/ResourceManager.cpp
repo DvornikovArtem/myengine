@@ -8,7 +8,6 @@
 #include <cstring>
 #include <cmath>
 #include <fstream>
-#include <future>
 #include <limits>
 #include <sstream>
 #include <optional>
@@ -54,6 +53,7 @@ namespace myengine::resource
         constexpr std::uint32_t kProceduralSphereLongitudeSegments = 48;
         constexpr float kProceduralSphereRadius = 0.5f;
         constexpr float kPi = 3.14159265358979323846f;
+        constexpr std::size_t kMaxFinalizationsPerFrame = 2;
 
         constexpr std::uint64_t kHashOffsetBasis = 14695981039346656037ull;
         constexpr std::uint64_t kHashPrime = 1099511628211ull;
@@ -138,16 +138,6 @@ namespace myengine::resource
                     return static_cast<char>(std::tolower(ch));
                 });
             return value;
-        }
-
-        bool IsFutureReady(std::future<MeshCpuAsset>& future)
-        {
-            return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-        }
-
-        bool IsFutureReady(std::future<TextureCpuAsset>& future)
-        {
-            return future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
         }
 
         bool IsMeshBinaryPath(const std::filesystem::path& path)
@@ -1296,11 +1286,19 @@ namespace myengine::resource
     ResourceManager::ResourceManager(render::IRenderAdapter& renderAdapter, core::Logger& logger)
         : renderAdapter_(renderAdapter), logger_(logger)
     {
+        streamingContext_.priority = jobs::Priority::Streaming;
         lastHotReloadScanTime_ = std::chrono::steady_clock::now();
         fallbackMesh_ = CreateFallbackMesh();
         fallbackTexture_ = CreateFallbackTexture();
         fallbackShader_ = CreateFallbackShader();
         fallbackMaterial_ = CreateFallbackMaterial();
+    }
+
+    ResourceManager::~ResourceManager()
+    {
+        // The jobs capture this ResourceManager, so all of them must finish before its fields are destroyed
+        shuttingDown_ = true;
+        jobs::Wait(streamingContext_);
     }
 
     bool ResourceManager::LoadManifest(const std::filesystem::path& path)
@@ -1534,12 +1532,6 @@ namespace myengine::resource
         {
             return it->second;
         }
-        ScheduleMeshLoad(request.key, request.path);
-
-        if (const auto it = meshCache_.find(request.key); it != meshCache_.end())
-        {
-            return it->second;
-        }
 
         ScheduleMeshLoad(request.key, request.path);
         auto placeholder = BuildMeshPlaceholder(request.key, request.path);
@@ -1554,12 +1546,6 @@ namespace myengine::resource
         {
             return it->second;
         }
-        ScheduleMeshLoad(request.key, request.path);
-
-        if (const auto it = textureCache_.find(request.key); it != textureCache_.end())
-        {
-            return it->second;
-        }
 
         ScheduleTextureLoad(request.key, request.path);
         auto placeholder = BuildTexturePlaceholder(request.key, request.path);
@@ -1570,12 +1556,6 @@ namespace myengine::resource
     ResourceHandle<ShaderAsset> ResourceManager::LoadShader(const std::filesystem::path& path)
     {
         const auto& request = ResolveRequest(path);
-        if (const auto it = shaderCache_.find(request.key); it != shaderCache_.end())
-        {
-            return it->second;
-        }
-        ScheduleMeshLoad(request.key, request.path);
-
         if (const auto it = shaderCache_.find(request.key); it != shaderCache_.end())
         {
             return it->second;
@@ -1598,12 +1578,6 @@ namespace myengine::resource
         {
             return it->second;
         }
-        ScheduleMeshLoad(request.key, request.path);
-
-        if (const auto it = materialCache_.find(request.key); it != materialCache_.end())
-        {
-            return it->second;
-        }
 
         auto resource = LoadMaterialInternal(request.key, request.path);
         if (resource == nullptr)
@@ -1620,11 +1594,7 @@ namespace myengine::resource
         const std::filesystem::path resolvedPath = ResolvePath(path);
         const std::string key = NormalizeKey(resolvedPath);
         meshCache_.erase(key);
-
-        if (pendingMeshLoads_.find(key) == pendingMeshLoads_.end())
-        {
-            ScheduleMeshLoad(key, resolvedPath);
-        }
+        ScheduleMeshLoad(key, resolvedPath);
 
         auto placeholder = BuildMeshPlaceholder(key, resolvedPath);
         meshCache_.insert_or_assign(key, placeholder);
@@ -1636,11 +1606,7 @@ namespace myengine::resource
         const std::filesystem::path resolvedPath = ResolvePath(path);
         const std::string key = NormalizeKey(resolvedPath);
         textureCache_.erase(key);
-
-        if (pendingTextureLoads_.find(key) == pendingTextureLoads_.end())
-        {
-            ScheduleTextureLoad(key, resolvedPath);
-        }
+        ScheduleTextureLoad(key, resolvedPath);
 
         auto placeholder = BuildTexturePlaceholder(key, resolvedPath);
         textureCache_.insert_or_assign(key, placeholder);
@@ -1665,43 +1631,47 @@ namespace myengine::resource
     {
         ZoneScoped;
 
-        FinalizePendingMeshes();
-        FinalizePendingTextures();
+        std::vector<ReadyLoad> loadsToFinalize;
+        std::size_t remainingReadyLoadCount = 0;
+        {
+            std::lock_guard<std::mutex> lock(readyLoadsMutex_);
+            const std::size_t loadCount = std::min(kMaxFinalizationsPerFrame, readyLoads_.size());
+            loadsToFinalize.reserve(loadCount);
+
+            for (std::size_t index = 0; index < loadCount; ++index)
+            {
+                loadsToFinalize.push_back(std::move(readyLoads_[index]));
+            }
+
+            if (loadCount > 0)
+            {
+                readyLoads_.erase(readyLoads_.begin(), readyLoads_.begin() + loadCount);
+            }
+            remainingReadyLoadCount = readyLoads_.size();
+        }
+
+        // GPU resources are created on the main thread and never while the ready queue is locked
+        for (ReadyLoad& readyLoad : loadsToFinalize)
+        {
+            std::visit(
+                [this](auto& result)
+                {
+                    using Result = std::decay_t<decltype(result)>;
+                    if constexpr (std::is_same_v<Result, MeshLoadResult>)
+                    {
+                        FinalizeMeshLoad(std::move(result));
+                    }
+                    else
+                    {
+                        FinalizeTextureLoad(std::move(result));
+                    }
+                },
+                readyLoad);
+        }
 
         TracyPlot("Resources/PendingMeshLoads", static_cast<std::int64_t>(pendingMeshLoads_.size()));
         TracyPlot("Resources/PendingTextureLoads", static_cast<std::int64_t>(pendingTextureLoads_.size()));
-    }
-
-    void ResourceManager::FinalizePendingMeshes()
-    {
-        std::vector<std::string> keys;
-        keys.reserve(pendingMeshLoads_.size());
-
-        for (const auto& [key, _] : pendingMeshLoads_)
-        {
-            keys.push_back(key);
-        }
-
-        for (const auto& key : keys)
-        {
-            TryFinalizeMeshLoad(key);
-        }
-    }
-
-    void ResourceManager::FinalizePendingTextures()
-    {
-        std::vector<std::string> keys;
-        keys.reserve(pendingTextureLoads_.size());
-
-        for (const auto& [key, _] : pendingTextureLoads_)
-        {
-            keys.push_back(key);
-        }
-
-        for (const auto& key : keys)
-        {
-            TryFinalizeTextureLoad(key);
-        }
+        TracyPlot("Resources/ReadyLoads", static_cast<std::int64_t>(remainingReadyLoadCount));
     }
 
     void ResourceManager::ReloadChangedMeshes()
@@ -1709,13 +1679,8 @@ namespace myengine::resource
         std::vector<std::filesystem::path> changed;
         changed.reserve(meshCache_.size());
 
-        for (const auto& [key, resource] : meshCache_)
+        for (const auto& [_, resource] : meshCache_)
         {
-            if (pendingMeshLoads_.find(key) != pendingMeshLoads_.end())
-            {
-                continue;
-            }
-
             if (resource != nullptr && HasChanged(resource->dependencies))
             {
                 changed.push_back(resource->sourcePath);
@@ -1734,13 +1699,8 @@ namespace myengine::resource
         std::vector<std::filesystem::path> changed;
         changed.reserve(textureCache_.size());
 
-        for (const auto& [key, resource] : textureCache_)
+        for (const auto& [_, resource] : textureCache_)
         {
-            if (pendingTextureLoads_.find(key) != pendingTextureLoads_.end())
-            {
-                continue;
-            }
-
             if (resource != nullptr && HasChanged(resource->dependencies))
             {
                 changed.push_back(resource->sourcePath);
@@ -1796,98 +1756,172 @@ namespace myengine::resource
 
     void ResourceManager::ScheduleMeshLoad(const std::string& key, const std::filesystem::path& path)
     {
-        if (pendingMeshLoads_.find(key) != pendingMeshLoads_.end())
+        if (shuttingDown_)
         {
             return;
         }
 
-        logger_.Info("ResourceManager: scheduled async mesh load " + path.string());
-        MeshLoadJob job;
-        job.path = path;
-        job.future = std::async(std::launch::async, [path]()
-        {
-            return LoadMeshCpuAsset(path);
-        });
+        auto request = std::make_shared<LoadRequest>();
+        request->key = key;
+        request->path = path;
+        request->generation = ++meshLoadGenerations_[key];
+        pendingMeshLoads_.insert_or_assign(key, request->generation);
 
-        pendingMeshLoads_.insert_or_assign(key, std::move(job));
+        logger_.Info("ResourceManager: scheduled streaming mesh load " + path.string());
+        jobs::Execute(streamingContext_, [this, request](jobs::JobArgs)
+        {
+            if (shuttingDown_)
+            {
+                return;
+            }
+
+            MeshLoadResult result;
+            result.request = request;
+            try
+            {
+                result.cpuAsset.emplace(LoadMeshCpuAsset(request->path));
+            }
+            catch (const std::exception& ex)
+            {
+                result.error = ex.what();
+            }
+            catch (...)
+            {
+                result.error = "unknown error";
+            }
+
+            if (shuttingDown_)
+            {
+                return;
+            }
+
+            std::lock_guard<std::mutex> lock(readyLoadsMutex_);
+            if (!shuttingDown_)
+            {
+                readyLoads_.emplace_back(std::move(result));
+            }
+        });
     }
 
     void ResourceManager::ScheduleTextureLoad(const std::string& key, const std::filesystem::path& path)
     {
-        if (pendingTextureLoads_.find(key) != pendingTextureLoads_.end())
+        if (shuttingDown_)
         {
             return;
         }
 
-        logger_.Info("ResourceManager: scheduled async texture load " + path.string());
-        TextureLoadJob job;
-        job.path = path;
-        job.future = std::async(std::launch::async, [this, path]()
-        {
-            return LoadTextureCpuAsset(path, logger_);
-        });
+        auto request = std::make_shared<LoadRequest>();
+        request->key = key;
+        request->path = path;
+        request->generation = ++textureLoadGenerations_[key];
+        pendingTextureLoads_.insert_or_assign(key, request->generation);
 
-        pendingTextureLoads_.insert_or_assign(key, std::move(job));
+        logger_.Info("ResourceManager: scheduled streaming texture load " + path.string());
+        jobs::Execute(streamingContext_, [this, request](jobs::JobArgs)
+        {
+            if (shuttingDown_)
+            {
+                return;
+            }
+
+            TextureLoadResult result;
+            result.request = request;
+            try
+            {
+                result.cpuAsset.emplace(LoadTextureCpuAsset(request->path, logger_));
+            }
+            catch (const std::exception& ex)
+            {
+                result.error = ex.what();
+            }
+            catch (...)
+            {
+                result.error = "unknown error";
+            }
+
+            if (shuttingDown_)
+            {
+                return;
+            }
+
+            std::lock_guard<std::mutex> lock(readyLoadsMutex_);
+            if (!shuttingDown_)
+            {
+                readyLoads_.emplace_back(std::move(result));
+            }
+        });
     }
 
-    ResourceHandle<MeshAsset> ResourceManager::TryFinalizeMeshLoad(const std::string& key)
+    void ResourceManager::FinalizeMeshLoad(MeshLoadResult result)
     {
-        const auto jobIt = pendingMeshLoads_.find(key);
-        if (jobIt == pendingMeshLoads_.end() || !IsFutureReady(jobIt->second.future))
+        const LoadRequest& request = *result.request;
+        const auto pendingIt = pendingMeshLoads_.find(request.key);
+        if (pendingIt == pendingMeshLoads_.end() || pendingIt->second != request.generation)
         {
-            const auto cacheIt = meshCache_.find(key);
-            return cacheIt != meshCache_.end() ? cacheIt->second : nullptr;
+            // A newer hot reload request owns this key now
+            return;
         }
 
         ZoneScopedN("ResourceManager::FinalizeMesh");
 
         try
         {
-            MeshCpuAsset cpuAsset = jobIt->second.future.get();
-            auto resource = BuildMeshResource(key, jobIt->second.path, std::move(cpuAsset));
-            meshCache_.insert_or_assign(key, resource != nullptr ? resource : BuildMeshPlaceholder(key, jobIt->second.path));
+            if (!result.cpuAsset.has_value())
+            {
+                throw std::runtime_error(result.error.empty() ? "load returned no result" : result.error);
+            }
+
+            auto resource = BuildMeshResource(request.key, request.path, std::move(*result.cpuAsset));
+            meshCache_.insert_or_assign(
+                request.key,
+                resource != nullptr ? resource : BuildMeshPlaceholder(request.key, request.path));
         }
         catch (const std::exception& ex)
         {
             logger_.Warning(
-                "ResourceManager: async mesh load failed " +
-                jobIt->second.path.string() +
+                "ResourceManager: streaming mesh load failed " +
+                request.path.string() +
                 " error=" + ex.what());
-            meshCache_.insert_or_assign(key, BuildMeshPlaceholder(key, jobIt->second.path));
+            meshCache_.insert_or_assign(request.key, BuildMeshPlaceholder(request.key, request.path));
         }
 
-        pendingMeshLoads_.erase(jobIt);
-        return meshCache_[key];
+        pendingMeshLoads_.erase(pendingIt);
     }
 
-    ResourceHandle<TextureAsset> ResourceManager::TryFinalizeTextureLoad(const std::string& key)
+    void ResourceManager::FinalizeTextureLoad(TextureLoadResult result)
     {
-        const auto jobIt = pendingTextureLoads_.find(key);
-        if (jobIt == pendingTextureLoads_.end() || !IsFutureReady(jobIt->second.future))
+        const LoadRequest& request = *result.request;
+        const auto pendingIt = pendingTextureLoads_.find(request.key);
+        if (pendingIt == pendingTextureLoads_.end() || pendingIt->second != request.generation)
         {
-            const auto cacheIt = textureCache_.find(key);
-            return cacheIt != textureCache_.end() ? cacheIt->second : nullptr;
+            // A newer hot reload request owns this key now
+            return;
         }
 
         ZoneScopedN("ResourceManager::FinalizeTexture");
 
         try
         {
-            TextureCpuAsset cpuAsset = jobIt->second.future.get();
-            auto resource = BuildTextureResource(key, jobIt->second.path, std::move(cpuAsset));
-            textureCache_.insert_or_assign(key, resource != nullptr ? resource : BuildTexturePlaceholder(key, jobIt->second.path));
+            if (!result.cpuAsset.has_value())
+            {
+                throw std::runtime_error(result.error.empty() ? "load returned no result" : result.error);
+            }
+
+            auto resource = BuildTextureResource(request.key, request.path, std::move(*result.cpuAsset));
+            textureCache_.insert_or_assign(
+                request.key,
+                resource != nullptr ? resource : BuildTexturePlaceholder(request.key, request.path));
         }
         catch (const std::exception& ex)
         {
             logger_.Warning(
-                "ResourceManager: async texture load failed " +
-                jobIt->second.path.string() +
+                "ResourceManager: streaming texture load failed " +
+                request.path.string() +
                 " error=" + ex.what());
-            textureCache_.insert_or_assign(key, BuildTexturePlaceholder(key, jobIt->second.path));
+            textureCache_.insert_or_assign(request.key, BuildTexturePlaceholder(request.key, request.path));
         }
 
-        pendingTextureLoads_.erase(jobIt);
-        return textureCache_[key];
+        pendingTextureLoads_.erase(pendingIt);
     }
 
     ResourceHandle<MeshAsset> ResourceManager::BuildMeshResource(
