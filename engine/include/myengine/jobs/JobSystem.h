@@ -38,7 +38,8 @@ namespace myengine::jobs
 	// Creates worker threads once per session. ~0u means "as many as the CPU allows"
 	void Initialize(std::uint32_t maxWorkerCount = ~0u);
 
-	// Waits for the queued jobs and stops the workers. Safe to call more than once
+	// Finishes every queued and running job, including the jobs they schedule, then stops the workers.
+	// Main thread only, never from a job. Safe to call more than once
 	void Shutdown();
 
 	std::uint32_t GetWorkerCount(Priority priority = Priority::High);
