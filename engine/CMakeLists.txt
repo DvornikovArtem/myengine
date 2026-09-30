@@ -70,6 +70,8 @@ set(ENGINE_SOURCES
   src/ecs/systems/PlayerControlSystem.cpp
   src/ecs/systems/RenderSystem.cpp
   src/input/InputManager.cpp
+  src/jobs/JobQueue.cpp
+  src/jobs/JobQueue.h
   src/jobs/JobSystem.cpp
   src/render/dx12/Dx12RenderAdapter.cpp
   src/resource/ResourceManager.cpp
