@@ -91,9 +91,14 @@ namespace myengine::jobs
 				return false;
 			}
 			bottom_.store(oldBottom, std::memory_order_relaxed);
+
+			// top and bottom moved past this index, so the slot is reused one lap later
+			Take(bottom, bottom + kCapacity, job);
+			return true;
 		}
 
-		Take(bottom, job);
+		// bottom stays at this index, so the next Push writes into the same slot with the same index
+		Take(bottom, bottom, job);
 		return true;
 	}
 
@@ -117,11 +122,12 @@ namespace myengine::jobs
 			return false;
 		}
 
-		Take(claimedTop, job);
+		// top moved past this index, so the slot is reused one lap later
+		Take(claimedTop, claimedTop + kCapacity, job);
 		return true;
 	}
 
-	void JobQueue::Take(const std::size_t index, Job& job)
+	void JobQueue::Take(const std::size_t index, const std::size_t nextIndex, Job& job)
 	{
 		Slot& slot = slots_[index & (kCapacity - 1)];
 		std::uint32_t attempts = 0;
@@ -131,7 +137,7 @@ namespace myengine::jobs
 		}
 
 		job = std::move(slot.job);
-		slot.sequence.store(index + kCapacity, std::memory_order_release);
+		slot.sequence.store(nextIndex, std::memory_order_release);
 	}
 
 	void SharedJobQueue::Push(Job&& job)

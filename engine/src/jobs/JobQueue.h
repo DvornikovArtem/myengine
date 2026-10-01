@@ -57,7 +57,8 @@ namespace myengine::jobs
 			Job job;
 		};
 
-		void Take(std::size_t index, Job& job);
+		// nextIndex: the logical index that will be written into this slot next
+		void Take(std::size_t index, std::size_t nextIndex, Job& job);
 
 		std::unique_ptr<Slot[]> slots_;
 		alignas(64) std::atomic<std::size_t> top_{ 0 };
