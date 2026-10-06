@@ -1,6 +1,7 @@
 ﻿set(ENGINE_HEADERS
   include/myengine/config/AppConfig.h
   include/myengine/core/Application.h
+  include/myengine/core/FileWatcher.h
   include/myengine/core/Logger.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -45,6 +46,9 @@
   include/myengine/resource/ResourceManager.h
   include/myengine/scene/SceneSerializer.h
   include/myengine/scene/TransformUtils.h
+  include/myengine/scripting/PrefabLibrary.h
+  include/myengine/scripting/ScriptRuntime.h
+  include/myengine/scripting/ScriptSystem.h
   include/myengine/spatial/Octree.h
   include/myengine/spatial/UniformGrid2D.h
   include/myengine/spatial/UniformGrid3D.h
@@ -57,6 +61,7 @@
 set(ENGINE_SOURCES
   src/config/AppConfig.cpp
   src/core/Application.cpp
+  src/core/FileWatcher.cpp
   src/core/Logger.cpp
   src/core/Timer.cpp
   src/core/Window.cpp
@@ -77,8 +82,14 @@ set(ENGINE_SOURCES
   src/jobs/JobSystem.cpp
   src/render/dx12/Dx12RenderAdapter.cpp
   src/resource/ResourceManager.cpp
+  src/scene/PrefabLibrary.cpp
   src/scene/SceneSerializer.cpp
   src/scene/TransformUtils.cpp
+  src/scripting/EntityRef.h
+  src/scripting/ScriptBindings.cpp
+  src/scripting/ScriptContext.h
+  src/scripting/ScriptRuntime.cpp
+  src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
   src/ui/SceneEditor.cpp
   src/ui/UiManager.cpp
@@ -152,7 +163,18 @@ target_link_libraries(myengine_engine
     dwmapi
     gdi32
     shell32
-    TracyClient)
+    TracyClient
+  PRIVATE
+    # pybind11 / Python.h stay inside engine/src/scripting, public headers do not include them
+    myengine_python)
+
+# pyconfig.h asks for python314.lib by name (#pragma comment(lib)), so the exe needs the library directory.
+# Set as INTERFACE here: link settings of a PRIVATE dependency do not reach the exe through a static library.
+# (python314.dll can not be delay-loaded: pybind11 imports data symbols such as PyLong_Type)
+target_link_directories(myengine_engine INTERFACE "${MYENGINE_PYTHON_ROOT}/libs")
+
+# pybind11 bindings produce many sections in one object file
+set_source_files_properties(src/scripting/ScriptBindings.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
 
 myengine_apply_compiler_options(myengine_engine)
 

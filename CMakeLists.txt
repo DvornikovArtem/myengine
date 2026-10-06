@@ -125,6 +125,31 @@ target_include_directories(myengine_directxheaders
   INTERFACE
     "${MYENGINE_DIRECTX_HEADERS_ROOT}")
 
+# Python 3.14 + pybind11 for scripting (LR2). Everything is vendored: the installed Python is not used.
+# Runtime (python314.dll + python314.zip) lives in external/runtime and is copied next to the exe.
+set(MYENGINE_PYTHON_ROOT "${CMAKE_SOURCE_DIR}/external/python")
+set(MYENGINE_PYTHON_HEADER "${MYENGINE_PYTHON_ROOT}/include/Python.h")
+set(MYENGINE_PYTHON_LIB "${MYENGINE_PYTHON_ROOT}/libs/python314.lib")
+set(MYENGINE_PYBIND11_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/external/pybind11/include")
+if(NOT EXISTS "${MYENGINE_PYTHON_HEADER}")
+  message(FATAL_ERROR "Python.h not found: ${MYENGINE_PYTHON_HEADER}")
+endif()
+if(NOT EXISTS "${MYENGINE_PYTHON_LIB}")
+  message(FATAL_ERROR "python314.lib not found: ${MYENGINE_PYTHON_LIB}")
+endif()
+if(NOT EXISTS "${MYENGINE_PYBIND11_INCLUDE_DIR}/pybind11/embed.h")
+  message(FATAL_ERROR "pybind11 not found: ${MYENGINE_PYBIND11_INCLUDE_DIR}")
+endif()
+add_library(myengine_python_lib UNKNOWN IMPORTED GLOBAL)
+set_target_properties(myengine_python_lib PROPERTIES IMPORTED_LOCATION "${MYENGINE_PYTHON_LIB}")
+add_library(myengine_python INTERFACE)
+# SYSTEM: /W4 does not apply to third-party headers
+target_include_directories(myengine_python SYSTEM
+  INTERFACE
+    "${MYENGINE_PYTHON_ROOT}/include"
+    "${MYENGINE_PYBIND11_INCLUDE_DIR}")
+target_link_libraries(myengine_python INTERFACE myengine_python_lib)
+
 add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
 target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE> $<$<CONFIG:RelWithDebInfo>:TRACY_FIBERS>)
 add_subdirectory(engine)
