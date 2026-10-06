@@ -31,6 +31,7 @@
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/scene/SceneSerializer.h>
+#include <myengine/scripting/ScriptSystem.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -131,6 +132,23 @@ namespace myengine::core
         logger_.Info("Job system initialized: " + std::to_string(jobs::GetWorkerCount(jobs::Priority::High)) + " high, " + 
             std::to_string(jobs::GetWorkerCount(jobs::Priority::Streaming)) + " streaming worker(s)");
 
+        // Python lives on this (main) thread for the whole session. Scripts are read from the source tree,
+        // so hot reload sees the edits; the copy next to the exe is the fallback.
+        {
+            const auto sourceScriptsDir = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scripts";
+            std::error_code scriptsDirError;
+            scripting::ScriptRuntimeDesc scriptDesc;
+            scriptDesc.exeDir = GetExecutableDirectory();
+            scriptDesc.scriptsDir = std::filesystem::is_directory(sourceScriptsDir, scriptsDirError)
+                ? sourceScriptsDir
+                : scriptDesc.exeDir / "assets/scripts";
+            scriptDesc.logger = &logger_;
+            if (!scriptRuntime_.Initialize(scriptDesc))
+            {
+                logger_.Warning("Scripting is disabled, the engine continues without scripts");
+            }
+        }
+
         renderAdapter_ = std::make_unique<render::dx12::Dx12RenderAdapter>(logger_);
         if (!renderAdapter_->Initialize())
         {
@@ -209,6 +227,12 @@ namespace myengine::core
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
+        // After physics: scripts see this frame's collision/trigger events
+        {
+            auto scriptSystem = std::make_unique<scripting::ScriptSystem>(scriptRuntime_, input_, prefabLibrary_, logger_);
+            scriptSystem_ = scriptSystem.get();
+            world_.AddUpdateSystem(std::move(scriptSystem));
+        }
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
         const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/benchmark.json";
@@ -397,6 +421,12 @@ namespace myengine::core
         cameraControlActive_ = false;
         SetCursorVisible(true);
 
+        // 1. Release every Python object while the interpreter is still alive
+        if (scriptSystem_ != nullptr)
+        {
+            scriptSystem_->Shutdown();
+        }
+
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         if (editorState.mode == editor::RuntimeMode::Play && !editorState.playModeSnapshot.empty())
         {
@@ -414,6 +444,9 @@ namespace myengine::core
         uiManager_.Shutdown();
         resourceManager_.reset();
 
+        // 3. Py_Finalize: after the scene is saved, before the job system stops. Safe to call twice
+        scriptRuntime_.Shutdown();
+
         // After ResourceManager: it waits for its loading jobs in the destructor
         jobs::Shutdown();
 
@@ -425,6 +458,7 @@ namespace myengine::core
         }
 
         windows_.clear();
+        scriptSystem_ = nullptr;
         world_ = ecs::World{};
     }
 

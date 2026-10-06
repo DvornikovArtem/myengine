@@ -48,3 +48,7 @@ external/**/x64/**
 !external/**/x64/**/*.lib
 
 !assets/models/**/*.obj
+
+# Python for scripting
+!external/python/libs/*.lib
+!external/runtime/*.dll
