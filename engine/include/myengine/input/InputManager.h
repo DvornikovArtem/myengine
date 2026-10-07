@@ -22,6 +22,7 @@ namespace myengine::input
 
 		void OnKeyDown(std::uint32_t key);
 		void OnKeyUp(std::uint32_t key);
+		void ReleaseAllInputs();
 
 		void OnMouseDown(core::MouseButton button);
 		void OnMouseUp(core::MouseButton button);

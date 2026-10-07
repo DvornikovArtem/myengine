@@ -1,0 +1,90 @@
+{
+  "entities": [
+    {
+      "id": 1,
+      "Tag": { "name": "Camera_1" },
+      "Camera": {
+        "position": [0.0, 6.0, -12.0],
+        "rotationDeg": [20.0, 0.0, 0.0],
+        "fovYDeg": 60.0,
+        "nearPlane": 0.01,
+        "farPlane": 200.0,
+        "isPrimary": true
+      },
+      "CameraController": { "moveSpeed": 3.0, "zoomSpeed": 1.0 },
+      "WindowBinding": { "windowId": 1 }
+    },
+    {
+      "id": 2,
+      "Tag": { "name": "Controlled_1" },
+      "Transform": { "position": [0.0, 0.5, 2.0], "scale": [0.9, 0.9, 0.9] },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/default.material.json",
+        "visible": true
+      },
+      "Rigidbody": { "mass": 1.0, "useGravity": true },
+      "Collider": { "type": "box", "halfExtents": [0.5, 0.5, 0.5], "bounciness": 0.0 },
+      "PlayerController": { "windowId": 1, "moveSpeed": 5.3, "jumpSpeed": 6.7 },
+      "WindowBinding": { "windowId": 1 }
+    },
+    {
+      "id": 3,
+      "Tag": { "name": "Floor_1" },
+      "Transform": { "position": [0.0, -0.5, 3.0], "scale": [14.0, 1.0, 14.0] },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/cool.material.json",
+        "visible": true
+      },
+      "Collider": { "type": "box", "halfExtents": [0.5, 0.5, 0.5], "bounciness": 0.0 },
+      "WindowBinding": { "windowId": 1 }
+    },
+    {
+      "id": 4,
+      "Tag": { "name": "GameManager" },
+      "Script": {
+        "scripts": [
+          { "module": "game_manager", "class": "GameManager", "props": {} }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "Tag": { "name": "CoinSpawner" },
+      "Transform": { "position": [0.0, 0.5, 3.0] },
+      "Script": {
+        "scripts": [
+          { "module": "coin_spawner", "class": "CoinSpawner", "props": {} }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "Tag": { "name": "EnemySpawner" },
+      "Transform": { "position": [4.0, 0.5, 5.0] },
+      "Script": {
+        "scripts": [
+          { "module": "enemy_spawner", "class": "EnemySpawner", "props": {} }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "Tag": { "name": "CoinPreview" },
+      "Transform": { "position": [-2.0, 0.5, 3.0], "scale": [0.4, 0.4, 0.4] },
+      "MeshRenderer": {
+        "meshPath": "assets/models/sphere.obj",
+        "materialPath": "assets/materials/warm.material.json",
+        "visible": true
+      },
+      "Collider": { "type": "sphere", "radius": 0.5, "isTrigger": true },
+      "WindowBinding": { "windowId": 1 },
+      "Script": {
+        "scripts": [
+          { "module": "coin", "class": "Coin", "props": { "spin_speed": 120.0, "score_value": 1 } }
+        ]
+      }
+    }
+  ]
+}

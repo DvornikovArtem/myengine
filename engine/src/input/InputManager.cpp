@@ -41,6 +41,21 @@ namespace myengine::input
         }
     }
 
+    void InputManager::ReleaseAllInputs()
+    {
+        for (std::uint32_t key = 0; key < keys_.size(); ++key)
+        {
+            OnKeyUp(key);
+        }
+        for (std::size_t button = 0; button < mouseButtons_.size(); ++button)
+        {
+            OnMouseUp(static_cast<core::MouseButton>(button));
+        }
+        activeWindowId_ = 0;
+        mouseWheelAccumulated_ = 0;
+        ResetMouseTracking();
+    }
+
     void InputManager::OnMouseDown(const core::MouseButton button)
     {
         const auto index = static_cast<std::size_t>(button);

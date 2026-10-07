@@ -41,7 +41,7 @@ namespace myengine::core
         explicit Application(HINSTANCE instance = GetModuleHandleW(nullptr));
         ~Application();
 
-        bool Initialize(const config::AppConfig& config);
+        bool Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath = {});
         int Run();
         void Shutdown();
 
@@ -123,6 +123,7 @@ namespace myengine::core
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
+        bool sceneLoaded_ = false;
         bool cameraControlActive_ = false;
         bool cursorHidden_ = false;
         bool runtimeEventsBound_ = false;
