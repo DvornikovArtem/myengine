@@ -30,6 +30,7 @@
 #include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
+#include <myengine/scene/SceneEvents.h>
 #include <myengine/scene/SceneSerializer.h>
 #include <myengine/scripting/ScriptSystem.h>
 
@@ -108,7 +109,7 @@ namespace myengine::core
         Shutdown();
     }
 
-    bool Application::Initialize(const config::AppConfig& config)
+    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath)
     {
         config_ = config;
 
@@ -235,12 +236,20 @@ namespace myengine::core
         }
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
-        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/benchmark.json";
-        const auto executableScenePath = GetExecutableDirectory() / "assets/scenes/benchmark.json";
+        const auto requestedScenePath = scenePath.empty() ? std::filesystem::path("assets/scenes/benchmark.json") : scenePath;
+        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / requestedScenePath;
+        const auto executableScenePath = GetExecutableDirectory() / requestedScenePath;
         std::error_code scenePathError;
-        sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
-            ? sourceScenePath
-            : executableScenePath;
+        if (!scenePath.empty() && (scenePath.is_absolute() || std::filesystem::exists(scenePath, scenePathError)))
+        {
+            sceneSavePath_ = std::filesystem::absolute(scenePath).lexically_normal();
+        }
+        else
+        {
+            sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
+                ? sourceScenePath
+                : executableScenePath;
+        }
 
         BindRuntimeEventListeners();
 
@@ -251,13 +260,22 @@ namespace myengine::core
 
         if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
         {
+            // A typo or invalid explicit scene must not overwrite the file with the default demo.
+            if (!scenePath.empty())
+            {
+                logger_.Error("Failed to load the requested scene: " + sceneSavePath_.u8string());
+                sceneSavePath_.clear();
+                return false;
+            }
             BuildDemoScene();
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
+            core::ServiceLocator::GetEventBus().Publish(scene::SceneLoadedEvent{&world_});
         }
         else
         {
             RebindWindowControlledEntities();
         }
+        sceneLoaded_ = true;
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         //editorState.mode = editor::RuntimeMode::Edit;
         //editorState.selectedEntity = ecs::kInvalidEntity;
@@ -436,7 +454,7 @@ namespace myengine::core
             core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         }
 
-        if (!sceneSavePath_.empty() && !world_.GetEntities().empty())
+        if (sceneLoaded_ && !sceneSavePath_.empty())
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
@@ -460,6 +478,7 @@ namespace myengine::core
         windows_.clear();
         scriptSystem_ = nullptr;
         world_ = ecs::World{};
+        sceneLoaded_ = false;
     }
 
     void Application::RequestQuit()
@@ -791,7 +810,7 @@ namespace myengine::core
 
     bool Application::SaveSceneToDisk()
     {
-        if (sceneSavePath_.empty())
+        if (!sceneLoaded_ || sceneSavePath_.empty())
         {
             return false;
         }
@@ -988,6 +1007,7 @@ namespace myengine::core
         world_.ClearEntities();
         core::ServiceLocator::GetPhysicsWorldState().recentEvents.clear();
         BuildDemoScene();
+        core::ServiceLocator::GetEventBus().Publish(scene::SceneLoadedEvent{&world_});
     }
 
     void Application::SpawnDemoBox(const WindowId windowId)

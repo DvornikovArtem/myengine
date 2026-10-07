@@ -23,6 +23,7 @@
   include/myengine/ecs/components/MotionComponent.h
   include/myengine/ecs/components/PlayerControllerComponent.h
   include/myengine/ecs/components/RigidbodyComponent.h
+  include/myengine/ecs/components/ScriptComponent.h
   include/myengine/ecs/components/TagComponent.h
   include/myengine/ecs/components/TransformComponent.h
   include/myengine/ecs/components/Vector3.h
@@ -45,6 +46,7 @@
   include/myengine/render/dx12/Dx12RenderAdapter.h
   include/myengine/resource/ResourceManager.h
   include/myengine/scene/SceneSerializer.h
+  include/myengine/scene/SceneEvents.h
   include/myengine/scene/TransformUtils.h
   include/myengine/scripting/PrefabLibrary.h
   include/myengine/scripting/ScriptRuntime.h

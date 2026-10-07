@@ -73,6 +73,13 @@ namespace myengine::ecs
         nextEntityId_ = 1;
     }
 
+    void World::SwapEntities(World& other)
+    {
+        std::swap(nextEntityId_, other.nextEntityId_);
+        entities_.swap(other.entities_);
+        std::swap(registry_, other.registry_);
+    }
+
     void World::AddUpdateSystem(std::unique_ptr<IUpdateSystem> system)
     {
         if (system != nullptr)
@@ -117,7 +124,9 @@ namespace myengine::ecs
             return false;
         }
 
-        auto& childHierarchy = registry_.Emplace<components::HierarchyComponent>(child);
+        auto& childHierarchy = registry_.Has<components::HierarchyComponent>(child)
+            ? registry_.Get<components::HierarchyComponent>(child)
+            : registry_.Emplace<components::HierarchyComponent>(child);
         if (childHierarchy.parent == parent)
         {
             return true;
@@ -128,7 +137,9 @@ namespace myengine::ecs
             RemoveChildReference(childHierarchy.parent, child);
         }
 
-        auto& parentHierarchy = registry_.Emplace<components::HierarchyComponent>(parent);
+        auto& parentHierarchy = registry_.Has<components::HierarchyComponent>(parent)
+            ? registry_.Get<components::HierarchyComponent>(parent)
+            : registry_.Emplace<components::HierarchyComponent>(parent);
         if (std::find(parentHierarchy.children.begin(), parentHierarchy.children.end(), child) == parentHierarchy.children.end())
         {
             parentHierarchy.children.push_back(child);

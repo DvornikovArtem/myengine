@@ -1,6 +1,7 @@
 // main.cpp
 
 #include <filesystem>
+#include <string_view>
 #include <vector>
 
 #include <states/LoadingState.h>
@@ -13,9 +14,39 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <shellapi.h>
 
 namespace
 {
+    bool ParseSceneArgument(std::filesystem::path& scenePath)
+    {
+        int argumentCount = 0;
+        wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        if (arguments == nullptr)
+        {
+            return false;
+        }
+
+        bool valid = true;
+        for (int index = 1; index < argumentCount; ++index)
+        {
+            if (std::wstring_view(arguments[index]) != L"--scene" || !scenePath.empty() || index + 1 >= argumentCount)
+            {
+                valid = false;
+                break;
+            }
+            scenePath = arguments[++index];
+            if (scenePath.empty() || std::wstring_view(arguments[index]) == L"--scene")
+            {
+                valid = false;
+                break;
+            }
+        }
+
+        LocalFree(arguments);
+        return valid;
+    }
+
     // Searches for the application config path
     std::filesystem::path ResolveConfigPath()
     {
@@ -50,12 +81,19 @@ namespace
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
+    std::filesystem::path scenePath;
+    if (!ParseSceneArgument(scenePath))
+    {
+        MessageBoxW(nullptr, L"Usage: myengine.exe [--scene <path>]", L"myengine", MB_OK | MB_ICONERROR);
+        return -1;
+    }
+
     myengine::core::Application app(hInstance);
 
     const auto configPath = ResolveConfigPath();
     const auto config = myengine::config::AppConfig::LoadFromFile(configPath);
 
-    if (!app.Initialize(config))
+    if (!app.Initialize(config, scenePath))
     {
         return -1;
     }
