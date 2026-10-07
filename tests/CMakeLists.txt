@@ -28,3 +28,11 @@ target_link_libraries(myengine_scripting_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_scripting_smoke)
 myengine_copy_runtime_assets(myengine_scripting_smoke)
 set_property(TARGET myengine_scripting_smoke PROPERTY FOLDER "Tests")
+
+add_executable(myengine_controls_tests
+  controls/ControlSystemsTests.cpp)
+
+target_link_libraries(myengine_controls_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_controls_tests)
+set_property(TARGET myengine_controls_tests PROPERTY FOLDER "Tests")
+add_test(NAME control_systems COMMAND myengine_controls_tests)

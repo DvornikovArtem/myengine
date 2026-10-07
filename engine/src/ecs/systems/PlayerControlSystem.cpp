@@ -1,9 +1,7 @@
 #include <algorithm>
-#include <cmath>
 
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
-#include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/PlayerControllerComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
@@ -14,11 +12,6 @@
 
 namespace myengine::ecs::systems
 {
-    namespace
-    {
-        constexpr float kDegToRad = 0.0174532925f;
-    }
-
     PlayerControlSystem::PlayerControlSystem(input::InputManager& input)
         : input_(input)
     {
@@ -39,23 +32,9 @@ namespace myengine::ecs::systems
             return;
         }
 
-        float cameraYawDeg = 0.0f;
-        world.ForEach<components::CameraComponent, components::WindowBindingComponent>(
-            [&](const EntityId, components::CameraComponent& camera, components::WindowBindingComponent& binding)
-            {
-                if (binding.windowId == activeWindowId && camera.isPrimary)
-                {
-                    cameraYawDeg = camera.rotationDeg.y;
-                }
-            });
-
-        const float yawRad = cameraYawDeg * kDegToRad;
-        const components::Vec3 forward{
-            std::sin(yawRad),
-            0.0f,
-            std::cos(yawRad),
-        };
-        const components::Vec3 right{forward.z, 0.0f, -forward.x};
+        // Player movement uses world X/Z axes, independent of the camera rotation.
+        const components::Vec3 forward{0.0f, 0.0f, 1.0f};
+        const components::Vec3 right{1.0f, 0.0f, 0.0f};
 
         world.ForEach<components::PlayerControllerComponent, components::RigidbodyComponent>(
             [&](const EntityId entity, components::PlayerControllerComponent& controller, components::RigidbodyComponent& rigidbody)

@@ -127,12 +127,25 @@ Movement keys (`CameraControlSystem`):
 - `S` / `Down` - backward
 - `A` / `Left` - strafe left
 - `D` / `Right` - strafe right
-- `Space` - move up (world Y)
-- `Left Shift` / `Shift` - move down (world Y)
+- `E` / `Space` - move up (world Y)
+- `Q` / `Left Shift` / `Shift` - move down (world Y)
 
 Mouse:
 - Mouse move - yaw/pitch rotation (pitch is clamped to avoid looking exactly up/down)
 - Mouse wheel - changes movement speed multiplicatively
+
+### 6.3 Player controls
+
+Player controls are active in Play mode, in the active window, while RMB camera navigation is off.
+Movement uses fixed world axes and does not depend on the camera rotation:
+
+- `W` / `Up` - move along +Z
+- `S` / `Down` - move along -Z
+- `A` / `Left` - move along -X
+- `D` / `Right` - move along +X
+- `Space` - jump when grounded
+
+Diagonal input is normalized so it does not increase movement speed.
 
 ## 7. ECS Architecture (Current)
 

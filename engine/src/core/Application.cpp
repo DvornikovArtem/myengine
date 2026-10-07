@@ -591,6 +591,11 @@ namespace myengine::core
 
             case WM_KILLFOCUS:
             {
+                // Windows may deliver key-up to another app after Alt-Tab. Do not keep old keys held.
+                if (input_.GetActiveWindowId() == window.Id())
+                {
+                    input_.ReleaseAllInputs();
+                }
                 if (inputOwnerWindowId_ == window.Id())
                 {
                     cameraControlActive_ = false;
@@ -633,13 +638,14 @@ namespace myengine::core
 
             case WM_KEYUP:
             {
+                // Release even if an editor widget captured the keyboard after our key-down.
+                input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
                 if (uiWantsKeyboardCapture && !cameraConsumesKeyboard)
                 {
                     return 0;
                 }
 
                 input_.SetActiveWindow(window.Id());
-                input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
                 event.type = InputEventType::KeyUp;
                 event.key = static_cast<std::uint32_t>(wparam);
                 stateMachine_.HandleEvent(*this, event);
@@ -951,8 +957,10 @@ namespace myengine::core
         input_.BindAction("camera_right", 'D');
         input_.BindAction("camera_right", VK_RIGHT);
         input_.BindAction("camera_up", VK_SPACE);
+        input_.BindAction("camera_up", 'E');
         input_.BindAction("camera_down", VK_SHIFT);
         input_.BindAction("camera_down", VK_LSHIFT);
+        input_.BindAction("camera_down", 'Q');
 
         input_.BindAction("player_forward", 'W');
         input_.BindAction("player_forward", VK_UP);

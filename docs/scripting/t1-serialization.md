@@ -36,12 +36,14 @@
 ```powershell
 .\setup.bat
 cmake -S . -B build -DMYENGINE_BUILD_TESTS=ON
-cmake --build build --config Debug --target myengine myengine_scene_serialization myengine_job_stress myengine_scripting_smoke
+cmake --build build --config Debug --target myengine myengine_scene_serialization myengine_job_stress myengine_scripting_smoke myengine_controls_tests
 ctest --test-dir build -C Debug --output-on-failure
 & ".\build\tests\Debug\myengine_scripting_smoke.exe"
 ```
 
 `scene_serialization` проверяет компоненты, несколько скриптов, `props`, старую сцену, иерархию, восстановление снимка, события, ошибки загрузки и сохранение зарегистрированных систем.
+
+`control_systems` проверяет движение персонажа с места по мировым осям при разных поворотах камеры и частотах кадров, вертикальное перемещение камеры и сброс ввода при потере фокуса.
 
 `myengine_scripting_smoke` — отдельная интеграционная проверка с DX12-окном (поэтому не входит в CTest). Она запускает приложение на временной копии сцены, выполняет 120 кадров, выходит штатно и проверяет, что изменения `props` во время Play не попали в сохранённую сцену. Исходные сцены не перезаписываются.
 
@@ -60,5 +62,7 @@ Get-Content ".\build\tests\Debug\logs\myengine.log" | Select-String "Python|Scri
 ```
 
 При выходе файл выбранной сцены будет сохранён. Как и раньше, если приложение закрыто в Play, сначала восстанавливается снимок начала Play.
+
+В Play без зажатой ПКМ персонаж управляется независимо от камеры: W/S — по мировой оси Z, A/D — по X, Space — прыжок. С зажатой ПКМ управляется камера; Q опускает её, E поднимает по мировой оси Y.
 
 В сборке остаются существовавшие до T1 предупреждения стороннего ImGuizmo и отсутствующих PDB для DirectXTK/DirectXTex; изменения T1 не добавляют новых предупреждений.

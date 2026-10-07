@@ -49,6 +49,19 @@ int main()
         {
             throw std::runtime_error("Application is not saving into the selected scene");
         }
+        auto& input = app.GetInputManager();
+        input.OnKeyDown('E');
+        if (!input.IsActionDown("camera_up"))
+        {
+            throw std::runtime_error("E is not bound to camera up");
+        }
+        input.OnKeyUp('E');
+        input.OnKeyDown('Q');
+        if (!input.IsActionDown("camera_down"))
+        {
+            throw std::runtime_error("Q is not bound to camera down");
+        }
+        input.OnKeyUp('Q');
         app.GetWorld().Get<myengine::ecs::components::ScriptComponent>(7).scripts[0].props["score_value"] = 99;
         app.GetWorld().AddUpdateSystem(std::make_unique<QuitAfterFrames>());
         if (app.Run() != 0)
