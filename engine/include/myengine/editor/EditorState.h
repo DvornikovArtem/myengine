@@ -67,6 +67,17 @@ namespace myengine::editor
         double renderMs = 0.0;
     };
 
+    // Written by ScriptSystem, shown in Statistics. On a long session the numbers must not grow (no leaked state)
+    struct ScriptStats
+    {
+        std::uint32_t instances = 0;
+        std::uint32_t activeInstances = 0;
+        std::uint32_t faultedInstances = 0;
+        std::uint32_t scriptModules = 0; // modules loaded from assets/scripts, refreshed once per second
+        std::uint32_t pythonObjects = 0; // len(gc.get_objects()), refreshed once per second
+        std::uint32_t errors = 0; // total script errors since start
+    };
+
     struct RenderStats
     {
         std::uint32_t totalEntities = 0;
@@ -111,6 +122,7 @@ namespace myengine::editor
         bool sceneDirty = false;
         core::WindowId lastInteractedWindowId = 0;
         std::string playModeSnapshot;
+        ScriptStats scriptStats{};
         std::unordered_map<core::WindowId, WindowEditorState> windows;
 
         WindowEditorState& GetOrCreateWindowState(const core::WindowId windowId)

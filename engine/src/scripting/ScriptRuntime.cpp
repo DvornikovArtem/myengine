@@ -9,6 +9,7 @@
 #include <myengine/core/Logger.h>
 
 #include "ScriptContext.h"
+#include "ScriptModules.h"
 
 namespace py = pybind11;
 
@@ -20,6 +21,12 @@ namespace myengine::scripting
         {
             static ScriptContext context;
             return context;
+        }
+
+        py::module_ GetModule(const std::string& name)
+        {
+            MYENGINE_ASSERT_SCRIPT_THREAD();
+            return py::module_::import(name.c_str());
         }
     }
 
