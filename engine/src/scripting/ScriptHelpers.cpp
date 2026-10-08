@@ -142,6 +142,16 @@ def reload_module(name, path, source):
 _MISSING = object()
 
 
+def live_fields(obj):
+    """Current values of the editable fields of a running object, as JSON (for the inspector in Play)."""
+    values = {}
+    for name, kind, default in describe_fields(type(obj)):
+        value = getattr(obj, name, default)
+        ok, value = _coerce(_TYPES_BY_NAME[kind], value)
+        values[name] = value if ok else default
+    return json.dumps(values)
+
+
 def transfer_state(old, new):
     """Hot reload in Play, L2: the new object gets the old object's state (counters, timers, references),
     except fields whose default value changed in the code - those keep the value from the new code / the scene.

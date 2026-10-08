@@ -389,7 +389,15 @@ namespace myengine::scripting
             }
         }
 
-        if (core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play && !reloadedModules.empty())
+        if (reloadedModules.empty())
+        {
+            return;
+        }
+
+        // The inspector reads the field lists again (a new file may also make a failed module importable)
+        runtime_.ClearFieldCache();
+
+        if (core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play)
         {
             ReloadInstances(reloadedModules);
         }
@@ -398,8 +406,6 @@ namespace myengine::scripting
         {
             return;
         }
-
-        runtime_.ClearFieldCache();
 
         // "from utils import f" in other modules still points to the old function: run all scripts again
         if (helperReloaded && !fullBatch)
@@ -956,9 +962,44 @@ namespace myengine::scripting
         return hudLines_;
     }
 
-    nlohmann::json ScriptSystem::GetLiveFields(const ecs::EntityId /*entity*/, const std::size_t /*scriptIndex*/) const
+    nlohmann::json ScriptSystem::GetLiveFields(const ecs::EntityId entity, const std::size_t scriptIndex) const
     {
-        // T7
-        return nlohmann::json::object();
+        const auto it = impl_->instances.find(entity);
+        if (!runtime_.IsInitialized() || it == impl_->instances.end() || scriptIndex >= it->second.size() || !it->second[scriptIndex].object)
+        {
+            return nlohmann::json::object();
+        }
+
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        try
+        {
+            const auto text = detail::Helper("live_fields")(it->second[scriptIndex].object).cast<std::string>();
+            return nlohmann::json::parse(text);
+        }
+        catch (const std::exception&)
+        {
+            // A broken property in the script: the inspector shows nothing rather than failing every frame
+            return nlohmann::json::object();
+        }
+    }
+
+    std::string ScriptSystem::GetInstanceStatus(const ecs::EntityId entity, const std::size_t scriptIndex) const
+    {
+        const auto it = impl_->instances.find(entity);
+        if (it == impl_->instances.end() || scriptIndex >= it->second.size())
+        {
+            return std::string();
+        }
+
+        switch (it->second[scriptIndex].state)
+        {
+        case InstanceState::PendingStart:
+            return "Starting";
+        case InstanceState::Active:
+            return "Active";
+        case InstanceState::Faulted:
+            return "Faulted";
+        }
+        return std::string();
     }
 }
