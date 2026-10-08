@@ -12,9 +12,9 @@
 #include <utility>
 #include <vector>
 
-#include <pybind11/eval.h>
 #include <pybind11/pybind11.h>
 
+#include <myengine/core/FileWatcher.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
@@ -29,6 +29,7 @@
 
 #include "Behaviour.h"
 #include "ScriptContext.h"
+#include "ScriptHelpers.h"
 #include "ScriptModules.h"
 
 namespace py = pybind11;
@@ -40,86 +41,6 @@ namespace myengine::scripting
         constexpr std::size_t kMaxRecentErrors = 32;
         constexpr int kMaxDestroyRounds = 16; // OnDestroy may destroy more entities; the rest waits for the next frame
 
-        // Helpers that are simpler in Python: props -> fields of a new instance, exception -> file:line + traceback
-        constexpr const char* kHelpersCode = R"PY(
-import gc
-import inspect
-import json
-import os
-import sys
-import traceback
-
-
-def _declared_fields(cls):
-    """Fields of a behaviour = class attributes with a type annotation, over the whole MRO."""
-    fields = {}
-    for klass in reversed(cls.__mro__):
-        try:
-            fields.update(inspect.get_annotations(klass))
-        except Exception:
-            pass
-    return fields
-
-
-def _coerce(annotation, value):
-    if annotation is bool:
-        return isinstance(value, bool), value
-    if annotation is int:
-        return isinstance(value, int) and not isinstance(value, bool), value
-    if annotation is float:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return True, float(value)
-        return False, value
-    if annotation is str:
-        return isinstance(value, str), value
-    return True, value
-
-
-def apply_props(obj, cls, props_json):
-    """Sets scene/prefab values on a new instance. Returns warnings for unknown fields and wrong types."""
-    warnings = []
-    fields = _declared_fields(cls)
-    for name, value in json.loads(props_json).items():
-        if name not in fields:
-            warnings.append(f"unknown field '{name}' (declare it in the class: {name}: <type> = <default>)")
-            continue
-        ok, value = _coerce(fields[name], value)
-        if not ok:
-            expected = getattr(fields[name], "__name__", str(fields[name]))
-            warnings.append(f"field '{name}' expects {expected}, got {type(value).__name__}; the default is kept")
-            continue
-        setattr(obj, name, value)
-    return warnings
-
-
-def _is_script_file(path, scripts_dir):
-    try:
-        return os.path.normcase(os.path.abspath(path)).startswith(scripts_dir)
-    except Exception:
-        return False
-
-
-def describe_error(exc_type, exc_value, exc_tb, scripts_dir):
-    """Returns (file, line, summary, full_text). file:line is the last traceback frame inside assets/scripts."""
-    scripts_dir = os.path.normcase(os.path.abspath(scripts_dir))
-    file, line = "", 0
-    for frame in traceback.extract_tb(exc_tb):
-        if _is_script_file(frame.filename, scripts_dir):
-            file, line = os.path.basename(frame.filename), frame.lineno or 0
-    if isinstance(exc_value, SyntaxError) and exc_value.filename and _is_script_file(exc_value.filename, scripts_dir):
-        file, line = os.path.basename(exc_value.filename), exc_value.lineno or 0
-    summary = "".join(traceback.format_exception_only(exc_type, exc_value)).strip()
-    full_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb)).rstrip()
-    return file, line, summary, full_text
-
-
-def stats(scripts_dir):
-    """(number of modules loaded from assets/scripts, number of objects tracked by the garbage collector)"""
-    scripts_dir = os.path.normcase(os.path.abspath(scripts_dir))
-    modules = sum(1 for module in list(sys.modules.values())
-                  if _is_script_file(getattr(module, "__file__", None) or "", scripts_dir))
-    return modules, len(gc.get_objects())
-)PY";
 
         enum class InstanceState
         {
@@ -165,7 +86,11 @@ def stats(scripts_dir):
         std::vector<ecs::EntityId> destroyQueue;
         std::unordered_set<ecs::EntityId> destroyPending;
 
-        py::object helpers; // dict with the functions from kHelpersCode, created on first use
+        // Hot reload: the scan of assets/scripts runs in a Streaming job, changes arrive here on the main thread
+        core::FileWatcher watcher;
+        std::vector<core::FileChange> fileChanges;
+        bool expectFullBatch = false; // the next batch is a "reload all" (F5 or a changed helper module)
+        bool playReloadHintShown = false; // the "Stop -> Play restarts the running ones" hint, once per Play
 
         events::SubscriptionId collisionSubscription = 0;
         events::SubscriptionId triggerSubscription = 0;
@@ -188,11 +113,9 @@ def stats(scripts_dir):
                         instance.object.release();
                     }
                 }
-                helpers.release();
             }
 
             instances.clear();
-            helpers = py::object();
         }
     };
 
@@ -252,6 +175,13 @@ def stats(scripts_dir):
         // Stop restores the Play snapshot: components are recreated at new addresses, script objects start over
         impl_->sceneLoadedSubscription = bus.Subscribe<scene::SceneLoadedEvent>(
             [this](const scene::SceneLoadedEvent&) { ResetInstances(); });
+
+        // Every *.py in assets/scripts (the source tree), new files included. Changes are applied in Update
+        if (runtime_.IsInitialized())
+        {
+            impl_->watcher.WatchDirectory(runtime_.GetScriptsDir(), ".py",
+                [this](const core::FileChange& change) { impl_->fileChanges.push_back(change); });
+        }
     }
 
     ScriptSystem::~ScriptSystem()
@@ -278,28 +208,28 @@ def stats(scripts_dir):
         context.world = &world;
         context.system = this;
 
-        if (!EnsureHelpers())
-        {
-            return;
-        }
-
-        // Hot reload (T5) goes here: it works in Edit too
-
-        if (core::ServiceLocator::GetEditorRuntimeState().mode != editor::RuntimeMode::Play)
-        {
-            // Scripts run only in Play. Normally Stop already reset everything through SceneLoadedEvent
-            if (!impl_->instances.empty() || !impl_->events.empty() || !impl_->destroyQueue.empty())
-            {
-                ResetInstances();
-            }
-            UpdateStats(deltaTime);
-            return;
-        }
-
         // Script errors are handled per call (SafeCall). This is the last line: nothing from the scripting layer
         // may leave Update and stop the engine loop
         try
         {
+            // 0. Hot reload, in Edit too: the scan runs in a Streaming job, swapping modules happens here
+            {
+                ZoneScopedN("Scripts::HotReload");
+                impl_->watcher.Poll();
+                ProcessFileChanges();
+            }
+
+            if (core::ServiceLocator::GetEditorRuntimeState().mode != editor::RuntimeMode::Play)
+            {
+                // Scripts run only in Play. Normally Stop already reset everything through SceneLoadedEvent
+                if (!impl_->instances.empty() || !impl_->events.empty() || !impl_->destroyQueue.empty())
+                {
+                    ResetInstances();
+                }
+                UpdateStats(deltaTime);
+                return;
+            }
+
             CreateInstances(world);
             StartInstances();
             DispatchEvents(world);
@@ -313,24 +243,124 @@ def stats(scripts_dir):
         }
     }
 
-    bool ScriptSystem::EnsureHelpers()
+    void ScriptSystem::ProcessFileChanges()
     {
-        if (impl_->helpers)
+        if (impl_->fileChanges.empty())
         {
-            return true;
+            return;
         }
 
-        try
+        const auto changes = std::move(impl_->fileChanges);
+        impl_->fileChanges.clear();
+        const bool fullBatch = impl_->expectFullBatch;
+        impl_->expectFullBatch = false;
+
+        struct ModuleChange
         {
-            py::dict helpers;
-            py::exec(kHelpersCode, helpers);
-            impl_->helpers = std::move(helpers);
-            return true;
+            std::string name; // "coin" or "enemies.chaser"
+            std::string fileName; // "coin.py", for messages
+            const core::FileChange* change = nullptr;
+            py::object loaded; // the module currently in sys.modules, or None
+            bool helper = false; // loaded and defines no Behaviour: other modules may import from it
+        };
+
+        const py::object modules = py::module_::import("sys").attr("modules");
+        const py::object behaviourType = py::type::of<detail::Behaviour>();
+        const auto& scriptsDir = runtime_.GetScriptsDir();
+
+        std::vector<ModuleChange> moduleChanges;
+        for (const auto& change : changes)
+        {
+            // assets/scripts/enemies/chaser.py -> "enemies.chaser"
+            auto relative = change.path.lexically_relative(scriptsDir).replace_extension();
+            if (relative.empty() || *relative.begin() == "..")
+            {
+                continue;
+            }
+            std::string name;
+            for (const auto& part : relative)
+            {
+                name += (name.empty() ? "" : ".") + part.u8string();
+            }
+
+            ModuleChange moduleChange;
+            moduleChange.name = name;
+            moduleChange.fileName = change.path.filename().u8string();
+            moduleChange.change = &change;
+
+            if (change.removed)
+            {
+                logger_.Warning("ScriptSystem: " + moduleChange.fileName + " was removed; the loaded code stays until the next start");
+                continue;
+            }
+            if (change.contents.empty())
+            {
+                // An editor may truncate the file first and write it a moment later: the next scan brings the text
+                continue;
+            }
+
+            moduleChange.loaded = modules.attr("get")(name);
+            moduleChange.helper = !moduleChange.loaded.is_none() &&
+                !detail::Helper("defines_behaviour")(moduleChange.loaded, behaviourType).cast<bool>();
+            moduleChanges.push_back(std::move(moduleChange));
         }
-        catch (py::error_already_set& error)
+
+        // Helper modules first: the others import from them while their own code runs
+        std::stable_partition(moduleChanges.begin(), moduleChanges.end(), [](const ModuleChange& item) { return item.helper; });
+
+        const auto report = [this](const std::string& name, const char* method, py::error_already_set* error, const char* message)
         {
-            logger_.Error(std::string("ScriptSystem: helper code failed, scripts are not run: ") + error.what());
-            return false;
+            ReportError(name, method, error, message);
+        };
+
+        bool anyReloaded = false;
+        bool helperReloaded = false;
+        for (const auto& item : moduleChanges)
+        {
+            const auto path = item.change->path.u8string();
+            const py::bytes source(item.change->contents);
+
+            Instance probe; // SafeCall reports through an instance name; nothing else of it is used
+            probe.name = item.name;
+
+            if (item.loaded.is_none())
+            {
+                // Not imported yet: Python reads it from disk when a script needs it. Report syntax errors right now
+                SafeCall(probe, report, "reload", [&]() { detail::Helper("check_syntax")(path, source); });
+                continue;
+            }
+
+            const bool ok = SafeCall(probe, report, "reload", [&]() { detail::Helper("reload_module")(item.name, path, source); });
+            if (ok)
+            {
+                logger_.Info("ScriptSystem: hot reload " + item.fileName);
+                anyReloaded = true;
+                helperReloaded = helperReloaded || item.helper;
+            }
+            else
+            {
+                logger_.Warning("ScriptSystem: " + item.fileName + " was not reloaded, the previous version keeps running");
+            }
+        }
+
+        if (!anyReloaded)
+        {
+            return;
+        }
+
+        runtime_.ClearFieldCache();
+
+        // "from utils import f" in other modules still points to the old function: run all scripts again
+        if (helperReloaded && !fullBatch)
+        {
+            logger_.Info("ScriptSystem: a helper module changed, reloading all scripts");
+            RequestReloadAll();
+        }
+
+        if (core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play && !impl_->playReloadHintShown)
+        {
+            impl_->playReloadHintShown = true;
+            logger_.Info("ScriptSystem: new code is used by objects created from now on; Stop -> Play restarts the running ones");
         }
     }
 
@@ -403,7 +433,7 @@ def stats(scripts_dir):
                         auto* native = object.cast<detail::Behaviour*>();
                         native->entity = detail::EntityRef{entity};
 
-                        const auto warnings = impl_->helpers["apply_props"](object, cls, entry.props.dump()).cast<py::list>();
+                        const auto warnings = detail::Helper("apply_props")(object, cls, entry.props.dump()).cast<py::list>();
                         for (const auto& warning : warnings)
                         {
                             logger_.Warning("ScriptSystem: " + instance.name + " (entity " + std::to_string(entity) + "): " +
@@ -676,7 +706,7 @@ def stats(scripts_dir):
 
         try
         {
-            const auto result = impl_->helpers["stats"](runtime_.GetScriptsDir().u8string()).cast<py::tuple>();
+            const auto result = detail::Helper("stats")(runtime_.GetScriptsDir().u8string()).cast<py::tuple>();
             stats.scriptModules = result[0].cast<std::uint32_t>();
             stats.pythonObjects = result[1].cast<std::uint32_t>();
         }
@@ -694,14 +724,14 @@ def stats(scripts_dir):
         std::string fullText;
 
         auto* error = static_cast<py::error_already_set*>(pythonError);
-        if (error != nullptr && impl_->helpers)
+        if (error != nullptr)
         {
             // An exception raised by pybind11 itself (e.g. a missing super().__init__()) has no traceback:
             // a null handle can not be passed to Python, None can
             const auto orNone = [](const py::object& value) { return value ? value : py::none(); };
             try
             {
-                const auto described = impl_->helpers["describe_error"](
+                const auto described = detail::Helper("describe_error")(
                     orNone(error->type()), orNone(error->value()), orNone(error->trace()), runtime_.GetScriptsDir().u8string()).cast<py::tuple>();
                 scriptError.file = described[0].cast<std::string>();
                 scriptError.line = described[1].cast<int>();
@@ -713,10 +743,6 @@ def stats(scripts_dir):
                 // error_already_set is a std::exception too
                 summary = error->what();
             }
-        }
-        else if (error != nullptr)
-        {
-            summary = error->what();
         }
 
         // First line: file:line, then the full traceback
@@ -738,11 +764,14 @@ def stats(scripts_dir):
 
     void ScriptSystem::RequestReloadAll()
     {
-        // T5
+        // The next scan (a Streaming job, like every scan) reads every script, and all loaded modules are run again
+        impl_->watcher.RequestFullRescan();
+        impl_->expectFullBatch = true;
     }
 
     void ScriptSystem::ResetInstances()
     {
+        impl_->playReloadHintShown = false;
         impl_->ReleasePythonObjects(runtime_.IsInitialized());
         impl_->events.clear();
         impl_->destroyQueue.clear();
@@ -751,6 +780,9 @@ def stats(scripts_dir):
 
     void ScriptSystem::Shutdown()
     {
+        // Before jobs::Shutdown: wait for a running file scan
+        impl_->watcher.Stop();
+        impl_->fileChanges.clear();
         ResetInstances();
 
         auto& context = detail::GetScriptContext();

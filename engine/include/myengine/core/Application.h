@@ -54,6 +54,7 @@ namespace myengine::core
         input::InputManager& GetInputManager();
         Logger& GetLogger();
         resource::ResourceManager& GetResourceManager();
+        scripting::ScriptRuntime& GetScriptRuntime();
         const std::filesystem::path& GetSceneSavePath() const;
         void SetStateLabel(const std::string& label);
         bool SaveSceneToDisk();

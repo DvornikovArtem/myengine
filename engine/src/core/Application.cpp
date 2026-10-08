@@ -205,6 +205,13 @@ namespace myengine::core
         sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };
         sceneEditorServices.captureSceneSnapshot = [this]() { return CaptureSceneSnapshot(); };
         sceneEditorServices.restoreSceneSnapshot = [this](std::string_view snapshot) { return RestoreSceneSnapshot(snapshot); };
+        sceneEditorServices.reloadScripts = [this]()
+        {
+            if (scriptSystem_ != nullptr)
+            {
+                scriptSystem_->RequestReloadAll();
+            }
+        };
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");
@@ -611,7 +618,7 @@ namespace myengine::core
             {
                 const auto key = static_cast<std::uint32_t>(wparam);
 
-                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3)
+                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3 && key != VK_F5)
                 {
                     return 0;
                 }
@@ -629,6 +636,11 @@ namespace myengine::core
                     if (key == VK_F3)
                     {
                         TogglePhysicsDebugDraw();
+                    }
+                    else if (key == VK_F5 && scriptSystem_ != nullptr)
+                    {
+                        // Hot reload of every script (the file watcher does it on save anyway)
+                        scriptSystem_->RequestReloadAll();
                     }
                 }
 
@@ -793,6 +805,11 @@ namespace myengine::core
     resource::ResourceManager& Application::GetResourceManager()
     {
         return *resourceManager_;
+    }
+
+    scripting::ScriptRuntime& Application::GetScriptRuntime()
+    {
+        return scriptRuntime_;
     }
 
     const std::filesystem::path& Application::GetSceneSavePath() const

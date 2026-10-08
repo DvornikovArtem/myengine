@@ -742,6 +742,15 @@ namespace myengine::ui
                 editorState.playModeSnapshot.clear();
             }
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Reload scripts") && services_.reloadScripts)
+        {
+            services_.reloadScripts();
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Hot reload of every script (F5). Saved files are reloaded automatically");
+        }
 
         ImGui::SameLine();
         ImGui::TextDisabled("|");

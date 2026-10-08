@@ -44,6 +44,7 @@ namespace myengine::ui
         std::function<bool()> loadScene;
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
+        std::function<void()> reloadScripts; // hot reload of every script, same as F5
     };
 
     struct SceneEditorWindowContext
