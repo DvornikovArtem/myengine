@@ -139,6 +139,23 @@ def reload_module(name, path, source):
     return module
 
 
+_MISSING = object()
+
+
+def transfer_state(old, new):
+    """Hot reload in Play, L2: the new object gets the old object's state (counters, timers, references),
+    except fields whose default value changed in the code - those keep the value from the new code / the scene.
+    Returns the names of such fields."""
+    old_cls, new_cls = type(old), type(new)
+    old_fields, new_fields = _declared_fields(old_cls), _declared_fields(new_cls)
+    changed = sorted(name for name in new_fields
+                     if name in old_fields and getattr(old_cls, name, _MISSING) != getattr(new_cls, name, _MISSING))
+    for name, value in list(vars(old).items()):
+        if name not in changed:
+            setattr(new, name, value)
+    return changed
+
+
 def defines_behaviour(module, base):
     """True if the module defines a subclass of myengine.Behaviour (not only imports one)."""
     return any(isinstance(value, type) and issubclass(value, base) and value.__module__ == module.__name__
