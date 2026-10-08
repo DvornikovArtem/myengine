@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,7 @@
 
 #include <windows.h>
 #include <pybind11/embed.h>
+#include <tracy/Tracy.hpp>
 
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
@@ -410,6 +412,63 @@ saved_module = api_behaviours
         Check(myengine::core::ServiceLocator::GetEditorRuntimeState().scriptStats.instances == 0, "Stop did not clear the instance counter");
     }
 
+    void TestScriptProfiling(Fixture& fixture)
+    {
+        fixture.system->ResetInstances();
+        fixture.world.ClearEntities();
+        auto& editorState = myengine::core::ServiceLocator::GetEditorRuntimeState();
+        auto& stats = editorState.scriptStats;
+        Check(stats.updateMs == 0.0, "Reset did not clear the script timing");
+        editorState.mode = myengine::editor::RuntimeMode::Play;
+
+        const auto receiver = fixture.Entity("TimingReceiver");
+        fixture.Script(receiver, "ProfileProbe");
+        const auto sender = fixture.Entity("TimingSender");
+        fixture.Script(sender, "ProfileProbe", {{"delay", 0.01}, {"receiver", "TimingReceiver"}, {"message_delay", 0.01}});
+
+        const auto timedTick = [&](const double minimumMs)
+        {
+            stats.updateMs = -1.0; // every path must publish a fresh sample
+            const auto start = std::chrono::steady_clock::now();
+            fixture.Tick();
+            const double elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+            Check(std::isfinite(stats.updateMs) && stats.updateMs >= minimumMs, "Script work or an early-return path was not timed");
+            Check(stats.updateMs <= elapsedMs, "Nested send calls were counted twice in the script timing");
+        };
+        timedTick(20.0);
+        py::dict globals;
+        py::exec(R"PY(
+import myengine as me
+import api_behaviours as behaviours
+sender = me.world.find("TimingSender").get_script(behaviours.ProfileProbe)
+receiver = me.world.find("TimingReceiver").get_script(behaviours.ProfileProbe)
+assert receiver.messages == 1
+sender.receiver = ""
+sender.fail = True
+)PY", globals);
+        const auto errors = stats.errors;
+        timedTick(10.0);
+        Check(fixture.system->GetInstanceStatus(sender, 0) == "Faulted", "Profiling changed exception handling");
+        Check(stats.errors == errors + 1, "A profiled exception was not reported exactly once");
+        timedTick(0.0); // a faulted object is skipped, but the frame still gets a new measurement
+        Check(stats.errors == errors + 1, "Profiling retried a faulted callback");
+
+        editorState.mode = myengine::editor::RuntimeMode::Edit;
+        timedTick(0.0); // the Edit-mode early return still includes watcher and statistics work
+        Check(stats.instances == 0, "Profiling prevented Stop from releasing instances");
+        fixture.system->ResetInstances();
+        Check(stats.updateMs == 0.0, "Stop left a stale script timing");
+        fixture.system->Shutdown();
+        Check(stats.updateMs == 0.0, "Shutdown left a stale script timing");
+
+        myengine::scripting::ScriptRuntime disabledRuntime;
+        myengine::scene::PrefabLibrary disabledPrefabs;
+        myengine::scripting::ScriptSystem disabledSystem(disabledRuntime, fixture.input, disabledPrefabs, *fixture.logger);
+        stats.updateMs = -1.0;
+        disabledSystem.Update(fixture.world, 0.016f);
+        Check(std::isfinite(stats.updateMs) && stats.updateMs >= 0.0, "Disabled scripting left a stale timing");
+    }
+
     int RunTests(Fixture& fixture)
     {
         try
@@ -417,7 +476,8 @@ saved_module = api_behaviours
             TestApiAndLifecycle(fixture);
             TestSpawn(fixture);
             TestHotReloadAndFields(fixture);
-            std::cout << "OK: script API, prefab spawn, safe handles, lifecycle, messages, events, hot reload and inspector fields\n";
+            TestScriptProfiling(fixture);
+            std::cout << "OK: script API, prefab spawn, safe handles, lifecycle, messages, events, hot reload, inspector fields and profiling\n";
             return 0;
         }
         catch (const std::exception& error)
@@ -431,8 +491,34 @@ saved_module = api_behaviours
     }
 }
 
-int main()
+int main(const int argc, char** argv)
 {
+    if (argc > 2 || (argc == 2 && std::string(argv[1]) != "--wait-for-tracy"))
+    {
+        std::cerr << "Usage: myengine_script_api_tests [--wait-for-tracy]\n";
+        return 1;
+    }
+    if (argc == 2)
+    {
+#if defined(TRACY_ENABLE)
+        // The headless test can finish before capture retries its connection. Only a manual trace run waits.
+        std::cout << "Waiting for Tracy capture (up to 10 seconds)...\n" << std::flush;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!TracyIsConnected && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (!TracyIsConnected)
+        {
+            std::cerr << "FAILED: start Tracy capture first, then retry\n";
+            return 1;
+        }
+#else
+        std::cerr << "FAILED: Tracy capture requires RelWithDebInfo\n";
+        return 1;
+#endif
+    }
+
     myengine::jobs::Initialize(2);
     int result = 1;
     try

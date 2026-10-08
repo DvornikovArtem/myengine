@@ -340,6 +340,7 @@ namespace myengine::core
         struct FrameTimingStats
         {
             double worldUpdateMs = 0.0;
+            double scriptsMs = 0.0;
             double stateUpdateMs = 0.0;
             double hotReloadMs = 0.0;
             double uiUpdateMs = 0.0;
@@ -383,6 +384,7 @@ namespace myengine::core
                 world_.UpdateSystems(deltaTime);
             }
             const auto worldUpdateEndTime = std::chrono::steady_clock::now();
+            const double scriptsMs = core::ServiceLocator::GetEditorRuntimeState().scriptStats.updateMs;
 
 
             const auto stateUpdateStartTime = std::chrono::steady_clock::now();
@@ -427,6 +429,7 @@ namespace myengine::core
                 };
 
             frameTimingStats.worldUpdateMs += millisecondsBetween(worldUpdateStartTime, worldUpdateEndTime);
+            frameTimingStats.scriptsMs += scriptsMs;
             frameTimingStats.stateUpdateMs += millisecondsBetween(stateUpdateStartTime, stateUpdateEndTime);
             frameTimingStats.hotReloadMs += millisecondsBetween(hotReloadStartTime, hotReloadEndTime);
             frameTimingStats.uiUpdateMs += millisecondsBetween(uiUpdateStartTime, uiUpdateEndTime);
@@ -437,6 +440,7 @@ namespace myengine::core
             PublishFrameStatistics(
                 deltaTime,
                 millisecondsBetween(worldUpdateStartTime, worldUpdateEndTime),
+                scriptsMs,
                 millisecondsBetween(stateUpdateStartTime, stateUpdateEndTime),
                 millisecondsBetween(hotReloadStartTime, hotReloadEndTime),
                 millisecondsBetween(uiUpdateStartTime, uiUpdateEndTime),
@@ -453,6 +457,7 @@ namespace myengine::core
                 timingMessage
                     << "FrameTimes avg_ms total=" << frameTimingStats.totalMs * inverseFrameCount
                     << " world=" << frameTimingStats.worldUpdateMs * inverseFrameCount
+                    << " scripts=" << frameTimingStats.scriptsMs * inverseFrameCount
                     << " state=" << frameTimingStats.stateUpdateMs * inverseFrameCount
                     << " hot_reload=" << frameTimingStats.hotReloadMs * inverseFrameCount
                     << " ui=" << frameTimingStats.uiUpdateMs * inverseFrameCount
@@ -1176,6 +1181,7 @@ namespace myengine::core
     void Application::PublishFrameStatistics(
         const float deltaTime,
         const double worldUpdateMs,
+        const double scriptsMs,
         const double stateUpdateMs,
         const double hotReloadMs,
         const double uiUpdateMs,
@@ -1208,6 +1214,7 @@ namespace myengine::core
             windowState.timings.averageFps = averageFps;
             windowState.timings.frameMs = frameMs;
             windowState.timings.worldUpdateMs = worldUpdateMs;
+            windowState.timings.scriptsMs = scriptsMs;
             windowState.timings.stateUpdateMs = stateUpdateMs;
             windowState.timings.hotReloadMs = hotReloadMs;
             windowState.timings.uiUpdateMs = uiUpdateMs;

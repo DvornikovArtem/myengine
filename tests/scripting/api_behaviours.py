@@ -65,3 +65,29 @@ class PrefabSpawner(me.Behaviour):
         if not hasattr(self, "spawned"):
             self.spawned = me.world.spawn("test", me.Vec3(4, 2, 3))
             self.waiting_for_start = self.spawned.get_script(Counter) is None
+
+
+def _profile_work(seconds):
+    import time
+    deadline = time.perf_counter() + seconds
+    while time.perf_counter() < deadline:
+        pass
+
+
+class ProfileProbe(me.Behaviour):
+    delay: float = 0.0
+    receiver: str = ""
+    message_delay: float = 0.0
+    fail: bool = False
+    messages: int = 0
+
+    def OnUpdate(self, dt):
+        _profile_work(self.delay)
+        if self.receiver:
+            me.send(self.receiver, "work", self.message_delay)
+        if self.fail:
+            raise RuntimeError("profiling failure")
+
+    def work(self, seconds):
+        _profile_work(seconds)
+        self.messages += 1

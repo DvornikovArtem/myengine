@@ -1,0 +1,287 @@
+name,src_file,src_line,ns_since_start,exec_time_ns,thread,value
+Scripts::api_behaviours.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,773538933,1290489,3,entity=0; script=0
+Scripts::api_behaviours.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,804725252,3763742,3,entity=0; script=0
+Scripts::api_behaviours.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,835432694,1214775,3,entity=0; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,752500780,24847,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757681280,14217,3,entity=11; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757695988,3367,3,entity=12; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,759020772,5771,3,entity=3; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,759026924,2986,3,entity=4; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760528223,6372,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760534996,2625,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760537911,2435,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760540596,2094,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836925637,10610,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836946587,4669,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836955274,3105,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836959061,2494,3,entity=8; script=0
+Scripts::api_behaviours.Counter.fail,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757059320,499999,3,entity=2; script=0
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,748911909,4369121,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,755514038,92495,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,755609018,42190,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,755802124,1169720,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,756972616,7524,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,757574057,133393,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,757830113,40968,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,758189024,1803,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,758348146,438211,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,758962612,82066,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,760437491,134575,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,760662107,52089,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,761383526,30909,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,773462488,2060149,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,790345466,40637,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,804593542,3936701,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,820577325,45166,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,835360647,1697522,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,851539531,12554,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,851629702,20210012,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,872018473,10869587,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,882888651,29356,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,882918097,1884,3,
+Scripts::Update,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,273,882932384,90,3,
+Scripts::api_behaviours.PrefabSpawner.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775232126,25869,3,entity=2; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760711401,2224,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,761408914,4970,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775520203,1382,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,790382777,2034,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,808527397,1693,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,820620006,1643,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,837055754,1263,3,entity=9; script=0
+Scripts::api_behaviours.PrefabSpawner.OnReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775260099,3096,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,758395295,3918,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836921810,3396,3,entity=2; script=0
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,752527120,470,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,755599620,140,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,755610100,37762,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,755837572,60,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,756975241,60,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,757699535,110,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,757832888,50,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,758190326,50,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,758399393,50,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,759030080,50,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,760542881,60,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,760703325,50,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,761393264,81,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,775508050,200,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,790359282,180,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,808509563,271,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,820592214,210,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,836963499,170,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,851781040,140,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,872022060,191,3,
+Scripts::Events,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,688,882891527,120,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,752533091,2104,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,755605912,220,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,755651058,40,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,756970752,220,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,756980020,20,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,757706859,120,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,757839360,31460,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,758190617,80,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,758785686,130,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,759044267,90,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,760555956,15689,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,760713785,110,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,761414074,140,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,775521766,360,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,790384991,831,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,808529291,270,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,820621830,380,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,837057217,311,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,871838762,341,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,882887419,150,3,
+Scripts::Flush,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,804,882917907,30,3,
+Scripts::api_behaviours.Broken.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755805220,28304,3,entity=10; script=0
+Scripts::api_behaviours.ReloadProbe.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760664882,33454,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775435983,17994,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836877356,16411,3,entity=9; script=0
+Scripts::api_behaviours.ProfileProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,851782132,16912,3,entity=1; script=0
+Scripts::api_behaviours.ProfileProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,851799996,20038205,3,entity=2; script=0
+Scripts::api_behaviours.ProfileProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,872023242,5862,3,entity=1; script=0
+Scripts::api_behaviours.ProfileProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,872029615,10856812,3,entity=2; script=0
+Scripts::api_behaviours.ProfileProbe.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,882894683,22933,3,entity=1; script=0
+Scripts::api_behaviours.ProfileProbe.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,851775499,4178,3,entity=1; script=0
+Scripts::api_behaviours.ProfileProbe.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,851780168,711,3,entity=2; script=0
+Scripts::api_behaviours.Counter.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775296799,20739,3,entity=5; script=0
+Scripts::api_behaviours.Counter.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775340241,24116,3,entity=6; script=0
+Scripts::api_behaviours.Counter.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775385637,12183,3,entity=7; script=0
+Scripts::api_behaviours.Counter.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775414482,18495,3,entity=8; script=0
+Scripts::api_behaviours.ReloadProbe.OnReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775470618,2756,3,entity=9; script=0
+Scripts::api_behaviours.Broken.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755835127,2184,3,entity=10; script=0
+Scripts::api_behaviours.Counter.OnDestroy,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757840703,13065,3,entity=11; script=0
+Scripts::api_behaviours.Counter.OnDestroy,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757854229,4538,3,entity=12; script=0
+Scripts::api_behaviours.Counter.OnDestroy,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760557899,6242,3,entity=3; script=0
+Scripts::api_behaviours.Counter.OnDestroy,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760564472,2625,3,entity=4; script=0
+Scripts::api_behaviours.ProfileProbe.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,851633650,58381,3,entity=1; script=0
+Scripts::api_behaviours.ProfileProbe.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,851694646,78479,3,entity=2; script=0
+Scripts::api_behaviours.Counter.add,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755344205,11913,3,entity=2; script=0
+Scripts::api_behaviours.Broken.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755838233,1113403,3,entity=10; script=0
+Scripts::api_behaviours.Listener.OnCollision,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755610661,21441,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnCollision,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755634436,3487,3,entity=9; script=0
+Scripts::api_behaviours.PrefabSpawner.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,758351051,38213,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,774908592,319416,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836720638,61517,3,entity=2; script=0
+Scripts::api_behaviours.ProfileProbe.work,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,861823517,10008973,3,entity=1; script=0
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,748964379,26881,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,755515641,1152,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,755609258,81,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,755802685,141,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,756973117,190,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,757575029,210,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,757830804,170,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,758189685,140,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,758348767,130,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,758963393,141,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,760438282,181,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,760662658,140,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,761384177,7034,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,773464371,2040793,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,790347169,8486,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,804595706,3909168,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,820579029,8375,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,835363433,1555522,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,851541014,531,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,851629923,70,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,872019686,210,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,882889553,210,3,
+Scripts::HotReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,306,882918197,50,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,748992843,3499781,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,755516893,78118,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,755609389,491,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,755802926,31440,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,756973527,1112,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,757575359,100872,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,757831095,1242,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,758189916,230,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,758348997,43613,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,758963664,56327,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,760438583,88708,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,760662919,36198,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,761391381,1302,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,775505585,1663,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,790356006,2194,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,808505375,2756,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,820587755,3246,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,836919245,1583,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,851630213,144144,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,872020076,1143,3,
+Scripts::Start,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,584,882889924,982,3,
+Scripts::api_behaviours.Counter.OnReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775319271,1513,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775368405,841,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775399163,591,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnReload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775434089,661,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnTrigger,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755640267,2735,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnTrigger,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755645167,2284,3,entity=9; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755604159,952,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755605411,341,3,entity=9; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755649966,410,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755650577,381,3,entity=9; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,756960432,812,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,756969850,561,3,entity=9; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,756978767,431,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,756979449,470,3,entity=9; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757700757,862,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757702020,451,3,entity=9; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757833870,1453,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757835693,481,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760699899,3256,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836961886,1463,3,entity=9; script=0
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,752527641,5390,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,755599820,6032,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,755647892,3136,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,755837682,1132850,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,756975511,4489,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,757699735,7044,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,757833008,6292,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,758190437,130,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,758399493,386063,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,759030200,14007,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,760543011,12444,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,760703435,10290,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,761393405,20599,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,775508320,13375,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,790359603,25318,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,808509994,19197,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,820592574,29176,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,836963840,93287,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,851781330,20057182,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,872022301,10864938,3,
+Scripts::OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,761,882891717,26170,3,
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,758399994,385231,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,759030801,2164,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760543652,1864,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760703986,1684,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,761397182,4879,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775509102,3366,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,790361206,11461,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,808511256,7334,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,820594037,10450,3,entity=2; script=0
+Scripts::api_behaviours.PrefabSpawner.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836964591,82867,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,752529905,2905,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755600542,3166,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755648353,1282,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,756953499,6352,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,756976343,2104,3,entity=2; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757702811,2275,3,entity=11; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757705456,1152,3,entity=12; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757836585,2565,3,entity=12; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,759033396,1483,3,entity=3; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,759039508,4589,3,entity=4; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760546077,1743,3,entity=4; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760548121,1713,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760550104,2145,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760552509,1343,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760554463,881,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760706161,1482,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760707944,892,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760709106,882,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760710248,832,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,761402762,1844,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,761404977,1052,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,761406409,982,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,761407672,942,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775513249,1764,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775515323,1934,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775517548,1042,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775518920,1042,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,790373369,3506,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,790377336,1664,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,790379681,1312,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,790381324,1142,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,808519232,2905,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,808522578,1172,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,808524091,1302,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,808525854,1263,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,820605258,8917,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,820614786,1674,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,820616780,1223,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,820618393,1303,3,entity=8; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,837048120,2585,3,entity=5; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,837051035,1964,3,entity=6; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,837053300,1001,3,entity=7; script=0
+Scripts::api_behaviours.Counter.OnUpdate,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,837054642,842,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755596164,2504,3,entity=8; script=0
+Scripts::api_behaviours.Listener.OnStart,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755598969,521,3,entity=9; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,749005106,3484993,3,entity=2; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757579026,50747,3,entity=11; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,757632468,43192,3,entity=12; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,758966229,33834,3,entity=3; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,759002147,17373,3,entity=4; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760441679,34465,3,entity=5; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760478218,18195,3,entity=6; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760497585,14527,3,entity=7; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,760513405,13515,3,entity=8; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775266030,30137,3,entity=5; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775322698,17102,3,entity=6; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775370669,14618,3,entity=7; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775401167,12984,3,entity=8; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836789699,28194,3,entity=5; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836821319,23134,3,entity=6; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836846858,13876,3,entity=7; script=0
+Scripts::api_behaviours.Counter.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,836862548,12904,3,entity=8; script=0
+Scripts::api_behaviours.Counter.missing_method,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755361308,1012,3,entity=2; script=0
+Scripts::api_behaviours.Listener.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755519628,55025,3,entity=8; script=0
+Scripts::api_behaviours.Listener.create,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,755577168,17423,3,entity=9; script=0
+Scripts::api_behaviours.ReloadProbe.reload,C:\Users\ivanm\source\repos\myengine\engine\src\scripting\ScriptSystem.cpp,161,775454378,15870,3,entity=9; script=0

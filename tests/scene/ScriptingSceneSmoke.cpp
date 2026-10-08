@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -9,6 +10,7 @@
 
 #include <myengine/config/AppConfig.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/System.h>
 #include <myengine/ecs/components/ScriptComponent.h>
 
@@ -68,6 +70,19 @@ int main()
         {
             throw std::runtime_error("Application loop failed");
         }
+        const auto& editorState = myengine::core::ServiceLocator::GetEditorRuntimeState();
+        if (editorState.windows.empty())
+        {
+            throw std::runtime_error("No window statistics were published");
+        }
+        for (const auto& [windowId, windowState] : editorState.windows)
+        {
+            if (!std::isfinite(windowState.timings.scriptsMs) || windowState.timings.scriptsMs <= 0.0 ||
+                windowState.timings.scriptsMs > windowState.timings.worldUpdateMs)
+            {
+                throw std::runtime_error("The scripts timing bucket was not published as part of world update");
+            }
+        }
         app.Shutdown();
 
         std::ifstream file(scenePath);
@@ -87,7 +102,7 @@ int main()
         }
         file.close();
         std::filesystem::remove(scenePath);
-        std::cout << "OK: application startup, selected scene, 120 frames, Play snapshot save and shutdown\n";
+        std::cout << "OK: application startup, selected scene, 120 frames, script timing bucket, Play snapshot save and shutdown\n";
         return 0;
     }
     catch (const std::exception& ex)
