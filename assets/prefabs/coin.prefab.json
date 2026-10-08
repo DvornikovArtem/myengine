@@ -1,0 +1,20 @@
+{
+  "name": "Coin",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": { "name": "Coin" },
+      "Transform": { "position": [0, 0.5, 0], "rotationDeg": [0, 0, 0], "scale": [0.4, 0.4, 0.4] },
+      "MeshRenderer": { "meshPath": "assets/models/sphere.obj", "materialPath": "assets/materials/gold.material.json", "visible": true },
+      "Collider": { "type": "sphere", "radius": 0.5, "isTrigger": true },
+      "Script": { "scripts": [ { "module": "coin", "class": "Coin", "props": { "spin_speed": 120.0, "score_value": 1 } } ] }
+    },
+    {
+      "id": 2,
+      "Tag": { "name": "CoinGlow" },
+      "Hierarchy": { "parent": 1 },
+      "Transform": { "position": [0, 0, 0], "rotationDeg": [0, 0, 0], "scale": [1.2, 1.2, 1.2] },
+      "MeshRenderer": { "meshPath": "assets/models/pyramid.obj", "materialPath": "assets/materials/cool.material.json", "visible": true }
+    }
+  ]
+}

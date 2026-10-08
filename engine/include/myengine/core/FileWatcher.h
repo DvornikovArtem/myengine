@@ -22,7 +22,7 @@ namespace myengine::core
 
     // Watches files by modification time. The scan (exists + last_write_time) and the reading of changed files run
     // as a job in the Streaming pool, so the frame does not wait for the disk. Callbacks run on the main thread in Poll.
-    // The first scan only remembers the state, so nothing is reported at startup.
+    // The first scan only remembers the state, unless RequestFullRescan explicitly requests the file contents.
     class FileWatcher
     {
     public:

@@ -8,6 +8,8 @@
 
 #include <pybind11/pybind11.h>
 
+#include <myengine/ecs/components/Vector3.h>
+
 #include "EntityRef.h"
 
 namespace myengine::scripting
@@ -26,6 +28,7 @@ namespace myengine::scripting::detail
     // A friend of ScriptSystem: pybind11 remains out of the public engine headers.
     struct ScriptApi
     {
+        static ecs::EntityId Spawn(ScriptSystem& system, ecs::World& world, const std::string& prefab, const ecs::components::Vec3* position);
         static pybind11::object GetScript(ScriptSystem& system, ecs::EntityId entity, pybind11::handle scriptClass);
         static bool Send(ScriptSystem& system, ecs::EntityId entity, const std::string& method, const pybind11::args& args);
         static void SetHudLine(ScriptSystem& system, const std::string& key, const std::string& text);

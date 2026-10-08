@@ -1,0 +1,14 @@
+{
+  "name": "Firework",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": { "name": "Firework" },
+      "Transform": { "position": [0, 1, 0], "rotationDeg": [0, 0, 0], "scale": [0.15, 0.15, 0.15] },
+      "MeshRenderer": { "meshPath": "assets/models/crate.obj", "materialPath": "assets/materials/gold.material.json", "visible": true },
+      "Rigidbody": { "mass": 0.25, "useGravity": true, "isKinematic": false },
+      "Collider": { "type": "box", "halfExtents": [0.5, 0.5, 0.5] },
+      "Script": { "scripts": [ { "module": "firework", "class": "Firework", "props": { "lifetime": 2.0 } } ] }
+    }
+  ]
+}
