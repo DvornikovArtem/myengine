@@ -1,0 +1,256 @@
+{
+  "entities": [
+    {
+      "Camera": {
+        "farPlane": 200.0,
+        "fovYDeg": 60.0,
+        "isPrimary": true,
+        "nearPlane": 0.009999999776482582,
+        "orthographicHalfHeight": 1.0,
+        "position": [
+          0.0,
+          9.0,
+          -9.0
+        ],
+        "rotationDeg": [
+          35.0,
+          0.0,
+          0.0
+        ]
+      },
+      "CameraController": {
+        "mouseSensitivityDeg": 0.11999999731779099,
+        "moveSpeed": 3.0,
+        "rotateSpeedDeg": 80.0,
+        "zoomSpeed": 1.0
+      },
+      "Tag": {
+        "name": "Camera_1"
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 1
+    },
+    {
+      "Collider": {
+        "bounciness": 0.0,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/default.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "PlayerController": {
+        "airControl": 0.44999998807907104,
+        "jumpSpeed": 6.699999809265137,
+        "moveSpeed": 5.300000190734863,
+        "windowId": 1
+      },
+      "Rigidbody": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gravityScale": 1.0,
+        "isKinematic": false,
+        "linearDamping": 0.14000000059604645,
+        "mass": 1.0,
+        "sleepLinearSpeed": 0.07999999821186066,
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "Controlled_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.5,
+          2.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.8999999761581421,
+          0.8999999761581421,
+          0.8999999761581421
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 2
+    },
+    {
+      "Collider": {
+        "bounciness": 0.0,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/cool.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "Floor_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          -0.5,
+          3.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          14.0,
+          1.0,
+          14.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 3
+    },
+    {
+      "Script": {
+        "scripts": [
+          {
+            "class": "GameManager",
+            "module": "game_manager",
+            "props": {
+              "fall_damage": 1,
+              "fall_height": -4.0,
+              "firework_count": 20,
+              "firework_speed": 5.0,
+              "hit_cooldown": 1.5,
+              "round_duration": 60.0,
+              "target_score": 10
+            }
+          }
+        ]
+      },
+      "Tag": {
+        "name": "GameManager"
+      },
+      "id": 4
+    },
+    {
+      "Script": {
+        "scripts": [
+          {
+            "class": "CoinSpawner",
+            "module": "coin_spawner",
+            "props": {
+              "max_coins": 6,
+              "prefab_name": "coin",
+              "spawn_interval": 1.5,
+              "spawn_radius": 4.0
+            }
+          }
+        ]
+      },
+      "Tag": {
+        "name": "CoinSpawner"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.5,
+          3.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "id": 5
+    },
+    {
+      "Script": {
+        "scripts": [
+          {
+            "class": "EnemySpawner",
+            "module": "enemy_spawner",
+            "props": {
+              "initial_delay": 4.0,
+              "max_enemies": 8,
+              "prefab_name": "chaser",
+              "spawn_radius": 1.5,
+              "wave_growth": 1,
+              "wave_interval": 10.0,
+              "wave_size": 1
+            }
+          }
+        ]
+      },
+      "Tag": {
+        "name": "EnemySpawner"
+      },
+      "Transform": {
+        "position": [
+          4.0,
+          0.5,
+          5.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "id": 6
+    }
+  ]
+}
