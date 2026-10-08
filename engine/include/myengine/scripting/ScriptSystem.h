@@ -13,6 +13,7 @@
 
 #include <myengine/ecs/Entity.h>
 #include <myengine/ecs/System.h>
+#include <myengine/scripting/ScriptRuntime.h>
 
 namespace myengine::core
 {
@@ -67,6 +68,8 @@ namespace myengine::scripting
         bool IsDestroyPending(ecs::EntityId entity) const;
 
         const std::deque<ScriptError>& GetRecentErrors() const; // last 32
+        void ClearRecentErrors(); // clears the list, not Faulted states or the total error counter
+        ScriptConsoleResult ExecuteConsole(const std::string& source); // Play only, after Update attached the world
         const std::map<std::string, std::string>& GetHudLines() const; // hud.set(...)
         nlohmann::json GetLiveFields(ecs::EntityId entity, std::size_t scriptIndex) const; // current values in Play
         // "Active", "Starting", "Faulted"; empty if the script has no object (Edit mode)

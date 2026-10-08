@@ -74,3 +74,14 @@ target_link_libraries(myengine_gameplay_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_gameplay_smoke)
 myengine_copy_runtime_assets(myengine_gameplay_smoke)
 set_property(TARGET myengine_gameplay_smoke PROPERTY FOLDER "Tests")
+
+add_executable(myengine_script_console_tests
+  scripting/ScriptConsoleTests.cpp)
+
+target_link_libraries(myengine_script_console_tests PRIVATE myengine_engine)
+target_include_directories(myengine_script_console_tests SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_script_console_tests)
+myengine_copy_runtime_assets(myengine_script_console_tests)
+set_property(TARGET myengine_script_console_tests PROPERTY FOLDER "Tests")
+add_test(NAME script_console COMMAND myengine_script_console_tests)
+set_tests_properties(script_console PROPERTIES TIMEOUT 30)

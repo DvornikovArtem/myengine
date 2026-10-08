@@ -248,6 +248,28 @@ namespace myengine::core
             }
             return lines;
         };
+        sceneEditorServices.scriptConsole.execute = [this](const std::string& source)
+        {
+            return scriptSystem_ != nullptr ? scriptSystem_->ExecuteConsole(source) : scripting::ScriptConsoleResult{};
+        };
+        sceneEditorServices.scriptConsole.reset = [this]() { scriptRuntime_.ResetConsole(); };
+        sceneEditorServices.scriptConsole.generation = [this]() { return scriptRuntime_.GetConsoleGeneration(); };
+        sceneEditorServices.scriptConsole.errors = [this]()
+        {
+            if (scriptSystem_ == nullptr)
+            {
+                return std::vector<scripting::ScriptError>{};
+            }
+            const auto& errors = scriptSystem_->GetRecentErrors();
+            return std::vector<scripting::ScriptError>(errors.begin(), errors.end());
+        };
+        sceneEditorServices.scriptConsole.clearErrors = [this]()
+        {
+            if (scriptSystem_ != nullptr)
+            {
+                scriptSystem_->ClearRecentErrors();
+            }
+        };
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");

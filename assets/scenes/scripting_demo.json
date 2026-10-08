@@ -1,90 +1,295 @@
 {
   "entities": [
     {
-      "id": 1,
-      "Tag": { "name": "Camera_1" },
       "Camera": {
-        "position": [0.0, 6.0, -12.0],
-        "rotationDeg": [20.0, 0.0, 0.0],
-        "fovYDeg": 60.0,
-        "nearPlane": 0.01,
         "farPlane": 200.0,
-        "isPrimary": true
+        "fovYDeg": 60.0,
+        "isPrimary": true,
+        "nearPlane": 0.009999999776482582,
+        "orthographicHalfHeight": 1.0,
+        "position": [
+          -0.690412700176239,
+          6.420035362243652,
+          -1.0230828523635864
+        ],
+        "rotationDeg": [
+          52.52003479003906,
+          6.000014781951904,
+          0.0
+        ]
       },
-      "CameraController": { "moveSpeed": 3.0, "zoomSpeed": 1.0 },
-      "WindowBinding": { "windowId": 1 }
+      "CameraController": {
+        "mouseSensitivityDeg": 0.11999999731779099,
+        "moveSpeed": 3.0,
+        "rotateSpeedDeg": 80.0,
+        "zoomSpeed": 1.0
+      },
+      "Tag": {
+        "name": "Camera_1"
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 1
     },
     {
-      "id": 2,
-      "Tag": { "name": "Controlled_1" },
-      "Transform": { "position": [0.0, 0.5, 2.0], "scale": [0.9, 0.9, 0.9] },
+      "Collider": {
+        "bounciness": 0.0,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
       "MeshRenderer": {
-        "meshPath": "assets/models/crate.obj",
         "materialPath": "assets/materials/default.material.json",
-        "visible": true
-      },
-      "Rigidbody": { "mass": 1.0, "useGravity": true },
-      "Collider": { "type": "box", "halfExtents": [0.5, 0.5, 0.5], "bounciness": 0.0 },
-      "PlayerController": { "windowId": 1, "moveSpeed": 5.3, "jumpSpeed": 6.7 },
-      "WindowBinding": { "windowId": 1 }
-    },
-    {
-      "id": 3,
-      "Tag": { "name": "Floor_1" },
-      "Transform": { "position": [0.0, -0.5, 3.0], "scale": [14.0, 1.0, 14.0] },
-      "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
         "visible": true
       },
-      "Collider": { "type": "box", "halfExtents": [0.5, 0.5, 0.5], "bounciness": 0.0 },
-      "WindowBinding": { "windowId": 1 }
-    },
-    {
-      "id": 4,
-      "Tag": { "name": "GameManager" },
-      "Script": {
-        "scripts": [
-          { "module": "game_manager", "class": "GameManager", "props": {} }
+      "PlayerController": {
+        "airControl": 0.44999998807907104,
+        "jumpSpeed": 6.699999809265137,
+        "moveSpeed": 5.300000190734863,
+        "windowId": 1
+      },
+      "Rigidbody": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gravityScale": 1.0,
+        "isKinematic": false,
+        "linearDamping": 0.14000000059604645,
+        "mass": 1.0,
+        "sleepLinearSpeed": 0.07999999821186066,
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
         ]
-      }
-    },
-    {
-      "id": 5,
-      "Tag": { "name": "CoinSpawner" },
-      "Transform": { "position": [0.0, 0.5, 3.0] },
-      "Script": {
-        "scripts": [
-          { "module": "coin_spawner", "class": "CoinSpawner", "props": {} }
+      },
+      "Tag": {
+        "name": "Controlled_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.5,
+          2.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.8999999761581421,
+          0.8999999761581421,
+          0.8999999761581421
         ]
-      }
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 2
     },
     {
-      "id": 6,
-      "Tag": { "name": "EnemySpawner" },
-      "Transform": { "position": [4.0, 0.5, 5.0] },
-      "Script": {
-        "scripts": [
-          { "module": "enemy_spawner", "class": "EnemySpawner", "props": {} }
-        ]
-      }
-    },
-    {
-      "id": 7,
-      "Tag": { "name": "CoinPreview" },
-      "Transform": { "position": [-2.0, 0.5, 3.0], "scale": [0.4, 0.4, 0.4] },
+      "Collider": {
+        "bounciness": 0.0,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
       "MeshRenderer": {
-        "meshPath": "assets/models/sphere.obj",
-        "materialPath": "assets/materials/warm.material.json",
+        "materialPath": "assets/materials/cool.material.json",
+        "meshPath": "assets/models/crate.obj",
         "visible": true
       },
-      "Collider": { "type": "sphere", "radius": 0.5, "isTrigger": true },
-      "WindowBinding": { "windowId": 1 },
+      "Tag": {
+        "name": "Floor_1"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          -0.5,
+          3.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          14.0,
+          1.0,
+          14.0
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 3
+    },
+    {
       "Script": {
         "scripts": [
-          { "module": "coin", "class": "Coin", "props": { "spin_speed": 120.0, "score_value": 1 } }
+          {
+            "class": "GameManager",
+            "module": "game_manager",
+            "props": {}
+          }
         ]
-      }
+      },
+      "Tag": {
+        "name": "GameManager"
+      },
+      "id": 4
+    },
+    {
+      "Script": {
+        "scripts": [
+          {
+            "class": "CoinSpawner",
+            "module": "coin_spawner",
+            "props": {}
+          }
+        ]
+      },
+      "Tag": {
+        "name": "CoinSpawner"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.5,
+          3.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "id": 5
+    },
+    {
+      "Script": {
+        "scripts": [
+          {
+            "class": "EnemySpawner",
+            "module": "enemy_spawner",
+            "props": {}
+          }
+        ]
+      },
+      "Tag": {
+        "name": "EnemySpawner"
+      },
+      "Transform": {
+        "position": [
+          4.0,
+          0.5,
+          5.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "id": 6
+    },
+    {
+      "Collider": {
+        "bounciness": 0.11999999731779099,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": true,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "sphere"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/warm.material.json",
+        "meshPath": "assets/models/sphere.obj",
+        "visible": true
+      },
+      "Script": {
+        "scripts": [
+          {
+            "class": "Coin",
+            "module": "coin",
+            "props": {
+              "score_value": 1,
+              "spin_speed": 120.0
+            }
+          }
+        ]
+      },
+      "Tag": {
+        "name": "CoinPreview"
+      },
+      "Transform": {
+        "position": [
+          -2.0,
+          0.5,
+          3.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.4000000059604645,
+          0.4000000059604645,
+          0.4000000059604645
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 7
     }
   ]
 }

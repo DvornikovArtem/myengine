@@ -965,6 +965,7 @@ namespace myengine::scripting
         if (detail::GetScriptContext().system == this)
         {
             ++detail::GetScriptContext().sceneVersion;
+            runtime_.ResetConsole(); // release console references after invalidating handles, before the old instances
         }
         impl_->ReleasePythonObjects(runtime_.IsInitialized());
         impl_->events.clear();
@@ -1012,6 +1013,42 @@ namespace myengine::scripting
     const std::deque<ScriptError>& ScriptSystem::GetRecentErrors() const
     {
         return recentErrors_;
+    }
+
+    void ScriptSystem::ClearRecentErrors()
+    {
+        recentErrors_.clear();
+    }
+
+    ScriptConsoleResult ScriptSystem::ExecuteConsole(const std::string& source)
+    {
+        if (!runtime_.IsInitialized() || !runtime_.IsMainThread())
+        {
+            ScriptConsoleResult result;
+            result.error = "Console requires the initialized Python runtime on the main thread.";
+            return result;
+        }
+        const auto& context = detail::GetScriptContext();
+        if (core::ServiceLocator::GetEditorRuntimeState().mode != editor::RuntimeMode::Play || context.system != this || context.world == nullptr)
+        {
+            ScriptConsoleResult result;
+            result.error = "Console commands run only in Play, after the first script frame.";
+            return result;
+        }
+        logger_.Info("Console input: " + source);
+        auto result = runtime_.ExecuteConsole(source);
+        if (!result.success)
+        {
+            logger_.Error("Console error: " + result.error);
+            recentErrors_.push_back({result.file, result.line, result.error, SecondsSince(impl_->startTime)});
+            while (recentErrors_.size() > kMaxRecentErrors)
+            {
+                recentErrors_.pop_front();
+            }
+            ++impl_->totalErrors;
+            core::ServiceLocator::GetEditorRuntimeState().scriptStats.errors = impl_->totalErrors;
+        }
+        return result;
     }
 
     const std::map<std::string, std::string>& ScriptSystem::GetHudLines() const

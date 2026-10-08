@@ -3,6 +3,7 @@
 #include <myengine/scripting/ScriptRuntime.h>
 
 #include <system_error>
+#include <utility>
 
 #include <pybind11/embed.h>
 
@@ -11,6 +12,8 @@
 #include "ScriptContext.h"
 #include "ScriptHelpers.h"
 #include "ScriptModules.h"
+
+#include <tracy/Tracy.hpp>
 
 namespace py = pybind11;
 
@@ -33,6 +36,42 @@ namespace myengine::scripting
 
     namespace
     {
+        constexpr std::size_t kMaxConsoleOutput = 64 * 1024;
+
+        class ScopedConsoleCapture
+        {
+        public:
+            explicit ScopedConsoleCapture(std::string& output)
+                : previous_(std::move(detail::GetScriptContext().consoleOutput))
+            {
+                detail::GetScriptContext().consoleOutput = [&output, truncated = false](const char* level, const std::string& text) mutable
+                {
+                    if (truncated)
+                    {
+                        return;
+                    }
+                    const std::string line = (std::string(level) == "INFO" ? std::string() : "[" + std::string(level) + "] ") + text + '\n';
+                    if (output.size() + line.size() > kMaxConsoleOutput)
+                    {
+                        output.append(line, 0, kMaxConsoleOutput - output.size());
+                        output += "\n... console output truncated ...\n";
+                        truncated = true;
+                    }
+                    else
+                    {
+                        output += line;
+                    }
+                };
+            }
+
+            ~ScopedConsoleCapture() { detail::GetScriptContext().consoleOutput = std::move(previous_); }
+            ScopedConsoleCapture(const ScopedConsoleCapture&) = delete;
+            ScopedConsoleCapture& operator=(const ScopedConsoleCapture&) = delete;
+
+        private:
+            std::function<void(const char*, const std::string&)> previous_;
+        };
+
         // Runs once after the interpreter starts. The exe is a WIN32 app without a console,
         // so print() would print nowhere: stdout/stderr are redirected into the engine log.
         constexpr const char* kBootstrapCode = R"PY(
@@ -209,6 +248,7 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
 
         MYENGINE_ASSERT_SCRIPT_THREAD();
 
+        ResetConsole();
         try
         {
             // Flush a print() without a trailing newline and detach the log streams before finalization
@@ -226,6 +266,7 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
         context.world = nullptr;
         context.system = nullptr;
         context.input = nullptr;
+        context.consoleOutput = {};
 
         if (desc_.logger != nullptr)
         {
@@ -310,4 +351,103 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
     {
         fieldCache_.clear();
     }
+
+    ScriptConsoleResult ScriptRuntime::ExecuteConsole(const std::string& source)
+    {
+        ZoneScopedN("Scripts::Console");
+        ScriptConsoleResult result;
+        if (!initialized_)
+        {
+            result.error = "Python runtime is not initialized.";
+            return result;
+        }
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        if (source.size() > 16 * 1024 || source.find('\0') != std::string::npos)
+        {
+            try { detail::Helper("cancel_console_input")(); } catch (const std::exception&) {}
+            result.error = "Console input must be at most 16 KiB per line and contain no NUL bytes.";
+            return result;
+        }
+
+        // Do not attribute an unfinished print from a game script to this console command.
+        auto flushStreams = []()
+        {
+            const auto sys = py::module_::import("sys");
+            sys.attr("stdout").attr("flush")();
+            sys.attr("stderr").attr("flush")();
+        };
+        try
+        {
+            flushStreams();
+        }
+        catch (const std::exception& error)
+        {
+            result.error = error.what();
+            return result;
+        }
+        ScopedConsoleCapture capture(result.output);
+        try
+        {
+            result.incomplete = detail::Helper("console_push")(source).cast<bool>();
+            result.success = true;
+            flushStreams(); // print(end="") is visible immediately too
+        }
+        catch (py::error_already_set& error)
+        {
+            result.success = false;
+            result.file = "<console>";
+            try
+            {
+                const auto orNone = [](const py::object& value) { return value ? value : py::none(); };
+                const auto described = detail::Helper("describe_error")(
+                    orNone(error.type()), orNone(error.value()), orNone(error.trace()), desc_.scriptsDir.u8string()).cast<py::tuple>();
+                const auto file = described[0].cast<std::string>();
+                if (!file.empty())
+                {
+                    result.file = file;
+                }
+                result.line = described[1].cast<int>();
+                result.error = result.file + ":" + std::to_string(result.line) + ": " + described[2].cast<std::string>() + "\n" + described[3].cast<std::string>();
+            }
+            catch (const std::exception&)
+            {
+                result.error = error.what();
+            }
+            try { flushStreams(); } catch (const std::exception&) {}
+        }
+        catch (const std::exception& error)
+        {
+            result.success = false;
+            result.error = error.what();
+        }
+        if (result.error.size() > kMaxConsoleOutput)
+        {
+            result.error.resize(kMaxConsoleOutput);
+            result.error += "\n... traceback truncated ...";
+        }
+        return result;
+    }
+
+    void ScriptRuntime::ResetConsole()
+    {
+        if (!initialized_)
+        {
+            return;
+        }
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        try
+        {
+            detail::Helper("reset_console")();
+            ++consoleGeneration_;
+        }
+        catch (const std::exception& error)
+        {
+            if (desc_.logger != nullptr)
+            {
+                desc_.logger->Warning(std::string("ScriptRuntime: console reset failed: ") + error.what());
+            }
+        }
+    }
+
+    std::uint64_t ScriptRuntime::GetConsoleGeneration() const { return consoleGeneration_; }
 }

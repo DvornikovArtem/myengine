@@ -26,6 +26,12 @@ namespace
     {
         MYENGINE_ASSERT_SCRIPT_THREAD();
 
+        auto& context = GetScriptContext();
+        if (context.consoleOutput)
+        {
+            const char* name = level == LogLevel::Warning ? "WARN" : level == LogLevel::Error ? "ERROR" : level == LogLevel::Debug ? "DEBUG" : "INFO";
+            context.consoleOutput(name, message);
+        }
         if (auto* logger = GetScriptContext().logger)
         {
             logger->Log(level, "[script] " + message);
