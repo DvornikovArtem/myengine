@@ -60,6 +60,9 @@ namespace myengine::ui
         constexpr char kCubeMeshPath[] = "assets/models/crate.obj";
         constexpr char kSphereMeshPath[] = "assets/models/sphere.obj";
         constexpr float kViewportToolbarPadding = 12.0f;
+        constexpr ImU32 kPlayBadgeColor = IM_COL32(46, 160, 67, 255);
+        constexpr ImU32 kEditBadgeColor = IM_COL32(70, 78, 90, 255);
+        constexpr float kPlayFrameThickness = 3.0f;
         constexpr float kViewportToolbarHeight = 44.0f;
         constexpr float kDefaultRenderableRadius = 0.8660254f;
 
@@ -726,11 +729,40 @@ namespace myengine::ui
         ImGui::BeginGroup();
 
         const bool isEditMode = editorState.mode == editor::RuntimeMode::Edit;
-        ImGui::TextDisabled("%s", isEditMode ? "Edit" : "Play");
+
+        // Mode badge: bright in Play, calm in Edit; the viewport gets a frame of the same colour in Play
+        {
+            const ImU32 badgeColor = isEditMode ? kEditBadgeColor : kPlayBadgeColor;
+            const char* badgeText = isEditMode ? "EDIT" : "PLAYING";
+            const ImVec2 textSize = ImGui::CalcTextSize(badgeText);
+            const ImVec2 badgePadding{10.0f, 3.0f};
+            const ImVec2 badgeMin = ImGui::GetCursorScreenPos();
+            const ImVec2 badgeSize{textSize.x + badgePadding.x * 2.0f, ImGui::GetFrameHeight()};
+            auto* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(badgeMin, ImVec2(badgeMin.x + badgeSize.x, badgeMin.y + badgeSize.y), badgeColor, 6.0f);
+            drawList->AddText(
+                ImVec2(badgeMin.x + badgePadding.x, badgeMin.y + (badgeSize.y - textSize.y) * 0.5f),
+                IM_COL32(255, 255, 255, 255),
+                badgeText);
+            ImGui::Dummy(badgeSize);
+
+            if (!isEditMode)
+            {
+                const float half = kPlayFrameThickness * 0.5f;
+                drawList->AddRect(
+                    ImVec2(viewportRect.x + half, viewportRect.y + half),
+                    ImVec2(viewportRect.x + viewportRect.width - half, viewportRect.y + viewportRect.height - half),
+                    badgeColor,
+                    0.0f,
+                    0,
+                    kPlayFrameThickness);
+            }
+        }
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
+        ImGui::BeginDisabled(!isEditMode);
         if (ImGui::Button("Play"))
         {
             if (isEditMode && services_.captureSceneSnapshot)
@@ -740,8 +772,12 @@ namespace myengine::ui
                 physicsState.physicsPaused = false;
             }
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Stop") && editorState.mode == editor::RuntimeMode::Play)
+        ImGui::BeginDisabled(isEditMode);
+        const bool stopPressed = ImGui::Button("Stop");
+        ImGui::EndDisabled();
+        if (stopPressed && editorState.mode == editor::RuntimeMode::Play)
         {
             const bool restoredScene =
                 editorState.playModeSnapshot.empty() ||

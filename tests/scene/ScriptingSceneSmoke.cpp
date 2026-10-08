@@ -43,7 +43,7 @@ int main()
         std::filesystem::copy_file(std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/scripting_demo.json", scenePath);
 
         myengine::core::Application app;
-        if (!app.Initialize(myengine::config::AppConfig::Default(), scenePath))
+        if (!app.Initialize(myengine::config::AppConfig::Default(), scenePath, true))
         {
             throw std::runtime_error("Application initialization failed; see logs/myengine.log");
         }

@@ -18,7 +18,7 @@
 
 namespace
 {
-    bool ParseSceneArgument(std::filesystem::path& scenePath)
+    bool ParseArguments(std::filesystem::path& scenePath, bool& startInPlay)
     {
         int argumentCount = 0;
         wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
@@ -30,6 +30,11 @@ namespace
         bool valid = true;
         for (int index = 1; index < argumentCount; ++index)
         {
+            if (std::wstring_view(arguments[index]) == L"--play" && !startInPlay)
+            {
+                startInPlay = true;
+                continue;
+            }
             if (std::wstring_view(arguments[index]) != L"--scene" || !scenePath.empty() || index + 1 >= argumentCount)
             {
                 valid = false;
@@ -82,9 +87,10 @@ namespace
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
     std::filesystem::path scenePath;
-    if (!ParseSceneArgument(scenePath))
+    bool startInPlay = false;
+    if (!ParseArguments(scenePath, startInPlay))
     {
-        MessageBoxW(nullptr, L"Usage: myengine.exe [--scene <path>]", L"myengine", MB_OK | MB_ICONERROR);
+        MessageBoxW(nullptr, L"Usage: myengine.exe [--scene <path>] [--play]", L"myengine", MB_OK | MB_ICONERROR);
         return -1;
     }
 
@@ -93,7 +99,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     const auto configPath = ResolveConfigPath();
     const auto config = myengine::config::AppConfig::LoadFromFile(configPath);
 
-    if (!app.Initialize(config, scenePath))
+    if (!app.Initialize(config, scenePath, startInPlay))
     {
         return -1;
     }

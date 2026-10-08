@@ -41,7 +41,8 @@ namespace myengine::core
         explicit Application(HINSTANCE instance = GetModuleHandleW(nullptr));
         ~Application();
 
-        bool Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath = {});
+        /// startInPlay: begin in Play (scripts and physics running) instead of Edit.
+        bool Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath = {}, bool startInPlay = false);
         int Run();
         void Shutdown();
 
@@ -81,6 +82,7 @@ namespace myengine::core
         void SetInputOwnerWindow(WindowId id);
         void SetCursorVisible(bool visible);
         void WarpCursorToWindowCenter(const Window& window);
+        void UpdateWindowTitles();
         void ConfigureInputBindings();
         void BindRuntimeEventListeners();
         void BuildDemoScene();
@@ -125,6 +127,8 @@ namespace myengine::core
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
+        std::string stateLabel_;
+        bool titleShowsPlay_ = false;
         bool sceneLoaded_ = false;
         bool cameraControlActive_ = false;
         bool cursorHidden_ = false;

@@ -40,6 +40,9 @@ namespace myengine::core
 {
     namespace
     {
+        // The scene opened without --scene (benchmark.json stays available through --scene for LR1 measurements)
+        constexpr char kDefaultScenePath[] = "assets/scenes/coin_guard_demo.json";
+
         std::wstring Utf8ToWide(const std::string& text)
         {
             if (text.empty())
@@ -109,7 +112,7 @@ namespace myengine::core
         Shutdown();
     }
 
-    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath)
+    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath, const bool startInPlay)
     {
         config_ = config;
 
@@ -302,7 +305,7 @@ namespace myengine::core
         }
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
-        const auto requestedScenePath = scenePath.empty() ? std::filesystem::path("assets/scenes/benchmark.json") : scenePath;
+        const auto requestedScenePath = scenePath.empty() ? std::filesystem::path(kDefaultScenePath) : scenePath;
         const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / requestedScenePath;
         const auto executableScenePath = GetExecutableDirectory() / requestedScenePath;
         std::error_code scenePathError;
@@ -343,14 +346,19 @@ namespace myengine::core
         }
         sceneLoaded_ = true;
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        //editorState.mode = editor::RuntimeMode::Edit;
-        //editorState.selectedEntity = ecs::kInvalidEntity;
-        //editorState.playModeSnapshot.clear();
-        //core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         editorState.selectedEntity = ecs::kInvalidEntity;
-        editorState.playModeSnapshot = CaptureSceneSnapshot();
-        editorState.mode = editor::RuntimeMode::Play;
-        core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
+        if (startInPlay)
+        {
+            editorState.playModeSnapshot = CaptureSceneSnapshot();
+            editorState.mode = editor::RuntimeMode::Play;
+            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
+        }
+        else
+        {
+            editorState.playModeSnapshot.clear();
+            editorState.mode = editor::RuntimeMode::Edit;
+            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
+        }
 
         timer_.Reset();
         logger_.Info("Application initialization finished");
@@ -416,6 +424,10 @@ namespace myengine::core
                 stateMachine_.Update(*this, deltaTime);
             }
             const auto stateUpdateEndTime = std::chrono::steady_clock::now();
+            if ((core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play) != titleShowsPlay_)
+            {
+                UpdateWindowTitles();
+            }
             
 
             const auto hotReloadStartTime = std::chrono::steady_clock::now();
@@ -886,7 +898,23 @@ namespace myengine::core
 
     void Application::SetStateLabel(const std::string& label)
     {
-        const std::wstring suffix = L" [" + Utf8ToWide(label) + L"]";
+        stateLabel_ = label;
+        UpdateWindowTitles();
+        uiManager_.SetStateLabel(label);
+    }
+
+    void Application::UpdateWindowTitles()
+    {
+        titleShowsPlay_ = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
+        std::wstring suffix;
+        if (!stateLabel_.empty())
+        {
+            suffix += L" [" + Utf8ToWide(stateLabel_) + L"]";
+        }
+        if (titleShowsPlay_)
+        {
+            suffix += L" [PLAY]";
+        }
         for (auto& runtime : windows_)
         {
             if (!runtime.closed && runtime.window)
@@ -894,8 +922,6 @@ namespace myengine::core
                 runtime.window->SetTitle(runtime.baseTitle + suffix);
             }
         }
-
-        uiManager_.SetStateLabel(label);
     }
 
     bool Application::SaveSceneToDisk()

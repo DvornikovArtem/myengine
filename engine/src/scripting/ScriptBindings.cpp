@@ -32,7 +32,7 @@ namespace
             const char* name = level == LogLevel::Warning ? "WARN" : level == LogLevel::Error ? "ERROR" : level == LogLevel::Debug ? "DEBUG" : "INFO";
             context.consoleOutput(name, message);
         }
-        if (auto* logger = GetScriptContext().logger)
+        if (auto* logger = context.logger)
         {
             logger->Log(level, "[script] " + message);
         }

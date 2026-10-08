@@ -72,7 +72,7 @@ int main()
             std::filesystem::u8path("myengine T6 сцена " + std::to_string(uniqueId) + ".json");
         std::filesystem::copy_file(std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/coin_guard_demo.json", scenePath);
         myengine::core::Application app;
-        if (!app.Initialize(myengine::config::AppConfig::Default(), scenePath))
+        if (!app.Initialize(myengine::config::AppConfig::Default(), scenePath, true))
         {
             throw std::runtime_error("Application initialization failed; see logs/myengine.log");
         }
