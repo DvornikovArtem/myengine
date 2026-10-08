@@ -68,7 +68,8 @@ namespace myengine::scripting
         // Python objects (pybind11 types) live in Impl, so this header does not include pybind11
         struct Impl;
 
-        bool EnsureHelpers();
+        // Hot reload: compile -> new module object -> swap in sys.modules; on any error the old module stays
+        void ProcessFileChanges();
         // pythonError is a pybind11::error_already_set* (void* keeps pybind11 out of this header)
         void ReportError(const std::string& name, const char* method, void* pythonError, const char* message);
 

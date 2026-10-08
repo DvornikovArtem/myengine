@@ -92,6 +92,8 @@ set(ENGINE_SOURCES
   src/scripting/EntityRef.h
   src/scripting/ScriptBindings.cpp
   src/scripting/ScriptContext.h
+  src/scripting/ScriptHelpers.cpp
+  src/scripting/ScriptHelpers.h
   src/scripting/ScriptModules.h
   src/scripting/ScriptRuntime.cpp
   src/scripting/ScriptSystem.cpp

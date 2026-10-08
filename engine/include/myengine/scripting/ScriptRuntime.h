@@ -3,6 +3,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -62,11 +63,15 @@ namespace myengine::scripting
 
         const std::filesystem::path& GetScriptsDir() const;
 
-        // Fields of module.className for the inspector, works in Edit mode without instances
+        // Fields of module.className for the inspector, works in Edit mode without instances.
+        // Cached; an import error is logged once and gives an empty list until the cache is cleared
         std::vector<ScriptFieldInfo> DescribeFields(const std::string& module, const std::string& className);
+        // Called after hot reload: field lists are built again from the new code
+        void ClearFieldCache();
 
     private:
         ScriptRuntimeDesc desc_;
+        std::map<std::string, std::vector<ScriptFieldInfo>> fieldCache_; // "module.Class" -> fields
         std::thread::id mainThreadId_;
         bool initialized_ = false;
     };

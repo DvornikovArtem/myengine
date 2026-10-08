@@ -9,6 +9,7 @@
 #include <myengine/core/Logger.h>
 
 #include "ScriptContext.h"
+#include "ScriptHelpers.h"
 #include "ScriptModules.h"
 
 namespace py = pybind11;
@@ -174,6 +175,7 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
         try
         {
             py::exec(kBootstrapCode);
+            detail::InstallHelpers();
 
             if (desc_.logger != nullptr)
             {
@@ -214,6 +216,7 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
 
         py::finalize_interpreter();
         initialized_ = false;
+        fieldCache_.clear();
 
         auto& context = detail::GetScriptContext();
         context.world = nullptr;
@@ -240,9 +243,65 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
         return desc_.scriptsDir;
     }
 
-    std::vector<ScriptFieldInfo> ScriptRuntime::DescribeFields(const std::string& /*module*/, const std::string& /*className*/)
+    std::vector<ScriptFieldInfo> ScriptRuntime::DescribeFields(const std::string& module, const std::string& className)
     {
-        // T5: import the module and read inspect.get_annotations(cls) over the MRO
-        return {};
+        const std::string key = module + "." + className;
+        if (const auto cached = fieldCache_.find(key); cached != fieldCache_.end())
+        {
+            return cached->second;
+        }
+
+        std::vector<ScriptFieldInfo> fields;
+        if (initialized_)
+        {
+            MYENGINE_ASSERT_SCRIPT_THREAD();
+            try
+            {
+                const py::object cls = detail::GetModule(module).attr(className.c_str());
+                for (const auto& item : detail::Helper("describe_fields")(cls))
+                {
+                    const auto entry = item.cast<py::tuple>();
+                    ScriptFieldInfo field;
+                    field.name = entry[0].cast<std::string>();
+                    const auto kind = entry[1].cast<std::string>();
+                    if (kind == "bool")
+                    {
+                        field.type = ScriptFieldInfo::Type::Bool;
+                        field.defaultValue = entry[2].cast<bool>();
+                    }
+                    else if (kind == "int")
+                    {
+                        field.type = ScriptFieldInfo::Type::Int;
+                        field.defaultValue = entry[2].cast<long long>();
+                    }
+                    else if (kind == "float")
+                    {
+                        field.type = ScriptFieldInfo::Type::Float;
+                        field.defaultValue = entry[2].cast<double>();
+                    }
+                    else
+                    {
+                        field.type = ScriptFieldInfo::Type::String;
+                        field.defaultValue = entry[2].cast<std::string>();
+                    }
+                    fields.push_back(std::move(field));
+                }
+            }
+            catch (const std::exception& exception)
+            {
+                if (desc_.logger != nullptr)
+                {
+                    desc_.logger->Warning("ScriptRuntime: can not read fields of " + key + ": " + exception.what());
+                }
+            }
+        }
+
+        fieldCache_[key] = fields;
+        return fields;
+    }
+
+    void ScriptRuntime::ClearFieldCache()
+    {
+        fieldCache_.clear();
     }
 }
