@@ -17,6 +17,7 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/ColliderComponent.h>
+#include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
 #include <myengine/ecs/components/ScriptComponent.h>
@@ -58,6 +59,19 @@ namespace
             std::filesystem::copy_file(source, directory / "api_behaviours.py");
             logger = std::make_unique<myengine::core::Logger>();
             Check(logger->Initialize(directory / "test.log"), "Logger initialization failed");
+            const auto prefabsDirectory = directory / "prefabs";
+            std::filesystem::create_directory(prefabsDirectory);
+            const nlohmann::json prefab = {{"entities", nlohmann::json::array({
+                {{"id", 10}, {"Tag", {{"name", "Prefabricated"}}}, {"Transform", {{"position", {1, 0, 0}}}},
+                    {"Script", {{"scripts", nlohmann::json::array({{{"module", "api_behaviours"}, {"class", "Counter"}, {"props", {{"count", 20}}}}})}}}},
+                {{"id", 30}, {"Tag", {{"name", "PrefabChild"}}}, {"Hierarchy", {{"parent", 10}}},
+                    {"Script", {{"scripts", nlohmann::json::array({{{"module", "api_behaviours"}, {"class", "Counter"}, {"props", {{"count", 30}}}}})}}}}
+            })}};
+            std::ofstream prefabFile(prefabsDirectory / "test.prefab.json", std::ios::binary);
+            prefabFile << prefab.dump();
+            prefabFile.close();
+            Check(static_cast<bool>(prefabFile), "Could not write the test prefab");
+            Check(prefabs.Initialize(prefabsDirectory, logger.get()), "Test prefabs initialization failed");
             wchar_t executable[32768]{};
             Check(GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(std::size(executable))) != 0, "Executable path unavailable");
             const auto executableDirectory = std::filesystem::path(executable).parent_path();
@@ -69,6 +83,7 @@ namespace
         ~Fixture()
         {
             system.reset(); // subscriptions and Python objects go away before the interpreter
+            prefabs.Shutdown();
             runtime.Shutdown();
             logger.reset(); // close the log before deleting the owned temporary directory
             if (!keepArtifacts)
@@ -287,6 +302,65 @@ except me.EntityDeadError:
         Check(fixture.system->GetHudLines().empty(), "Stop / scene reset did not clear the HUD");
     }
 
+    void TestSpawn(Fixture& fixture)
+    {
+        const auto spawner = fixture.Entity("Spawner");
+        fixture.Script(spawner, "PrefabSpawner");
+        fixture.Tick();
+        py::dict globals;
+        py::exec(R"PY(
+import myengine as me
+import api_behaviours as behaviours
+spawner = me.world.find("Spawner").get_script(behaviours.PrefabSpawner)
+spawned = spawner.spawned
+assert spawned.alive and spawner.waiting_for_start
+assert spawned.transform.position == me.Vec3(4, 2, 3)
+assert spawned.get_script(behaviours.Counter) is None
+assert ("start", "Prefabricated") not in behaviours.events
+saved_player = me.world.find("NewPlayer")
+)PY", globals);
+        const auto root = globals["spawned"].attr("id").cast<ecs::EntityId>();
+        const auto child = fixture.world.Get<components::HierarchyComponent>(root).children.at(0);
+        Check(fixture.world.Get<components::HierarchyComponent>(child).parent == root, "Python spawn did not remap the child parent");
+        Check(fixture.system->GetInstanceStatus(root, 0).empty(), "Spawned behaviour started in the same frame");
+        fixture.Tick();
+        py::exec(R"PY(
+assert spawned.get_script(behaviours.Counter).count == 21
+assert me.world.find("PrefabChild").get_script(behaviours.Counter).count == 31
+assert behaviours.events.count(("start", "Prefabricated")) == 1
+assert saved_player.alive  # spawn does not publish SceneLoadedEvent or invalidate handles
+second = me.world.spawn("test")
+third = me.world.spawn("test", position=None)
+assert second != third and second != spawned
+assert second.transform.position == me.Vec3(1, 0, 0)
+assert third.get_script(behaviours.Counter) is None
+)PY", globals);
+        const auto count = fixture.world.GetEntities().size();
+        py::exec(R"PY(
+for name in ("missing", "../test"):
+    try:
+        me.world.spawn(name)
+        assert False, "Invalid prefab was spawned"
+    except RuntimeError:
+        pass
+try:
+    me.world.spawn("test", me.Vec3(float("nan"), 0, 0))
+    assert False, "An invalid spawn position was accepted"
+except ValueError:
+    pass
+try:
+    me.world.spawn("test", (1, 2, 3))
+    assert False, "Spawn position must be Vec3 or None"
+except TypeError:
+    pass
+spawned.destroy()
+)PY", globals);
+        Check(fixture.world.GetEntities().size() == count, "Failed Python spawn changed the world");
+        fixture.Tick();
+        Check(!fixture.world.IsAlive(root) && !fixture.world.IsAlive(child), "Destroy did not remove a spawned prefab subtree");
+        py::exec("assert not spawned.alive and saved_player.alive\nassert behaviours.events.count(('destroy', 'PrefabChild')) == 1", globals);
+    }
+
     void TestHotReloadAndFields(Fixture& fixture)
     {
         const auto probe = fixture.Entity("Reload");
@@ -341,8 +415,9 @@ saved_module = api_behaviours
         try
         {
             TestApiAndLifecycle(fixture);
+            TestSpawn(fixture);
             TestHotReloadAndFields(fixture);
-            std::cout << "OK: script API, safe handles, lifecycle, messages, events, hot reload and inspector fields\n";
+            std::cout << "OK: script API, prefab spawn, safe handles, lifecycle, messages, events, hot reload and inspector fields\n";
             return 0;
         }
         catch (const std::exception& error)

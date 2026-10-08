@@ -58,3 +58,10 @@ class ReloadProbe(me.Behaviour):
 
     def OnReload(self):
         self.reloads += 1
+
+
+class PrefabSpawner(me.Behaviour):
+    def OnUpdate(self, dt):
+        if not hasattr(self, "spawned"):
+            self.spawned = me.world.spawn("test", me.Vec3(4, 2, 3))
+            self.waiting_for_start = self.spawned.get_script(Counter) is None

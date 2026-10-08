@@ -162,7 +162,7 @@ namespace myengine::core
                 }
             }
 
-            if (state.baselineDone)
+            if (state.baselineDone || state.reportAll)
             {
                 for (const auto& [path, fileState] : current)
                 {

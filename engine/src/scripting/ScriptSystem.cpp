@@ -23,6 +23,7 @@
 #include <myengine/events/EventBus.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/scene/SceneEvents.h>
+#include <myengine/scripting/PrefabLibrary.h>
 #include <myengine/scripting/ScriptRuntime.h>
 
 #include <tracy/Tracy.hpp>
@@ -238,6 +239,8 @@ namespace myengine::scripting
     void ScriptSystem::Update(ecs::World& world, const float deltaTime)
     {
         ZoneScopedN("Scripts::Update");
+
+        prefabs_.Poll(); // in Edit too; only the Streaming job touches the disk
 
         if (!runtime_.IsInitialized())
         {
@@ -1021,6 +1024,17 @@ namespace myengine::scripting
             return "Faulted";
         }
         return std::string();
+    }
+
+    ecs::EntityId detail::ScriptApi::Spawn(ScriptSystem& system, ecs::World& world, const std::string& prefab, const ecs::components::Vec3* position)
+    {
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        const auto entity = system.prefabs_.Instantiate(world, prefab, position);
+        if (entity == ecs::kInvalidEntity)
+        {
+            throw std::runtime_error("world.spawn failed: " + system.prefabs_.GetLastError());
+        }
+        return entity;
     }
 
     py::object detail::ScriptApi::GetScript(ScriptSystem& system, const ecs::EntityId entity, const py::handle scriptClass)

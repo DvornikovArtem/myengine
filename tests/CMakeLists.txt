@@ -46,3 +46,12 @@ myengine_copy_runtime_assets(myengine_script_api_tests)
 set_property(TARGET myengine_script_api_tests PROPERTY FOLDER "Tests")
 add_test(NAME script_api COMMAND myengine_script_api_tests)
 set_tests_properties(script_api PROPERTIES TIMEOUT 30)
+
+add_executable(myengine_prefab_tests
+  scene/PrefabLibraryTests.cpp)
+
+target_link_libraries(myengine_prefab_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_prefab_tests)
+set_property(TARGET myengine_prefab_tests PROPERTY FOLDER "Tests")
+add_test(NAME prefab_library COMMAND myengine_prefab_tests)
+set_tests_properties(prefab_library PROPERTIES TIMEOUT 30)

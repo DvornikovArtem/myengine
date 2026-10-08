@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -324,6 +325,15 @@ namespace myengine::scripting::detail
             .def("__repr__", [](const EntityRef& entity) { return "Entity(" + std::to_string(entity.id) + ")"; });
 
         auto worldModule = module.def_submodule("world", "Queries return handles; pending destroy requests are excluded");
+        worldModule.def("spawn", [](const std::string& prefab, const std::optional<Vec3>& position)
+            {
+                if (position)
+                {
+                    CheckVector(*position);
+                }
+                return EntityRef{ScriptApi::Spawn(RequireSystem(), RequireWorld(), prefab, position ? &*position : nullptr)};
+            }, py::arg("prefab"), py::arg("position") = py::none(),
+            "Create a prefab immediately; its behaviours start on the next ScriptSystem step");
         worldModule.def("find", &Find, py::arg("name"));
         worldModule.def("find_all", [](const std::string& prefix)
             {

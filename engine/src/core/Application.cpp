@@ -150,6 +150,18 @@ namespace myengine::core
             }
         }
 
+        // Like scripts, prefabs use the source assets for hot reload, with a packaged copy as the fallback.
+        {
+            const auto sourcePrefabsDir = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/prefabs";
+            std::error_code error;
+            const auto prefabsDir = std::filesystem::is_directory(sourcePrefabsDir, error)
+                ? sourcePrefabsDir : GetExecutableDirectory() / "assets/prefabs";
+            if (!prefabLibrary_.Initialize(prefabsDir, &logger_))
+            {
+                logger_.Warning("Prefab spawning is disabled, the engine continues without prefabs");
+            }
+        }
+
         renderAdapter_ = std::make_unique<render::dx12::Dx12RenderAdapter>(logger_);
         if (!renderAdapter_->Initialize())
         {
@@ -492,6 +504,9 @@ namespace myengine::core
 
         uiManager_.Shutdown();
         resourceManager_.reset();
+
+        // 2. Stop the prefab watcher while the Streaming workers still exist.
+        prefabLibrary_.Shutdown();
 
         // 3. Py_Finalize: after the scene is saved, before the job system stops. Safe to call twice
         scriptRuntime_.Shutdown();
