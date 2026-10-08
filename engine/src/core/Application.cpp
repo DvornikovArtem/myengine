@@ -212,6 +212,18 @@ namespace myengine::core
                 scriptSystem_->RequestReloadAll();
             }
         };
+        sceneEditorServices.describeScriptFields = [this](const std::string& module, const std::string& className)
+        {
+            return scriptRuntime_.DescribeFields(module, className);
+        };
+        sceneEditorServices.scriptStatus = [this](const ecs::EntityId entity, const std::size_t scriptIndex)
+        {
+            return scriptSystem_ != nullptr ? scriptSystem_->GetInstanceStatus(entity, scriptIndex) : std::string();
+        };
+        sceneEditorServices.liveScriptFields = [this](const ecs::EntityId entity, const std::size_t scriptIndex)
+        {
+            return scriptSystem_ != nullptr ? scriptSystem_->GetLiveFields(entity, scriptIndex) : nlohmann::json::object();
+        };
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");

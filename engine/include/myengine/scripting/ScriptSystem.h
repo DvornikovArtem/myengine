@@ -64,6 +64,8 @@ namespace myengine::scripting
         const std::deque<ScriptError>& GetRecentErrors() const; // last 32
         const std::map<std::string, std::string>& GetHudLines() const; // hud.set(...)
         nlohmann::json GetLiveFields(ecs::EntityId entity, std::size_t scriptIndex) const; // current values in Play
+        // "Active", "Starting", "Faulted"; empty if the script has no object (Edit mode)
+        std::string GetInstanceStatus(ecs::EntityId entity, std::size_t scriptIndex) const;
 
     private:
         // Python objects (pybind11 types) live in Impl, so this header does not include pybind11

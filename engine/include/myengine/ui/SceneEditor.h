@@ -1,11 +1,16 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <myengine/editor/EditorState.h>
+#include <myengine/scripting/ScriptRuntime.h>
 
 namespace myengine::core
 {
@@ -45,6 +50,11 @@ namespace myengine::ui
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
         std::function<void()> reloadScripts; // hot reload of every script, same as F5
+        // Script fields for the inspector (ScriptRuntime::DescribeFields)
+        std::function<std::vector<scripting::ScriptFieldInfo>(const std::string& module, const std::string& className)> describeScriptFields;
+        // Play only: "Active" / "Starting" / "Faulted" and current field values of a running script object
+        std::function<std::string(ecs::EntityId entity, std::size_t scriptIndex)> scriptStatus;
+        std::function<nlohmann::json(ecs::EntityId entity, std::size_t scriptIndex)> liveScriptFields;
     };
 
     struct SceneEditorWindowContext

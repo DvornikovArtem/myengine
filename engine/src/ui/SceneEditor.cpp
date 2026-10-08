@@ -29,6 +29,7 @@
 #include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
+#include <myengine/ecs/components/ScriptComponent.h>
 #include <myengine/ecs/components/TagComponent.h>
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
@@ -36,6 +37,7 @@
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/ui/SceneEditor.h>
+#include <myengine/ui/ScriptInspector.h>
 
 namespace myengine::ui
 {
@@ -1189,6 +1191,77 @@ namespace myengine::ui
                         const std::string beforePrimarySnapshot = CaptureSceneSnapshot();
                         camera->isPrimary = isPrimary;
                         RecordSceneMutationImmediate("Toggle Camera Primary", beforePrimarySnapshot);
+                    }
+                }
+            }
+
+            // Script behaviours: fields declared in the script class (speed: float = 3.0).
+            // Edit: values are stored in the scene and used on the next Play. Play: current values, read-only
+            if (auto* script = world.TryGet<ecs::components::ScriptComponent>(entity); script != nullptr)
+            {
+                if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    if (!editEnabled)
+                    {
+                        ImGui::EndDisabled(); // the status line stays readable in Play
+                    }
+
+                    ui::ScriptFieldsUndo undo;
+                    undo.recordFromItem = [this](const char* label) { RecordSceneMutationFromItem(label); };
+                    undo.captureBefore = [this]() { return CaptureSceneSnapshot(); };
+                    undo.recordImmediate = [this](const char* label, const std::string& before) { RecordSceneMutationImmediate(label, before); };
+
+                    for (std::size_t index = 0; index < script->scripts.size(); ++index)
+                    {
+                        auto& entry = script->scripts[index];
+                        ImGui::PushID(static_cast<int>(index));
+
+                        if (index > 0)
+                        {
+                            ImGui::Separator();
+                        }
+                        ImGui::Text("%s.%s", entry.module.c_str(), entry.className.c_str());
+
+                        const std::string status = editEnabled || !services_.scriptStatus ? std::string() : services_.scriptStatus(entity, index);
+                        ImGui::SameLine();
+                        if (editEnabled)
+                        {
+                            ImGui::TextDisabled("(applied on Play)");
+                        }
+                        else if (status == "Faulted")
+                        {
+                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "Faulted - see the log");
+                        }
+                        else
+                        {
+                            ImGui::TextDisabled("%s", status.empty() ? "not created" : status.c_str());
+                        }
+
+                        const auto fields = services_.describeScriptFields
+                            ? services_.describeScriptFields(entry.module, entry.className)
+                            : std::vector<scripting::ScriptFieldInfo>{};
+                        if (fields.empty())
+                        {
+                            ImGui::TextDisabled("No editable fields, or the script failed to load (see the log).");
+                            ImGui::TextDisabled("A field is a class attribute with a type: speed: float = 3.0");
+                        }
+                        else if (editEnabled)
+                        {
+                            ui::DrawScriptFields(fields, entry.props, undo);
+                        }
+                        else
+                        {
+                            // Play: the live object's values; editing is off, changes would be lost on Stop anyway
+                            const auto live = services_.liveScriptFields ? services_.liveScriptFields(entity, index) : nlohmann::json::object();
+                            ui::DrawScriptFieldValues(fields, live);
+                        }
+
+                        ImGui::PopID();
+                    }
+
+                    if (!editEnabled)
+                    {
+                        ImGui::BeginDisabled();
                     }
                 }
             }
