@@ -37,6 +37,7 @@
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/ui/SceneEditor.h>
+#include <myengine/ui/PrefabInspector.h>
 #include <myengine/ui/ScriptInspector.h>
 
 namespace myengine::ui
@@ -49,6 +50,7 @@ namespace myengine::ui
         constexpr char kViewportWindowName[] = "Viewport";
         constexpr char kMaterialEditorWindowName[] = "Material Editor";
         constexpr char kAssetBrowserWindowName[] = "Asset Browser";
+        constexpr char kPrefabsWindowName[] = "Prefabs";
         constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
         constexpr char kMaterialPayloadType[] = "MYENGINE_ASSET_MATERIAL";
         constexpr char kTexturePayloadType[] = "MYENGINE_ASSET_TEXTURE";
@@ -523,6 +525,7 @@ namespace myengine::ui
         services_ = std::move(services);
         history_ = std::make_unique<editor::EditorCommandHistory>();
         gizmo_ = std::make_unique<editor::TransformGizmo>();
+        prefabInspector_ = std::make_unique<PrefabInspector>();
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -537,6 +540,7 @@ namespace myengine::ui
             history_->Clear();
         }
         gizmo_.reset();
+        prefabInspector_.reset();
         history_.reset();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -573,6 +577,7 @@ namespace myengine::ui
         DrawSceneVisibilityMask(windowState.viewport);
         BuildMaterialEditorPanel(windowContext);
         BuildAssetBrowserPanel(windowContext);
+        BuildPrefabsPanel(windowContext);
 
         if (editorState.showImGuiDemo)
         {
@@ -682,6 +687,7 @@ namespace myengine::ui
                 ImGui::MenuItem(kViewportWindowName, nullptr, &editorState.showViewport);
                 ImGui::MenuItem(kMaterialEditorWindowName, nullptr, &editorState.showMaterialEditor);
                 ImGui::MenuItem(kAssetBrowserWindowName, nullptr, &editorState.showAssetBrowser);
+                ImGui::MenuItem(kPrefabsWindowName, nullptr, &editorState.showPrefabs);
                 ImGui::EndMenu();
             }
 
@@ -1713,6 +1719,28 @@ namespace myengine::ui
         ImGui::End();
     }
 
+    void SceneEditor::BuildPrefabsPanel(const SceneEditorWindowContext& windowContext)
+    {
+        (void)windowContext;
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (!editorState.showPrefabs)
+        {
+            return;
+        }
+        if (ImGui::Begin(kPrefabsWindowName, &editorState.showPrefabs))
+        {
+            if (services_.prefabLibrary != nullptr)
+            {
+                prefabInspector_->Draw(*services_.prefabLibrary, services_.describeScriptFields);
+            }
+            else
+            {
+                ImGui::TextDisabled("Prefab library is unavailable.");
+            }
+        }
+        ImGui::End();
+    }
+
     void SceneEditor::HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext)
     {
         (void)windowContext;
@@ -1793,6 +1821,7 @@ namespace myengine::ui
         ImGui::DockBuilderDockWindow(kMaterialEditorWindowName, dockRight);
         ImGui::DockBuilderDockWindow(kAssetBrowserWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kStatisticsWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kPrefabsWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kViewportWindowName, dockCenter);
         ImGui::DockBuilderFinish(dockspaceId);
     }

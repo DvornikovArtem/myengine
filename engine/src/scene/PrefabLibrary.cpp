@@ -300,6 +300,35 @@ namespace myengine::scene
         }
     }
 
+    nlohmann::json* PrefabLibrary::ReloadPrefab(const std::string_view prefabName)
+    {
+        try
+        {
+            if (impl_ == nullptr)
+            {
+                throw std::runtime_error("PrefabLibrary is not initialized");
+            }
+            const auto path = PrefabPath(impl_->directory, prefabName);
+            for (auto it = impl_->cache.begin(); it != impl_->cache.end();)
+            {
+                if (CompareStringOrdinal(path.c_str(), -1, it->second.path.c_str(), -1, TRUE) == CSTR_EQUAL)
+                {
+                    it = impl_->cache.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            return GetPrefabJson(prefabName);
+        }
+        catch (const std::exception& error)
+        {
+            ReportError(std::string(prefabName) + ": " + error.what());
+            return nullptr;
+        }
+    }
+
     ecs::EntityId PrefabLibrary::Instantiate(ecs::World& world, const std::string_view prefabName, const ecs::components::Vec3* position)
     {
         std::vector<ecs::EntityId> created;
@@ -386,17 +415,24 @@ namespace myengine::scene
 
     bool PrefabLibrary::SavePrefab(const std::string_view prefabName)
     {
+        const auto* prefab = GetPrefabJson(prefabName);
+        return prefab != nullptr && SavePrefab(prefabName, *prefab);
+    }
+
+    bool PrefabLibrary::SavePrefab(const std::string_view prefabName, const json& prefab)
+    {
+        lastError_.clear();
         std::filesystem::path temporary;
         try
         {
-            auto* prefab = GetPrefabJson(prefabName);
-            if (prefab == nullptr)
+            if (impl_ == nullptr)
             {
-                return false;
+                throw std::runtime_error("PrefabLibrary is not initialized");
             }
-            ValidatePrefab(*prefab);
+            ValidatePrefab(prefab);
+            auto data = prefab; // prepare the copy before writing, including when prefab refers to the cache
             const auto path = PrefabPath(impl_->directory, prefabName);
-            const auto source = prefab->dump(2) + '\n';
+            const auto source = data.dump(2) + '\n';
             const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
             auto candidate = path;
             candidate += ".tmp." + std::to_string(GetCurrentProcessId()) + "." + std::to_string(stamp);
@@ -419,7 +455,19 @@ namespace myengine::scene
                 throw std::runtime_error("Could not replace " + path.u8string());
             }
             temporary.clear();
-            impl_->cache.at(std::string(prefabName)).source = source;
+            // Alias names on Windows (coin / COIN) refer to the same file. Do not keep an older spawn template.
+            for (auto it = impl_->cache.begin(); it != impl_->cache.end();)
+            {
+                if (CompareStringOrdinal(path.c_str(), -1, it->second.path.c_str(), -1, TRUE) == CSTR_EQUAL)
+                {
+                    it = impl_->cache.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            impl_->cache.emplace(std::string(prefabName), Impl::CachedPrefab{std::move(data), source, path});
             return true;
         }
         catch (const std::exception& error)
