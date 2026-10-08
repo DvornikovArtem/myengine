@@ -87,9 +87,12 @@ set(ENGINE_SOURCES
   src/scene/PrefabLibrary.cpp
   src/scene/SceneSerializer.cpp
   src/scene/TransformUtils.cpp
+  src/scripting/Behaviour.h
+  src/scripting/BehaviourBindings.cpp
   src/scripting/EntityRef.h
   src/scripting/ScriptBindings.cpp
   src/scripting/ScriptContext.h
+  src/scripting/ScriptModules.h
   src/scripting/ScriptRuntime.cpp
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp

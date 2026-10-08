@@ -16,12 +16,18 @@ namespace myengine::ecs
     class World;
 }
 
+namespace myengine::scripting
+{
+    class ScriptSystem;
+}
+
 namespace myengine::scripting::detail
 {
     struct ScriptContext
     {
         core::Logger* logger = nullptr;
         ecs::World* world = nullptr; // set by ScriptSystem::Update, nullptr before the first frame
+        ScriptSystem* system = nullptr; // for deferred destroy and other requests from scripts
         std::thread::id mainThreadId;
     };
 

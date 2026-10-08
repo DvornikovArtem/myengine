@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <deque>
 #include <map>
+#include <memory>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -54,16 +55,36 @@ namespace myengine::scripting
         void ResetInstances(); // on SceneLoadedEvent and on Stop: drop every instance
         void Shutdown(); // release every py::object, called before ScriptRuntime::Shutdown
 
+        // entity.destroy() from a script: the entity and its children are destroyed at the end of the script step.
+        // World::DestroyEntity is immediate, and destroying in the middle of a registry walk breaks iterators
+        void RequestDestroy(ecs::EntityId entity);
+        bool IsDestroyPending(ecs::EntityId entity) const;
+
         const std::deque<ScriptError>& GetRecentErrors() const; // last 32
         const std::map<std::string, std::string>& GetHudLines() const; // hud.set(...)
         nlohmann::json GetLiveFields(ecs::EntityId entity, std::size_t scriptIndex) const; // current values in Play
 
     private:
+        // Python objects (pybind11 types) live in Impl, so this header does not include pybind11
+        struct Impl;
+
+        bool EnsureHelpers();
+        // pythonError is a pybind11::error_already_set* (void* keeps pybind11 out of this header)
+        void ReportError(const std::string& name, const char* method, void* pythonError, const char* message);
+
+        void CreateInstances(ecs::World& world);
+        void StartInstances();
+        void DispatchEvents(ecs::World& world);
+        void UpdateInstances(ecs::World& world, float deltaTime);
+        void FlushDestroyed(ecs::World& world);
+        void UpdateStats(float deltaTime);
+
         ScriptRuntime& runtime_;
         input::InputManager& input_;
         scene::PrefabLibrary& prefabs_;
         core::Logger& logger_;
 
+        std::unique_ptr<Impl> impl_;
         std::deque<ScriptError> recentErrors_;
         std::map<std::string, std::string> hudLines_;
     };

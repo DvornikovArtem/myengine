@@ -1207,6 +1207,12 @@ namespace myengine::ui
             ImGui::Text("Drawn: %u", windowState.renderStats.renderedEntities);
             ImGui::Text("Active collisions: %u", physicsState.stats.collisionPairs);
             ImGui::Text("Resource memory: %s", FormatBytes(windowState.renderStats.resourceMemoryBytes).c_str());
+            ImGui::Separator();
+            const auto& scriptStats = editorState.scriptStats;
+            ImGui::Text("Scripts: %u (active %u, faulted %u)", scriptStats.instances, scriptStats.activeInstances, scriptStats.faultedInstances);
+            ImGui::Text("Script modules: %u", scriptStats.scriptModules);
+            ImGui::Text("Python objects: %u", scriptStats.pythonObjects);
+            ImGui::Text("Script errors: %u", scriptStats.errors);
         }
         ImGui::End();
     }
