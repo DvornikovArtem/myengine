@@ -18,8 +18,15 @@
 #include <myengine/input/InputManager.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
+#include <myengine/scripting/PrefabLibrary.h>
+#include <myengine/scripting/ScriptRuntime.h>
 #include <myengine/state/StateMachine.h>
 #include <myengine/ui/UiManager.h>
+
+namespace myengine::scripting
+{
+    class ScriptSystem;
+}
 
 namespace myengine::core
 {
@@ -34,7 +41,8 @@ namespace myengine::core
         explicit Application(HINSTANCE instance = GetModuleHandleW(nullptr));
         ~Application();
 
-        bool Initialize(const config::AppConfig& config);
+        /// startInPlay: begin in Play (scripts and physics running) instead of Edit.
+        bool Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath = {}, bool startInPlay = false);
         int Run();
         void Shutdown();
 
@@ -47,6 +55,7 @@ namespace myengine::core
         input::InputManager& GetInputManager();
         Logger& GetLogger();
         resource::ResourceManager& GetResourceManager();
+        scripting::ScriptRuntime& GetScriptRuntime();
         const std::filesystem::path& GetSceneSavePath() const;
         void SetStateLabel(const std::string& label);
         bool SaveSceneToDisk();
@@ -73,6 +82,7 @@ namespace myengine::core
         void SetInputOwnerWindow(WindowId id);
         void SetCursorVisible(bool visible);
         void WarpCursorToWindowCenter(const Window& window);
+        void UpdateWindowTitles();
         void ConfigureInputBindings();
         void BindRuntimeEventListeners();
         void BuildDemoScene();
@@ -83,6 +93,7 @@ namespace myengine::core
         void PublishFrameStatistics(
             float deltaTime,
             double worldUpdateMs,
+            double scriptsMs,
             double stateUpdateMs,
             double hotReloadMs,
             double uiUpdateMs,
@@ -100,10 +111,15 @@ namespace myengine::core
         config::AppConfig config_;
 
         Logger logger_;
+        // Declared before world_: members are destroyed in reverse order, so the world (and ScriptSystem with
+        // its Python objects) always goes away before the interpreter
+        scripting::ScriptRuntime scriptRuntime_;
+        scene::PrefabLibrary prefabLibrary_;
         Timer timer_;
         input::InputManager input_;
         state::StateMachine stateMachine_;
         ecs::World world_;
+        scripting::ScriptSystem* scriptSystem_ = nullptr; // owned by world_
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;
@@ -111,6 +127,9 @@ namespace myengine::core
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
+        std::string stateLabel_;
+        bool titleShowsPlay_ = false;
+        bool sceneLoaded_ = false;
         bool cameraControlActive_ = false;
         bool cursorHidden_ = false;
         bool runtimeEventsBound_ = false;

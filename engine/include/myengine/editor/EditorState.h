@@ -61,10 +61,23 @@ namespace myengine::editor
         float averageFps = 0.0f;
         double frameMs = 0.0;
         double worldUpdateMs = 0.0;
+        double scriptsMs = 0.0; // part of worldUpdateMs, not an additional frame stage
         double stateUpdateMs = 0.0;
         double hotReloadMs = 0.0;
         double uiUpdateMs = 0.0;
         double renderMs = 0.0;
+    };
+
+    // Written by ScriptSystem, shown in Statistics. On a long session the numbers must not grow (no leaked state)
+    struct ScriptStats
+    {
+        double updateMs = 0.0; // full ScriptSystem::Update, including hot reload and bookkeeping
+        std::uint32_t instances = 0;
+        std::uint32_t activeInstances = 0;
+        std::uint32_t faultedInstances = 0;
+        std::uint32_t scriptModules = 0; // modules loaded from assets/scripts, refreshed once per second
+        std::uint32_t pythonObjects = 0; // len(gc.get_objects()), refreshed once per second
+        std::uint32_t errors = 0; // total script errors since start
     };
 
     struct RenderStats
@@ -106,11 +119,16 @@ namespace myengine::editor
         bool showViewport = true;
         bool showMaterialEditor = true;
         bool showAssetBrowser = true;
+        bool showPrefabs = true;
+        bool showScriptConsole = true;
         bool showImGuiDemo = false;
         bool selectionLocked = false;
         bool sceneDirty = false;
         core::WindowId lastInteractedWindowId = 0;
         std::string playModeSnapshot;
+        ScriptStats scriptStats{};
+        // Hot reload in Play: true - the new object keeps the old one's state (L2), false - it starts over (L1)
+        bool scriptReloadKeepsState = true;
         std::unordered_map<core::WindowId, WindowEditorState> windows;
 
         WindowEditorState& GetOrCreateWindowState(const core::WindowId windowId)

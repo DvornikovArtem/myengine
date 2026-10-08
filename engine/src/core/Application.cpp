@@ -30,7 +30,9 @@
 #include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
+#include <myengine/scene/SceneEvents.h>
 #include <myengine/scene/SceneSerializer.h>
+#include <myengine/scripting/ScriptSystem.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -38,6 +40,9 @@ namespace myengine::core
 {
     namespace
     {
+        // The scene opened without --scene (benchmark.json stays available through --scene for LR1 measurements)
+        constexpr char kDefaultScenePath[] = "assets/scenes/coin_guard_demo.json";
+
         std::wstring Utf8ToWide(const std::string& text)
         {
             if (text.empty())
@@ -107,7 +112,7 @@ namespace myengine::core
         Shutdown();
     }
 
-    bool Application::Initialize(const config::AppConfig& config)
+    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath, const bool startInPlay)
     {
         config_ = config;
 
@@ -130,6 +135,35 @@ namespace myengine::core
         jobs::Initialize();
         logger_.Info("Job system initialized: " + std::to_string(jobs::GetWorkerCount(jobs::Priority::High)) + " high, " + 
             std::to_string(jobs::GetWorkerCount(jobs::Priority::Streaming)) + " streaming worker(s)");
+
+        // Python lives on this (main) thread for the whole session. Scripts are read from the source tree,
+        // so hot reload sees the edits; the copy next to the exe is the fallback.
+        {
+            const auto sourceScriptsDir = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scripts";
+            std::error_code scriptsDirError;
+            scripting::ScriptRuntimeDesc scriptDesc;
+            scriptDesc.exeDir = GetExecutableDirectory();
+            scriptDesc.scriptsDir = std::filesystem::is_directory(sourceScriptsDir, scriptsDirError)
+                ? sourceScriptsDir
+                : scriptDesc.exeDir / "assets/scripts";
+            scriptDesc.logger = &logger_;
+            if (!scriptRuntime_.Initialize(scriptDesc))
+            {
+                logger_.Warning("Scripting is disabled, the engine continues without scripts");
+            }
+        }
+
+        // Like scripts, prefabs use the source assets for hot reload, with a packaged copy as the fallback.
+        {
+            const auto sourcePrefabsDir = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/prefabs";
+            std::error_code error;
+            const auto prefabsDir = std::filesystem::is_directory(sourcePrefabsDir, error)
+                ? sourcePrefabsDir : GetExecutableDirectory() / "assets/prefabs";
+            if (!prefabLibrary_.Initialize(prefabsDir, &logger_))
+            {
+                logger_.Warning("Prefab spawning is disabled, the engine continues without prefabs");
+            }
+        }
 
         renderAdapter_ = std::make_unique<render::dx12::Dx12RenderAdapter>(logger_);
         if (!renderAdapter_->Initialize())
@@ -181,11 +215,65 @@ namespace myengine::core
         sceneEditorServices.world = &world_;
         sceneEditorServices.resourceManager = resourceManager_.get();
         sceneEditorServices.logger = &logger_;
+        sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };
         sceneEditorServices.captureSceneSnapshot = [this]() { return CaptureSceneSnapshot(); };
         sceneEditorServices.restoreSceneSnapshot = [this](std::string_view snapshot) { return RestoreSceneSnapshot(snapshot); };
+        sceneEditorServices.reloadScripts = [this]()
+        {
+            if (scriptSystem_ != nullptr)
+            {
+                scriptSystem_->RequestReloadAll();
+            }
+        };
+        sceneEditorServices.describeScriptFields = [this](const std::string& module, const std::string& className)
+        {
+            return scriptRuntime_.DescribeFields(module, className);
+        };
+        sceneEditorServices.scriptStatus = [this](const ecs::EntityId entity, const std::size_t scriptIndex)
+        {
+            return scriptSystem_ != nullptr ? scriptSystem_->GetInstanceStatus(entity, scriptIndex) : std::string();
+        };
+        sceneEditorServices.liveScriptFields = [this](const ecs::EntityId entity, const std::size_t scriptIndex)
+        {
+            return scriptSystem_ != nullptr ? scriptSystem_->GetLiveFields(entity, scriptIndex) : nlohmann::json::object();
+        };
+        sceneEditorServices.scriptHudLines = [this]()
+        {
+            std::vector<std::string> lines;
+            if (scriptSystem_ != nullptr)
+            {
+                for (const auto& line : scriptSystem_->GetHudLines())
+                {
+                    lines.push_back(line.second);
+                }
+            }
+            return lines;
+        };
+        sceneEditorServices.scriptConsole.execute = [this](const std::string& source)
+        {
+            return scriptSystem_ != nullptr ? scriptSystem_->ExecuteConsole(source) : scripting::ScriptConsoleResult{};
+        };
+        sceneEditorServices.scriptConsole.reset = [this]() { scriptRuntime_.ResetConsole(); };
+        sceneEditorServices.scriptConsole.generation = [this]() { return scriptRuntime_.GetConsoleGeneration(); };
+        sceneEditorServices.scriptConsole.errors = [this]()
+        {
+            if (scriptSystem_ == nullptr)
+            {
+                return std::vector<scripting::ScriptError>{};
+            }
+            const auto& errors = scriptSystem_->GetRecentErrors();
+            return std::vector<scripting::ScriptError>(errors.begin(), errors.end());
+        };
+        sceneEditorServices.scriptConsole.clearErrors = [this]()
+        {
+            if (scriptSystem_ != nullptr)
+            {
+                scriptSystem_->ClearRecentErrors();
+            }
+        };
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");
@@ -209,14 +297,28 @@ namespace myengine::core
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
+        // After physics: scripts see this frame's collision/trigger events
+        {
+            auto scriptSystem = std::make_unique<scripting::ScriptSystem>(scriptRuntime_, input_, prefabLibrary_, logger_);
+            scriptSystem_ = scriptSystem.get();
+            world_.AddUpdateSystem(std::move(scriptSystem));
+        }
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
-        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scenes/benchmark.json";
-        const auto executableScenePath = GetExecutableDirectory() / "assets/scenes/benchmark.json";
+        const auto requestedScenePath = scenePath.empty() ? std::filesystem::path(kDefaultScenePath) : scenePath;
+        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / requestedScenePath;
+        const auto executableScenePath = GetExecutableDirectory() / requestedScenePath;
         std::error_code scenePathError;
-        sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
-            ? sourceScenePath
-            : executableScenePath;
+        if (!scenePath.empty() && (scenePath.is_absolute() || std::filesystem::exists(scenePath, scenePathError)))
+        {
+            sceneSavePath_ = std::filesystem::absolute(scenePath).lexically_normal();
+        }
+        else
+        {
+            sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
+                ? sourceScenePath
+                : executableScenePath;
+        }
 
         BindRuntimeEventListeners();
 
@@ -227,22 +329,36 @@ namespace myengine::core
 
         if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
         {
+            // A typo or invalid explicit scene must not overwrite the file with the default demo.
+            if (!scenePath.empty())
+            {
+                logger_.Error("Failed to load the requested scene: " + sceneSavePath_.u8string());
+                sceneSavePath_.clear();
+                return false;
+            }
             BuildDemoScene();
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
+            core::ServiceLocator::GetEventBus().Publish(scene::SceneLoadedEvent{&world_});
         }
         else
         {
             RebindWindowControlledEntities();
         }
+        sceneLoaded_ = true;
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        //editorState.mode = editor::RuntimeMode::Edit;
-        //editorState.selectedEntity = ecs::kInvalidEntity;
-        //editorState.playModeSnapshot.clear();
-        //core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         editorState.selectedEntity = ecs::kInvalidEntity;
-        editorState.playModeSnapshot = CaptureSceneSnapshot();
-        editorState.mode = editor::RuntimeMode::Play;
-        core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
+        if (startInPlay)
+        {
+            editorState.playModeSnapshot = CaptureSceneSnapshot();
+            editorState.mode = editor::RuntimeMode::Play;
+            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
+        }
+        else
+        {
+            editorState.playModeSnapshot.clear();
+            editorState.mode = editor::RuntimeMode::Edit;
+            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
+        }
 
         timer_.Reset();
         logger_.Info("Application initialization finished");
@@ -255,6 +371,7 @@ namespace myengine::core
         struct FrameTimingStats
         {
             double worldUpdateMs = 0.0;
+            double scriptsMs = 0.0;
             double stateUpdateMs = 0.0;
             double hotReloadMs = 0.0;
             double uiUpdateMs = 0.0;
@@ -298,6 +415,7 @@ namespace myengine::core
                 world_.UpdateSystems(deltaTime);
             }
             const auto worldUpdateEndTime = std::chrono::steady_clock::now();
+            const double scriptsMs = core::ServiceLocator::GetEditorRuntimeState().scriptStats.updateMs;
 
 
             const auto stateUpdateStartTime = std::chrono::steady_clock::now();
@@ -306,6 +424,10 @@ namespace myengine::core
                 stateMachine_.Update(*this, deltaTime);
             }
             const auto stateUpdateEndTime = std::chrono::steady_clock::now();
+            if ((core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play) != titleShowsPlay_)
+            {
+                UpdateWindowTitles();
+            }
             
 
             const auto hotReloadStartTime = std::chrono::steady_clock::now();
@@ -342,6 +464,7 @@ namespace myengine::core
                 };
 
             frameTimingStats.worldUpdateMs += millisecondsBetween(worldUpdateStartTime, worldUpdateEndTime);
+            frameTimingStats.scriptsMs += scriptsMs;
             frameTimingStats.stateUpdateMs += millisecondsBetween(stateUpdateStartTime, stateUpdateEndTime);
             frameTimingStats.hotReloadMs += millisecondsBetween(hotReloadStartTime, hotReloadEndTime);
             frameTimingStats.uiUpdateMs += millisecondsBetween(uiUpdateStartTime, uiUpdateEndTime);
@@ -352,6 +475,7 @@ namespace myengine::core
             PublishFrameStatistics(
                 deltaTime,
                 millisecondsBetween(worldUpdateStartTime, worldUpdateEndTime),
+                scriptsMs,
                 millisecondsBetween(stateUpdateStartTime, stateUpdateEndTime),
                 millisecondsBetween(hotReloadStartTime, hotReloadEndTime),
                 millisecondsBetween(uiUpdateStartTime, uiUpdateEndTime),
@@ -368,6 +492,7 @@ namespace myengine::core
                 timingMessage
                     << "FrameTimes avg_ms total=" << frameTimingStats.totalMs * inverseFrameCount
                     << " world=" << frameTimingStats.worldUpdateMs * inverseFrameCount
+                    << " scripts=" << frameTimingStats.scriptsMs * inverseFrameCount
                     << " state=" << frameTimingStats.stateUpdateMs * inverseFrameCount
                     << " hot_reload=" << frameTimingStats.hotReloadMs * inverseFrameCount
                     << " ui=" << frameTimingStats.uiUpdateMs * inverseFrameCount
@@ -397,6 +522,12 @@ namespace myengine::core
         cameraControlActive_ = false;
         SetCursorVisible(true);
 
+        // 1. Release every Python object while the interpreter is still alive
+        if (scriptSystem_ != nullptr)
+        {
+            scriptSystem_->Shutdown();
+        }
+
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         if (editorState.mode == editor::RuntimeMode::Play && !editorState.playModeSnapshot.empty())
         {
@@ -406,13 +537,19 @@ namespace myengine::core
             core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         }
 
-        if (!sceneSavePath_.empty() && !world_.GetEntities().empty())
+        if (sceneLoaded_ && !sceneSavePath_.empty())
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
 
         uiManager_.Shutdown();
         resourceManager_.reset();
+
+        // 2. Stop the prefab watcher while the Streaming workers still exist.
+        prefabLibrary_.Shutdown();
+
+        // 3. Py_Finalize: after the scene is saved, before the job system stops. Safe to call twice
+        scriptRuntime_.Shutdown();
 
         // After ResourceManager: it waits for its loading jobs in the destructor
         jobs::Shutdown();
@@ -425,7 +562,9 @@ namespace myengine::core
         }
 
         windows_.clear();
+        scriptSystem_ = nullptr;
         world_ = ecs::World{};
+        sceneLoaded_ = false;
     }
 
     void Application::RequestQuit()
@@ -538,6 +677,11 @@ namespace myengine::core
 
             case WM_KILLFOCUS:
             {
+                // Windows may deliver key-up to another app after Alt-Tab. Do not keep old keys held.
+                if (input_.GetActiveWindowId() == window.Id())
+                {
+                    input_.ReleaseAllInputs();
+                }
                 if (inputOwnerWindowId_ == window.Id())
                 {
                     cameraControlActive_ = false;
@@ -553,7 +697,7 @@ namespace myengine::core
             {
                 const auto key = static_cast<std::uint32_t>(wparam);
 
-                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3)
+                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3 && key != VK_F5)
                 {
                     return 0;
                 }
@@ -572,6 +716,11 @@ namespace myengine::core
                     {
                         TogglePhysicsDebugDraw();
                     }
+                    else if (key == VK_F5 && scriptSystem_ != nullptr)
+                    {
+                        // Hot reload of every script (the file watcher does it on save anyway)
+                        scriptSystem_->RequestReloadAll();
+                    }
                 }
 
                 stateMachine_.HandleEvent(*this, event);
@@ -580,13 +729,14 @@ namespace myengine::core
 
             case WM_KEYUP:
             {
+                // Release even if an editor widget captured the keyboard after our key-down.
+                input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
                 if (uiWantsKeyboardCapture && !cameraConsumesKeyboard)
                 {
                     return 0;
                 }
 
                 input_.SetActiveWindow(window.Id());
-                input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
                 event.type = InputEventType::KeyUp;
                 event.key = static_cast<std::uint32_t>(wparam);
                 stateMachine_.HandleEvent(*this, event);
@@ -736,6 +886,11 @@ namespace myengine::core
         return *resourceManager_;
     }
 
+    scripting::ScriptRuntime& Application::GetScriptRuntime()
+    {
+        return scriptRuntime_;
+    }
+
     const std::filesystem::path& Application::GetSceneSavePath() const
     {
         return sceneSavePath_;
@@ -743,7 +898,23 @@ namespace myengine::core
 
     void Application::SetStateLabel(const std::string& label)
     {
-        const std::wstring suffix = L" [" + Utf8ToWide(label) + L"]";
+        stateLabel_ = label;
+        UpdateWindowTitles();
+        uiManager_.SetStateLabel(label);
+    }
+
+    void Application::UpdateWindowTitles()
+    {
+        titleShowsPlay_ = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
+        std::wstring suffix;
+        if (!stateLabel_.empty())
+        {
+            suffix += L" [" + Utf8ToWide(stateLabel_) + L"]";
+        }
+        if (titleShowsPlay_)
+        {
+            suffix += L" [PLAY]";
+        }
         for (auto& runtime : windows_)
         {
             if (!runtime.closed && runtime.window)
@@ -751,13 +922,11 @@ namespace myengine::core
                 runtime.window->SetTitle(runtime.baseTitle + suffix);
             }
         }
-
-        uiManager_.SetStateLabel(label);
     }
 
     bool Application::SaveSceneToDisk()
     {
-        if (sceneSavePath_.empty())
+        if (!sceneLoaded_ || sceneSavePath_.empty())
         {
             return false;
         }
@@ -898,8 +1067,10 @@ namespace myengine::core
         input_.BindAction("camera_right", 'D');
         input_.BindAction("camera_right", VK_RIGHT);
         input_.BindAction("camera_up", VK_SPACE);
+        input_.BindAction("camera_up", 'E');
         input_.BindAction("camera_down", VK_SHIFT);
         input_.BindAction("camera_down", VK_LSHIFT);
+        input_.BindAction("camera_down", 'Q');
 
         input_.BindAction("player_forward", 'W');
         input_.BindAction("player_forward", VK_UP);
@@ -954,6 +1125,7 @@ namespace myengine::core
         world_.ClearEntities();
         core::ServiceLocator::GetPhysicsWorldState().recentEvents.clear();
         BuildDemoScene();
+        core::ServiceLocator::GetEventBus().Publish(scene::SceneLoadedEvent{&world_});
     }
 
     void Application::SpawnDemoBox(const WindowId windowId)
@@ -1058,6 +1230,7 @@ namespace myengine::core
     void Application::PublishFrameStatistics(
         const float deltaTime,
         const double worldUpdateMs,
+        const double scriptsMs,
         const double stateUpdateMs,
         const double hotReloadMs,
         const double uiUpdateMs,
@@ -1090,6 +1263,7 @@ namespace myengine::core
             windowState.timings.averageFps = averageFps;
             windowState.timings.frameMs = frameMs;
             windowState.timings.worldUpdateMs = worldUpdateMs;
+            windowState.timings.scriptsMs = scriptsMs;
             windowState.timings.stateUpdateMs = stateUpdateMs;
             windowState.timings.hotReloadMs = hotReloadMs;
             windowState.timings.uiUpdateMs = uiUpdateMs;

@@ -1,11 +1,17 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <myengine/editor/EditorState.h>
+#include <myengine/scripting/ScriptRuntime.h>
+#include <myengine/ui/ScriptConsole.h>
 
 namespace myengine::core
 {
@@ -32,18 +38,34 @@ namespace myengine::resource
     struct MaterialAsset;
 }
 
+namespace myengine::scene
+{
+    class PrefabLibrary;
+}
+
 namespace myengine::ui
 {
+    class PrefabInspector;
+
     struct SceneEditorServices
     {
         ecs::World* world = nullptr;
         resource::ResourceManager* resourceManager = nullptr;
         core::Logger* logger = nullptr;
+        scene::PrefabLibrary* prefabLibrary = nullptr;
         std::function<void()> requestQuit;
         std::function<bool()> saveScene;
         std::function<bool()> loadScene;
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
+        std::function<void()> reloadScripts; // hot reload of every script, same as F5
+        // Script fields for the inspector (ScriptRuntime::DescribeFields)
+        std::function<std::vector<scripting::ScriptFieldInfo>(const std::string& module, const std::string& className)> describeScriptFields;
+        // Play only: "Active" / "Starting" / "Faulted" and current field values of a running script object
+        std::function<std::string(ecs::EntityId entity, std::size_t scriptIndex)> scriptStatus;
+        std::function<nlohmann::json(ecs::EntityId entity, std::size_t scriptIndex)> liveScriptFields;
+        std::function<std::vector<std::string>()> scriptHudLines;
+        ScriptConsoleServices scriptConsole;
     };
 
     struct SceneEditorWindowContext
@@ -75,6 +97,8 @@ namespace myengine::ui
         void BuildViewportPanel(const SceneEditorWindowContext& windowContext);
         void BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext);
         void BuildAssetBrowserPanel(const SceneEditorWindowContext& windowContext);
+        void BuildPrefabsPanel(const SceneEditorWindowContext& windowContext);
+        void BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext);
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void ValidateSelection() const;
         void CreateDefaultDockLayout(const SceneEditorWindowContext& windowContext);
@@ -101,6 +125,8 @@ namespace myengine::ui
         SceneEditorServices services_{};
         std::unique_ptr<editor::EditorCommandHistory> history_;
         std::unique_ptr<editor::TransformGizmo> gizmo_;
+        std::unique_ptr<PrefabInspector> prefabInspector_;
+        std::unique_ptr<ScriptConsole> scriptConsole_;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;

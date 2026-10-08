@@ -1,0 +1,14 @@
+{
+  "name": "Chaser",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": { "name": "Chaser" },
+      "Transform": { "position": [0, 0.5, 0], "rotationDeg": [0, 0, 0], "scale": [0.6, 0.6, 0.6] },
+      "MeshRenderer": { "meshPath": "assets/models/crate.obj", "materialPath": "assets/materials/warm.material.json", "visible": true },
+      "Rigidbody": { "mass": 1.0, "useGravity": true, "isKinematic": false },
+      "Collider": { "type": "box", "halfExtents": [0.5, 0.5, 0.5] },
+      "Script": { "scripts": [ { "module": "chaser", "class": "Chaser", "props": { "speed": 3.0, "damage": 1, "aggressive": true, "target_name": "Controlled_1", "detection_radius": 20.0, "catch_radius": 0.8 } } ] }
+    }
+  ]
+}

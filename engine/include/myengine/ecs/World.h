@@ -20,6 +20,8 @@ namespace myengine::ecs
         bool IsAlive(EntityId entity) const;
         std::vector<EntityId> GetEntities() const;
         void ClearEntities();
+        // Replaces scene data without replacing the update/render systems registered in this world.
+        void SwapEntities(World& other);
 
         template <typename T, typename... Args>
         T& Emplace(EntityId entity, Args&&... args)

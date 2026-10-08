@@ -1,0 +1,17 @@
+Test project C:/Users/ivanm/source/repos/myengine/build
+    Start 1: job_system_stress
+1/6 Test #1: job_system_stress ................   Passed    0.73 sec
+    Start 2: scene_serialization
+2/6 Test #2: scene_serialization ..............   Passed    0.06 sec
+    Start 3: control_systems
+3/6 Test #3: control_systems ..................   Passed    0.89 sec
+    Start 4: script_api
+4/6 Test #4: script_api .......................   Passed    0.44 sec
+    Start 5: prefab_library
+5/6 Test #5: prefab_library ...................   Passed    1.32 sec
+    Start 6: scripting_gameplay
+6/6 Test #6: scripting_gameplay ...............   Passed    0.47 sec
+
+100% tests passed out of 6
+
+Total Test time (real) =   3.92 sec

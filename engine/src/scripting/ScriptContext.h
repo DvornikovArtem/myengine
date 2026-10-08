@@ -1,0 +1,63 @@
+// ScriptContext.h
+// Private header of the scripting subsystem: engine pointers that the bindings (ScriptBindings.cpp) need.
+
+#pragma once
+
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <thread>
+
+namespace myengine::core
+{
+    class Logger;
+}
+
+namespace myengine::ecs
+{
+    class World;
+}
+
+namespace myengine::input
+{
+    class InputManager;
+}
+
+namespace myengine::scripting
+{
+    class ScriptSystem;
+}
+
+namespace myengine::scripting::detail
+{
+    struct ScriptContext
+    {
+        core::Logger* logger = nullptr;
+        ecs::World* world = nullptr; // set by ScriptSystem::Update, nullptr before the first frame
+        ScriptSystem* system = nullptr; // for deferred destroy and other requests from scripts
+        input::InputManager* input = nullptr;
+        std::uint64_t sceneVersion = 0; // saved handles must not refer to another scene with the same entity ids
+        float deltaTime = 0.0f;
+        double totalTime = 0.0;
+        std::uint64_t frame = 0;
+        std::thread::id mainThreadId;
+        // Set only during a console call. The log still receives every line normally.
+        std::function<void(const char* level, const std::string& text)> consoleOutput;
+    };
+
+    // One context per process: the embedded interpreter is global too
+    ScriptContext& GetScriptContext();
+
+    // Defined in ScriptBindings.cpp. The engine is a static library: without a reference to that object file
+    // the linker drops it together with PYBIND11_EMBEDDED_MODULE, and "import myengine" fails
+    void EnsureBindingsLinked();
+
+    inline bool IsScriptThread()
+    {
+        return std::this_thread::get_id() == GetScriptContext().mainThreadId;
+    }
+}
+
+// Python is called only from the main thread (see docs/scripting/architecture.md, "Потоки")
+#define MYENGINE_ASSERT_SCRIPT_THREAD() assert(::myengine::scripting::detail::IsScriptThread() && "Python must be used only on the main thread")

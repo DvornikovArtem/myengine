@@ -29,6 +29,7 @@
 #include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
+#include <myengine/ecs/components/ScriptComponent.h>
 #include <myengine/ecs/components/TagComponent.h>
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
@@ -36,6 +37,8 @@
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/ui/SceneEditor.h>
+#include <myengine/ui/PrefabInspector.h>
+#include <myengine/ui/ScriptInspector.h>
 
 namespace myengine::ui
 {
@@ -47,6 +50,8 @@ namespace myengine::ui
         constexpr char kViewportWindowName[] = "Viewport";
         constexpr char kMaterialEditorWindowName[] = "Material Editor";
         constexpr char kAssetBrowserWindowName[] = "Asset Browser";
+        constexpr char kPrefabsWindowName[] = "Prefabs";
+        constexpr char kScriptConsoleWindowName[] = "Script Console";
         constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
         constexpr char kMaterialPayloadType[] = "MYENGINE_ASSET_MATERIAL";
         constexpr char kTexturePayloadType[] = "MYENGINE_ASSET_TEXTURE";
@@ -55,6 +60,9 @@ namespace myengine::ui
         constexpr char kCubeMeshPath[] = "assets/models/crate.obj";
         constexpr char kSphereMeshPath[] = "assets/models/sphere.obj";
         constexpr float kViewportToolbarPadding = 12.0f;
+        constexpr ImU32 kPlayBadgeColor = IM_COL32(46, 160, 67, 255);
+        constexpr ImU32 kEditBadgeColor = IM_COL32(70, 78, 90, 255);
+        constexpr float kPlayFrameThickness = 3.0f;
         constexpr float kViewportToolbarHeight = 44.0f;
         constexpr float kDefaultRenderableRadius = 0.8660254f;
 
@@ -521,6 +529,8 @@ namespace myengine::ui
         services_ = std::move(services);
         history_ = std::make_unique<editor::EditorCommandHistory>();
         gizmo_ = std::make_unique<editor::TransformGizmo>();
+        prefabInspector_ = std::make_unique<PrefabInspector>();
+        scriptConsole_ = std::make_unique<ScriptConsole>();
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -535,6 +545,8 @@ namespace myengine::ui
             history_->Clear();
         }
         gizmo_.reset();
+        prefabInspector_.reset();
+        scriptConsole_.reset();
         history_.reset();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -571,6 +583,8 @@ namespace myengine::ui
         DrawSceneVisibilityMask(windowState.viewport);
         BuildMaterialEditorPanel(windowContext);
         BuildAssetBrowserPanel(windowContext);
+        BuildPrefabsPanel(windowContext);
+        BuildScriptConsolePanel(windowContext);
 
         if (editorState.showImGuiDemo)
         {
@@ -680,6 +694,8 @@ namespace myengine::ui
                 ImGui::MenuItem(kViewportWindowName, nullptr, &editorState.showViewport);
                 ImGui::MenuItem(kMaterialEditorWindowName, nullptr, &editorState.showMaterialEditor);
                 ImGui::MenuItem(kAssetBrowserWindowName, nullptr, &editorState.showAssetBrowser);
+                ImGui::MenuItem(kPrefabsWindowName, nullptr, &editorState.showPrefabs);
+                ImGui::MenuItem(kScriptConsoleWindowName, nullptr, &editorState.showScriptConsole);
                 ImGui::EndMenu();
             }
 
@@ -713,11 +729,40 @@ namespace myengine::ui
         ImGui::BeginGroup();
 
         const bool isEditMode = editorState.mode == editor::RuntimeMode::Edit;
-        ImGui::TextDisabled("%s", isEditMode ? "Edit" : "Play");
+
+        // Mode badge: bright in Play, calm in Edit; the viewport gets a frame of the same colour in Play
+        {
+            const ImU32 badgeColor = isEditMode ? kEditBadgeColor : kPlayBadgeColor;
+            const char* badgeText = isEditMode ? "EDIT" : "PLAYING";
+            const ImVec2 textSize = ImGui::CalcTextSize(badgeText);
+            const ImVec2 badgePadding{10.0f, 3.0f};
+            const ImVec2 badgeMin = ImGui::GetCursorScreenPos();
+            const ImVec2 badgeSize{textSize.x + badgePadding.x * 2.0f, ImGui::GetFrameHeight()};
+            auto* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(badgeMin, ImVec2(badgeMin.x + badgeSize.x, badgeMin.y + badgeSize.y), badgeColor, 6.0f);
+            drawList->AddText(
+                ImVec2(badgeMin.x + badgePadding.x, badgeMin.y + (badgeSize.y - textSize.y) * 0.5f),
+                IM_COL32(255, 255, 255, 255),
+                badgeText);
+            ImGui::Dummy(badgeSize);
+
+            if (!isEditMode)
+            {
+                const float half = kPlayFrameThickness * 0.5f;
+                drawList->AddRect(
+                    ImVec2(viewportRect.x + half, viewportRect.y + half),
+                    ImVec2(viewportRect.x + viewportRect.width - half, viewportRect.y + viewportRect.height - half),
+                    badgeColor,
+                    0.0f,
+                    0,
+                    kPlayFrameThickness);
+            }
+        }
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
+        ImGui::BeginDisabled(!isEditMode);
         if (ImGui::Button("Play"))
         {
             if (isEditMode && services_.captureSceneSnapshot)
@@ -727,8 +772,12 @@ namespace myengine::ui
                 physicsState.physicsPaused = false;
             }
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ImGui::Button("Stop") && editorState.mode == editor::RuntimeMode::Play)
+        ImGui::BeginDisabled(isEditMode);
+        const bool stopPressed = ImGui::Button("Stop");
+        ImGui::EndDisabled();
+        if (stopPressed && editorState.mode == editor::RuntimeMode::Play)
         {
             const bool restoredScene =
                 editorState.playModeSnapshot.empty() ||
@@ -741,6 +790,24 @@ namespace myengine::ui
                 physicsState.physicsPaused = true;
                 editorState.playModeSnapshot.clear();
             }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reload scripts") && services_.reloadScripts)
+        {
+            services_.reloadScripts();
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Hot reload of every script (F5). Saved files are reloaded automatically");
+        }
+        ImGui::SameLine();
+        ImGui::Checkbox("Keep script state", &editorState.scriptReloadKeepsState);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "Hot reload in Play.\n"
+                "On: running objects keep their state, fields with a changed default take the new value (L2).\n"
+                "Off: running objects start over with OnStart (L1)");
         }
 
         ImGui::SameLine();
@@ -1175,6 +1242,77 @@ namespace myengine::ui
                 }
             }
 
+            // Script behaviours: fields declared in the script class (speed: float = 3.0).
+            // Edit: values are stored in the scene and used on the next Play. Play: current values, read-only
+            if (auto* script = world.TryGet<ecs::components::ScriptComponent>(entity); script != nullptr)
+            {
+                if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    if (!editEnabled)
+                    {
+                        ImGui::EndDisabled(); // the status line stays readable in Play
+                    }
+
+                    ui::ScriptFieldsUndo undo;
+                    undo.recordFromItem = [this](const char* label) { RecordSceneMutationFromItem(label); };
+                    undo.captureBefore = [this]() { return CaptureSceneSnapshot(); };
+                    undo.recordImmediate = [this](const char* label, const std::string& before) { RecordSceneMutationImmediate(label, before); };
+
+                    for (std::size_t index = 0; index < script->scripts.size(); ++index)
+                    {
+                        auto& entry = script->scripts[index];
+                        ImGui::PushID(static_cast<int>(index));
+
+                        if (index > 0)
+                        {
+                            ImGui::Separator();
+                        }
+                        ImGui::Text("%s.%s", entry.module.c_str(), entry.className.c_str());
+
+                        const std::string status = editEnabled || !services_.scriptStatus ? std::string() : services_.scriptStatus(entity, index);
+                        ImGui::SameLine();
+                        if (editEnabled)
+                        {
+                            ImGui::TextDisabled("(applied on Play)");
+                        }
+                        else if (status == "Faulted")
+                        {
+                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "Faulted - see the log");
+                        }
+                        else
+                        {
+                            ImGui::TextDisabled("%s", status.empty() ? "not created" : status.c_str());
+                        }
+
+                        const auto fields = services_.describeScriptFields
+                            ? services_.describeScriptFields(entry.module, entry.className)
+                            : std::vector<scripting::ScriptFieldInfo>{};
+                        if (fields.empty())
+                        {
+                            ImGui::TextDisabled("No editable fields, or the script failed to load (see the log).");
+                            ImGui::TextDisabled("A field is a class attribute with a type: speed: float = 3.0");
+                        }
+                        else if (editEnabled)
+                        {
+                            ui::DrawScriptFields(fields, entry.props, undo);
+                        }
+                        else
+                        {
+                            // Play: the live object's values; editing is off, changes would be lost on Stop anyway
+                            const auto live = services_.liveScriptFields ? services_.liveScriptFields(entity, index) : nlohmann::json::object();
+                            ui::DrawScriptFieldValues(fields, live);
+                        }
+
+                        ImGui::PopID();
+                    }
+
+                    if (!editEnabled)
+                    {
+                        ImGui::BeginDisabled();
+                    }
+                }
+            }
+
             if (!editEnabled)
             {
                 ImGui::EndDisabled();
@@ -1201,12 +1339,19 @@ namespace myengine::ui
             ImGui::Text("Frame: %.2f ms", windowState.timings.frameMs);
             ImGui::Text("Render: %.2f ms", windowState.timings.renderMs);
             ImGui::Text("World update: %.2f ms", windowState.timings.worldUpdateMs);
+            ImGui::Text("Scripts: %.3f ms (part of World update)", windowState.timings.scriptsMs);
             ImGui::Separator();
             ImGui::Text("Entities: %u", windowState.renderStats.totalEntities);
             ImGui::Text("Renderable: %u", windowState.renderStats.renderableEntities);
             ImGui::Text("Drawn: %u", windowState.renderStats.renderedEntities);
             ImGui::Text("Active collisions: %u", physicsState.stats.collisionPairs);
             ImGui::Text("Resource memory: %s", FormatBytes(windowState.renderStats.resourceMemoryBytes).c_str());
+            ImGui::Separator();
+            const auto& scriptStats = editorState.scriptStats;
+            ImGui::Text("Scripts: %u (active %u, faulted %u)", scriptStats.instances, scriptStats.activeInstances, scriptStats.faultedInstances);
+            ImGui::Text("Script modules: %u", scriptStats.scriptModules);
+            ImGui::Text("Python objects: %u", scriptStats.pythonObjects);
+            ImGui::Text("Script errors: %u", scriptStats.errors);
         }
         ImGui::End();
     }
@@ -1364,6 +1509,23 @@ namespace myengine::ui
             }
 
             toolbarHovered = BuildToolbar(windowContext, windowState.viewport);
+
+            if (editorState.mode == editor::RuntimeMode::Play && services_.scriptHudLines)
+            {
+                auto* drawList = ImGui::GetWindowDrawList();
+                const auto& viewport = windowState.viewport;
+                drawList->PushClipRect(ImVec2(viewport.x, viewport.y), ImVec2(viewport.x + viewport.width, viewport.y + viewport.height), true);
+                ImVec2 position(viewport.x + 12.0f, viewport.y + kViewportToolbarHeight + 12.0f);
+                for (const auto& text : services_.scriptHudLines())
+                {
+                    const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+                    drawList->AddRectFilled(ImVec2(position.x - 6.0f, position.y - 4.0f),
+                        ImVec2(position.x + size.x + 6.0f, position.y + size.y + 4.0f), IM_COL32(0, 0, 0, 160), 4.0f);
+                    drawList->AddText(position, IM_COL32(255, 255, 255, 255), text.c_str());
+                    position.y += size.y + 12.0f;
+                }
+                drawList->PopClipRect();
+            }
 
             if (canvasLeftClicked &&
                 editorState.mode == editor::RuntimeMode::Edit &&
@@ -1598,6 +1760,43 @@ namespace myengine::ui
         ImGui::End();
     }
 
+    void SceneEditor::BuildPrefabsPanel(const SceneEditorWindowContext& windowContext)
+    {
+        (void)windowContext;
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (!editorState.showPrefabs)
+        {
+            return;
+        }
+        if (ImGui::Begin(kPrefabsWindowName, &editorState.showPrefabs))
+        {
+            if (services_.prefabLibrary != nullptr)
+            {
+                prefabInspector_->Draw(*services_.prefabLibrary, services_.describeScriptFields);
+            }
+            else
+            {
+                ImGui::TextDisabled("Prefab library is unavailable.");
+            }
+        }
+        ImGui::End();
+    }
+
+    void SceneEditor::BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext)
+    {
+        (void)windowContext;
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (!editorState.showScriptConsole)
+        {
+            return;
+        }
+        if (ImGui::Begin(kScriptConsoleWindowName, &editorState.showScriptConsole))
+        {
+            scriptConsole_->Draw(services_.scriptConsole, editorState.mode == editor::RuntimeMode::Play);
+        }
+        ImGui::End();
+    }
+
     void SceneEditor::HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext)
     {
         (void)windowContext;
@@ -1608,6 +1807,10 @@ namespace myengine::ui
         }
 
         ImGuiIO& io = ImGui::GetIO();
+        if (io.WantTextInput)
+        {
+            return; // Delete / Ctrl+Z belong to the text field, not the selected scene entity
+        }
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false) && services_.saveScene && editorState.mode == editor::RuntimeMode::Edit)
         {
@@ -1678,6 +1881,8 @@ namespace myengine::ui
         ImGui::DockBuilderDockWindow(kMaterialEditorWindowName, dockRight);
         ImGui::DockBuilderDockWindow(kAssetBrowserWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kStatisticsWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kPrefabsWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kScriptConsoleWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kViewportWindowName, dockCenter);
         ImGui::DockBuilderFinish(dockspaceId);
     }
