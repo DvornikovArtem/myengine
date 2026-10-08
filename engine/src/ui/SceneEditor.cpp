@@ -1462,6 +1462,23 @@ namespace myengine::ui
 
             toolbarHovered = BuildToolbar(windowContext, windowState.viewport);
 
+            if (editorState.mode == editor::RuntimeMode::Play && services_.scriptHudLines)
+            {
+                auto* drawList = ImGui::GetWindowDrawList();
+                const auto& viewport = windowState.viewport;
+                drawList->PushClipRect(ImVec2(viewport.x, viewport.y), ImVec2(viewport.x + viewport.width, viewport.y + viewport.height), true);
+                ImVec2 position(viewport.x + 12.0f, viewport.y + kViewportToolbarHeight + 12.0f);
+                for (const auto& text : services_.scriptHudLines())
+                {
+                    const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+                    drawList->AddRectFilled(ImVec2(position.x - 6.0f, position.y - 4.0f),
+                        ImVec2(position.x + size.x + 6.0f, position.y + size.y + 4.0f), IM_COL32(0, 0, 0, 160), 4.0f);
+                    drawList->AddText(position, IM_COL32(255, 255, 255, 255), text.c_str());
+                    position.y += size.y + 12.0f;
+                }
+                drawList->PopClipRect();
+            }
+
             if (canvasLeftClicked &&
                 editorState.mode == editor::RuntimeMode::Edit &&
                 !mouseInToolbarRegion &&

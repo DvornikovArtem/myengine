@@ -224,6 +224,18 @@ namespace myengine::core
         {
             return scriptSystem_ != nullptr ? scriptSystem_->GetLiveFields(entity, scriptIndex) : nlohmann::json::object();
         };
+        sceneEditorServices.scriptHudLines = [this]()
+        {
+            std::vector<std::string> lines;
+            if (scriptSystem_ != nullptr)
+            {
+                for (const auto& line : scriptSystem_->GetHudLines())
+                {
+                    lines.push_back(line.second);
+                }
+            }
+            return lines;
+        };
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");

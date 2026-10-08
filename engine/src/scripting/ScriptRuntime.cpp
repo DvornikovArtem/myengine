@@ -114,6 +114,10 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
         auto& context = detail::GetScriptContext();
         context.logger = desc_.logger;
         context.mainThreadId = mainThreadId_;
+        ++context.sceneVersion;
+        context.deltaTime = 0.0f;
+        context.totalTime = 0.0;
+        context.frame = 0;
 
         // Without the standard library the interpreter can not start: disable scripting instead of failing later.
         // (python314.dll itself is a load-time dependency of the exe, Windows reports it before main)
@@ -220,6 +224,8 @@ print(f"Python {sys.version.split()[0]} is ready, Vec3 check: {myengine.Vec3(1, 
 
         auto& context = detail::GetScriptContext();
         context.world = nullptr;
+        context.system = nullptr;
+        context.input = nullptr;
 
         if (desc_.logger != nullptr)
         {

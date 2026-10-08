@@ -31,6 +31,11 @@ namespace myengine::scene
 
 namespace myengine::scripting
 {
+    namespace detail
+    {
+        struct ScriptApi;
+    }
+
     class ScriptRuntime;
 
     // Recent script errors (for the log, the console and the editor)
@@ -68,6 +73,8 @@ namespace myengine::scripting
         std::string GetInstanceStatus(ecs::EntityId entity, std::size_t scriptIndex) const;
 
     private:
+        friend struct detail::ScriptApi;
+
         // Python objects (pybind11 types) live in Impl, so this header does not include pybind11
         struct Impl;
 

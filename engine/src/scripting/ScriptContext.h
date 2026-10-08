@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <thread>
 
 namespace myengine::core
@@ -14,6 +15,11 @@ namespace myengine::core
 namespace myengine::ecs
 {
     class World;
+}
+
+namespace myengine::input
+{
+    class InputManager;
 }
 
 namespace myengine::scripting
@@ -28,6 +34,11 @@ namespace myengine::scripting::detail
         core::Logger* logger = nullptr;
         ecs::World* world = nullptr; // set by ScriptSystem::Update, nullptr before the first frame
         ScriptSystem* system = nullptr; // for deferred destroy and other requests from scripts
+        input::InputManager* input = nullptr;
+        std::uint64_t sceneVersion = 0; // saved handles must not refer to another scene with the same entity ids
+        float deltaTime = 0.0f;
+        double totalTime = 0.0;
+        std::uint64_t frame = 0;
         std::thread::id mainThreadId;
     };
 

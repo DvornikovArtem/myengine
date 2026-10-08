@@ -55,6 +55,7 @@ namespace myengine::ui
         // Play only: "Active" / "Starting" / "Faulted" and current field values of a running script object
         std::function<std::string(ecs::EntityId entity, std::size_t scriptIndex)> scriptStatus;
         std::function<nlohmann::json(ecs::EntityId entity, std::size_t scriptIndex)> liveScriptFields;
+        std::function<std::vector<std::string>()> scriptHudLines;
     };
 
     struct SceneEditorWindowContext
