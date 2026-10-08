@@ -1,0 +1,52 @@
+[2026-10-08 23:43:42] [INFO] Logger initialized
+[2026-10-08 23:43:42] [INFO] Application initialization started
+[2026-10-08 23:43:42] [INFO] Configured windows count: 1
+[2026-10-08 23:43:42] [INFO] Job system initialized: 15 high, 2 streaming worker(s)
+[2026-10-08 23:43:42] [INFO] [script] Python 3.14.6 is ready, Vec3 check: Vec3(2, 3, 4)
+[2026-10-08 23:43:42] [INFO] ScriptRuntime: initialized, sys.path = ['C:\\Users\\ivanm\\source\\repos\\myengine\\build\\tests\\Debug\\python314.zip', 'C:\\Users\\ivanm\\source\\repos\\myengine\\build\\tests\\Debug', 'C:\\Users\\ivanm\\source\\repos\\myengine\\assets\\scripts']
+[2026-10-08 23:43:42] [INFO] Initializing DX12 render adapter
+[2026-10-08 23:43:42] [INFO] DX12 debug layer disabled. Set MYENGINE_DX12_DEBUG=1 to enable it.
+[2026-10-08 23:43:42] [INFO] DX12 present vsync disabled in Debug. Set MYENGINE_VSYNC=1 to enable it.
+[2026-10-08 23:43:43] [INFO] DX12 adapter candidate: NVIDIA GeForce RTX 3060 Laptop GPU | dedicated_vram_mb=5994
+[2026-10-08 23:43:44] [INFO] DX12 hardware adapter selected: NVIDIA GeForce RTX 3060 Laptop GPU | dedicated_vram_mb=5994
+[2026-10-08 23:43:44] [INFO] DX12 render adapter initialized
+[2026-10-08 23:43:44] [INFO] UiManager: initialized
+[2026-10-08 23:43:44] [INFO] UiManager: fonts ready (body=custom, mono=custom)
+[2026-10-08 23:43:44] [INFO] ResourceManager: scheduled streaming mesh load C:\Users\ivanm\source\repos\myengine\assets\models\crate.obj
+[2026-10-08 23:43:44] [INFO] ResourceManager: scheduled streaming mesh load C:\Users\ivanm\source\repos\myengine\assets\models\pyramid.obj
+[2026-10-08 23:43:44] [INFO] ResourceManager: scheduled streaming mesh load C:\Users\ivanm\source\repos\myengine\assets\models\african_head.obj
+[2026-10-08 23:43:44] [INFO] ResourceManager: scheduled streaming texture load C:\Users\ivanm\source\repos\myengine\assets\textures\debug.bmp
+[2026-10-08 23:43:44] [INFO] ResourceManager: scheduled streaming texture load C:\Users\ivanm\source\repos\myengine\assets\textures\african_head_diffuse.dds
+[2026-10-08 23:43:44] [INFO] ResourceManager: shader loaded C:\Users\ivanm\source\repos\myengine\assets\shaders\textured_lit.shader.json
+[2026-10-08 23:43:44] [INFO] ResourceManager: material loaded C:\Users\ivanm\source\repos\myengine\assets\materials\default.material.json
+[2026-10-08 23:43:44] [INFO] ResourceManager: material loaded C:\Users\ivanm\source\repos\myengine\assets\materials\warm.material.json
+[2026-10-08 23:43:44] [INFO] ResourceManager: material loaded C:\Users\ivanm\source\repos\myengine\assets\materials\cool.material.json
+[2026-10-08 23:43:44] [INFO] ResourceManager: material loaded C:\Users\ivanm\source\repos\myengine\assets\materials\africanhead.material.json
+[2026-10-08 23:43:44] [INFO] ResourceManager: manifest loaded C:\Users\ivanm\source\repos\myengine\assets\manifests\demo_assets.json meshes=3 textures=2 shaders=1 materials=4
+[2026-10-08 23:43:44] [INFO] SceneSerializer: scene loaded from C:\Users\ivanm\AppData\Local\Temp\myengine T6 сцена 23610753786300.json
+[2026-10-08 23:43:44] [INFO] Application initialization finished
+[2026-10-08 23:43:44] [INFO] Main loop started
+[2026-10-08 23:43:44] [INFO] [script] GameManager: round started
+[2026-10-08 23:43:44] [INFO] ResourceManager: mesh ready C:\Users\ivanm\source\repos\myengine\assets\models\crate.obj vertices=24 indices=36 source=binary
+[2026-10-08 23:43:44] [INFO] ResourceManager: mesh ready C:\Users\ivanm\source\repos\myengine\assets\models\pyramid.obj vertices=16 indices=18 source=binary
+[2026-10-08 23:43:44] [INFO] ResourceManager: scheduled streaming mesh load C:\Users\ivanm\source\repos\myengine\assets\models\sphere.obj
+[2026-10-08 23:43:44] [INFO] ResourceManager: material loaded C:\Users\ivanm\source\repos\myengine\assets\materials\gold.material.json
+[2026-10-08 23:43:44] [INFO] ResourceManager: mesh ready C:\Users\ivanm\source\repos\myengine\assets\models\african_head.obj vertices=1339 indices=7476 source=binary
+[2026-10-08 23:43:44] [INFO] ResourceManager: texture ready C:\Users\ivanm\source\repos\myengine\assets\textures\debug.bmp size=2x2 source=binary
+[2026-10-08 23:43:44] [INFO] ResourceManager: texture ready C:\Users\ivanm\source\repos\myengine\assets\textures\african_head_diffuse.dds size=2844x2844 source=binary
+[2026-10-08 23:43:44] [INFO] ResourceManager: mesh ready C:\Users\ivanm\source\repos\myengine\assets\models\sphere.obj vertices=1225 indices=6624 source=binary
+[2026-10-08 23:43:44] [INFO] Collision 2 vs 3 | impulse=0.97 | point=(0.00, -0.00, 2.22)
+[2026-10-08 23:43:44] [INFO] Trigger 17 -> 2 | point=(3.38, 0.50, 0.85)
+[2026-10-08 23:43:44] [INFO] [script] GameManager: won, score=1
+[2026-10-08 23:43:44] [INFO] Collision 20 vs 37 | impulse=0.48 | point=(3.49, 1.58, 0.84)
+[2026-10-08 23:43:44] [INFO] Collision 21 vs 24 | impulse=0.40 | point=(3.46, 1.58, 0.90)
+[2026-10-08 23:43:44] [INFO] Collision 26 vs 29 | impulse=0.45 | point=(3.27, 1.58, 0.96)
+[2026-10-08 23:43:44] [INFO] Collision 31 vs 36 | impulse=0.37 | point=(3.27, 1.58, 0.75)
+[2026-10-08 23:43:44] [INFO] Collision 3 vs 19 | impulse=2.16 | point=(5.02, -0.01, 4.64)
+[2026-10-08 23:43:44] [INFO] Collision 2 vs 3 | impulse=0.97 | point=(3.15, -0.00, 1.08)
+[2026-10-08 23:43:44] [INFO] Main loop finished
+[2026-10-08 23:43:44] [INFO] SceneSerializer: scene restored from in-memory snapshot
+[2026-10-08 23:43:44] [INFO] SceneSerializer: scene saved to C:\Users\ivanm\AppData\Local\Temp\myengine T6 сцена 23610753786300.json
+[2026-10-08 23:43:44] [INFO] ScriptRuntime: shut down
+[2026-10-08 23:43:44] [INFO] Shutting down render adapter
+[2026-10-08 23:43:44] [INFO] DX12 render adapter shutdown complete

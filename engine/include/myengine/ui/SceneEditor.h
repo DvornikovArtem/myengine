@@ -37,13 +37,21 @@ namespace myengine::resource
     struct MaterialAsset;
 }
 
+namespace myengine::scene
+{
+    class PrefabLibrary;
+}
+
 namespace myengine::ui
 {
+    class PrefabInspector;
+
     struct SceneEditorServices
     {
         ecs::World* world = nullptr;
         resource::ResourceManager* resourceManager = nullptr;
         core::Logger* logger = nullptr;
+        scene::PrefabLibrary* prefabLibrary = nullptr;
         std::function<void()> requestQuit;
         std::function<bool()> saveScene;
         std::function<bool()> loadScene;
@@ -87,6 +95,7 @@ namespace myengine::ui
         void BuildViewportPanel(const SceneEditorWindowContext& windowContext);
         void BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext);
         void BuildAssetBrowserPanel(const SceneEditorWindowContext& windowContext);
+        void BuildPrefabsPanel(const SceneEditorWindowContext& windowContext);
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void ValidateSelection() const;
         void CreateDefaultDockLayout(const SceneEditorWindowContext& windowContext);
@@ -113,6 +122,7 @@ namespace myengine::ui
         SceneEditorServices services_{};
         std::unique_ptr<editor::EditorCommandHistory> history_;
         std::unique_ptr<editor::TransformGizmo> gizmo_;
+        std::unique_ptr<PrefabInspector> prefabInspector_;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;

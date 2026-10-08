@@ -212,6 +212,7 @@ namespace myengine::core
         sceneEditorServices.world = &world_;
         sceneEditorServices.resourceManager = resourceManager_.get();
         sceneEditorServices.logger = &logger_;
+        sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };

@@ -121,7 +121,7 @@ namespace myengine::ui
                 ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Default from the script code. Edit to store a value in the scene");
+                    ImGui::SetTooltip("Default from the script code. Edit to store a value in the scene or prefab");
                 }
             }
             else
@@ -139,7 +139,7 @@ namespace myengine::ui
                 }
                 if (ImGui::IsItemHovered())
                 {
-                    ImGui::SetTooltip("Remove the value from the scene: the default from the script code applies");
+                    ImGui::SetTooltip("Remove the stored value: the default from the script code applies");
                 }
             }
 

@@ -74,3 +74,14 @@ target_link_libraries(myengine_gameplay_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_gameplay_smoke)
 myengine_copy_runtime_assets(myengine_gameplay_smoke)
 set_property(TARGET myengine_gameplay_smoke PROPERTY FOLDER "Tests")
+
+add_executable(myengine_prefab_inspector_tests
+  ui/PrefabInspectorTests.cpp)
+
+target_link_libraries(myengine_prefab_inspector_tests PRIVATE myengine_engine)
+target_include_directories(myengine_prefab_inspector_tests SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_prefab_inspector_tests)
+myengine_copy_runtime_assets(myengine_prefab_inspector_tests)
+set_property(TARGET myengine_prefab_inspector_tests PROPERTY FOLDER "Tests")
+add_test(NAME prefab_inspector COMMAND myengine_prefab_inspector_tests)
+set_tests_properties(prefab_inspector PROPERTIES TIMEOUT 30)
