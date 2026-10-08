@@ -12,6 +12,7 @@ namespace myengine::scripting::detail
     void InstallHelpers();
 
     // A function of the helper module: apply_props, describe_error, stats, reload_module, check_syntax,
-    // defines_behaviour, describe_fields, transfer_state, live_fields. Throws pybind11::error_already_set
+    // defines_behaviour, describe_fields, transfer_state, live_fields, console_push, reset_console.
+    // Throws pybind11::error_already_set
     pybind11::object Helper(const char* name);
 }

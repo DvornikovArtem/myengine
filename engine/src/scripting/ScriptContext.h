@@ -5,6 +5,8 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <thread>
 
 namespace myengine::core
@@ -40,6 +42,8 @@ namespace myengine::scripting::detail
         double totalTime = 0.0;
         std::uint64_t frame = 0;
         std::thread::id mainThreadId;
+        // Set only during a console call. The log still receives every line normally.
+        std::function<void(const char* level, const std::string& text)> consoleOutput;
     };
 
     // One context per process: the embedded interpreter is global too

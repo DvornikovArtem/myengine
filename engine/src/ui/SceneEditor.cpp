@@ -51,6 +51,7 @@ namespace myengine::ui
         constexpr char kMaterialEditorWindowName[] = "Material Editor";
         constexpr char kAssetBrowserWindowName[] = "Asset Browser";
         constexpr char kPrefabsWindowName[] = "Prefabs";
+        constexpr char kScriptConsoleWindowName[] = "Script Console";
         constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
         constexpr char kMaterialPayloadType[] = "MYENGINE_ASSET_MATERIAL";
         constexpr char kTexturePayloadType[] = "MYENGINE_ASSET_TEXTURE";
@@ -526,6 +527,7 @@ namespace myengine::ui
         history_ = std::make_unique<editor::EditorCommandHistory>();
         gizmo_ = std::make_unique<editor::TransformGizmo>();
         prefabInspector_ = std::make_unique<PrefabInspector>();
+        scriptConsole_ = std::make_unique<ScriptConsole>();
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -541,6 +543,7 @@ namespace myengine::ui
         }
         gizmo_.reset();
         prefabInspector_.reset();
+        scriptConsole_.reset();
         history_.reset();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -578,6 +581,7 @@ namespace myengine::ui
         BuildMaterialEditorPanel(windowContext);
         BuildAssetBrowserPanel(windowContext);
         BuildPrefabsPanel(windowContext);
+        BuildScriptConsolePanel(windowContext);
 
         if (editorState.showImGuiDemo)
         {
@@ -688,6 +692,7 @@ namespace myengine::ui
                 ImGui::MenuItem(kMaterialEditorWindowName, nullptr, &editorState.showMaterialEditor);
                 ImGui::MenuItem(kAssetBrowserWindowName, nullptr, &editorState.showAssetBrowser);
                 ImGui::MenuItem(kPrefabsWindowName, nullptr, &editorState.showPrefabs);
+                ImGui::MenuItem(kScriptConsoleWindowName, nullptr, &editorState.showScriptConsole);
                 ImGui::EndMenu();
             }
 
@@ -1741,6 +1746,21 @@ namespace myengine::ui
         ImGui::End();
     }
 
+    void SceneEditor::BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext)
+    {
+        (void)windowContext;
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (!editorState.showScriptConsole)
+        {
+            return;
+        }
+        if (ImGui::Begin(kScriptConsoleWindowName, &editorState.showScriptConsole))
+        {
+            scriptConsole_->Draw(services_.scriptConsole, editorState.mode == editor::RuntimeMode::Play);
+        }
+        ImGui::End();
+    }
+
     void SceneEditor::HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext)
     {
         (void)windowContext;
@@ -1751,6 +1771,10 @@ namespace myengine::ui
         }
 
         ImGuiIO& io = ImGui::GetIO();
+        if (io.WantTextInput)
+        {
+            return; // Delete / Ctrl+Z belong to the text field, not the selected scene entity
+        }
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false) && services_.saveScene && editorState.mode == editor::RuntimeMode::Edit)
         {
@@ -1822,6 +1846,7 @@ namespace myengine::ui
         ImGui::DockBuilderDockWindow(kAssetBrowserWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kStatisticsWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kPrefabsWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kScriptConsoleWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kViewportWindowName, dockCenter);
         ImGui::DockBuilderFinish(dockspaceId);
     }

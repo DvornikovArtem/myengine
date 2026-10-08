@@ -58,6 +58,7 @@
   include/myengine/state/StateMachine.h
   include/myengine/ui/SceneEditor.h
   include/myengine/ui/PrefabInspector.h
+  include/myengine/ui/ScriptConsole.h
   include/myengine/ui/ScriptInspector.h
   include/myengine/ui/UiManager.h
 )
@@ -104,6 +105,7 @@ set(ENGINE_SOURCES
   src/state/StateMachine.cpp
   src/ui/SceneEditor.cpp
   src/ui/PrefabInspector.cpp
+  src/ui/ScriptConsole.cpp
   src/ui/ScriptInspector.cpp
   src/ui/UiManager.cpp
 )

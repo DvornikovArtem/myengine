@@ -16,6 +16,7 @@ namespace myengine::scripting::detail
 
         constexpr const char* kHelpersCode = R"PY(
 import gc
+import codeop
 import importlib.util
 import inspect
 import json
@@ -102,9 +103,9 @@ def describe_error(exc_type, exc_value, exc_tb, scripts_dir):
     scripts_dir = os.path.normcase(os.path.abspath(scripts_dir))
     file, line = "", 0
     for frame in traceback.extract_tb(exc_tb):
-        if _is_script_file(frame.filename, scripts_dir):
+        if frame.filename == "<console>" or _is_script_file(frame.filename, scripts_dir):
             file, line = os.path.basename(frame.filename), frame.lineno or 0
-    if isinstance(exc_value, SyntaxError) and exc_value.filename and _is_script_file(exc_value.filename, scripts_dir):
+    if isinstance(exc_value, SyntaxError) and exc_value.filename and (exc_value.filename == "<console>" or _is_script_file(exc_value.filename, scripts_dir)):
         file, line = os.path.basename(exc_value.filename), exc_value.lineno or 0
     # The last line is the error itself ("SyntaxError: expected ':'"); for a SyntaxError the lines above it
     # repeat the source line, and they stay in full_text
@@ -170,6 +171,62 @@ def defines_behaviour(module, base):
     """True if the module defines a subclass of myengine.Behaviour (not only imports one)."""
     return any(isinstance(value, type) and issubclass(value, base) and value.__module__ == module.__name__
                for value in list(vars(module).values()))
+
+
+# The REPL owns a separate namespace inside the interpreter, not __main__ or a game module.
+# A scene reload clears it so saved behaviour objects cannot keep the previous Play session alive.
+_console_namespace = None
+_console_lines = []
+
+
+def reset_console():
+    global _console_namespace
+    _console_lines.clear()
+    if _console_namespace is not None:
+        # A console-defined function references its globals, which can reference the function again.
+        # Break that cycle explicitly, including saved game objects, rather than waiting for gc.collect().
+        _console_namespace.clear()
+    _console_namespace = {"__name__": "__myengine_console__", "me": __import__("myengine")}
+
+
+def cancel_console_input():
+    _console_lines.clear()
+
+
+def console_push(source):
+    if _console_namespace is None:
+        reset_console()
+    _console_lines.append(source)
+    complete = False
+    try:
+        text = "\n".join(_console_lines)
+        if len(text.encode("utf-8")) > 65536:
+            raise ValueError("Console block exceeds 64 KiB; pending input was cancelled")
+        code = codeop.compile_command(text, "<console>", "single")
+        if code is None:
+            return True
+        complete = True
+
+        # The normal displayhook stores its last result in builtins._. Keep it in our namespace instead,
+        # otherwise an entity / behaviour printed in the console could survive Reset through builtins.
+        def display(value):
+            if value is not None:
+                _console_namespace["_"] = value
+                print(repr(value))
+
+        previous = sys.displayhook
+        sys.displayhook = display
+        try:
+            exec(code, _console_namespace, _console_namespace)
+        finally:
+            sys.displayhook = previous
+        return False
+    except BaseException:
+        complete = True
+        raise
+    finally:
+        if complete:
+            _console_lines.clear()
 )PY";
     }
 

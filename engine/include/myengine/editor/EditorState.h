@@ -120,6 +120,7 @@ namespace myengine::editor
         bool showMaterialEditor = true;
         bool showAssetBrowser = true;
         bool showPrefabs = true;
+        bool showScriptConsole = true;
         bool showImGuiDemo = false;
         bool selectionLocked = false;
         bool sceneDirty = false;

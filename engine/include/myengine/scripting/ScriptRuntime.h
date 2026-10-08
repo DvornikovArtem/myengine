@@ -3,6 +3,7 @@
 #pragma once
 
 #include <filesystem>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <thread>
@@ -17,6 +18,17 @@ namespace myengine::core
 
 namespace myengine::scripting
 {
+    // Plain data for the editor; Python objects never leave the scripting subsystem.
+    struct ScriptConsoleResult
+    {
+        bool success = false;
+        bool incomplete = false; // a compound statement needs another line (the prompt becomes ...)
+        std::string output; // print, expression values and myengine.log messages
+        std::string error; // file:line and full traceback
+        std::string file;
+        int line = 0;
+    };
+
     struct ScriptRuntimeDesc
     {
         std::filesystem::path exeDir; // where python314.dll / python314.zip are
@@ -69,10 +81,15 @@ namespace myengine::scripting
         // Called after hot reload: field lists are built again from the new code
         void ClearFieldCache();
 
+        ScriptConsoleResult ExecuteConsole(const std::string& source); // one REPL line, main thread only
+        void ResetConsole(); // release saved variables / pending lines before Stop or interpreter shutdown
+        std::uint64_t GetConsoleGeneration() const; // UI notices an automatic namespace reset
+
     private:
         ScriptRuntimeDesc desc_;
         std::map<std::string, std::vector<ScriptFieldInfo>> fieldCache_; // "module.Class" -> fields
         std::thread::id mainThreadId_;
         bool initialized_ = false;
+        std::uint64_t consoleGeneration_ = 0;
     };
 }
