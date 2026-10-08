@@ -1292,6 +1292,7 @@ namespace myengine::ui
             ImGui::Text("Frame: %.2f ms", windowState.timings.frameMs);
             ImGui::Text("Render: %.2f ms", windowState.timings.renderMs);
             ImGui::Text("World update: %.2f ms", windowState.timings.worldUpdateMs);
+            ImGui::Text("Scripts: %.3f ms (part of World update)", windowState.timings.scriptsMs);
             ImGui::Separator();
             ImGui::Text("Entities: %u", windowState.renderStats.totalEntities);
             ImGui::Text("Renderable: %u", windowState.renderStats.renderableEntities);

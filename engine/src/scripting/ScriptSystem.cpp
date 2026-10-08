@@ -83,6 +83,29 @@ namespace myengine::scripting
         {
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         }
+
+        // One wall-clock measurement of the whole step: nested send() calls are not added twice.
+        // The destructor also publishes the time on early return and after an exception.
+        class ScopedScriptTimer
+        {
+        public:
+            explicit ScopedScriptTimer(double& elapsedMs)
+                : elapsedMs_(elapsedMs), start_(std::chrono::steady_clock::now())
+            {
+            }
+
+            ~ScopedScriptTimer()
+            {
+                elapsedMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start_).count();
+            }
+
+            ScopedScriptTimer(const ScopedScriptTimer&) = delete;
+            ScopedScriptTimer& operator=(const ScopedScriptTimer&) = delete;
+
+        private:
+            double& elapsedMs_;
+            const std::chrono::steady_clock::time_point start_;
+        };
     }
 
     struct ScriptSystem::Impl
@@ -129,8 +152,17 @@ namespace myengine::scripting
         // Every call from C++ into a script goes through here. A Python exception (or a C++ exception thrown by a
         // binding) is logged with file:line and disables only this instance: the engine and other scripts go on
         template <class Report, class Call>
-        bool SafeCall(Instance& instance, Report&& report, const char* method, Call&& call)
+        bool SafeCall(Instance& instance, [[maybe_unused]] const ecs::EntityId entity, Report&& report, const char* method, Call&& call)
         {
+#if defined(TRACY_ENABLE)
+            // A dynamic source location lets Tracy and csvexport group calls by module, class and method.
+            // Keep entity ids in the text, not the name: copies of one script share the same timing group.
+            const std::string zoneName = ("Scripts::" + instance.name + "." + method).substr(0, 1024);
+            ZoneTransientN(scriptZone, zoneName.c_str(), true);
+            const std::string zoneText = "entity=" + std::to_string(entity) + "; script=" + std::to_string(instance.scriptIndex);
+            ZoneTextV(scriptZone, zoneText.data(), zoneText.size());
+#endif
+
             try
             {
                 call();
@@ -154,7 +186,7 @@ namespace myengine::scripting
         template <class Report>
         bool MakeObject(Instance& instance, const ecs::EntityId entity, const nlohmann::json& props, core::Logger& logger, Report&& report)
         {
-            return SafeCall(instance, report, "create", [&]()
+            return SafeCall(instance, entity, report, "create", [&]()
                 {
                     const py::object behaviourType = py::type::of<detail::Behaviour>();
                     py::module_ module = detail::GetModule(instance.module);
@@ -239,6 +271,7 @@ namespace myengine::scripting
     void ScriptSystem::Update(ecs::World& world, const float deltaTime)
     {
         ZoneScopedN("Scripts::Update");
+        ScopedScriptTimer scriptTimer(core::ServiceLocator::GetEditorRuntimeState().scriptStats.updateMs);
 
         prefabs_.Poll(); // in Edit too; only the Streaming job touches the disk
 
@@ -384,14 +417,14 @@ namespace myengine::scripting
             {
                 // Not imported yet: Python reads it from disk when a script needs it. Report syntax errors right now.
                 // A script that failed with "No module named ..." comes alive once its file appears
-                if (SafeCall(probe, report, "reload", [&]() { detail::Helper("check_syntax")(path, source); }))
+                if (SafeCall(probe, ecs::kInvalidEntity, report, "reload", [&]() { detail::Helper("check_syntax")(path, source); }))
                 {
                     reloadedModules.push_back(item.name);
                 }
                 continue;
             }
 
-            const bool ok = SafeCall(probe, report, "reload", [&]() { detail::Helper("reload_module")(item.name, path, source); });
+            const bool ok = SafeCall(probe, ecs::kInvalidEntity, report, "reload", [&]() { detail::Helper("reload_module")(item.name, path, source); });
             if (ok)
             {
                 logger_.Info("ScriptSystem: hot reload " + item.fileName);
@@ -497,7 +530,7 @@ namespace myengine::scripting
                 if (transfer)
                 {
                     // L2: the state moves to the new object, fields with a changed default take the new value
-                    const bool ok = SafeCall(fresh, report, "reload", [&]()
+                    const bool ok = SafeCall(fresh, entity, report, "reload", [&]()
                         {
                             for (const auto& name : detail::Helper("transfer_state")(instance.object, fresh.object))
                             {
@@ -515,7 +548,7 @@ namespace myengine::scripting
                     instance = std::move(fresh); // the old Python object is released here, without OnDestroy
 
                     auto* native = instance.native;
-                    SafeCall(instance, report, "OnReload", [native]() { native->OnReload(); });
+                    SafeCall(instance, entity, report, "OnReload", [native]() { native->OnReload(); });
                     ++kept;
                 }
                 else
@@ -641,7 +674,7 @@ namespace myengine::scripting
                 }
 
                 auto* native = instance.native;
-                if (SafeCall(instance, report, "OnStart", [native]() { native->OnStart(); }))
+                if (SafeCall(instance, entity, report, "OnStart", [native]() { native->OnStart(); }))
                 {
                     instance.state = InstanceState::Active;
                     instance.started = true;
@@ -685,7 +718,7 @@ namespace myengine::scripting
                 if (instance.state == InstanceState::Active)
                 {
                     auto* native = instance.native;
-                    SafeCall(instance, report, method, [&]() { call(native); });
+                    SafeCall(instance, entity, report, method, [&]() { call(native); });
                 }
             }
         };
@@ -760,7 +793,7 @@ namespace myengine::scripting
                 if (instance.state == InstanceState::Active)
                 {
                     auto* native = instance.native;
-                    SafeCall(instance, report, "OnUpdate", [native, deltaTime]() { native->OnUpdate(deltaTime); });
+                    SafeCall(instance, entity, report, "OnUpdate", [native, deltaTime]() { native->OnUpdate(deltaTime); });
                 }
             }
         }
@@ -812,7 +845,7 @@ namespace myengine::scripting
                         if (instance.state == InstanceState::Active)
                         {
                             auto* native = instance.native;
-                            SafeCall(instance, report, "OnDestroy", [native]() { native->OnDestroy(); });
+                            SafeCall(instance, entity, report, "OnDestroy", [native]() { native->OnDestroy(); });
                         }
                     }
                 }
@@ -938,6 +971,7 @@ namespace myengine::scripting
         impl_->destroyQueue.clear();
         impl_->destroyPending.clear();
         hudLines_.clear();
+        core::ServiceLocator::GetEditorRuntimeState().scriptStats.updateMs = 0.0;
     }
 
     void ScriptSystem::Shutdown()
@@ -1087,7 +1121,7 @@ namespace myengine::scripting
             {
                 continue;
             }
-            SafeCall(instance, report, method.c_str(), [&]()
+            SafeCall(instance, entity, report, method.c_str(), [&]()
                 {
                     const py::object object = instance.object;
                     if (py::hasattr(object, method.c_str()))

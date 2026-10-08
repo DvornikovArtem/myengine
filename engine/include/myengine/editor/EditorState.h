@@ -61,6 +61,7 @@ namespace myengine::editor
         float averageFps = 0.0f;
         double frameMs = 0.0;
         double worldUpdateMs = 0.0;
+        double scriptsMs = 0.0; // part of worldUpdateMs, not an additional frame stage
         double stateUpdateMs = 0.0;
         double hotReloadMs = 0.0;
         double uiUpdateMs = 0.0;
@@ -70,6 +71,7 @@ namespace myengine::editor
     // Written by ScriptSystem, shown in Statistics. On a long session the numbers must not grow (no leaked state)
     struct ScriptStats
     {
+        double updateMs = 0.0; // full ScriptSystem::Update, including hot reload and bookkeeping
         std::uint32_t instances = 0;
         std::uint32_t activeInstances = 0;
         std::uint32_t faultedInstances = 0;

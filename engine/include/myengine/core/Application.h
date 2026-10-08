@@ -91,6 +91,7 @@ namespace myengine::core
         void PublishFrameStatistics(
             float deltaTime,
             double worldUpdateMs,
+            double scriptsMs,
             double stateUpdateMs,
             double hotReloadMs,
             double uiUpdateMs,
