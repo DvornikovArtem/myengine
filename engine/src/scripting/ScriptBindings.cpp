@@ -2,20 +2,16 @@
 // The "myengine" Python module: everything a script can see from the engine.
 
 #include <cstdio>
-#include <functional>
 #include <string>
 
 #include <pybind11/embed.h>
 #include <pybind11/operators.h>
 
 #include <myengine/core/Logger.h>
-#include <myengine/ecs/World.h>
 #include <myengine/ecs/components/Vector3.h>
 
-#include <myengine/scripting/ScriptSystem.h>
-
 #include "Behaviour.h"
-#include "EntityRef.h"
+#include "ScriptApi.h"
 #include "ScriptContext.h"
 
 namespace py = pybind11;
@@ -24,7 +20,6 @@ namespace
 {
     using myengine::core::LogLevel;
     using myengine::ecs::components::Vec3;
-    using myengine::scripting::detail::EntityRef;
     using myengine::scripting::detail::GetScriptContext;
 
     void WriteLog(const LogLevel level, const std::string& message)
@@ -43,25 +38,6 @@ namespace
         // + 0.0f turns -0 into 0, so a flipped normal prints as Vec3(0, -1, 0), not Vec3(-0, -1, -0)
         std::snprintf(buffer, sizeof(buffer), "%g", static_cast<double>(value + 0.0f));
         return buffer;
-    }
-
-    bool IsEntityAlive(const EntityRef& entity)
-    {
-        MYENGINE_ASSERT_SCRIPT_THREAD();
-
-        const auto* world = GetScriptContext().world;
-        return world != nullptr && world->IsAlive(entity.id);
-    }
-
-    // Deferred: the entity is destroyed at the end of the script step, a second call does nothing
-    void DestroyEntity(const EntityRef& entity)
-    {
-        MYENGINE_ASSERT_SCRIPT_THREAD();
-
-        if (auto* system = GetScriptContext().system)
-        {
-            system->RequestDestroy(entity.id);
-        }
     }
 }
 
@@ -103,15 +79,6 @@ PYBIND11_EMBEDDED_MODULE(myengine, m)
                 return "Vec3(" + FormatFloat(value.x) + ", " + FormatFloat(value.y) + ", " + FormatFloat(value.z) + ")";
             });
 
-    // Entity handle. Components, name and the rest come in T2.
-    // No Python constructor: entities come from the engine (self.entity, world.spawn, world.find)
-    py::class_<EntityRef>(m, "Entity", "Handle to an engine entity (id + liveness check, never a raw pointer)")
-        .def_property_readonly("id", [](const EntityRef& entity) { return entity.id; })
-        .def_property_readonly("alive", &IsEntityAlive)
-        .def("destroy", &DestroyEntity, "Destroy the entity and its children at the end of the script step (deferred)")
-        .def("__eq__", [](const EntityRef& lhs, const EntityRef& rhs) { return lhs.id == rhs.id; })
-        .def("__hash__", [](const EntityRef& entity) { return std::hash<myengine::ecs::EntityId>{}(entity.id); })
-        .def("__repr__", [](const EntityRef& entity) { return "Entity(" + std::to_string(entity.id) + ")"; });
-
+    myengine::scripting::detail::BindScriptApi(m);
     myengine::scripting::detail::BindBehaviour(m);
 }

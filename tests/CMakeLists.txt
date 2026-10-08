@@ -36,3 +36,13 @@ target_link_libraries(myengine_controls_tests PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_controls_tests)
 set_property(TARGET myengine_controls_tests PROPERTY FOLDER "Tests")
 add_test(NAME control_systems COMMAND myengine_controls_tests)
+
+add_executable(myengine_script_api_tests
+  scripting/ScriptApiTests.cpp)
+
+target_link_libraries(myengine_script_api_tests PRIVATE myengine_engine myengine_python)
+myengine_apply_compiler_options(myengine_script_api_tests)
+myengine_copy_runtime_assets(myengine_script_api_tests)
+set_property(TARGET myengine_script_api_tests PROPERTY FOLDER "Tests")
+add_test(NAME script_api COMMAND myengine_script_api_tests)
+set_tests_properties(script_api PROPERTIES TIMEOUT 30)

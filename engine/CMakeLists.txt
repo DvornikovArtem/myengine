@@ -91,6 +91,8 @@ set(ENGINE_SOURCES
   src/scripting/Behaviour.h
   src/scripting/BehaviourBindings.cpp
   src/scripting/EntityRef.h
+  src/scripting/ScriptApi.h
+  src/scripting/ScriptApiBindings.cpp
   src/scripting/ScriptBindings.cpp
   src/scripting/ScriptContext.h
   src/scripting/ScriptHelpers.cpp
@@ -183,7 +185,7 @@ target_link_libraries(myengine_engine
 target_link_directories(myengine_engine INTERFACE "${MYENGINE_PYTHON_ROOT}/libs")
 
 # pybind11 bindings produce many sections in one object file
-set_source_files_properties(src/scripting/ScriptBindings.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
+set_source_files_properties(src/scripting/ScriptBindings.cpp src/scripting/ScriptApiBindings.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
 
 myengine_apply_compiler_options(myengine_engine)
 

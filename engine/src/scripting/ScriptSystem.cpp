@@ -28,6 +28,7 @@
 #include <tracy/Tracy.hpp>
 
 #include "Behaviour.h"
+#include "ScriptApi.h"
 #include "ScriptContext.h"
 #include "ScriptHelpers.h"
 #include "ScriptModules.h"
@@ -245,8 +246,20 @@ namespace myengine::scripting
 
         MYENGINE_ASSERT_SCRIPT_THREAD();
         auto& context = detail::GetScriptContext();
+        if (context.system == this && context.world != nullptr && context.world != &world)
+        {
+            ResetInstances();
+        }
+        if (context.system != this || context.world != &world)
+        {
+            ++context.sceneVersion;
+        }
         context.world = &world;
         context.system = this;
+        context.input = &input_;
+        context.deltaTime = deltaTime;
+        context.totalTime += deltaTime;
+        ++context.frame;
 
         // Script errors are handled per call (SafeCall). This is the last line: nothing from the scripting layer
         // may leave Update and stop the engine loop
@@ -912,10 +925,16 @@ namespace myengine::scripting
 
     void ScriptSystem::ResetInstances()
     {
+        // Invalidate saved handles before releasing old objects: __del__ must not touch the new scene.
+        if (detail::GetScriptContext().system == this)
+        {
+            ++detail::GetScriptContext().sceneVersion;
+        }
         impl_->ReleasePythonObjects(runtime_.IsInitialized());
         impl_->events.clear();
         impl_->destroyQueue.clear();
         impl_->destroyPending.clear();
+        hudLines_.clear();
     }
 
     void ScriptSystem::Shutdown()
@@ -930,6 +949,7 @@ namespace myengine::scripting
         {
             context.system = nullptr;
             context.world = nullptr;
+            context.input = nullptr;
         }
     }
 
@@ -1001,5 +1021,80 @@ namespace myengine::scripting
             return "Faulted";
         }
         return std::string();
+    }
+
+    py::object detail::ScriptApi::GetScript(ScriptSystem& system, const ecs::EntityId entity, const py::handle scriptClass)
+    {
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        if (!PyType_Check(scriptClass.ptr()))
+        {
+            throw py::type_error("get_script expects a Behaviour class");
+        }
+        const int subclass = PyObject_IsSubclass(scriptClass.ptr(), py::type::of<detail::Behaviour>().ptr());
+        if (subclass < 0)
+        {
+            throw py::error_already_set();
+        }
+        if (subclass == 0)
+        {
+            throw py::type_error("get_script expects a Behaviour class");
+        }
+        const auto it = system.impl_->instances.find(entity);
+        if (it != system.impl_->instances.end() && !system.IsDestroyPending(entity))
+        {
+            for (const auto& instance : it->second)
+            {
+                if (instance.object && instance.state != InstanceState::Faulted && py::isinstance(instance.object, scriptClass))
+                {
+                    return instance.object;
+                }
+            }
+        }
+        return py::none();
+    }
+
+    bool detail::ScriptApi::Send(ScriptSystem& system, const ecs::EntityId entity, const std::string& method, const py::args& args)
+    {
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        const auto report = [&system](const std::string& name, const char* operation, py::error_already_set* error, const char* message)
+        {
+            system.ReportError(name, operation, error, message);
+        };
+        bool delivered = false;
+        for (std::size_t index = 0;; ++index)
+        {
+            const auto it = system.impl_->instances.find(entity);
+            if (it == system.impl_->instances.end() || index >= it->second.size() || system.IsDestroyPending(entity))
+            {
+                break;
+            }
+            auto& instance = it->second[index];
+            if (!instance.object || instance.state == InstanceState::Faulted)
+            {
+                continue;
+            }
+            SafeCall(instance, report, method.c_str(), [&]()
+                {
+                    const py::object object = instance.object;
+                    if (py::hasattr(object, method.c_str()))
+                    {
+                        object.attr(method.c_str())(*args);
+                        delivered = true;
+                    }
+                });
+        }
+        return delivered;
+    }
+
+    void detail::ScriptApi::SetHudLine(ScriptSystem& system, const std::string& key, const std::string& text)
+    {
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        system.hudLines_[key] = text;
+    }
+
+    void detail::ScriptApi::ClearHudLine(ScriptSystem& system, const std::string& key)
+    {
+        MYENGINE_ASSERT_SCRIPT_THREAD();
+        system.hudLines_.erase(key);
     }
 }
