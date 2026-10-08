@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -70,6 +71,8 @@ namespace myengine::scripting
 
         // Hot reload: compile -> new module object -> swap in sys.modules; on any error the old module stays
         void ProcessFileChanges();
+        // Hot reload in Play: objects of these modules are replaced by objects of the new classes (L2 keeps state, L1 restarts)
+        void ReloadInstances(const std::vector<std::string>& modules);
         // pythonError is a pybind11::error_already_set* (void* keeps pybind11 out of this header)
         void ReportError(const std::string& name, const char* method, void* pythonError, const char* message);
 

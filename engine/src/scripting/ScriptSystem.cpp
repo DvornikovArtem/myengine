@@ -53,8 +53,12 @@ namespace myengine::scripting
         {
             py::object object; // owns the Python object; nullptr if creation failed
             detail::Behaviour* native = nullptr; // the same object seen from C++, valid while `object` is alive
+            std::string module; // "coin"
+            std::string className; // "Coin"
             std::string name; // "coin.Coin", for messages
+            std::size_t scriptIndex = 0; // index in ScriptComponent::scripts, for props on hot reload
             InstanceState state = InstanceState::PendingStart;
+            bool started = false; // OnStart has finished: hot reload may keep the state
         };
 
         struct QueuedEvent
@@ -90,7 +94,6 @@ namespace myengine::scripting
         core::FileWatcher watcher;
         std::vector<core::FileChange> fileChanges;
         bool expectFullBatch = false; // the next batch is a "reload all" (F5 or a changed helper module)
-        bool playReloadHintShown = false; // the "Stop -> Play restarts the running ones" hint, once per Play
 
         events::SubscriptionId collisionSubscription = 0;
         events::SubscriptionId triggerSubscription = 0;
@@ -142,6 +145,43 @@ namespace myengine::scripting
 
             instance.state = InstanceState::Faulted;
             return false;
+        }
+
+        // Creates the Python object of a behaviour: module -> class -> cls() -> entity -> props.
+        // Used when an entity appears and when hot reload replaces an object
+        template <class Report>
+        bool MakeObject(Instance& instance, const ecs::EntityId entity, const nlohmann::json& props, core::Logger& logger, Report&& report)
+        {
+            return SafeCall(instance, report, "create", [&]()
+                {
+                    const py::object behaviourType = py::type::of<detail::Behaviour>();
+                    py::module_ module = detail::GetModule(instance.module);
+                    py::object cls = module.attr(instance.className.c_str());
+
+                    const int isBehaviour = PyType_Check(cls.ptr()) ? PyObject_IsSubclass(cls.ptr(), behaviourType.ptr()) : 0;
+                    if (isBehaviour < 0)
+                    {
+                        throw py::error_already_set();
+                    }
+                    if (isBehaviour == 0)
+                    {
+                        throw std::runtime_error(instance.name + " is not a subclass of myengine.Behaviour");
+                    }
+
+                    py::object object = cls();
+                    auto* native = object.cast<detail::Behaviour*>();
+                    native->entity = detail::EntityRef{entity};
+
+                    const auto warnings = detail::Helper("apply_props")(object, cls, props.dump()).cast<py::list>();
+                    for (const auto& warning : warnings)
+                    {
+                        logger.Warning("ScriptSystem: " + instance.name + " (entity " + std::to_string(entity) + "): " +
+                            warning.cast<std::string>());
+                    }
+
+                    instance.object = std::move(object);
+                    instance.native = native;
+                });
         }
     }
 
@@ -315,6 +355,7 @@ namespace myengine::scripting
 
         bool anyReloaded = false;
         bool helperReloaded = false;
+        std::vector<std::string> reloadedModules; // swapped in sys.modules, or new files that compile
         for (const auto& item : moduleChanges)
         {
             const auto path = item.change->path.u8string();
@@ -325,8 +366,12 @@ namespace myengine::scripting
 
             if (item.loaded.is_none())
             {
-                // Not imported yet: Python reads it from disk when a script needs it. Report syntax errors right now
-                SafeCall(probe, report, "reload", [&]() { detail::Helper("check_syntax")(path, source); });
+                // Not imported yet: Python reads it from disk when a script needs it. Report syntax errors right now.
+                // A script that failed with "No module named ..." comes alive once its file appears
+                if (SafeCall(probe, report, "reload", [&]() { detail::Helper("check_syntax")(path, source); }))
+                {
+                    reloadedModules.push_back(item.name);
+                }
                 continue;
             }
 
@@ -334,6 +379,7 @@ namespace myengine::scripting
             if (ok)
             {
                 logger_.Info("ScriptSystem: hot reload " + item.fileName);
+                reloadedModules.push_back(item.name);
                 anyReloaded = true;
                 helperReloaded = helperReloaded || item.helper;
             }
@@ -341,6 +387,11 @@ namespace myengine::scripting
             {
                 logger_.Warning("ScriptSystem: " + item.fileName + " was not reloaded, the previous version keeps running");
             }
+        }
+
+        if (core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play && !reloadedModules.empty())
+        {
+            ReloadInstances(reloadedModules);
         }
 
         if (!anyReloaded)
@@ -356,12 +407,121 @@ namespace myengine::scripting
             logger_.Info("ScriptSystem: a helper module changed, reloading all scripts");
             RequestReloadAll();
         }
+    }
 
-        if (core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play && !impl_->playReloadHintShown)
+    void ScriptSystem::ReloadInstances(const std::vector<std::string>& modules)
+    {
+        auto* world = detail::GetScriptContext().world;
+        if (world == nullptr)
         {
-            impl_->playReloadHintShown = true;
-            logger_.Info("ScriptSystem: new code is used by objects created from now on; Stop -> Play restarts the running ones");
+            return;
         }
+
+        const bool keepState = core::ServiceLocator::GetEditorRuntimeState().scriptReloadKeepsState;
+        const auto report = [this](const std::string& name, const char* method, py::error_already_set* error, const char* message)
+        {
+            ReportError(name, method, error, message);
+        };
+
+        unsigned kept = 0;
+        unsigned restarted = 0;
+        unsigned failed = 0;
+        std::set<std::string> changedDefaults;
+
+        std::vector<ecs::EntityId> entities;
+        entities.reserve(impl_->instances.size());
+        for (const auto& [entity, list] : impl_->instances)
+        {
+            entities.push_back(entity);
+        }
+
+        for (const ecs::EntityId entity : entities)
+        {
+            for (std::size_t index = 0;; ++index)
+            {
+                const auto it = impl_->instances.find(entity);
+                if (it == impl_->instances.end() || index >= it->second.size())
+                {
+                    break;
+                }
+                if (std::find(modules.begin(), modules.end(), it->second[index].module) == modules.end())
+                {
+                    continue;
+                }
+
+                // Props as they are in the scene / prefab now
+                const auto* component = world->TryGet<ecs::components::ScriptComponent>(entity);
+                const std::size_t scriptIndex = it->second[index].scriptIndex;
+                const nlohmann::json props = component != nullptr && scriptIndex < component->scripts.size()
+                    ? component->scripts[scriptIndex].props
+                    : nlohmann::json::object();
+
+                Instance fresh;
+                fresh.module = it->second[index].module;
+                fresh.className = it->second[index].className;
+                fresh.name = it->second[index].name;
+                fresh.scriptIndex = scriptIndex;
+
+                // The class may be gone or broken in the new code: then the old object keeps running
+                if (!MakeObject(fresh, entity, props, logger_, report))
+                {
+                    ++failed;
+                    continue;
+                }
+
+                // Looked up again: creating the object ran Python code
+                auto& instance = impl_->instances.find(entity)->second[index];
+                const bool transfer = keepState && instance.object && instance.started;
+                if (transfer)
+                {
+                    // L2: the state moves to the new object, fields with a changed default take the new value
+                    const bool ok = SafeCall(fresh, report, "reload", [&]()
+                        {
+                            for (const auto& name : detail::Helper("transfer_state")(instance.object, fresh.object))
+                            {
+                                changedDefaults.insert(name.cast<std::string>());
+                            }
+                        });
+                    if (!ok)
+                    {
+                        ++failed;
+                        continue;
+                    }
+
+                    fresh.state = InstanceState::Active;
+                    fresh.started = true;
+                    instance = std::move(fresh); // the old Python object is released here, without OnDestroy
+
+                    auto* native = instance.native;
+                    SafeCall(instance, report, "OnReload", [native]() { native->OnReload(); });
+                    ++kept;
+                }
+                else
+                {
+                    // L1 (or the old object never started / never existed): start over, OnStart runs this frame
+                    fresh.state = InstanceState::PendingStart;
+                    instance = std::move(fresh);
+                    ++restarted;
+                }
+            }
+        }
+
+        if (kept + restarted + failed == 0)
+        {
+            return;
+        }
+
+        std::string message = "ScriptSystem: hot reload in Play: " + std::to_string(kept) + " object(s) kept their state, " +
+            std::to_string(restarted) + " restarted, " + std::to_string(failed) + " kept the old code";
+        if (!changedDefaults.empty())
+        {
+            message += "; fields with a new default:";
+            for (const auto& name : changedDefaults)
+            {
+                message += " " + name;
+            }
+        }
+        logger_.Info(message);
     }
 
     void ScriptSystem::CreateInstances(ecs::World& world)
@@ -390,7 +550,6 @@ namespace myengine::scripting
             return;
         }
 
-        const py::object behaviourType = py::type::of<detail::Behaviour>();
         const auto report = [this](const std::string& name, const char* method, py::error_already_set* error, const char* message)
         {
             ReportError(name, method, error, message);
@@ -409,41 +568,16 @@ namespace myengine::scripting
             std::vector<Instance> created;
             created.reserve(entries.size());
 
-            for (const auto& entry : entries)
+            for (std::size_t scriptIndex = 0; scriptIndex < entries.size(); ++scriptIndex)
             {
+                const auto& entry = entries[scriptIndex];
                 Instance instance;
+                instance.module = entry.module;
+                instance.className = entry.className;
                 instance.name = entry.module + "." + entry.className;
+                instance.scriptIndex = scriptIndex;
 
-                const bool ok = SafeCall(instance, report, "create", [&]()
-                    {
-                        py::module_ module = detail::GetModule(entry.module);
-                        py::object cls = module.attr(entry.className.c_str());
-
-                        const int isBehaviour = PyType_Check(cls.ptr()) ? PyObject_IsSubclass(cls.ptr(), behaviourType.ptr()) : 0;
-                        if (isBehaviour < 0)
-                        {
-                            throw py::error_already_set();
-                        }
-                        if (isBehaviour == 0)
-                        {
-                            throw std::runtime_error(instance.name + " is not a subclass of myengine.Behaviour");
-                        }
-
-                        py::object object = cls();
-                        auto* native = object.cast<detail::Behaviour*>();
-                        native->entity = detail::EntityRef{entity};
-
-                        const auto warnings = detail::Helper("apply_props")(object, cls, entry.props.dump()).cast<py::list>();
-                        for (const auto& warning : warnings)
-                        {
-                            logger_.Warning("ScriptSystem: " + instance.name + " (entity " + std::to_string(entity) + "): " +
-                                warning.cast<std::string>());
-                        }
-
-                        instance.object = std::move(object);
-                        instance.native = native;
-                    });
-
+                const bool ok = MakeObject(instance, entity, entry.props, logger_, report);
                 instance.state = ok ? InstanceState::PendingStart : InstanceState::Faulted;
                 created.push_back(std::move(instance));
             }
@@ -488,6 +622,7 @@ namespace myengine::scripting
                 if (SafeCall(instance, report, "OnStart", [native]() { native->OnStart(); }))
                 {
                     instance.state = InstanceState::Active;
+                    instance.started = true;
                 }
             }
         }
@@ -771,7 +906,6 @@ namespace myengine::scripting
 
     void ScriptSystem::ResetInstances()
     {
-        impl_->playReloadHintShown = false;
         impl_->ReleasePythonObjects(runtime_.IsInitialized());
         impl_->events.clear();
         impl_->destroyQueue.clear();

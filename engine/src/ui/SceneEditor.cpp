@@ -751,6 +751,15 @@ namespace myengine::ui
         {
             ImGui::SetTooltip("Hot reload of every script (F5). Saved files are reloaded automatically");
         }
+        ImGui::SameLine();
+        ImGui::Checkbox("Keep script state", &editorState.scriptReloadKeepsState);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "Hot reload in Play.\n"
+                "On: running objects keep their state, fields with a changed default take the new value (L2).\n"
+                "Off: running objects start over with OnStart (L1)");
+        }
 
         ImGui::SameLine();
         ImGui::TextDisabled("|");

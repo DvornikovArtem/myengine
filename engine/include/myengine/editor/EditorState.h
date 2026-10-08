@@ -123,6 +123,8 @@ namespace myengine::editor
         core::WindowId lastInteractedWindowId = 0;
         std::string playModeSnapshot;
         ScriptStats scriptStats{};
+        // Hot reload in Play: true - the new object keeps the old one's state (L2), false - it starts over (L1)
+        bool scriptReloadKeepsState = true;
         std::unordered_map<core::WindowId, WindowEditorState> windows;
 
         WindowEditorState& GetOrCreateWindowState(const core::WindowId windowId)
