@@ -55,3 +55,22 @@ myengine_apply_compiler_options(myengine_prefab_tests)
 set_property(TARGET myengine_prefab_tests PROPERTY FOLDER "Tests")
 add_test(NAME prefab_library COMMAND myengine_prefab_tests)
 set_tests_properties(prefab_library PROPERTIES TIMEOUT 30)
+
+add_executable(myengine_gameplay_tests
+  scripting/GameplayTests.cpp)
+
+target_link_libraries(myengine_gameplay_tests PRIVATE myengine_engine myengine_python)
+myengine_apply_compiler_options(myengine_gameplay_tests)
+myengine_copy_runtime_assets(myengine_gameplay_tests)
+set_property(TARGET myengine_gameplay_tests PROPERTY FOLDER "Tests")
+add_test(NAME scripting_gameplay COMMAND myengine_gameplay_tests)
+set_tests_properties(scripting_gameplay PROPERTIES TIMEOUT 30)
+
+# Manual integration test: plays a scripted round in a DX12 window.
+add_executable(myengine_gameplay_smoke
+  scene/GameplaySceneSmoke.cpp)
+
+target_link_libraries(myengine_gameplay_smoke PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_gameplay_smoke)
+myengine_copy_runtime_assets(myengine_gameplay_smoke)
+set_property(TARGET myengine_gameplay_smoke PROPERTY FOLDER "Tests")
