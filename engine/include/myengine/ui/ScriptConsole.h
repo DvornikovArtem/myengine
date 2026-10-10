@@ -37,13 +37,25 @@ namespace myengine::ui
         std::size_t GetHistoryCount() const;
 
     private:
+        enum class LineKind
+        {
+            Output, // a result printed by the interpreter
+            Echo,   // the command that was entered (">>> ..." / "... ...")
+            Error,
+            Notice, // a message of the console itself
+        };
+
         struct Line
         {
             std::string text;
             bool error = false;
+            LineKind kind = LineKind::Output;
         };
 
-        void Append(std::string text, bool error = false);
+        void Append(std::string text, bool error = false, LineKind kind = LineKind::Output);
+        void DrawToolbar(const ScriptConsoleServices& services, std::size_t errorCount);
+        void DrawConsole(const ScriptConsoleServices& services, bool commandsEnabled);
+        void DrawErrors(const std::vector<scripting::ScriptError>& errors);
         void ObserveGeneration(const ScriptConsoleServices& services);
         static int InputCallback(ImGuiInputTextCallbackData* data);
 
@@ -55,6 +67,7 @@ namespace myengine::ui
         bool incomplete_ = false;
         bool scrollToBottom_ = false;
         bool autoScroll_ = true;
+        bool showErrors_ = false; // the Errors view of the segmented switch
         bool reclaimFocus_ = false;
         std::uint64_t generation_ = 0;
         bool observedGeneration_ = false;

@@ -893,7 +893,10 @@ namespace myengine::ui
             float lineY = y;
             while (cursor < textEnd)
             {
-                const char* wrapEnd = font->CalcWordWrapPosition(sizePx, cursor, textEnd, wrapWidth);
+                // Tests and tools that never registered the editor fonts fall back to the current font
+                ImFont* wrapFont = font != nullptr ? font : ImGui::GetFont();
+                const float wrapSize = font != nullptr ? sizePx : ImGui::GetFontSize();
+                const char* wrapEnd = wrapFont->CalcWordWrapPosition(wrapSize, cursor, textEnd, wrapWidth);
                 if (wrapEnd == cursor)
                 {
                     wrapEnd = cursor + 1;

@@ -52,8 +52,8 @@ namespace myengine::ui
         void DrawHeader();
         void DrawCliSettings();
         void DrawTranscript(float footerHeight);
-        void DrawMessage(const assistant::AssistantMessage& message);
-        void DrawInput();
+        void DrawMessage(const assistant::AssistantMessage& message, assistant::AssistantMessage::Kind previousKind);
+        void DrawInput(float inputHeight);
         void DrawApprovals();
         void Submit();
 
@@ -65,6 +65,8 @@ namespace myengine::ui
         std::uint64_t drawnRevision_ = 0;
         bool scrollToBottom_ = false;
         bool reclaimFocus_ = false;
+        bool openSettingsRequested_ = false;
+        float settingsAnchor_[2]{};
         std::size_t drawnPending_ = 0;
     };
 }
