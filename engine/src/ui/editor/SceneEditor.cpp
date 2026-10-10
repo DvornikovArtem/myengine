@@ -101,10 +101,11 @@ namespace myengine::ui
         BuildViewportPanel(windowContext);
         DrawSceneVisibilityMask(windowState.viewport);
         BuildMaterialEditorPanel(windowContext);
-        BuildAssetBrowserPanel(windowContext);
         BuildPrefabsPanel(windowContext);
         BuildScriptConsolePanel(windowContext);
         BuildAssistantPanel(windowContext);
+        // Last, so Content Browser is the visible tab of the bottom group in the default layout
+        BuildAssetBrowserPanel(windowContext);
         BuildProjectDialogs();
 
         if (editorState.showImGuiDemo)
@@ -118,8 +119,15 @@ namespace myengine::ui
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+        // The menu bar, the main toolbar and the status bar come first: they shrink the work area the dockspace fills
+        BuildMainMenuBar(windowContext);
+        BuildMainToolbar(windowContext);
+        BuildStatusBar(windowContext);
+
         const ImGuiDockNodeFlags dockSpaceFlags = ImGuiDockNodeFlags_PassthruCentralNode;
         const ImGuiID dockspaceId = ImGui::GetID("MyEngineEditorDockSpace");
+        // A node already exists when the layout came from the ini file (checked before DockSpaceOverViewport creates one)
+        const bool hasSavedLayout = ImGui::DockBuilderGetNode(dockspaceId) != nullptr;
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_DockingEmptyBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
@@ -130,9 +138,19 @@ namespace myengine::ui
         auto& windowState = editorState.GetOrCreateWindowState(windowContext.windowId);
         if (!windowState.dockLayoutInitialized)
         {
-            CreateDefaultDockLayout(windowContext);
+            if (resetLayoutRequested_ || !hasSavedLayout)
+            {
+                CreateDefaultDockLayout(windowContext);
+            }
+            resetLayoutRequested_ = false;
             windowState.dockLayoutInitialized = true;
         }
+    }
+
+    void SceneEditor::BuildMainMenuBar(const SceneEditorWindowContext& windowContext)
+    {
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        auto& windowState = editorState.GetOrCreateWindowState(windowContext.windowId);
 
         if (ImGui::BeginMainMenuBar())
         {
@@ -180,7 +198,7 @@ namespace myengine::ui
                 ImGui::EndMenu();
             }
 
-            if (ImGui::BeginMenu("View"))
+            if (ImGui::BeginMenu("Window"))
             {
                 ImGui::MenuItem(kHierarchyWindowName, nullptr, &editorState.showHierarchy);
                 ImGui::MenuItem(kInspectorWindowName, nullptr, &editorState.showInspector);
@@ -191,6 +209,21 @@ namespace myengine::ui
                 ImGui::MenuItem(kPrefabsWindowName, nullptr, &editorState.showPrefabs);
                 ImGui::MenuItem(kScriptConsoleWindowName, nullptr, &editorState.showScriptConsole);
                 ImGui::MenuItem(kAssistantWindowName, nullptr, &editorState.showAssistant);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Reset Layout"))
+                {
+                    editorState.showHierarchy = true;
+                    editorState.showInspector = true;
+                    editorState.showStatistics = true;
+                    editorState.showViewport = true;
+                    editorState.showMaterialEditor = true;
+                    editorState.showAssetBrowser = true;
+                    editorState.showPrefabs = true;
+                    editorState.showScriptConsole = true;
+                    editorState.showAssistant = true;
+                    resetLayoutRequested_ = true;
+                    windowState.dockLayoutInitialized = false; // BuildDockSpace rebuilds the default layout
+                }
                 ImGui::EndMenu();
             }
 
@@ -211,24 +244,27 @@ namespace myengine::ui
         ImGuiID dockspaceId = ImGui::GetID("MyEngineEditorDockSpace");
         ImGui::DockBuilderRemoveNode(dockspaceId);
         ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
-        ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->Size);
+        ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
 
-        ImGuiID dockLeft = 0;
+        // Unreal-style default: viewport in the middle, Outliner over Details on the right,
+        // Content Browser / Output Log / Statistics / ... as tabs at the bottom
         ImGuiID dockRight = 0;
+        ImGuiID dockRightTop = 0;
+        ImGuiID dockRightBottom = 0;
         ImGuiID dockBottom = 0;
         ImGuiID dockCenter = dockspaceId;
 
-        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Left, 0.22f, &dockLeft, &dockCenter);
-        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Right, 0.28f, &dockRight, &dockCenter);
+        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Right, 0.22f, &dockRight, &dockCenter);
+        ImGui::DockBuilderSplitNode(dockRight, ImGuiDir_Up, 0.40f, &dockRightTop, &dockRightBottom);
         ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Down, 0.28f, &dockBottom, &dockCenter);
 
-        ImGui::DockBuilderDockWindow(kHierarchyWindowName, dockLeft);
-        ImGui::DockBuilderDockWindow(kInspectorWindowName, dockRight);
-        ImGui::DockBuilderDockWindow(kMaterialEditorWindowName, dockRight);
-        ImGui::DockBuilderDockWindow(kAssetBrowserWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kHierarchyWindowName, dockRightTop);
+        ImGui::DockBuilderDockWindow(kInspectorWindowName, dockRightBottom);
+        ImGui::DockBuilderDockWindow(kScriptConsoleWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kStatisticsWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kPrefabsWindowName, dockBottom);
-        ImGui::DockBuilderDockWindow(kScriptConsoleWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kMaterialEditorWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kAssetBrowserWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kAssistantWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kViewportWindowName, dockCenter);
         ImGui::DockBuilderFinish(dockspaceId);

@@ -17,6 +17,8 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ui/UiManager.h>
 
+#include "editor/EditorTheme.h"
+
 #include <tracy/Tracy.hpp>
 
 namespace myengine::ui
@@ -152,42 +154,6 @@ namespace myengine::ui
             io.AddKeyEvent(ImGuiMod_Super, (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0);
         }
 
-        void ConfigureStyle()
-        {
-            ImGuiStyle& style = ImGui::GetStyle();
-            style.WindowRounding = 8.0f;
-            style.ChildRounding = 6.0f;
-            style.FrameRounding = 5.0f;
-            style.GrabRounding = 5.0f;
-            style.PopupRounding = 6.0f;
-            style.TabRounding = 5.0f;
-            style.ScrollbarRounding = 8.0f;
-            style.WindowPadding = ImVec2(12.0f, 10.0f);
-            style.FramePadding = ImVec2(8.0f, 6.0f);
-            style.ItemSpacing = ImVec2(8.0f, 6.0f);
-            style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
-            style.Colors[ImGuiCol_WindowBg] = ImVec4(0.08f, 0.09f, 0.11f, 0.96f);
-            style.Colors[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.11f, 0.14f, 0.98f);
-            style.Colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.17f, 0.20f, 1.0f);
-            style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.26f, 0.31f, 1.0f);
-            style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.27f, 0.33f, 0.39f, 1.0f);
-            style.Colors[ImGuiCol_Header] = ImVec4(0.21f, 0.27f, 0.33f, 1.0f);
-            style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.27f, 0.35f, 0.42f, 1.0f);
-            style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.31f, 0.41f, 0.50f, 1.0f);
-            style.Colors[ImGuiCol_Button] = ImVec4(0.22f, 0.28f, 0.34f, 1.0f);
-            style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.29f, 0.37f, 0.45f, 1.0f);
-            style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.35f, 0.44f, 0.53f, 1.0f);
-            style.Colors[ImGuiCol_Tab] = ImVec4(0.15f, 0.18f, 0.22f, 1.0f);
-            style.Colors[ImGuiCol_TabHovered] = ImVec4(0.22f, 0.28f, 0.34f, 1.0f);
-            style.Colors[ImGuiCol_TabSelected] = ImVec4(0.24f, 0.30f, 0.37f, 1.0f);
-            style.Colors[ImGuiCol_TitleBg] = ImVec4(0.07f, 0.08f, 0.10f, 1.0f);
-            style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.10f, 0.12f, 0.15f, 1.0f);
-            style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.08f, 0.09f, 0.11f, 1.0f);
-            style.Colors[ImGuiCol_Separator] = ImVec4(0.25f, 0.30f, 0.36f, 1.0f);
-            style.Colors[ImGuiCol_CheckMark] = ImVec4(0.90f, 0.67f, 0.26f, 1.0f);
-            style.Colors[ImGuiCol_DockingPreview] = ImVec4(0.90f, 0.67f, 0.26f, 0.65f);
-        }
-
         ImFont* LoadFontFromPath(
             ImFontAtlas& atlas,
             const std::filesystem::path& path,
@@ -274,6 +240,30 @@ namespace myengine::ui
 
             return sourceRoot;
         }
+
+        // Window layout file: %APPDATA%\myengine\editor_layout.ini (the executable directory if APPDATA is unavailable).
+        // Dock layout and floating windows survive restarts; "Window > Reset Layout" rebuilds the default.
+        std::string ResolveLayoutIniPath(const core::WindowId windowId)
+        {
+            std::filesystem::path directory;
+            wchar_t appData[MAX_PATH]{};
+            const DWORD length = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
+            if (length > 0 && length < MAX_PATH)
+            {
+                directory = std::filesystem::path(appData) / L"myengine";
+            }
+            else
+            {
+                directory = GetExecutableDirectory();
+            }
+
+            std::error_code ec;
+            std::filesystem::create_directories(directory, ec);
+            const std::wstring name = windowId == 1
+                ? std::wstring(L"editor_layout.ini")
+                : L"editor_layout_" + std::to_wstring(windowId) + L".ini";
+            return (directory / name).u8string();
+        }
     }
 
     struct UiManager::WindowUiContext
@@ -292,6 +282,7 @@ namespace myengine::ui
         std::vector<std::uint32_t> scratchCommandIndices;
         bool wantMouseCapture = false;
         bool wantKeyboardCapture = false;
+        std::string layoutIniPath; // ImGui keeps the pointer, so it lives as long as the context
     };
 
     UiManager::UiManager() = default;
@@ -752,16 +743,17 @@ namespace myengine::ui
         io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         io.ConfigWindowsMoveFromTitleBarOnly = true;
-        io.IniFilename = nullptr;
+        windowContext->layoutIniPath = ResolveLayoutIniPath(windowId);
+        io.IniFilename = windowContext->layoutIniPath.c_str();
         io.LogFilename = nullptr;
 
-        ConfigureStyle();
+        detail::ApplyEditorTheme();
 
         const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesCyrillic();
         const auto fontRoot = ResolveFontRoot();
 
-        windowContext->bodyFont = LoadFontFromPath(*io.Fonts, fontRoot / "Inter-Regular.ttf", 17.0f, glyphRanges);
-        windowContext->monoFont = LoadFontFromPath(*io.Fonts, fontRoot / "JetBrainsMono-Regular.ttf", 15.0f, glyphRanges);
+        windowContext->bodyFont = LoadFontFromPath(*io.Fonts, fontRoot / "Inter-Regular.ttf", 15.0f, glyphRanges);
+        windowContext->monoFont = LoadFontFromPath(*io.Fonts, fontRoot / "JetBrainsMono-Regular.ttf", 14.0f, glyphRanges);
         const bool customBodyFont = windowContext->bodyFont != nullptr;
         const bool customMonoFont = windowContext->monoFont != nullptr;
         if (windowContext->bodyFont == nullptr)
