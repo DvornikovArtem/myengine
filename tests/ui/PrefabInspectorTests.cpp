@@ -163,6 +163,28 @@ namespace
         bool keepArtifacts = false;
     };
 
+    // The fields are drawn in a property grid (name | value | reset). Where the value and the reset arrow of the
+    // single row of the grid that was just drawn are: found through the table, not through the last item.
+    ImVec2 ValuePoint(const float offset)
+    {
+        ImGuiTable* table = ImGui::TableFindByID(ImGui::GetID("##script_fields"));
+        if (table == nullptr)
+        {
+            throw std::runtime_error("The script field grid was not drawn");
+        }
+        return ImVec2(table->Columns[1].WorkMinX + offset, (table->RowPosY1 + table->RowPosY2) * 0.5f);
+    }
+
+    ImVec2 ResetPoint()
+    {
+        ImGuiTable* table = ImGui::TableFindByID(ImGui::GetID("##script_fields"));
+        if (table == nullptr)
+        {
+            throw std::runtime_error("The script field grid was not drawn");
+        }
+        return ImVec2((table->Columns[2].WorkMinX + table->Columns[2].WorkMaxX) * 0.5f, (table->RowPosY1 + table->RowPosY2) * 0.5f);
+    }
+
     void TestWidgets(Fixture& fixture)
     {
         // The panel reuses T7's real widgets, not a second implementation of the field types.
@@ -180,10 +202,9 @@ namespace
         ImRect reset;
         const auto drawCheckbox = [&]()
         {
-            const auto start = ImGui::GetCursorScreenPos();
-            position = ImVec2(start.x + 8.0f, start.y + 8.0f);
             ui::DrawScriptFields(checkbox, props);
-            reset = GImGui->LastItemData.Rect;
+            position = ValuePoint(8.0f);
+            reset = ImRect(ResetPoint(), ResetPoint());
         };
         fixture.Frame(drawCheckbox);
         fixture.Frame(drawCheckbox);
@@ -210,9 +231,8 @@ namespace
             props = {{field.name, field.defaultValue}};
             const auto drawNumber = [&]()
             {
-                const auto start = ImGui::GetCursorScreenPos();
-                position = ImVec2(start.x + 30.0f, start.y + 8.0f);
                 ui::DrawScriptFields({field}, props);
+                position = ValuePoint(30.0f);
             };
             for (int frame = 0; frame < 25; ++frame)
             {
@@ -238,9 +258,8 @@ namespace
         props = {{"target", "Controlled_1"}};
         const auto drawString = [&]()
         {
-            const auto start = ImGui::GetCursorScreenPos();
-            position = ImVec2(start.x + 30.0f, start.y + 8.0f);
             ui::DrawScriptFields({fields[3]}, props);
+            position = ValuePoint(30.0f);
         };
         fixture.Frame(drawString);
         io.AddMousePosEvent(position.x, position.y);
