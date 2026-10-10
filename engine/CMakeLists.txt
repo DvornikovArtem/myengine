@@ -103,7 +103,13 @@ set(ENGINE_SOURCES
   src/scripting/ScriptRuntime.cpp
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
-  src/ui/SceneEditor.cpp
+  src/ui/editor/SceneEditor.cpp
+  src/ui/editor/SceneEditorAssets.cpp
+  src/ui/editor/SceneEditorDetails.cpp
+  src/ui/editor/SceneEditorInternal.h
+  src/ui/editor/SceneEditorOutliner.cpp
+  src/ui/editor/SceneEditorPanels.cpp
+  src/ui/editor/SceneEditorViewport.cpp
   src/ui/PrefabInspector.cpp
   src/ui/ScriptConsole.cpp
   src/ui/ScriptInspector.cpp
