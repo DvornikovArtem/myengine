@@ -168,6 +168,16 @@ namespace myengine::ui
     // Call right after an item: text with an optional shortcut (right, dim) and a second dim detail line
     void Tooltip(const char* text, const char* shortcut = nullptr, const char* detail = nullptr);
 
+    // ---- menus (D2) ----
+    // Menu entry with an icon column (dim), a check column when `showCheck`, and a shortcut at the right.
+    // Returns true when clicked. `width` is the content width of the menu (all entries of one menu use the same).
+    bool MenuItemIcon(const char* icon, const char* label, const char* shortcut = nullptr, bool checked = false,
+                      bool enabled = true, bool showCheck = false, float width = 248.0f);
+    // Small upper-case dim section title inside a menu
+    void MenuSection(const char* title);
+    // Popup with the editor menu look (4 px padding, light border); use like BeginPopup / EndPopup
+    bool BeginMenuPopup(const char* id);
+
     // ---- developer ----
     // Help > Developer > Widgets gallery: every helper in every state (acceptance tool, off by default)
     void DrawWidgetsGallery(bool* open);

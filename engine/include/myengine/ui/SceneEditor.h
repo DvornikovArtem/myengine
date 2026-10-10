@@ -111,7 +111,8 @@ namespace myengine::ui
         void BuildViewportPanel(const SceneEditorWindowContext& windowContext);
         void BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext);
         void BuildAssetBrowserPanel(const SceneEditorWindowContext& windowContext);
-        void DrawProjectMenuItems(bool editMode); // inside the File menu
+        void DrawFileMenu(bool editMode); // the File menu entries (maps, project, quit)
+        void OpenMapDialog();
         void BuildProjectDialogs(); // Project Browser and the map dialogs
         void RequestOpenProject(const std::string& projectFile);
         void RequestOpenScene(const std::string& scenePath);
@@ -162,6 +163,7 @@ namespace myengine::ui
         bool gizmoWasUsing_ = false;
         bool initialized_ = false;
         bool resetLayoutRequested_ = false;
+        int layoutFocusFrames_ = 0; // frames until a fresh default layout gets its active tabs
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
     };
 }

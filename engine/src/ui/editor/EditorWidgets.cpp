@@ -1050,6 +1050,76 @@ namespace myengine::ui
         ImGui::PopStyleVar(3);
     }
 
+    // ---- menus (D2) ----
+
+    bool MenuItemIcon(const char* icon, const char* label, const char* shortcut, const bool checked, const bool enabled,
+                      const bool showCheck, const float width)
+    {
+        const float height = 26.0f;
+        const std::string id = std::string("##mi_") + label;
+        PushFontRole(FontRole::Body);
+        ImGui::PushStyleColor(ImGuiCol_Text, Vec4(enabled ? style::kText : style::kTextDisabled));
+        const bool clicked = ImGui::Selectable(id.c_str(), false, enabled ? 0 : ImGuiSelectableFlags_Disabled, ImVec2(width, height));
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::PopStyleColor();
+
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float centerY = (min.y + max.y) * 0.5f;
+        float x = min.x + 10.0f;
+        if (showCheck)
+        {
+            if (checked)
+            {
+                DrawIcon(drawList, IconSize::Row14, ICON_CHECK, ImVec2(x + 7.0f, centerY), enabled ? style::kText : style::kTextDisabled);
+            }
+            x += 22.0f;
+        }
+        if (icon != nullptr && icon[0] != '\0')
+        {
+            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(x + 7.0f, centerY), enabled ? style::kTextDim : style::kTextDisabled);
+        }
+        x += 24.0f;
+
+        float sizePx = 0.0f;
+        ImFont* font = RoleFont(FontRole::Body, sizePx);
+        const ImU32 textColor = !enabled ? style::kTextDisabled : (hovered ? style::kTextStrong : style::kText);
+        drawList->AddText(font, sizePx, ImVec2(x, std::floor(centerY - sizePx * 0.5f - 0.5f)), textColor, label);
+        if (shortcut != nullptr && shortcut[0] != '\0')
+        {
+            float smallPx = 0.0f;
+            ImFont* small = RoleFont(FontRole::Secondary, smallPx);
+            const float shortcutWidth = TextWidth(FontRole::Secondary, shortcut);
+            drawList->AddText(small, smallPx, ImVec2(max.x - 12.0f - shortcutWidth, std::floor(centerY - smallPx * 0.5f - 0.5f)),
+                              enabled ? style::kTextDim : style::kTextDisabled, shortcut);
+        }
+        PopFontRole();
+        return clicked && enabled;
+    }
+
+    void MenuSection(const char* title)
+    {
+        PushFontRole(FontRole::Tiny);
+        ImGui::Dummy(ImVec2(0.0f, 2.0f));
+        const ImVec2 position = ImGui::GetCursorScreenPos();
+        float sizePx = 0.0f;
+        ImFont* font = RoleFont(FontRole::Tiny, sizePx);
+        ImGui::GetWindowDrawList()->AddText(font, sizePx, ImVec2(position.x + 10.0f, position.y), style::kTextDim, title);
+        ImGui::Dummy(ImVec2(0.0f, sizePx + 4.0f));
+        PopFontRole();
+    }
+
+    bool BeginMenuPopup(const char* id)
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f, 4.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, style::kRounding);
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
+        const bool open = ImGui::BeginPopup(id);
+        ImGui::PopStyleVar(3);
+        return open;
+    }
+
     // ---- developer: widgets gallery ----
 
     void DrawWidgetsGallery(bool* open)
