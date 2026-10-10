@@ -45,6 +45,7 @@ namespace myengine::scene
 
 namespace myengine::ui
 {
+    class ContentBrowser;
     class AssistantPanel;
     class PrefabInspector;
 
@@ -57,6 +58,7 @@ namespace myengine::ui
         std::function<void()> requestQuit;
         std::function<bool()> saveScene;
         std::function<bool()> loadScene;
+        std::function<bool(const std::string& scenePath)> openScene; // scene file by asset key ("assets/scenes/x.json"); it becomes the one Save writes
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
         std::function<void()> reloadScripts; // hot reload of every script, same as F5
@@ -98,6 +100,9 @@ namespace myengine::ui
         void BuildViewportPanel(const SceneEditorWindowContext& windowContext);
         void BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext);
         void BuildAssetBrowserPanel(const SceneEditorWindowContext& windowContext);
+        void RequestOpenScene(const std::string& scenePath);
+        void OpenSceneNow(const std::string& scenePath);
+        void DrawOpenScenePrompt();
         void BuildPrefabsPanel(const SceneEditorWindowContext& windowContext);
         void BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext);
         void BuildAssistantPanel(const SceneEditorWindowContext& windowContext);
@@ -129,6 +134,10 @@ namespace myengine::ui
         std::unique_ptr<editor::TransformGizmo> gizmo_;
         std::unique_ptr<PrefabInspector> prefabInspector_;
         std::unique_ptr<ScriptConsole> scriptConsole_;
+        std::unique_ptr<ContentBrowser> contentBrowser_;
+        std::string pendingOpenScenePath_; // waits for the answer of the unsaved changes prompt
+        std::string pinnedMaterialPath_; // a material opened from the Content Browser, shown instead of the selected entity's one
+        ecs::EntityId pinnedMaterialEntity_ = ecs::kInvalidEntity; // selection when it was pinned; another selection unpins
         std::unique_ptr<AssistantPanel> assistantPanel_;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;

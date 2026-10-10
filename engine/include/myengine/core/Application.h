@@ -60,6 +60,7 @@ namespace myengine::core
         void SetStateLabel(const std::string& label);
         bool SaveSceneToDisk();
         bool LoadSceneFromDisk();
+        bool OpenSceneFromDisk(const std::string& scenePath);
         std::string CaptureSceneSnapshot() const;
         bool RestoreSceneSnapshot(std::string_view snapshotJson);
 

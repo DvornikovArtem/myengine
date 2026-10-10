@@ -98,6 +98,16 @@ set_property(TARGET myengine_transform_gizmo_tests PROPERTY FOLDER "Tests")
 add_test(NAME transform_gizmo COMMAND myengine_transform_gizmo_tests)
 set_tests_properties(transform_gizmo PROPERTIES TIMEOUT 30)
 
+add_executable(myengine_content_browser_tests
+  ui/ContentBrowserTests.cpp)
+
+target_link_libraries(myengine_content_browser_tests PRIVATE myengine_engine)
+target_include_directories(myengine_content_browser_tests SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_content_browser_tests)
+set_property(TARGET myengine_content_browser_tests PROPERTY FOLDER "Tests")
+add_test(NAME content_browser COMMAND myengine_content_browser_tests)
+set_tests_properties(content_browser PROPERTIES TIMEOUT 30)
+
 add_executable(myengine_script_console_tests
   scripting/ScriptConsoleTests.cpp)
 
