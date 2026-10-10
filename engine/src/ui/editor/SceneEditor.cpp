@@ -1,5 +1,7 @@
 #include "SceneEditorInternal.h"
 
+#include <myengine/assistant/AssistantTools.h>
+
 namespace myengine::ui
 {
     using namespace detail;
@@ -20,7 +22,7 @@ namespace myengine::ui
             // Same lookup as for every asset path: <project>/assets, else the copy next to the executable
             contentBrowser_->SetRoot(services_.resourceManager->ResolvePath("assets"));
         }
-        assistantPanel_ = std::make_unique<AssistantPanel>(AssistantPanelConfig{std::filesystem::u8path(MYENGINE_SOURCE_DIR), services_.logger});
+        InitializeAssistant();
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -41,6 +43,7 @@ namespace myengine::ui
         pendingOpenScenePath_.clear();
         pinnedMaterialPath_.clear();
         assistantPanel_.reset(); // ends a running claude process
+        assistantTools_.reset();
         history_.reset();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();

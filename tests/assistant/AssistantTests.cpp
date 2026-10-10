@@ -314,6 +314,32 @@ namespace
         }
         Check(bashDenied, "Bash is not denied");
 
+        // With the engine bridge: prompts go to the editor, only read-only tools are pre-allowed, no file rule is
+        auto bridged = fixture.Config();
+        bridged.bridge.executable = fixture.fake;
+        bridged.bridge.pipeName = L"\\\\.\\pipe\\myengine-test";
+        bridged.bridge.token = "abc123";
+        bridged.bridge.allowedTools = {"mcp__myengine__get_mode", "mcp__myengine__list_entities"};
+        bridged.bridge.approveTool = "mcp__myengine__approve";
+        const auto bridgedLine = assistant::ClaudeCliBackend::BuildCommandLine(fixture.fake, bridged, "s.json", "sess-2", "mcp.json");
+        const auto bridgedHas = [&](const wchar_t* part) { return bridgedLine.find(part) != std::wstring::npos; };
+        Check(bridgedHas(L"--permission-mode default") && bridgedHas(L"--mcp-config \"mcp.json\"") && bridgedHas(L"--strict-mcp-config") &&
+            bridgedHas(L"--permission-prompt-tool mcp__myengine__approve") && !bridgedHas(L"dontAsk"), "The bridge flags are wrong");
+        Check(bridgedHas(L"--resume sess-2") && bridgedHas(L"--tools \"Read,Glob,Grep,Edit,Write\""), "The bridge command line lost the basics");
+        const auto bridgedSettings = json::parse(assistant::ClaudeCliBackend::BuildSettingsJson(bridged));
+        Check(bridgedSettings.at("permissions").at("allow") == json::array({"mcp__myengine__get_mode", "mcp__myengine__list_entities"}),
+            "With the bridge only the read-only engine tools may be pre-allowed (file edits must ask)");
+        bool scenesDenied = false;
+        for (const auto& rule : bridgedSettings.at("permissions").at("deny"))
+        {
+            scenesDenied = scenesDenied || rule == "Edit(./assets/scenes/**)";
+        }
+        Check(scenesDenied, "Scene files are not denied");
+        const auto mcp = json::parse(assistant::ClaudeCliBackend::BuildMcpConfigJson(bridged.bridge));
+        const auto& server = mcp.at("mcpServers").at("myengine");
+        Check(server.at("args")[0] == "--pipe" && server.at("args")[1] == "\\\\.\\pipe\\myengine-test" &&
+            server.at("env").at("MYENGINE_BRIDGE_TOKEN") == "abc123" && server.at("command") == fixture.fake.u8string(), "The MCP config is wrong");
+
         const auto message = json::parse(assistant::ClaudeCliBackend::BuildUserMessageLine("привет \"мир\"\nвторая строка"));
         Check(message.at("type") == "user" && message.at("message").at("content")[0].at("text") == "привет \"мир\"\nвторая строка",
             "The stdin message does not round-trip");

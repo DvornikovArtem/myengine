@@ -10,11 +10,11 @@
 
 | Чего нет | Где будет |
 | --- | --- |
-| Инструменты движка (запустить Play, прочитать сцену из памяти, создать сущность), мост MCP | AI2 |
-| Подтверждения «Применить / Отклонить» до выполнения правки | AI2 |
+| Инструменты движка (запустить Play, прочитать сцену из памяти, создать сущность), мост MCP | AI2: [ai2-engine-tools.md](ai2-engine-tools.md) |
+| Подтверждения «Применить / Отклонить» до выполнения правки | AI2: [ai2-engine-tools.md](ai2-engine-tools.md) |
 | Бэкенд по API-ключу (без установленного CLI и без подписки) | AI3 |
 
-Сейчас правка уже записана на диск к моменту, когда она показана в панели; откат — только через git.
+В AI1 правка уже записана на диск к моменту, когда она показана в панели; откат — только через git. Это поведение режима без моста `myengine_mcp.exe`; с мостом (AI2) то же правило карточек действует и для файлов.
 
 ## Что сделано
 
@@ -25,7 +25,7 @@
 | `ClaudeCliBackend` | [ClaudeCliBackend.h](../../engine/include/myengine/assistant/ClaudeCliBackend.h), [ClaudeCliBackend.cpp](../../engine/src/assistant/ClaudeCliBackend.cpp) | Поиск `claude`, `CreateProcess` и пайпы, Job Object, командная строка, временный settings-файл |
 | `ClaudeStreamParser` | [ClaudeStreamParser.h](../../engine/include/myengine/assistant/ClaudeStreamParser.h), [ClaudeStreamParser.cpp](../../engine/src/assistant/ClaudeStreamParser.cpp) | Разбор JSON-строк CLI в `AssistantEvent` |
 | `AssistantPanel` | [AssistantPanel.h](../../engine/include/myengine/ui/AssistantPanel.h), [AssistantPanel.cpp](../../engine/src/ui/AssistantPanel.cpp) | ImGui-панель: ввод, лента, Stop, New chat, поле пути к CLI |
-| Подключение к редактору | [SceneEditor.cpp](../../engine/src/ui/SceneEditor.cpp), [EditorState.h](../../engine/include/myengine/editor/EditorState.h) | Пункт View → Assistant, флаг `showAssistant`, докинг внизу, `Update()` каждый кадр |
+| Подключение к редактору | [SceneEditor.cpp](../../engine/src/ui/editor/SceneEditor.cpp), [EditorState.h](../../engine/include/myengine/editor/EditorState.h) | Пункт View → Assistant, флаг `showAssistant`, докинг внизу, `Update()` каждый кадр |
 | Системный промпт | [system_prompt.md](../../assets/assistant/system_prompt.md) | Краткая карта репозитория, API `myengine`, формат prefab, жёсткие правила |
 | Тест `assistant` | [AssistantTests.cpp](../../tests/assistant/AssistantTests.cpp), [FakeClaude.cpp](../../tests/assistant/FakeClaude.cpp) | Автопроверка без настоящего CLI |
 | Цель `myengine_assistant_live` | [AssistantLive.cpp](../../tests/assistant/AssistantLive.cpp) | Ручной прогон одной реплики на настоящем CLI (в CTest не входит) |
@@ -118,6 +118,7 @@ sequenceDiagram
 | Реплика пользователя | Заголовок `You` и текст |
 | Ответ | Текст, растёт по мере прихода дельт |
 | Вызов инструмента | `[...]` в работе, `[done]`, `[failed]` + имя инструмента + краткие аргументы или путь. Если есть diff — строка раскрывается, добавленное зелёное, удалённое красное. Текст ошибки инструмента показывается под строкой |
+| Карточка подтверждения (только с мостом, AI2) | Название действия, `Details` (diff или JSON), кнопки **Apply** / **Reject**; подробнее в [ai2-engine-tools.md](ai2-engine-tools.md#что-видно-в-панели) |
 | Конец реплики | Серая строка `<время> s \| $<стоимость> \| N in / M out tokens \| K turn(s)`, разделитель |
 | Список файлов | `Changed files (hot reload picks them up):` и маркированный список путей, без повторов |
 | Ошибка | Красный текст: ошибка результата (`error_max_turns` и т. п.), сбой запуска, недоступный CLI |
@@ -125,6 +126,8 @@ sequenceDiagram
 Ввод: Enter отправляет, Ctrl+Enter — новая строка. Пока идёт ответ, **Send** отключена. Лента прокручивается вниз сама, если она уже была внизу.
 
 ## Ограничения безопасности
+
+> Ниже описан набор AI1 (режим без моста `myengine_mcp.exe`): `--permission-mode dontAsk` и правила `Edit` в settings-файле. С мостом (AI2) режим, `--disallowedTools` и settings-файл другие, а правки файлов подтверждаются карточкой: отличия в [ai2-engine-tools.md](ai2-engine-tools.md#флаги-cli-с-мостом). Режим AI1 остаётся запасным, если `myengine_mcp.exe` не найден рядом с `myengine.exe`.
 
 CLI запускается с таким набором флагов (`ClaudeCliBackend::BuildCommandLine`):
 
@@ -248,7 +251,7 @@ ctest --test-dir build -C Debug -R assistant --output-on-failure
 | Этап | Что проверяет |
 | --- | --- |
 | `parser` | `init` → `SessionStarted`; дельты текста не дублируются итоговым сообщением; мусорные и оборванные строки пропускаются; субагент не протекает; путь внутри корня показан относительным (регистр диска не важен), вне корня остаётся полным; diff `Edit`, предпросмотр `Write`, сводка `Grep`; результат инструмента урезан до трёх строк; успешная правка сообщает файл, неудачная нет; `result` даёт стоимость, время, число шагов, токены (1110 / 40); `error_max_turns` становится ошибкой |
-| `command line and settings` | Флаги `-p`, stream-json, `--verbose`, `--include-partial-messages`, `--permission-mode dontAsk`, `--tools "Read,Glob,Grep,Edit,Write"`, `--disallowedTools "mcp__*"`, `--max-turns 7`, `--max-budget-usd 1.50`, `--resume`, `--settings`; отсутствующий файл промпта не передаётся; враждебный `session_id` (`x" --dangerously-skip-permissions`) не попадает в строку; правила `Edit(./assets/scripts/**)`, `Edit(./assets/prefabs/**)` и deny для `Bash`; сообщение пользователя в stdin переживает кавычки, перевод строки и кириллицу |
+| `command line and settings` | Флаги `-p`, stream-json, `--verbose`, `--include-partial-messages`, `--permission-mode dontAsk`, `--tools "Read,Glob,Grep,Edit,Write"`, `--disallowedTools "mcp__*"`, `--max-turns 7`, `--max-budget-usd 1.50`, `--resume`, `--settings`; отсутствующий файл промпта не передаётся; враждебный `session_id` (`x" --dangerously-skip-permissions`) не попадает в строку; правила `Edit(./assets/scripts/**)`, `Edit(./assets/prefabs/**)` и deny для `Bash`; сообщение пользователя в stdin переживает кавычки, перевод строки и кириллицу. Добавлено в AI2: с мостом в командной строке `--permission-mode default`, `--mcp-config`, `--strict-mcp-config`, `--permission-prompt-tool mcp__myengine__approve`, без `dontAsk`; settings содержит `allow` только для чтений движка и `deny` для `Edit(./assets/scenes/**)`; конфиг MCP несёт имя пайпа и токен |
 | `CLI not found` | Несуществующий путь даёт понятное сообщение, `Send` отказывает, процесс не стартует, отклонённое сообщение не попадает в ленту |
 | `full turn and resume` | Реплика через заглушку: поток текста без дублей, `session_id` сохранён, вызов `Edit` помечен выполненным и с diff, список изменённых файлов, итоговая строка и накопление стоимости; вторая отправка во время ответа отклоняется; вторая реплика идёт с `--resume fake-session-1`; **New chat** сбрасывает ленту, сессию и стоимость |
 | `cancel` | Пока процесс молчит, `Poll` не блокируется (худший вызов < 50 мс за 50 вызовов); `Cancel` быстрее 2 с, процесс заглушки действительно завершён, после `Cancel` событий нет; через сервис: Stop оставляет `Stopped.`, а следующая реплика продолжает ту же сессию |
@@ -266,8 +269,8 @@ ctest --test-dir build -C Debug -R assistant --output-on-failure
 - **Нет `--bare`, значит CLI читает окружение.** Подхватываются `CLAUDE.md` проекта (поэтому системный промпт просит игнорировать описание команды агентов) и, по документации Claude Code, пользовательские и проектные настройки. Их правила `allow` могут расширить права сверх файла `--settings`. На живом CLI это отдельно не проверялось (жёсткая блокировка записи вне двух папок проверена, но при настройках пользователя по умолчанию). Коннекторы аккаунта (MCP) отключены флагом `--disallowedTools "mcp__*"`.
 - **Время кадра.** В Debug самый долгий разбор одного кадра (`Poll`) в живых прогонах — около 7–12 мс при больших строках результата инструментов. Для сравнения, кадр при 60 FPS длится 16.7 мс. FPS в редакторе при ответе отдельно не мерили (Statistics не снимали). Критерий «FPS не падает заметно» остаётся на ручную проверку.
 - **Задержка старта.** Новый процесс на каждую реплику: CLI запускается и поднимает сессию заново через `--resume`, поэтому первый текст приходит не мгновенно. Задержку старта отдельно не мерили; для ориентира в живых прогонах весь короткий ответ с одной правкой занял 9.7 с.
-- **Правки сразу на диске.** Нет кнопок «Применить / Отклонить», Ctrl+Z редактора на файлы не действует; откат — git. Править ассистент может только файлы в `assets/scripts` и `assets/prefabs` рабочей копии (корень берётся из `MYENGINE_SOURCE_DIR`).
-- **Диалог без инструментов движка.** Ассистент не видит сцену в памяти, не запускает Play и сборку, не знает, какая сущность выбрана; изменение prefab не влияет на уже созданные объекты; сцену он файлами не правит и может лишь подсказать, что поменять в Inspector.
+- **Правки сразу на диске.** Нет кнопок «Применить / Отклонить», Ctrl+Z редактора на файлы не действует; откат — git. Править ассистент может только файлы в `assets/scripts` и `assets/prefabs` рабочей копии (корень берётся из `MYENGINE_SOURCE_DIR`). *В AI2 при работающем мосте правка файла подтверждается карточкой до записи; Ctrl+Z на файлы по-прежнему не действует.*
+- **Диалог без инструментов движка.** Ассистент не видит сцену в памяти, не запускает Play и сборку, не знает, какая сущность выбрана; изменение prefab не влияет на уже созданные объекты; сцену он файлами не правит и может лишь подсказать, что поменять в Inspector. *В AI2 при работающем мосте он читает сцену, меняет её и запускает Play инструментами движка: [ai2-engine-tools.md](ai2-engine-tools.md). Сборку по-прежнему не запускает.*
 - **Лимиты.** Лента хранит 500 сообщений (старые вытесняются), текст одного ответа растёт до 256 КиБ, панель показывает до 64 КиБ одного сообщения; запрос — до 128 КиБ; одна JSON-строка CLI — до 16 МиБ. Стоимость реплики ограничена `--max-budget-usd 2.00`, число шагов — `--max-turns 40`; из панели они не настраиваются.
 - **Стоимость в панели** — значение `total_cost_usd` из `result`. Что оно означает при работе по подписке, уточнить.
 - **Только Windows.** `ClaudeCliBackend` использует Win32 (`CreateProcess`, Job Object, `PeekNamedPipe`).

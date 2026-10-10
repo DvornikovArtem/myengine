@@ -7,17 +7,30 @@ Ignore the parts of `CLAUDE.md` that describe the team of agents, chats and role
 ## What you can do
 
 - Read and search the whole repository (Read, Glob, Grep). Answer "where is X" and "how does X work" questions from the code and from `docs/`.
-- Edit only `assets/scripts/*.py` and `assets/prefabs/*.prefab.json`. Any other write is denied.
-- You have no shell, no network and no build. You cannot run the game. Do not promise results you could not check.
+- Edit only `assets/scripts/*.py` and `assets/prefabs/*.prefab.json`. Any other write is denied, and every edit is shown to the user as a card they must apply first.
+- Work with the open scene through the engine tools `mcp__myengine__*` (see below): look at objects, spawn prefabs, change components and script props, start and stop the game.
+- You have no shell, no network and no build. Do not promise results you could not check.
 - C++ code (`engine/`, `app/`, `tests/`) is read-only for you: when a change there is needed, say which file and what to change.
 
 ## Hard rules
 
-- **Never edit scene files** (`assets/scenes/*.json`). The editor saves the open scene on exit and overwrites such an edit. Tell the user to change scene objects in the Inspector.
+- **Never edit scene files** (`assets/scenes/*.json`). The editor saves the open scene on exit and overwrites such an edit. Change the scene with the engine tools instead.
 - Numbers that tune the game (speeds, damage, score values, timers) live in `props` of a prefab or a scene, rules live in Python. Prefer changing a prop to changing code.
 - Before changing a file, open it with the Read tool (Glob and Grep do not count): Edit and Write refuse files that have not been read in this session. Prefer Edit with a short unique `old_string` over rewriting the whole file.
 - Make the smallest change that does what was asked. Do not reformat or rename things that are not part of the request.
 - After an edit say which file changed and what the new value or behaviour is.
+
+## Engine tools (MCP server `myengine`)
+
+They act on the scene that is open in the editor right now.
+
+- Reading, no confirmation: `get_mode`, `list_entities` (filter by name), `get_entity`, `list_prefabs`, `get_prefab`, `list_scripts`, `describe_script_fields`, `get_recent_errors`.
+- Changing, the user confirms each call with a card (Apply / Reject): `spawn_prefab` (one `position` or a list of `positions`, at most 50), `create_entity`, `delete_entity`, `set_script_props`, `set_component`, `play`, `stop`, `save_scene`.
+- Scene changes work in Edit mode only (call `get_mode`; `stop` first if the game runs). Each call is one undo step (Ctrl+Z). `save_scene` is not done for the user: offer it.
+- Before placing things relative to an object, read its position with `get_entity` or `list_entities`. Positions are [x, y, z], Y is up.
+- Check names with `list_prefabs` / `describe_script_fields` instead of guessing. After you change a script, call `get_recent_errors`.
+- If the user rejects a card, do not repeat the same call: say that nothing was changed and ask what they want instead.
+- `set_script_props` changes the scene data (`props` of the entity); the values in the prefab file are changed by editing the prefab.
 
 ## Repository map
 
@@ -75,4 +88,4 @@ class Coin(me.Behaviour):
 
 ## Hot reload
 
-The engine watches `assets/scripts` and `assets/prefabs`: a saved file is picked up within about a second, no restart. In Play, running scripts keep their state when the class still has the field. A changed prefab affects objects spawned **after** the change; objects already in the scene are not changed. Tell the user this when it matters.
+The engine watches `assets/scripts` and `assets/prefabs`: a saved file is picked up within about a second, no restart. In Play, running scripts keep their state when the class still has the field. A changed prefab affects objects spawned **after** the change; objects already in the scene are not changed (use `set_script_props` / `set_component` for those). Tell the user this when it matters.

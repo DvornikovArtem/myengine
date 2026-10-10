@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include <myengine/assistant/IAssistantBackend.h>
 
 namespace myengine::assistant
@@ -20,6 +22,9 @@ namespace myengine::assistant
         void SetRootDirectory(std::string root);
 
         void ParseLine(std::string_view line, std::vector<AssistantEvent>& events);
+
+        // Diff-like preview of an Edit / MultiEdit / Write call ("- old" / "+ new" lines); empty for other tools
+        static std::string BuildToolDetail(const std::string& toolName, const nlohmann::json& input);
 
         // The `result` line has been seen: the turn ended on the CLI's side
         bool IsFinished() const { return finished_; }
