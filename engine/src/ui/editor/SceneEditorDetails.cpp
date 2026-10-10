@@ -1,8 +1,73 @@
+#include <cstdio>
+
 #include "SceneEditorInternal.h"
+#include "SceneEditorEntityKind.h"
 
 namespace myengine::ui
 {
     using namespace detail;
+
+    namespace
+    {
+        // "crate.obj" -> "crate", "default.material.json" -> "default": the picker shows the asset name
+        std::string AssetName(const std::string& path)
+        {
+            if (path.empty())
+            {
+                return "None";
+            }
+
+            std::filesystem::path name = std::filesystem::path(path).filename();
+            while (name.has_extension())
+            {
+                name = name.stem();
+            }
+            return name.string();
+        }
+
+        // The icon shown in the list of an asset picker, with a stable ID after ## (two files may share a name)
+        std::string PickerItem(const char* icon, const std::string& label, const std::string& key)
+        {
+            return std::string(icon) + "  " + label + "##" + key;
+        }
+
+        // Dim 13 px line at the indent of a nested group
+        void DrawGroupCaption(const char* icon, const ImU32 iconColor, const std::string& text, const float indent)
+        {
+            const ImVec2 min = ImGui::GetCursorScreenPos();
+            const float available = ImGui::GetContentRegionAvail().x;
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const float rowHeight = 24.0f;
+            const float centerY = min.y + rowHeight * 0.5f;
+            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(min.x + indent + 7.0f, centerY), iconColor);
+
+            PushFontRole(FontRole::Secondary);
+            ImFont* font = ImGui::GetFont();
+            const float size = ImGui::GetFontSize();
+            PopFontRole();
+            drawList->AddText(font, size, ImVec2(min.x + indent + 22.0f, std::floor(centerY - size * 0.5f)), style::kTextDim, text.c_str());
+            ImGui::Dummy(ImVec2(available, rowHeight));
+        }
+
+        // A dim explanatory line with an info icon, wrapped at the panel width
+        void DrawInfoLine(const char* text, const float indent)
+        {
+            const ImVec2 min = ImGui::GetCursorScreenPos();
+            const float available = ImGui::GetContentRegionAvail().x;
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            PushFontRole(FontRole::Secondary);
+            ImFont* font = ImGui::GetFont();
+            const float size = ImGui::GetFontSize();
+            const float wrapWidth = std::max(available - indent - 24.0f, 40.0f);
+            const ImVec2 textSize = ImGui::CalcTextSize(text, nullptr, false, wrapWidth);
+            PopFontRole();
+
+            DrawIcon(drawList, IconSize::Row14, ICON_INFO, ImVec2(min.x + indent + 7.0f, min.y + 9.0f), style::kTextDim);
+            drawList->AddText(font, size, ImVec2(min.x + indent + 22.0f, min.y + 2.0f), style::kTextDim, text, nullptr, wrapWidth);
+            ImGui::Dummy(ImVec2(available, std::max(textSize.y + 6.0f, 22.0f)));
+        }
+    }
 
     void SceneEditor::BuildInspectorPanel(const SceneEditorWindowContext& windowContext)
     {
@@ -20,309 +85,485 @@ namespace myengine::ui
             const ecs::EntityId entity = editorState.selectedEntity;
             if (entity == ecs::kInvalidEntity || !world.IsAlive(entity))
             {
-                ImGui::TextDisabled("Select an entity from the hierarchy.");
+                EmptyState(
+                    ICON_SLIDERS_HORIZONTAL,
+                    "Nothing selected",
+                    "Select an entity in the Outliner or click it in the Viewport.");
                 ImGui::End();
                 return;
             }
 
-            ImGui::Text("Entity %u", entity);
-            ImGui::Separator();
-
             const bool editEnabled = editorState.mode == editor::RuntimeMode::Edit;
+            const EntityKindInfo kind = ClassifyEntity(world, entity);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            // ---- Header: a type icon, the name field and "Entity N · Type"
+            {
+                const ImVec2 start = ImGui::GetCursorScreenPos();
+                const float squareSize = 28.0f;
+                drawList->AddRectFilled(start, ImVec2(start.x + squareSize, start.y + squareSize), style::kRecessed, style::kRounding);
+                DrawIcon(
+                    drawList,
+                    IconSize::Row14,
+                    kind.icon,
+                    ImVec2(start.x + squareSize * 0.5f, start.y + squareSize * 0.5f),
+                    kind.color);
+
+                ImGui::SetCursorScreenPos(ImVec2(start.x + squareSize + 8.0f, start.y + (squareSize - style::kFrameHeight) * 0.5f));
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (auto* tag = world.TryGet<ecs::components::TagComponent>(entity); tag != nullptr)
+                {
+                    ImGui::BeginDisabled(!editEnabled);
+                    ImGui::InputText("##entity_name", &tag->name);
+                    FocusOutline();
+                    RecordSceneMutationFromItem("Rename Entity");
+                    ImGui::EndDisabled();
+                }
+                else
+                {
+                    ImGui::BeginDisabled();
+                    std::string placeholder = "Entity " + std::to_string(entity);
+                    ImGui::InputText("##entity_name", &placeholder);
+                    ImGui::EndDisabled();
+                }
+
+                const std::string subtitle = "Entity " + std::to_string(entity) + " \xC2\xB7 " + kind.name;
+                PushFontRole(FontRole::Secondary);
+                ImFont* font = ImGui::GetFont();
+                const float size = ImGui::GetFontSize();
+                PopFontRole();
+                drawList->AddText(
+                    font,
+                    size,
+                    ImVec2(start.x + squareSize + 8.0f + 10.0f, start.y + squareSize + 6.0f),
+                    style::kTextDim,
+                    subtitle.c_str());
+
+                ImGui::SetCursorScreenPos(start);
+                ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, squareSize + 6.0f + size + 8.0f));
+            }
+
             if (!editEnabled)
             {
-                ImGui::BeginDisabled();
+                Banner(BannerKind::Play, "Playing - live values. Edit them after Stop.");
+                ImGui::Dummy(ImVec2(0.0f, 6.0f));
             }
 
-            if (auto* tag = world.TryGet<ecs::components::TagComponent>(entity); tag != nullptr)
-            {
-                if (ImGui::CollapsingHeader("Tag", ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    ImGui::InputText("Name", &tag->name);
-                    RecordSceneMutationFromItem("Rename Entity");
-                }
-            }
-
+            // ---- Transform
             if (auto* transform = world.TryGet<ecs::components::TransformComponent>(entity); transform != nullptr)
             {
-                if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginCategory("Transform"))
                 {
-                    auto position = ToFloat3(transform->position);
-                    if (ImGui::DragFloat3("Position", position.data(), 0.05f))
+                    ImGui::BeginDisabled(!editEnabled);
+                    if (BeginPropertyGrid("##transform"))
                     {
-                        FromFloat3(position, transform->position);
-                    }
-                    RecordSceneMutationFromItem("Edit Transform Position");
+                        PropertyLabel("Position");
+                        auto position = ToFloat3(transform->position);
+                        if (DragVector3("##position", position.data(), 0.05f, "%.3f",
+                                [this](int) { RecordSceneMutationFromItem("Edit Transform Position"); }))
+                        {
+                            FromFloat3(position, transform->position);
+                        }
 
-                    auto rotation = ToFloat3(transform->rotationDeg);
-                    if (ImGui::DragFloat3("Rotation", rotation.data(), 0.5f))
-                    {
-                        FromFloat3(rotation, transform->rotationDeg);
-                    }
-                    RecordSceneMutationFromItem("Edit Transform Rotation");
+                        PropertyLabel("Rotation");
+                        auto rotation = ToFloat3(transform->rotationDeg);
+                        if (DragVector3("##rotation", rotation.data(), 0.5f, "%.3f",
+                                [this](int) { RecordSceneMutationFromItem("Edit Transform Rotation"); }))
+                        {
+                            FromFloat3(rotation, transform->rotationDeg);
+                        }
 
-                    auto scale = ToFloat3(transform->scale);
-                    if (ImGui::DragFloat3("Scale", scale.data(), 0.02f, 0.01f, 200.0f))
-                    {
-                        FromFloat3(scale, transform->scale);
+                        PropertyLabel("Scale");
+                        auto scale = ToFloat3(transform->scale);
+                        if (DragVector3("##scale", scale.data(), 0.02f, "%.3f",
+                                [this](int) { RecordSceneMutationFromItem("Edit Transform Scale"); }))
+                        {
+                            for (float& component : scale)
+                            {
+                                component = std::clamp(component, 0.01f, 200.0f);
+                            }
+                            FromFloat3(scale, transform->scale);
+                        }
+                        EndPropertyGrid();
                     }
-                    RecordSceneMutationFromItem("Edit Transform Scale");
+                    ImGui::EndDisabled();
+                    EndCategory();
                 }
             }
 
+            // ---- Mesh Renderer
             if (auto* renderer = world.TryGet<ecs::components::MeshRendererComponent>(entity); renderer != nullptr)
             {
-                if (ImGui::CollapsingHeader("MeshRenderer", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginCategory("Mesh Renderer"))
                 {
-                    const auto meshKeys = services_.resourceManager->GetKnownMeshKeys();
-                    const auto materialKeys = services_.resourceManager->GetKnownMaterialKeys();
-
-                    if (ImGui::BeginCombo("Mesh", FileNameLabel(renderer->meshPath).c_str()))
+                    ImGui::BeginDisabled(!editEnabled);
+                    if (BeginPropertyGrid("##mesh_renderer"))
                     {
-                        for (const auto& meshKey : meshKeys)
+                        PropertyLabel("Mesh");
                         {
-                            const bool selected = ResourcePathsEqual(*services_.resourceManager, meshKey, renderer->meshPath);
-                            if (ImGui::Selectable(FileNameLabel(meshKey).c_str(), selected))
+                            const auto meshKeys = services_.resourceManager->GetKnownMeshKeys();
+                            if (BeginAssetPicker("##mesh", AssetName(renderer->meshPath).c_str(), ICON_BOX, style::kTypeMesh, renderer->meshPath.c_str()))
                             {
-                                const std::string beforeMeshSnapshot = CaptureSceneSnapshot();
-                                renderer->meshPath = meshKey;
-                                RecordSceneMutationImmediate("Change Mesh", beforeMeshSnapshot);
-                            }
-                            if (selected)
-                            {
-                                ImGui::SetItemDefaultFocus();
+                                for (const auto& meshKey : meshKeys)
+                                {
+                                    const bool selected = ResourcePathsEqual(*services_.resourceManager, meshKey, renderer->meshPath);
+                                    if (ImGui::Selectable(PickerItem(ICON_BOX, AssetName(meshKey), meshKey).c_str(), selected))
+                                    {
+                                        const std::string beforeMeshSnapshot = CaptureSceneSnapshot();
+                                        renderer->meshPath = meshKey;
+                                        RecordSceneMutationImmediate("Change Mesh", beforeMeshSnapshot);
+                                    }
+                                    if (selected)
+                                    {
+                                        ImGui::SetItemDefaultFocus();
+                                    }
+                                }
+                                EndAssetPicker();
                             }
                         }
-                        ImGui::EndCombo();
-                    }
 
-                    if (ImGui::BeginCombo("Material", FileNameLabel(renderer->materialPath).c_str()))
-                    {
-                        for (const auto& materialKey : materialKeys)
+                        PropertyLabel("Material");
                         {
-                            const bool selected = ResourcePathsEqual(*services_.resourceManager, materialKey, renderer->materialPath);
-                            if (ImGui::Selectable(FileNameLabel(materialKey).c_str(), selected))
+                            const auto materialKeys = services_.resourceManager->GetKnownMaterialKeys();
+                            if (BeginAssetPicker("##material", AssetName(renderer->materialPath).c_str(), ICON_PALETTE, style::kTypeMaterial, renderer->materialPath.c_str()))
                             {
-                                const std::string beforeMaterialSnapshot = CaptureSceneSnapshot();
-                                renderer->materialPath = materialKey;
-                                RecordSceneMutationImmediate("Change Material", beforeMaterialSnapshot);
+                                for (const auto& materialKey : materialKeys)
+                                {
+                                    const bool selected = ResourcePathsEqual(*services_.resourceManager, materialKey, renderer->materialPath);
+                                    if (ImGui::Selectable(PickerItem(ICON_PALETTE, AssetName(materialKey), materialKey).c_str(), selected))
+                                    {
+                                        const std::string beforeMaterialSnapshot = CaptureSceneSnapshot();
+                                        renderer->materialPath = materialKey;
+                                        RecordSceneMutationImmediate("Change Material", beforeMaterialSnapshot);
+                                    }
+                                    if (selected)
+                                    {
+                                        ImGui::SetItemDefaultFocus();
+                                    }
+                                }
+                                EndAssetPicker();
                             }
-                            if (selected)
+
+                            // Third column: the same action as the old "Open Material Editor" button
+                            ImGui::TableSetColumnIndex(2);
+                            if (IconButton("##open_material_editor", ICON_SQUARE_PEN, "Open in Material Editor", false, true, 0, 22.0f, nullptr, IconSize::Row14))
                             {
-                                ImGui::SetItemDefaultFocus();
+                                editorState.showMaterialEditor = true;
+                                ImGui::SetWindowFocus(kMaterialEditorWindowName);
                             }
                         }
-                        ImGui::EndCombo();
+
+                        PropertyLabel("Visible");
+                        {
+                            bool visible = renderer->visible;
+                            if (Checkbox("##visible", &visible))
+                            {
+                                const std::string beforeVisibilitySnapshot = CaptureSceneSnapshot();
+                                renderer->visible = visible;
+                                RecordSceneMutationImmediate("Toggle Renderer Visibility", beforeVisibilitySnapshot);
+                            }
+                        }
+                        EndPropertyGrid();
                     }
 
                     if (auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(renderer->materialPath);
                         materialResource != nullptr)
                     {
-                        ImGui::TextDisabled("Shared material asset");
-                        ImGui::TextWrapped("%s", renderer->materialPath.c_str());
+                        DrawGroupCaption(
+                            ICON_PALETTE,
+                            style::kTypeMaterial,
+                            "Material asset \xC2\xB7 " + std::filesystem::path(renderer->materialPath).filename().string(),
+                            20.0f);
 
-                        resource::MaterialAsset beforeAsset = CloneMaterialAsset(materialResource->asset);
-                        auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
-                        if (ImGui::BeginCombo("Texture", FileNameLabel(materialResource->asset.texturePath).c_str()))
+                        if (BeginPropertyGrid("##material_asset", 32.0f))
                         {
-                            for (const auto& textureKey : textureKeys)
+                            resource::MaterialAsset beforeAsset = CloneMaterialAsset(materialResource->asset);
+                            const auto commitMaterialChange = [&](const char* label)
                             {
-                                const bool selected = ResourcePathsEqual(*services_.resourceManager, textureKey, materialResource->asset.texturePath);
-                                if (ImGui::Selectable(FileNameLabel(textureKey).c_str(), selected))
+                                if ((ImGui::IsItemDeactivatedAfterEdit() || !ImGui::IsItemActive()) &&
+                                    !MaterialEquals(beforeAsset, materialResource->asset))
                                 {
-                                    materialResource->asset.texturePath = textureKey;
-                                    services_.resourceManager->Load<resource::TextureAsset>(textureKey);
+                                    PushMaterialAssetCommand(
+                                        label,
+                                        renderer->materialPath,
+                                        beforeAsset,
+                                        CloneMaterialAsset(materialResource->asset));
+                                    beforeAsset = CloneMaterialAsset(materialResource->asset);
                                 }
-                                if (selected)
+                            };
+
+                            PropertyLabel("Texture");
+                            {
+                                auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
+                                const std::string textureLabel = materialResource->asset.texturePath.empty()
+                                    ? std::string("None")
+                                    : std::filesystem::path(materialResource->asset.texturePath).filename().string();
+                                if (BeginAssetPicker("##texture", textureLabel.c_str(), ICON_IMAGE, style::kTypeTexture, materialResource->asset.texturePath.c_str()))
                                 {
-                                    ImGui::SetItemDefaultFocus();
+                                    for (const auto& textureKey : textureKeys)
+                                    {
+                                        const bool selected = ResourcePathsEqual(*services_.resourceManager, textureKey, materialResource->asset.texturePath);
+                                        if (ImGui::Selectable(
+                                                PickerItem(ICON_IMAGE, std::filesystem::path(textureKey).filename().string(), textureKey).c_str(),
+                                                selected))
+                                        {
+                                            materialResource->asset.texturePath = textureKey;
+                                            services_.resourceManager->Load<resource::TextureAsset>(textureKey);
+                                        }
+                                        if (selected)
+                                        {
+                                            ImGui::SetItemDefaultFocus();
+                                        }
+                                    }
+                                    EndAssetPicker();
                                 }
+                                commitMaterialChange("Change Renderer Texture");
                             }
-                            ImGui::EndCombo();
-                        }
-                        if ((ImGui::IsItemDeactivatedAfterEdit() || !ImGui::IsItemActive()) &&
-                            !MaterialEquals(beforeAsset, materialResource->asset))
-                        {
-                            PushMaterialAssetCommand(
-                                "Change Renderer Texture",
-                                renderer->materialPath,
-                                beforeAsset,
-                                CloneMaterialAsset(materialResource->asset));
-                        }
 
-                        beforeAsset = CloneMaterialAsset(materialResource->asset);
-                        float tint[4]{
-                            materialResource->asset.tint.r,
-                            materialResource->asset.tint.g,
-                            materialResource->asset.tint.b,
-                            materialResource->asset.tint.a,
-                        };
-                        if (ImGui::ColorEdit4("Tint", tint))
-                        {
-                            materialResource->asset.tint = {tint[0], tint[1], tint[2], tint[3]};
-                        }
-                        if ((ImGui::IsItemDeactivatedAfterEdit() || !ImGui::IsItemActive()) &&
-                            !MaterialEquals(beforeAsset, materialResource->asset))
-                        {
-                            PushMaterialAssetCommand(
-                                "Change Renderer Tint",
-                                renderer->materialPath,
-                                beforeAsset,
-                                CloneMaterialAsset(materialResource->asset));
-                        }
+                            PropertyLabel("Tint");
+                            {
+                                float tint[4]{
+                                    materialResource->asset.tint.r,
+                                    materialResource->asset.tint.g,
+                                    materialResource->asset.tint.b,
+                                    materialResource->asset.tint.a,
+                                };
 
-                        if (ImGui::Button("Open Material Editor"))
-                        {
-                            editorState.showMaterialEditor = true;
+                                // A 40 x 24 swatch (the picker opens on click) and the four 0-255 values in one row
+                                if (ImGui::ColorButton("##tint_swatch", ImVec4(tint[0], tint[1], tint[2], tint[3]),
+                                        ImGuiColorEditFlags_AlphaPreview, ImVec2(40.0f, style::kFrameHeight)))
+                                {
+                                    ImGui::OpenPopup("##tint_picker");
+                                }
+                                if (ImGui::BeginPopup("##tint_picker"))
+                                {
+                                    if (ImGui::ColorPicker4("##tint_picker_4", tint, ImGuiColorEditFlags_AlphaBar))
+                                    {
+                                        materialResource->asset.tint = {tint[0], tint[1], tint[2], tint[3]};
+                                    }
+                                    commitMaterialChange("Change Renderer Tint");
+                                    ImGui::EndPopup();
+                                }
+
+                                ImGui::SameLine();
+                                ImGui::SetNextItemWidth(-FLT_MIN);
+                                int channels[4]{
+                                    static_cast<int>(std::lround(tint[0] * 255.0f)),
+                                    static_cast<int>(std::lround(tint[1] * 255.0f)),
+                                    static_cast<int>(std::lround(tint[2] * 255.0f)),
+                                    static_cast<int>(std::lround(tint[3] * 255.0f)),
+                                };
+                                if (ImGui::DragInt4("##tint_channels", channels, 0.5f, 0, 255))
+                                {
+                                    materialResource->asset.tint = {
+                                        static_cast<float>(std::clamp(channels[0], 0, 255)) / 255.0f,
+                                        static_cast<float>(std::clamp(channels[1], 0, 255)) / 255.0f,
+                                        static_cast<float>(std::clamp(channels[2], 0, 255)) / 255.0f,
+                                        static_cast<float>(std::clamp(channels[3], 0, 255)) / 255.0f,
+                                    };
+                                }
+                                FocusOutline();
+                                commitMaterialChange("Change Renderer Tint");
+                            }
+                            EndPropertyGrid();
                         }
+                        DrawInfoLine("Shared asset: changes apply to every entity using it.", 32.0f);
                     }
-
-                    bool visible = renderer->visible;
-                    if (ImGui::Checkbox("Visible", &visible))
-                    {
-                        const std::string beforeVisibilitySnapshot = CaptureSceneSnapshot();
-                        renderer->visible = visible;
-                        RecordSceneMutationImmediate("Toggle Renderer Visibility", beforeVisibilitySnapshot);
-                    }
-                    ImGui::TextDisabled("%s", renderer->materialPath.c_str());
+                    ImGui::EndDisabled();
+                    EndCategory();
                 }
             }
 
+            // ---- Rigidbody
             if (auto* rigidbody = world.TryGet<ecs::components::RigidbodyComponent>(entity); rigidbody != nullptr)
             {
-                if (ImGui::CollapsingHeader("Rigidbody", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginCategory("Rigidbody"))
                 {
-                    bool useGravity = rigidbody->useGravity;
-                    if (ImGui::Checkbox("Use Gravity", &useGravity))
+                    ImGui::BeginDisabled(!editEnabled);
+                    if (BeginPropertyGrid("##rigidbody"))
                     {
-                        const std::string beforeGravitySnapshot = CaptureSceneSnapshot();
-                        rigidbody->useGravity = useGravity;
-                        RecordSceneMutationImmediate("Toggle Rigidbody Gravity", beforeGravitySnapshot);
-                    }
+                        PropertyLabel("Use Gravity");
+                        bool useGravity = rigidbody->useGravity;
+                        if (Checkbox("##use_gravity", &useGravity))
+                        {
+                            const std::string beforeGravitySnapshot = CaptureSceneSnapshot();
+                            rigidbody->useGravity = useGravity;
+                            RecordSceneMutationImmediate("Toggle Rigidbody Gravity", beforeGravitySnapshot);
+                        }
 
-                    bool isKinematic = rigidbody->isKinematic;
-                    if (ImGui::Checkbox("Is Kinematic", &isKinematic))
-                    {
-                        const std::string beforeKinematicSnapshot = CaptureSceneSnapshot();
-                        rigidbody->isKinematic = isKinematic;
-                        RecordSceneMutationImmediate("Toggle Rigidbody Kinematic", beforeKinematicSnapshot);
-                    }
+                        PropertyLabel("Is Kinematic");
+                        bool isKinematic = rigidbody->isKinematic;
+                        if (Checkbox("##is_kinematic", &isKinematic))
+                        {
+                            const std::string beforeKinematicSnapshot = CaptureSceneSnapshot();
+                            rigidbody->isKinematic = isKinematic;
+                            RecordSceneMutationImmediate("Toggle Rigidbody Kinematic", beforeKinematicSnapshot);
+                        }
 
-                    auto velocity = ToFloat3(rigidbody->velocity);
-                    ImGui::BeginDisabled();
-                    ImGui::DragFloat3("Velocity", velocity.data(), 0.0f);
+                        // Read only: three numbers, no field
+                        PropertyLabel("Velocity", true);
+                        {
+                            char text[96];
+                            std::snprintf(
+                                text,
+                                sizeof(text),
+                                "%.3f   %.3f   %.3f",
+                                rigidbody->velocity.x,
+                                rigidbody->velocity.y,
+                                rigidbody->velocity.z);
+                            PushFontRole(FontRole::Secondary);
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(style::kTextDim));
+                            ImGui::TextUnformatted(text);
+                            ImGui::PopStyleColor();
+                            PopFontRole();
+                        }
+                        EndPropertyGrid();
+                    }
                     ImGui::EndDisabled();
+                    EndCategory();
                 }
             }
 
+            // ---- Collider
             if (auto* collider = world.TryGet<ecs::components::ColliderComponent>(entity); collider != nullptr)
             {
-                if (ImGui::CollapsingHeader("BoxCollider", ImGuiTreeNodeFlags_DefaultOpen))
+                const char* typeName = collider->type == ecs::components::ColliderType::Sphere ? "Sphere" : "Box";
+                if (BeginCategory("Collider", true, typeName))
                 {
-                    int type = collider->type == ecs::components::ColliderType::Sphere ? 1 : 0;
-                    if (ImGui::Combo("Type", &type, "Box\0Sphere\0"))
+                    ImGui::BeginDisabled(!editEnabled);
+                    if (BeginPropertyGrid("##collider"))
                     {
-                        const std::string beforeTypeSnapshot = CaptureSceneSnapshot();
-                        collider->type = type == 1 ? ecs::components::ColliderType::Sphere : ecs::components::ColliderType::Box;
-                        RecordSceneMutationImmediate("Change Collider Type", beforeTypeSnapshot);
-                    }
-
-                    if (collider->type == ecs::components::ColliderType::Box)
-                    {
-                        auto halfExtents = ToFloat3(collider->halfExtents);
-                        if (ImGui::DragFloat3("Half Extents", halfExtents.data(), 0.02f, 0.01f, 100.0f))
+                        PropertyLabel("Type");
+                        int type = collider->type == ecs::components::ColliderType::Sphere ? 1 : 0;
+                        if (ImGui::Combo("##type", &type, "Box\0Sphere\0"))
                         {
-                            FromFloat3(halfExtents, collider->halfExtents);
+                            const std::string beforeTypeSnapshot = CaptureSceneSnapshot();
+                            collider->type = type == 1 ? ecs::components::ColliderType::Sphere : ecs::components::ColliderType::Box;
+                            RecordSceneMutationImmediate("Change Collider Type", beforeTypeSnapshot);
                         }
-                        RecordSceneMutationFromItem("Edit Collider Extents");
-                    }
-                    else
-                    {
-                        float radius = collider->radius;
-                        if (ImGui::DragFloat("Radius", &radius, 0.02f, 0.01f, 100.0f))
+
+                        if (collider->type == ecs::components::ColliderType::Box)
                         {
-                            collider->radius = radius;
+                            PropertyLabel("Half Extents");
+                            auto halfExtents = ToFloat3(collider->halfExtents);
+                            if (DragVector3("##half_extents", halfExtents.data(), 0.02f, "%.3f",
+                                    [this](int) { RecordSceneMutationFromItem("Edit Collider Extents"); }))
+                            {
+                                for (float& component : halfExtents)
+                                {
+                                    component = std::clamp(component, 0.01f, 100.0f);
+                                }
+                                FromFloat3(halfExtents, collider->halfExtents);
+                            }
                         }
-                        RecordSceneMutationFromItem("Edit Collider Radius");
-                    }
+                        else
+                        {
+                            PropertyLabel("Radius");
+                            float radius = collider->radius;
+                            if (ImGui::DragFloat("##radius", &radius, 0.02f, 0.01f, 100.0f, "%.3f"))
+                            {
+                                collider->radius = radius;
+                            }
+                            FocusOutline();
+                            RecordSceneMutationFromItem("Edit Collider Radius");
+                        }
 
-                    auto offset = ToFloat3(collider->offset);
-                    if (ImGui::DragFloat3("Offset", offset.data(), 0.02f))
-                    {
-                        FromFloat3(offset, collider->offset);
-                    }
-                    RecordSceneMutationFromItem("Edit Collider Offset");
+                        PropertyLabel("Offset");
+                        auto offset = ToFloat3(collider->offset);
+                        if (DragVector3("##offset", offset.data(), 0.02f, "%.3f",
+                                [this](int) { RecordSceneMutationFromItem("Edit Collider Offset"); }))
+                        {
+                            FromFloat3(offset, collider->offset);
+                        }
 
-                    float friction = collider->friction;
-                    if (ImGui::DragFloat("Friction", &friction, 0.01f, 0.0f, 2.0f))
-                    {
-                        collider->friction = friction;
-                    }
-                    RecordSceneMutationFromItem("Edit Collider Friction");
+                        PropertyLabel("Friction");
+                        float friction = collider->friction;
+                        if (ImGui::DragFloat("##friction", &friction, 0.01f, 0.0f, 2.0f, "%.3f"))
+                        {
+                            collider->friction = friction;
+                        }
+                        FocusOutline();
+                        RecordSceneMutationFromItem("Edit Collider Friction");
 
-                    float bounciness = collider->bounciness;
-                    if (ImGui::DragFloat("Bounciness", &bounciness, 0.01f, 0.0f, 2.0f))
-                    {
-                        collider->bounciness = bounciness;
-                    }
-                    RecordSceneMutationFromItem("Edit Collider Bounciness");
+                        PropertyLabel("Bounciness");
+                        float bounciness = collider->bounciness;
+                        if (ImGui::DragFloat("##bounciness", &bounciness, 0.01f, 0.0f, 2.0f, "%.3f"))
+                        {
+                            collider->bounciness = bounciness;
+                        }
+                        FocusOutline();
+                        RecordSceneMutationFromItem("Edit Collider Bounciness");
 
-                    bool isTrigger = collider->isTrigger;
-                    if (ImGui::Checkbox("Trigger", &isTrigger))
-                    {
-                        const std::string beforeTriggerSnapshot = CaptureSceneSnapshot();
-                        collider->isTrigger = isTrigger;
-                        RecordSceneMutationImmediate("Toggle Collider Trigger", beforeTriggerSnapshot);
+                        PropertyLabel("Trigger");
+                        bool isTrigger = collider->isTrigger;
+                        if (Checkbox("##trigger", &isTrigger))
+                        {
+                            const std::string beforeTriggerSnapshot = CaptureSceneSnapshot();
+                            collider->isTrigger = isTrigger;
+                            RecordSceneMutationImmediate("Toggle Collider Trigger", beforeTriggerSnapshot);
+                        }
+                        EndPropertyGrid();
                     }
+                    ImGui::EndDisabled();
+                    EndCategory();
                 }
             }
 
+            // ---- Camera
             if (auto* camera = world.TryGet<ecs::components::CameraComponent>(entity); camera != nullptr)
             {
-                if (ImGui::CollapsingHeader("Camera"))
+                if (BeginCategory("Camera"))
                 {
-                    auto position = ToFloat3(camera->position);
-                    if (ImGui::DragFloat3("Camera Position", position.data(), 0.05f))
+                    ImGui::BeginDisabled(!editEnabled);
+                    if (BeginPropertyGrid("##camera"))
                     {
-                        FromFloat3(position, camera->position);
-                    }
-                    RecordSceneMutationFromItem("Edit Camera Position");
+                        PropertyLabel("Position");
+                        auto position = ToFloat3(camera->position);
+                        if (DragVector3("##camera_position", position.data(), 0.05f, "%.3f",
+                                [this](int) { RecordSceneMutationFromItem("Edit Camera Position"); }))
+                        {
+                            FromFloat3(position, camera->position);
+                        }
 
-                    auto rotation = ToFloat3(camera->rotationDeg);
-                    if (ImGui::DragFloat3("Camera Rotation", rotation.data(), 0.5f))
-                    {
-                        FromFloat3(rotation, camera->rotationDeg);
-                    }
-                    RecordSceneMutationFromItem("Edit Camera Rotation");
+                        PropertyLabel("Rotation");
+                        auto rotation = ToFloat3(camera->rotationDeg);
+                        if (DragVector3("##camera_rotation", rotation.data(), 0.5f, "%.3f",
+                                [this](int) { RecordSceneMutationFromItem("Edit Camera Rotation"); }))
+                        {
+                            FromFloat3(rotation, camera->rotationDeg);
+                        }
 
-                    float fovYDeg = camera->fovYDeg;
-                    if (ImGui::DragFloat("FOV", &fovYDeg, 0.2f, 15.0f, 160.0f))
-                    {
-                        camera->fovYDeg = fovYDeg;
-                    }
-                    RecordSceneMutationFromItem("Edit Camera FOV");
+                        PropertyLabel("FOV");
+                        float fovYDeg = camera->fovYDeg;
+                        if (ImGui::DragFloat("##fov", &fovYDeg, 0.2f, 15.0f, 160.0f, "%.1f"))
+                        {
+                            camera->fovYDeg = fovYDeg;
+                        }
+                        FocusOutline();
+                        RecordSceneMutationFromItem("Edit Camera FOV");
 
-                    bool isPrimary = camera->isPrimary;
-                    if (ImGui::Checkbox("Primary", &isPrimary))
-                    {
-                        const std::string beforePrimarySnapshot = CaptureSceneSnapshot();
-                        camera->isPrimary = isPrimary;
-                        RecordSceneMutationImmediate("Toggle Camera Primary", beforePrimarySnapshot);
+                        PropertyLabel("Primary");
+                        bool isPrimary = camera->isPrimary;
+                        if (Checkbox("##primary", &isPrimary))
+                        {
+                            const std::string beforePrimarySnapshot = CaptureSceneSnapshot();
+                            camera->isPrimary = isPrimary;
+                            RecordSceneMutationImmediate("Toggle Camera Primary", beforePrimarySnapshot);
+                        }
+                        EndPropertyGrid();
                     }
+                    ImGui::EndDisabled();
+                    EndCategory();
                 }
             }
 
-            // Script behaviours: fields declared in the script class (speed: float = 3.0).
+            // ---- Scripts: fields declared in the script class (speed: float = 3.0).
             // Edit: values are stored in the scene and used on the next Play. Play: current values, read-only
             if (auto* script = world.TryGet<ecs::components::ScriptComponent>(entity); script != nullptr)
             {
-                if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginCategory("Scripts"))
                 {
-                    if (!editEnabled)
-                    {
-                        ImGui::EndDisabled(); // the status line stays readable in Play
-                    }
-
                     ui::ScriptFieldsUndo undo;
                     undo.recordFromItem = [this](const char* label) { RecordSceneMutationFromItem(label); };
                     undo.captureBefore = [this]() { return CaptureSceneSnapshot(); };
@@ -333,25 +574,29 @@ namespace myengine::ui
                         auto& entry = script->scripts[index];
                         ImGui::PushID(static_cast<int>(index));
 
-                        if (index > 0)
+                        ui::ScriptHeaderChip chip = ui::ScriptHeaderChip::AppliedOnPlay;
+                        if (!editEnabled)
                         {
-                            ImGui::Separator();
+                            const std::string status = services_.scriptStatus ? services_.scriptStatus(entity, index) : std::string();
+                            if (status == "Faulted")
+                            {
+                                chip = ui::ScriptHeaderChip::Faulted;
+                            }
+                            else if (status == "Active")
+                            {
+                                chip = ui::ScriptHeaderChip::Active;
+                            }
+                            else
+                            {
+                                chip = ui::ScriptHeaderChip::NotCreated;
+                            }
                         }
-                        ImGui::Text("%s.%s", entry.module.c_str(), entry.className.c_str());
 
-                        const std::string status = editEnabled || !services_.scriptStatus ? std::string() : services_.scriptStatus(entity, index);
-                        ImGui::SameLine();
-                        if (editEnabled)
+                        if (ui::DrawScriptHeader(entry.module, entry.className, chip))
                         {
-                            ImGui::TextDisabled("(applied on Play)");
-                        }
-                        else if (status == "Faulted")
-                        {
-                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.3f, 1.0f), "Faulted - see the log");
-                        }
-                        else
-                        {
-                            ImGui::TextDisabled("%s", status.empty() ? "not created" : status.c_str());
+                            // "Open log": bring the log window forward (the errors are listed there)
+                            editorState.showScriptConsole = true;
+                            ImGui::SetWindowFocus(kScriptConsoleWindowName);
                         }
 
                         const auto fields = services_.describeScriptFields
@@ -359,8 +604,8 @@ namespace myengine::ui
                             : std::vector<scripting::ScriptFieldInfo>{};
                         if (fields.empty())
                         {
-                            ImGui::TextDisabled("No editable fields, or the script failed to load (see the log).");
-                            ImGui::TextDisabled("A field is a class attribute with a type: speed: float = 3.0");
+                            DrawInfoLine("No editable fields, or the script failed to load (see the log).", 20.0f);
+                            DrawInfoLine("A field is a class attribute with a type: speed: float = 3.0", 20.0f);
                         }
                         else if (editEnabled)
                         {
@@ -373,19 +618,11 @@ namespace myengine::ui
                             ui::DrawScriptFieldValues(fields, live);
                         }
 
+                        ImGui::Dummy(ImVec2(0.0f, 4.0f));
                         ImGui::PopID();
                     }
-
-                    if (!editEnabled)
-                    {
-                        ImGui::BeginDisabled();
-                    }
+                    EndCategory();
                 }
-            }
-
-            if (!editEnabled)
-            {
-                ImGui::EndDisabled();
             }
         }
         ImGui::End();
