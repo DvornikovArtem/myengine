@@ -3,6 +3,7 @@
 #include <cfloat>
 #include <cstdint>
 #include <filesystem>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -197,6 +198,75 @@ namespace myengine::ui
                 sizePixels,
                 config,
                 glyphRanges);
+        }
+
+        // ImGui sizes a font by its line height (hhea ascender - descender), the CSS size of the mockups is the em square.
+        // Returns line height / em of a TrueType file, 1 when it cannot be read.
+        float LineHeightPerEm(const std::filesystem::path& path)
+        {
+            std::ifstream file(path, std::ios::binary);
+            unsigned char header[12]{};
+            if (!file.read(reinterpret_cast<char*>(header), sizeof(header)))
+            {
+                return 1.0f;
+            }
+            const auto u16 = [](const unsigned char* p) { return static_cast<int>((p[0] << 8) | p[1]); };
+            const auto s16 = [&](const unsigned char* p) { return static_cast<int>(static_cast<short>(u16(p))); };
+            const auto u32 = [](const unsigned char* p)
+            {
+                return (static_cast<std::uint32_t>(p[0]) << 24) | (static_cast<std::uint32_t>(p[1]) << 16) |
+                    (static_cast<std::uint32_t>(p[2]) << 8) | static_cast<std::uint32_t>(p[3]);
+            };
+
+            struct Table
+            {
+                char tag[4];
+                std::uint32_t offset;
+            };
+            std::vector<Table> tables;
+            const int tableCount = std::min(u16(header + 4), 64);
+            for (int index = 0; index < tableCount; ++index)
+            {
+                unsigned char record[16]{};
+                if (!file.read(reinterpret_cast<char*>(record), sizeof(record)))
+                {
+                    return 1.0f;
+                }
+                Table table{};
+                std::memcpy(table.tag, record, 4);
+                table.offset = u32(record + 8);
+                tables.push_back(table);
+            }
+
+            int unitsPerEm = 0;
+            int ascender = 0;
+            int descender = 0;
+            for (const Table& table : tables)
+            {
+                unsigned char data[8]{};
+                if (std::memcmp(table.tag, "head", 4) == 0)
+                {
+                    file.seekg(static_cast<std::streamoff>(table.offset) + 18);
+                    if (file.read(reinterpret_cast<char*>(data), 2))
+                    {
+                        unitsPerEm = u16(data);
+                    }
+                }
+                else if (std::memcmp(table.tag, "hhea", 4) == 0)
+                {
+                    file.seekg(static_cast<std::streamoff>(table.offset) + 4);
+                    if (file.read(reinterpret_cast<char*>(data), 4))
+                    {
+                        ascender = s16(data);
+                        descender = s16(data + 2);
+                    }
+                }
+            }
+            if (unitsPerEm <= 0 || ascender - descender <= 0)
+            {
+                return 1.0f;
+            }
+            return static_cast<float>(ascender - descender) / static_cast<float>(unitsPerEm);
         }
 
         std::filesystem::path GetExecutableDirectory()
@@ -788,13 +858,16 @@ namespace myengine::ui
         const std::filesystem::path mono = fontRoot / "JetBrainsMono-Regular.ttf";
         const std::filesystem::path lucide = fontRoot / "lucide.ttf";
 
-        auto addTextFont = [&](const std::filesystem::path& file, const float size, const bool mergeIcons) -> ImFont*
+        // Size of the spec (em) -> size ImGui wants (line height). The icons merged in keep the size of the spec: a
+        // merged source is scaled by its size relative to the main one, so they stay 14 px in a 17 px text font.
+        auto addTextFont = [&](const std::filesystem::path& file, const float size, const bool mergeIcons, float& bakedSize) -> ImFont*
         {
+            bakedSize = size * LineHeightPerEm(file);
             // Inter has its own glyphs in the Private Use Area; they would shadow the icons that merge in later
             static const ImWchar kExcludePrivateUse[] = {0xE000, 0xF8FF, 0};
             ImFontConfig textConfig;
             textConfig.GlyphExcludeRanges = kExcludePrivateUse;
-            ImFont* font = LoadFontFromPath(*io.Fonts, file, size, glyphRanges, &textConfig);
+            ImFont* font = LoadFontFromPath(*io.Fonts, file, bakedSize, glyphRanges, &textConfig);
             if (font != nullptr && mergeIcons)
             {
                 ImFontConfig iconConfig;
@@ -814,11 +887,13 @@ namespace myengine::ui
         };
 
         EditorFonts editorFonts;
-        editorFonts.body = addTextFont(interRegular, style::kFontBody, true);
-        editorFonts.strong = addTextFont(interSemiBold, style::kFontStrong, true);
-        editorFonts.secondary = addTextFont(interRegular, style::kFontSecondary, true);
-        editorFonts.tiny = addTextFont(interRegular, style::kFontTiny, true);
-        editorFonts.mono = LoadFontFromPath(*io.Fonts, mono, style::kFontMono, glyphRanges);
+        editorFonts.body = addTextFont(interRegular, style::kFontBody, true, editorFonts.bodySize);
+        editorFonts.strong = addTextFont(interSemiBold, style::kFontStrong, true, editorFonts.strongSize);
+        editorFonts.secondary = addTextFont(interRegular, style::kFontSecondary, true, editorFonts.secondarySize);
+        editorFonts.tiny = addTextFont(interRegular, style::kFontTiny, true, editorFonts.tinySize);
+        // The mono size of the spec (13) is the em; bake the size that ImGui reads as a line height
+        editorFonts.monoSize = style::kFontMono * LineHeightPerEm(mono);
+        editorFonts.mono = LoadFontFromPath(*io.Fonts, mono, editorFonts.monoSize, glyphRanges);
         editorFonts.icon12 = addIconFont(12.0f);
         editorFonts.icon14 = addIconFont(14.0f);
         editorFonts.icon16 = addIconFont(16.0f);
@@ -835,6 +910,7 @@ namespace myengine::ui
         {
             windowContext->bodyFont = io.Fonts->AddFontDefault();
             editorFonts.body = windowContext->bodyFont;
+            editorFonts.bodySize = 0.0f;
         }
         if (windowContext->bodyFont != nullptr)
         {
@@ -844,13 +920,20 @@ namespace myengine::ui
         {
             windowContext->monoFont = io.FontDefault;
             editorFonts.mono = windowContext->monoFont;
+            editorFonts.monoSize = 0.0f; // not the baked mono file: the default size of the role
         }
         // Missing font files fall back to the default font so every helper still draws
-        for (ImFont** font : {&editorFonts.strong, &editorFonts.secondary, &editorFonts.tiny})
+        const std::pair<ImFont**, float*> textRoles[] = {
+            {&editorFonts.strong, &editorFonts.strongSize},
+            {&editorFonts.secondary, &editorFonts.secondarySize},
+            {&editorFonts.tiny, &editorFonts.tinySize},
+        };
+        for (const auto& [font, size] : textRoles)
         {
             if (*font == nullptr)
             {
                 *font = editorFonts.body;
+                *size = 0.0f;
             }
         }
         for (ImFont** font : {&editorFonts.icon12, &editorFonts.icon14, &editorFonts.icon16, &editorFonts.icon18,
@@ -862,6 +945,12 @@ namespace myengine::ui
             }
         }
         SetEditorFonts(editorFonts);
+
+        if (customBodyFont)
+        {
+            // The theme was applied before the fonts: the frame is kFrameHeight tall whatever size the body font was baked at
+            ImGui::GetStyle().FramePadding.y = (style::kFrameHeight - editorFonts.bodySize) * 0.5f;
+        }
 
         if (logger_ != nullptr)
         {

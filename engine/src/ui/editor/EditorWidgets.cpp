@@ -46,12 +46,27 @@ namespace myengine::ui
             ImFont* font = nullptr;
             switch (role)
             {
-                case FontRole::Strong: sizeOut = style::kFontStrong; font = fonts.strong; break;
-                case FontRole::Secondary: sizeOut = style::kFontSecondary; font = fonts.secondary; break;
-                case FontRole::Tiny: sizeOut = style::kFontTiny; font = fonts.tiny; break;
-                case FontRole::Mono: sizeOut = style::kFontMono; font = fonts.mono; break;
+                case FontRole::Strong:
+                    sizeOut = fonts.strongSize > 0.0f ? fonts.strongSize : style::kFontStrong;
+                    font = fonts.strong;
+                    break;
+                case FontRole::Secondary:
+                    sizeOut = fonts.secondarySize > 0.0f ? fonts.secondarySize : style::kFontSecondary;
+                    font = fonts.secondary;
+                    break;
+                case FontRole::Tiny:
+                    sizeOut = fonts.tinySize > 0.0f ? fonts.tinySize : style::kFontTiny;
+                    font = fonts.tiny;
+                    break;
+                case FontRole::Mono:
+                    sizeOut = fonts.monoSize > 0.0f ? fonts.monoSize : style::kFontMono;
+                    font = fonts.mono;
+                    break;
                 case FontRole::Body:
-                default: sizeOut = style::kFontBody; font = fonts.body; break;
+                default:
+                    sizeOut = fonts.bodySize > 0.0f ? fonts.bodySize : style::kFontBody;
+                    font = fonts.body;
+                    break;
             }
             if (font == nullptr)
             {
@@ -200,6 +215,13 @@ namespace myengine::ui
         ImGui::PopFont();
     }
 
+    float FontRoleSize(const FontRole role)
+    {
+        float size = 0.0f;
+        RoleFont(role, size);
+        return size;
+    }
+
     void DrawIcon(ImDrawList* drawList, const IconSize size, const char* icon, const ImVec2 center, const ImU32 color)
     {
         float sizePx = 0.0f;
@@ -225,7 +247,7 @@ namespace myengine::ui
         {
             const std::string text = WithIcon(icon, label);
             PushFontRole(FontRole::Secondary);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, (style::kFrameHeight - style::kFontSecondary) * 0.5f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, (style::kFrameHeight - FontRoleSize(FontRole::Secondary)) * 0.5f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, style::kRounding);
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, border ? 1.0f : 0.0f);
             ImGui::PushStyleColor(ImGuiCol_Button, enabled ? Vec4(normal) : Vec4(style::kControlDisabled));
@@ -529,7 +551,7 @@ namespace myengine::ui
     {
         const float fieldWidth = width > 0.0f ? width : ImGui::GetContentRegionAvail().x;
         ImGui::SetNextItemWidth(fieldWidth);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28.0f, 5.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28.0f, (style::kFrameHeight - FontRoleSize(FontRole::Body)) * 0.5f));
         const bool changed = ImGui::InputTextWithHint(id, hint, text);
         ImGui::PopStyleVar();
 
@@ -684,7 +706,7 @@ namespace myengine::ui
         bool changed = false;
         ImGui::PushID(id);
         PushFontRole(FontRole::Secondary);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(11.0f, 5.5f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(11.0f, (style::kFrameHeight - FontRoleSize(FontRole::Secondary)) * 0.5f));
         for (int axis = 0; axis < 3; ++axis)
         {
             if (axis > 0)

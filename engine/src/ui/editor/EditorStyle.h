@@ -90,6 +90,8 @@ namespace myengine::ui::style
     inline constexpr float kIconSmall = 12.0f;             // chevrons
 
     // ---- font sizes ----
+    // The em of the mockups (CSS px). UiManager bakes a font at size * lineHeight / em, because ImGui sizes by line height;
+    // read the baked size of a role from FontRoleSize(), not from here.
     inline constexpr float kFontBody = 14.0f;
     inline constexpr float kFontStrong = 14.0f;
     inline constexpr float kFontSecondary = 13.0f;

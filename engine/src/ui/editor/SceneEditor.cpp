@@ -186,8 +186,8 @@ namespace myengine::ui
         auto& windowState = editorState.GetOrCreateWindowState(windowContext.windowId);
         const bool isEditMode = editorState.mode == editor::RuntimeMode::Edit;
 
-        // 28 px bar: font 14 + 2 x 7
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 7.0f));
+        // 28 px bar: the body font + 2 x padding
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, (style::kMenuBarHeight - FontRoleSize(FontRole::Body)) * 0.5f));
         ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
         if (ImGui::BeginMainMenuBar())
         {
@@ -291,7 +291,7 @@ namespace myengine::ui
                 const float centerY = windowPosition.y + style::kMenuBarHeight * 0.5f;
                 auto* drawList = ImGui::GetWindowDrawList();
                 PushFontRole(FontRole::Secondary);
-                const float textY = std::floor(centerY - style::kFontSecondary * 0.5f - 0.5f);
+                const float textY = std::floor(centerY - FontRoleSize(FontRole::Secondary) * 0.5f - 0.5f);
                 drawList->AddText(ImVec2(x, textY), style::kText, mapName.c_str());
                 x += mapWidth;
                 if (editorState.sceneDirty)

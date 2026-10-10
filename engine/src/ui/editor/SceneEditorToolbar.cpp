@@ -45,7 +45,7 @@ namespace myengine::ui
 
         void DrawSegment(ImDrawList* drawList, const StatusSegment& segment, float x, const float centerY)
         {
-            const float textY = std::floor(centerY - style::kFontSecondary * 0.5f - 0.5f);
+            const float textY = std::floor(centerY - FontRoleSize(FontRole::Secondary) * 0.5f - 0.5f);
             if (segment.dot)
             {
                 drawList->AddCircleFilled(ImVec2(x + 4.0f, centerY), 4.0f, segment.dotColor);
@@ -82,7 +82,7 @@ namespace myengine::ui
             }
             const float centerY = min.y + size.y * 0.5f;
             DrawIcon(drawList, IconSize::Row14, icon, ImVec2(min.x + 10.0f + 7.0f, centerY), hovered ? style::kText : style::kTextDim);
-            drawList->AddText(ImVec2(min.x + 10.0f + 14.0f + 6.0f, std::floor(centerY - style::kFontSecondary * 0.5f - 0.5f)),
+            drawList->AddText(ImVec2(min.x + 10.0f + 14.0f + 6.0f, std::floor(centerY - FontRoleSize(FontRole::Secondary) * 0.5f - 0.5f)),
                               hovered ? style::kTextStrong : style::kText, label);
             return pressed;
         }
