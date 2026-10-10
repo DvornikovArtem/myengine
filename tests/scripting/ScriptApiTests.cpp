@@ -18,6 +18,8 @@
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
+#include <myengine/ecs/components/CameraComponent.h>
+#include <myengine/ecs/components/CameraControllerComponent.h>
 #include <myengine/ecs/components/ColliderComponent.h>
 #include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
@@ -304,6 +306,60 @@ except me.EntityDeadError:
         Check(fixture.system->GetHudLines().empty(), "Stop / scene reset did not clear the HUD");
     }
 
+    // me.camera (the primary scene camera) and me.debug (collider wireframes), RL1
+    void TestCameraAndDebug(Fixture& fixture)
+    {
+        fixture.Tick(); // the script context holds the world after an update
+        py::dict globals;
+        py::exec("import myengine as me", globals);
+        py::exec(R"PY(
+assert me.camera.set(me.Vec3(0, 0, 0), me.Vec3(0, 0, 0)) is False
+assert me.camera.get() is None and me.camera.get_fov() is None
+)PY", globals);
+
+        const auto cameraEntity = fixture.Entity("Camera");
+        auto& camera = fixture.world.Emplace<components::CameraComponent>(cameraEntity);
+        camera.isPrimary = false;
+        auto& controller = fixture.world.Emplace<components::CameraControllerComponent>(cameraEntity);
+        py::exec("assert me.camera.set(me.Vec3(1, 2, 3), me.Vec3(0, 0, 0)) is False", globals);
+        Check(!controller.scriptControlled, "A camera that is not primary must stay under the free-fly controller");
+
+        camera.isPrimary = true;
+        py::exec(R"PY(
+assert me.camera.set(me.Vec3(1, 2, 3), me.Vec3(10, 20, 30), 80.0)
+position, rotation = me.camera.get()
+assert (position.x, position.y, position.z) == (1, 2, 3)
+assert (rotation.x, rotation.y, rotation.z) == (10, 20, 30)
+assert me.camera.get_fov() == 80.0
+assert me.camera.set(me.Vec3(4, 5, 6), me.Vec3(0, 90, 0))   # no fov: the old one stays
+assert me.camera.get_fov() == 80.0
+for bad in (0.0, 180.0, float("nan")):
+    try:
+        me.camera.set(me.Vec3(0, 0, 0), me.Vec3(0, 0, 0), bad)
+        assert False, "fov out of range was accepted"
+    except ValueError:
+        pass
+try:
+    me.camera.set(me.Vec3(float("nan"), 0, 0), me.Vec3(0, 0, 0))
+    assert False, "a non-finite position was accepted"
+except ValueError:
+    pass
+)PY", globals);
+        Check(camera.position.x == 4 && camera.position.y == 5 && camera.position.z == 6, "Python did not move the C++ camera");
+        Check(camera.rotationDeg.y == 90 && camera.fovYDeg == 80.0f, "Python did not rotate the C++ camera");
+        Check(controller.scriptControlled, "me.camera.set did not hand the camera to the script");
+
+        auto& physics = myengine::core::ServiceLocator::GetPhysicsWorldState();
+        const bool wireframes = physics.debugDrawEnabled;
+        py::exec("me.debug.show_colliders(False); assert me.debug.colliders_visible() is False", globals);
+        Check(!physics.debugDrawEnabled, "me.debug.show_colliders(False) did not reach the physics state");
+        py::exec("me.debug.show_colliders(True); assert me.debug.colliders_visible() is True", globals);
+        Check(physics.debugDrawEnabled, "me.debug.show_colliders(True) did not reach the physics state");
+        physics.debugDrawEnabled = wireframes;
+
+        fixture.world.DestroyEntity(cameraEntity);
+    }
+
     void TestSpawn(Fixture& fixture)
     {
         const auto spawner = fixture.Entity("Spawner");
@@ -474,6 +530,7 @@ sender.fail = True
         try
         {
             TestApiAndLifecycle(fixture);
+            TestCameraAndDebug(fixture);
             TestSpawn(fixture);
             TestHotReloadAndFields(fixture);
             TestScriptProfiling(fixture);

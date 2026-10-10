@@ -93,6 +93,17 @@ namespace myengine::ui
         windowState.materialPreviewEnabled = false;
         windowState.materialPreviewMaterialPath.clear();
 
+        // When Play starts, the input goes to the game, as in UE: a text field of a panel (the chat, the script
+        // console) that held the keyboard lets it go, and the viewport is the focused window. Esc inside a text
+        // field or a click on another panel's field gives the keyboard back to the editor.
+        const bool playingNow = editorState.mode == editor::RuntimeMode::Play;
+        if (playingNow && !wasPlaying_)
+        {
+            ImGui::ClearActiveID();
+            ImGui::SetWindowFocus(kViewportWindowName);
+        }
+        wasPlaying_ = playingNow;
+
         HandleKeyboardShortcuts(windowContext);
         BuildDockSpace(windowContext);
         // The order of the Begin calls is the tab order of a freshly docked group

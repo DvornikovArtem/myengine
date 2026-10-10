@@ -1,0 +1,78 @@
+{
+  "name": "RlCar",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": {
+        "name": "RlCar"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.5,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          0.6,
+          2.4
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_blue.material.json",
+        "visible": true
+      },
+      "Rigidbody": {
+        "mass": 3.0,
+        "useGravity": true,
+        "isKinematic": false
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "bounciness": 0.2
+      }
+    },
+    {
+      "id": 2,
+      "Tag": {
+        "name": "RlCarCabin"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.8,
+          -0.1
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.75,
+          0.8,
+          0.45
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/cabin_glass.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 1
+      }
+    }
+  ]
+}

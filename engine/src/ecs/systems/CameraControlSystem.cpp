@@ -5,6 +5,8 @@
 
 #include <directxtk/SimpleMath.h>
 
+#include <myengine/core/ServiceLocator.h>
+#include <myengine/editor/EditorState.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/CameraControllerComponent.h>
@@ -42,6 +44,7 @@ namespace myengine::ecs::systems
 
         const auto [mouseDeltaX, mouseDeltaY] = input_.ConsumeMouseDelta();
         const int wheelSteps = input_.ConsumeMouseWheelSteps();
+        const bool playing = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
 
         constexpr float kSpeedMultiplierPerWheelStep = 1.12f;
         constexpr float kMinMoveSpeed = 0.2f;
@@ -52,6 +55,16 @@ namespace myengine::ecs::systems
             [&](const EntityId, components::CameraComponent& camera, components::CameraControllerComponent& controller, const components::WindowBindingComponent& binding)
             {
                 if (binding.windowId != activeWindowId_)
+                {
+                    return;
+                }
+
+                // A script that moves the camera (me.camera.set) owns it for the rest of the Play session
+                if (!playing)
+                {
+                    controller.scriptControlled = false;
+                }
+                else if (controller.scriptControlled)
                 {
                     return;
                 }

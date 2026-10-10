@@ -13,7 +13,10 @@
 
 #include <pybind11/stl.h>
 
+#include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
+#include <myengine/ecs/components/CameraComponent.h>
+#include <myengine/ecs/components/CameraControllerComponent.h>
 #include <myengine/ecs/components/ColliderComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
@@ -385,6 +388,76 @@ namespace myengine::scripting::detail
                 }
                 return result;
             }, py::arg("center"), py::arg("radius"), py::arg("prefix") = "");
+
+        // The camera that renders the scene (the first primary one). In Play the viewport draws through it, so a
+        // script can follow a car; the change is part of the scene and Stop restores the snapshot.
+        auto cameraModule = module.def_submodule("camera", "Primary scene camera: set / get position and rotation in degrees");
+        const auto primaryCamera = []() -> std::pair<ecs::EntityId, ecs::components::CameraComponent*>
+        {
+            auto& world = RequireWorld();
+            for (const auto id : QueryEntities())
+            {
+                if (auto* camera = world.TryGet<ecs::components::CameraComponent>(id); camera != nullptr && camera->isPrimary)
+                {
+                    return {id, camera};
+                }
+            }
+            return {ecs::kInvalidEntity, nullptr};
+        };
+        cameraModule.def("set", [primaryCamera](const Vec3& position, const Vec3& rotation, const std::optional<float>& fov)
+            {
+                CheckVector(position);
+                CheckVector(rotation);
+                if (fov && (!std::isfinite(*fov) || *fov <= 0.0f || *fov >= 180.0f))
+                {
+                    throw py::value_error("fov must be between 0 and 180 degrees");
+                }
+                const auto [id, camera] = primaryCamera();
+                if (camera == nullptr)
+                {
+                    return false;
+                }
+                camera->position = position;
+                camera->rotationDeg = rotation;
+                if (fov)
+                {
+                    camera->fovYDeg = *fov;
+                }
+                if (auto* controller = RequireWorld().TryGet<ecs::components::CameraControllerComponent>(id); controller != nullptr)
+                {
+                    controller->scriptControlled = true;
+                }
+                return true;
+            }, py::arg("position"), py::arg("rotation_deg"), py::arg("fov") = py::none(),
+            "Place the primary camera (rotation: pitch, yaw, roll in degrees; fov: vertical, degrees). Returns False without a camera");
+        cameraModule.def("get", [primaryCamera]() -> py::object
+            {
+                const auto camera = primaryCamera().second;
+                if (camera == nullptr)
+                {
+                    return py::none();
+                }
+                return py::make_tuple(camera->position, camera->rotationDeg);
+            }, "(position, rotation_deg) of the primary camera, None without one");
+        cameraModule.def("get_fov", [primaryCamera]() -> py::object
+            {
+                const auto camera = primaryCamera().second;
+                return camera != nullptr ? py::cast(camera->fovYDeg) : py::none();
+            }, "Vertical field of view of the primary camera in degrees, None without one");
+
+        // The collider wireframes of the viewport (Show > Colliders, F3). A game that fills the view turns them off
+        // and gives them back in OnDestroy: the flag lives in the editor, not in the scene.
+        auto debugModule = module.def_submodule("debug", "Editor visualisation of the running scene");
+        debugModule.def("show_colliders", [](const bool visible)
+            {
+                MYENGINE_ASSERT_SCRIPT_THREAD();
+                core::ServiceLocator::GetPhysicsWorldState().debugDrawEnabled = visible;
+            }, py::arg("visible"), "Show or hide the collider wireframes of the viewport");
+        debugModule.def("colliders_visible", []()
+            {
+                MYENGINE_ASSERT_SCRIPT_THREAD();
+                return core::ServiceLocator::GetPhysicsWorldState().debugDrawEnabled;
+            });
 
         auto inputModule = module.def_submodule("input");
         inputModule.def("is_down", [](const std::string& action) { return RequireInput().IsActionDown(action); }, py::arg("action"));

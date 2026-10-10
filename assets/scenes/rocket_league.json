@@ -1,0 +1,53 @@
+{
+  "entities": [
+    {
+      "Camera": {
+        "farPlane": 300.0,
+        "fovYDeg": 75.0,
+        "isPrimary": true,
+        "nearPlane": 0.10000000149011612,
+        "orthographicHalfHeight": 1.0,
+        "position": [
+          0.0,
+          46.0,
+          -40.0
+        ],
+        "rotationDeg": [
+          58.0,
+          0.0,
+          0.0
+        ]
+      },
+      "CameraController": {
+        "mouseSensitivityDeg": 0.11999999731779099,
+        "moveSpeed": 10.0,
+        "rotateSpeedDeg": 80.0,
+        "zoomSpeed": 1.0
+      },
+      "Tag": {
+        "name": "ArenaCamera"
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 1
+    },
+    {
+      "Script": {
+        "scripts": [
+          {
+            "class": "RocketLeague",
+            "module": "rocket_league",
+            "props": {
+              "start_mode": 0
+            }
+          }
+        ]
+      },
+      "Tag": {
+        "name": "RocketLeague"
+      },
+      "id": 2
+    }
+  ]
+}

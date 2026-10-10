@@ -1,0 +1,43 @@
+{
+  "name": "RlBall",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": {
+        "name": "RlBall"
+      },
+      "Transform": {
+        "position": [
+          0,
+          3,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          1.4,
+          1.4
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_sphere.obj",
+        "materialPath": "assets/materials/rl/ball.material.json",
+        "visible": true
+      },
+      "Rigidbody": {
+        "mass": 1.0,
+        "useGravity": true,
+        "isKinematic": false
+      },
+      "Collider": {
+        "type": "sphere",
+        "radius": 1.0,
+        "bounciness": 0.75
+      }
+    }
+  ]
+}

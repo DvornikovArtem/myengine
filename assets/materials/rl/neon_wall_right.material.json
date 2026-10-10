@@ -1,0 +1,10 @@
+{
+  "shader": "../../shaders/textured_lit.shader.json",
+  "texture": "../../textures/rl/neon_wall_right.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "RlDeco",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": {
+        "name": "RlDeco"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/fx_white.material.json",
+        "visible": true
+      }
+    }
+  ]
+}
