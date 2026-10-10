@@ -42,5 +42,6 @@ namespace myengine::editor
     private:
         bool hovered_ = false;
         bool using_ = false;
+        ecs::EntityId editedEntity_ = ecs::kInvalidEntity;
     };
 }
