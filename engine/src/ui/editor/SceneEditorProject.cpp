@@ -216,7 +216,7 @@ namespace myengine::ui
                         const float centerY = (rowMin.y + rowMax.y) * 0.5f;
                         DrawIcon(drawList, IconSize::Row14, ICON_MAP, ImVec2(rowMin.x + 18.0f, centerY), style::kTypeScene);
                         const std::string label = fs::u8path(map).stem().u8string();
-                        drawList->AddText(ImVec2(rowMin.x + 34.0f, std::floor(centerY - style::kFontBody * 0.5f - 0.5f)), style::kTextStrong, label.c_str());
+                        drawList->AddText(ImVec2(rowMin.x + 34.0f, std::floor(centerY - FontRoleSize(FontRole::Body) * 0.5f - 0.5f)), style::kTextStrong, label.c_str());
                         if (current)
                         {
                             const ImVec2 after = ImGui::GetCursorScreenPos();

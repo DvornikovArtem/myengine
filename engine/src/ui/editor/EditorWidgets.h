@@ -44,8 +44,13 @@ namespace myengine::ui
         ImFont* secondary = nullptr;
         ImFont* tiny = nullptr;
         ImFont* mono = nullptr;
-        // Size the mono font was baked at. ImGui sizes a font by its line height (ascender - descender), not by the
-        // em square, so the 13 px of the spec (em) is baked as 13 * lineHeight / em. 0: use style::kFontMono.
+        // Sizes the text fonts were baked at. ImGui sizes a font by its line height (ascender - descender), not by
+        // the em square, so a spec size (em) of 14 is baked as 14 * lineHeight / em (about 17 for Inter, 18.5 for the
+        // mono). 0: the font is not baked from the file, the size of the token is used.
+        float bodySize = 0.0f;
+        float strongSize = 0.0f;
+        float secondarySize = 0.0f;
+        float tinySize = 0.0f;
         float monoSize = 0.0f;
         ImFont* icon12 = nullptr;
         ImFont* icon14 = nullptr;
@@ -61,6 +66,9 @@ namespace myengine::ui
     void ClearEditorFonts();
     void PushFontRole(FontRole role);
     void PopFontRole();
+    // The size in pixels that PushFontRole gives the role (its line height, not the em of the spec). Use it for what
+    // is centred by hand: FramePadding.y = (height - FontRoleSize(role)) / 2.
+    float FontRoleSize(FontRole role);
 
     // Draws one Lucide glyph centred on `center`, at the baked size
     void DrawIcon(ImDrawList* drawList, IconSize size, const char* icon, ImVec2 center, ImU32 color);
