@@ -49,7 +49,7 @@ namespace myengine::ui
                 case FontRole::Strong: sizeOut = style::kFontStrong; font = fonts.strong; break;
                 case FontRole::Secondary: sizeOut = style::kFontSecondary; font = fonts.secondary; break;
                 case FontRole::Tiny: sizeOut = style::kFontTiny; font = fonts.tiny; break;
-                case FontRole::Mono: sizeOut = style::kFontMono; font = fonts.mono; break;
+                case FontRole::Mono: sizeOut = fonts.monoSize > 0.0f ? fonts.monoSize : style::kFontMono; font = fonts.mono; break;
                 case FontRole::Body:
                 default: sizeOut = style::kFontBody; font = fonts.body; break;
             }

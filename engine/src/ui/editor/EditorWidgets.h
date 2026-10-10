@@ -44,6 +44,9 @@ namespace myengine::ui
         ImFont* secondary = nullptr;
         ImFont* tiny = nullptr;
         ImFont* mono = nullptr;
+        // Size the mono font was baked at. ImGui sizes a font by its line height (ascender - descender), not by the
+        // em square, so the 13 px of the spec (em) is baked as 13 * lineHeight / em. 0: use style::kFontMono.
+        float monoSize = 0.0f;
         ImFont* icon12 = nullptr;
         ImFont* icon14 = nullptr;
         ImFont* icon16 = nullptr;
