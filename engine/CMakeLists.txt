@@ -7,6 +7,7 @@
   include/myengine/core/Application.h
   include/myengine/core/FileWatcher.h
   include/myengine/core/Logger.h
+  include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
   include/myengine/core/Types.h
@@ -77,6 +78,7 @@ set(ENGINE_SOURCES
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/Logger.cpp
+  src/core/ProjectContext.cpp
   src/core/Timer.cpp
   src/core/Window.cpp
   src/editor/EditorCommandHistory.cpp
@@ -119,6 +121,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorInternal.h
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
+  src/ui/editor/SceneEditorProject.cpp
   src/ui/editor/SceneEditorViewport.cpp
   src/ui/ContentBrowser.cpp
   src/ui/PrefabInspector.cpp
@@ -192,6 +195,9 @@ target_link_libraries(myengine_engine
     dxguid
     imm32
     user32
+    ole32
+    shell32
+    uuid
     dwmapi
     gdi32
     shell32

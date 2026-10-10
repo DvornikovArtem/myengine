@@ -123,6 +123,8 @@ namespace myengine::editor
         bool showScriptConsole = true;
         bool showAssistant = true;
         bool showImGuiDemo = false;
+        bool showProjectBrowser = false; // the Project Browser window (File > Open Project, --project-browser)
+        std::string mapPath; // the open map as a project path ("Maps/Main.json")
         bool selectionLocked = false;
         bool sceneDirty = false;
         core::WindowId lastInteractedWindowId = 0;

@@ -108,6 +108,15 @@ set_property(TARGET myengine_content_browser_tests PROPERTY FOLDER "Tests")
 add_test(NAME content_browser COMMAND myengine_content_browser_tests)
 set_tests_properties(content_browser PROPERTIES TIMEOUT 30)
 
+add_executable(myengine_project_tests
+  core/ProjectContextTests.cpp)
+
+target_link_libraries(myengine_project_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_project_tests)
+set_property(TARGET myengine_project_tests PROPERTY FOLDER "Tests")
+add_test(NAME project_context COMMAND myengine_project_tests)
+set_tests_properties(project_context PROPERTIES TIMEOUT 30)
+
 add_executable(myengine_script_console_tests
   scripting/ScriptConsoleTests.cpp)
 

@@ -25,6 +25,7 @@
 #include <stb_image.h>
 
 #include <myengine/core/Logger.h>
+#include <myengine/core/ServiceLocator.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
 
@@ -1233,10 +1234,14 @@ namespace myengine::resource
                 // performs the matching code-page conversion.
                 const std::filesystem::path assetPath(key);
                 std::string stableKey;
-                const std::array<std::filesystem::path, 2> roots{
-                    std::filesystem::u8path(MYENGINE_SOURCE_DIR),
-                    GetExecutableDirectory(),
-                };
+                // The project folder first: its assets get keys relative to it ("Content/Models/a.obj")
+                std::vector<std::filesystem::path> roots;
+                if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized())
+                {
+                    roots.push_back(project.Root());
+                }
+                roots.push_back(std::filesystem::u8path(MYENGINE_SOURCE_DIR));
+                roots.push_back(GetExecutableDirectory());
 
                 for (const auto& root : roots)
                 {
@@ -1440,6 +1445,12 @@ namespace myengine::resource
     std::filesystem::path ResourceManager::ResolvePath(const std::filesystem::path& path) const
     {
         ZoneScoped;
+
+        // The project, then the engine content, the working directory and the executable folder
+        if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized())
+        {
+            return project.ResolveContentPath(path);
+        }
 
         std::error_code ec;
 

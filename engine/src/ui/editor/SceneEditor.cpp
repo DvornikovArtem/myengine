@@ -15,9 +15,30 @@ namespace myengine::ui
         prefabInspector_ = std::make_unique<PrefabInspector>();
         scriptConsole_ = std::make_unique<ScriptConsole>();
         contentBrowser_ = std::make_unique<ContentBrowser>();
-        if (services_.resourceManager != nullptr)
+        projectUi_ = std::make_unique<ProjectUiState>();
+        if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized())
         {
-            // Same lookup as for every asset path: <project>/assets, else the copy next to the executable
+            // The content folder of the project; maps get their own root when they are outside of it
+            std::error_code relativeError;
+            const std::filesystem::path mapsInContent =
+                project.MapsDir().lexically_normal().lexically_relative(project.ContentDir().lexically_normal());
+            const std::string mapsText = mapsInContent.generic_u8string();
+            const bool mapsInsideContent = !mapsInContent.empty() && mapsText != ".." && mapsText.rfind("../", 0) != 0;
+            if (mapsInsideContent)
+            {
+                contentBrowser_->SetRoot(project.ContentDir(), project.ToProjectRelative(project.ContentDir()), {});
+            }
+            else
+            {
+                contentBrowser_->SetRoot(
+                    project.Root(),
+                    "",
+                    {project.ToProjectRelative(project.ContentDir()), project.ToProjectRelative(project.MapsDir())});
+                contentBrowser_->SetRootLabel(project.Name());
+            }
+        }
+        else if (services_.resourceManager != nullptr)
+        {
             contentBrowser_->SetRoot(services_.resourceManager->ResolvePath("assets"));
         }
         assistantPanel_ = std::make_unique<AssistantPanel>(AssistantPanelConfig{std::filesystem::u8path(MYENGINE_SOURCE_DIR), services_.logger});
@@ -38,6 +59,7 @@ namespace myengine::ui
         prefabInspector_.reset();
         scriptConsole_.reset();
         contentBrowser_.reset();
+        projectUi_.reset();
         pendingOpenScenePath_.clear();
         pinnedMaterialPath_.clear();
         assistantPanel_.reset(); // ends a running claude process
@@ -80,6 +102,7 @@ namespace myengine::ui
         BuildPrefabsPanel(windowContext);
         BuildScriptConsolePanel(windowContext);
         BuildAssistantPanel(windowContext);
+        BuildProjectDialogs();
 
         if (editorState.showImGuiDemo)
         {
@@ -129,6 +152,8 @@ namespace myengine::ui
                         history_->Clear();
                     }
                 }
+
+                DrawProjectMenuItems(editorState.mode == editor::RuntimeMode::Edit);
 
                 ImGui::Separator();
                 if (ImGui::MenuItem("Quit") && services_.requestQuit)

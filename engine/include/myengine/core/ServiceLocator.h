@@ -1,5 +1,6 @@
 #pragma once
 
+#include <myengine/core/ProjectContext.h>
 #include <myengine/editor/EditorState.h>
 #include <myengine/events/EventBus.h>
 #include <myengine/physics/PhysicsWorldState.h>
@@ -25,6 +26,13 @@ namespace myengine::core
         {
             static editor::EditorRuntimeState editorState;
             return editorState;
+        }
+
+        // The project of this process; Application sets it up before anything resolves a content path
+        static ProjectContext& GetProjectContext()
+        {
+            static ProjectContext projectContext;
+            return projectContext;
         }
     };
 }

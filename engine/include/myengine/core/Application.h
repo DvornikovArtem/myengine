@@ -43,6 +43,10 @@ namespace myengine::core
 
         /// startInPlay: begin in Play (scripts and physics running) instead of Edit.
         bool Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath = {}, bool startInPlay = false);
+        /// Before Initialize: the .myproject to open (empty: the project of the engine folder).
+        void SetProjectFile(const std::filesystem::path& projectFile);
+        /// Before Initialize: open the Project Browser over the editor at start.
+        void SetShowProjectBrowser(bool show);
         int Run();
         void Shutdown();
 
@@ -60,7 +64,12 @@ namespace myengine::core
         void SetStateLabel(const std::string& label);
         bool SaveSceneToDisk();
         bool LoadSceneFromDisk();
+        /// Opens a map by its project path ("Maps/Main.json"); it becomes the file that Save writes.
         bool OpenSceneFromDisk(const std::string& scenePath);
+        /// Writes the world to a new map file and makes it the current one.
+        bool SaveSceneAs(const std::string& scenePath);
+        /// Starts a new process for the project and quits this one. discardScene: do not save the map on exit.
+        bool RestartWithProject(const std::filesystem::path& projectFile, bool discardScene);
         std::string CaptureSceneSnapshot() const;
         bool RestoreSceneSnapshot(std::string_view snapshotJson);
 
@@ -131,6 +140,9 @@ namespace myengine::core
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
+        std::filesystem::path projectFile_; // from --project, empty: the project of the engine folder
+        bool showProjectBrowser_ = false;
+        bool discardSceneOnExit_ = false; // set when the process restarts for another project without saving
         std::string stateLabel_;
         bool titleShowsPlay_ = false;
         bool sceneLoaded_ = false;

@@ -1,0 +1,9 @@
+{
+  "name": "myengine",
+  "engineVersion": 1,
+  "contentDir": "assets",
+  "mapsDir": "assets/scenes",
+  "scriptsDir": "assets/scripts",
+  "prefabsDir": "assets/prefabs",
+  "defaultMap": "assets/scenes/coin_guard_demo.json"
+}

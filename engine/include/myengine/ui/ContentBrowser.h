@@ -50,8 +50,18 @@ namespace myengine::ui
         ContentBrowser();
 
         // The folder that is shown as "Content", normally <project>/assets. Resets the navigation.
+        // Asset keys are the folder name plus the path below it ("assets/models/crate.obj").
         void SetRoot(const std::filesystem::path& root);
+        // A root whose keys start with keyPrefix (the root's path inside the project, "" when it is the project
+        // folder itself). visiblePaths limits what is shown: only these folders (paths below the root) and
+        // the folders that lead to them, e.g. {"Content", "Maps"} for a project folder.
+        void SetRoot(
+            const std::filesystem::path& root,
+            const std::string& keyPrefix,
+            const std::vector<std::string>& visiblePaths);
         const std::filesystem::path& GetRoot() const;
+        // The name of the top node and of the first crumb: "Content" by default, the project name for a project folder
+        void SetRootLabel(const std::string& label);
         const std::string& GetRootName() const; // folder name of the root: "assets"
 
         void Refresh(); // rescan the tree and the current folder
@@ -82,6 +92,8 @@ namespace myengine::ui
         };
 
         void BuildTree(FolderNode& node, int depth) const;
+        bool IsVisibleFolder(const std::string& relative) const; // with visiblePaths: on the way to or below one of them
+        bool ShowsFilesIn(const std::string& relative) const; // with visiblePaths: inside one of them
         void RebuildEntries();
         ContentEntry MakeEntry(const std::filesystem::path& absolute, bool isFolder) const;
         void DrawTree(const FolderNode& node, bool isRoot);
@@ -89,6 +101,9 @@ namespace myengine::ui
 
         std::filesystem::path root_;
         std::string rootName_;
+        std::string keyPrefix_;
+        std::string rootLabel_ = "Content";
+        std::vector<std::string> visiblePaths_;
         std::string currentFolder_;
         std::string search_;
         std::string selectedPath_;
