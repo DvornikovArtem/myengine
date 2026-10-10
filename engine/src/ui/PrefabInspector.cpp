@@ -20,26 +20,10 @@ namespace myengine::ui
 {
     namespace
     {
-        // Spec 4.8 "No prefabs": icon, title and text centred in the panel. Drawn with plain ImGui calls, so it also
-        // works in a context that has no editor fonts (headless tests).
+        // Spec 4.8 "No prefabs"
         void DrawNoPrefabs()
         {
-            const ImVec2 region = ImGui::GetContentRegionAvail();
-            const ImVec2 origin = ImGui::GetCursorScreenPos();
-            const float centerX = origin.x + region.x * 0.5f;
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-            const float topPadding = std::max((region.y - 90.0f) * 0.5f, 8.0f);
-            DrawIcon(drawList, IconSize::Empty30, ICON_PACKAGE, ImVec2(centerX, origin.y + topPadding + 15.0f), style::kEmptyStateIcon);
-
-            const char* title = "No prefabs";
-            const char* text = "Add .prefab.json files to assets/prefabs.";
-            const float lineHeight = ImGui::GetTextLineHeight();
-            float y = origin.y + topPadding + 40.0f;
-            drawList->AddText(ImVec2(std::floor(centerX - ImGui::CalcTextSize(title).x * 0.5f), y), style::kText, title);
-            y += lineHeight + 4.0f;
-            drawList->AddText(ImVec2(std::floor(centerX - ImGui::CalcTextSize(text).x * 0.5f), y), style::kTextDim, text);
-            ImGui::Dummy(ImVec2(region.x, topPadding + 40.0f + lineHeight * 2.0f + 8.0f));
+            EmptyState(ICON_PACKAGE, "No prefabs", "Add .prefab.json files to assets/prefabs.");
         }
     }
 
@@ -172,22 +156,7 @@ namespace myengine::ui
             ImGui::SetCursorScreenPos(ImVec2(start.x + squareSize + 8.0f, start.y + (squareSize - style::kFrameHeight) * 0.5f));
             ImGui::BeginDisabled(IsDirty());
             ImGui::SetNextItemWidth(-FLT_MIN);
-            const bool comboOpen = ImGui::BeginCombo(
-                "##prefab",
-                selectedName_.empty() ? "Select a template" : selectedName_.c_str(),
-                ImGuiComboFlags_NoArrowButton);
-            {
-                // The same chevron as the asset pickers instead of ImGui's triangle button
-                const ImVec2 comboMin = ImGui::GetItemRectMin();
-                const ImVec2 comboMax = ImGui::GetItemRectMax();
-                DrawIcon(
-                    drawList,
-                    IconSize::Chevron12,
-                    ICON_CHEVRON_DOWN,
-                    ImVec2(comboMax.x - 14.0f, (comboMin.y + comboMax.y) * 0.5f),
-                    style::kTextDim);
-            }
-            if (comboOpen)
+            if (BeginCombo("##prefab", selectedName_.empty() ? "Select a template" : selectedName_.c_str()))
             {
                 for (const auto& name : names)
                 {
@@ -196,7 +165,7 @@ namespace myengine::ui
                         Select(library, name);
                     }
                 }
-                ImGui::EndCombo();
+                EndCombo();
             }
             ImGui::EndDisabled();
             ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + squareSize + 6.0f));

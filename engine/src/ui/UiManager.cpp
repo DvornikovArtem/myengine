@@ -753,7 +753,20 @@ namespace myengine::ui
 
         detail::ApplyEditorTheme();
 
-        const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesCyrillic();
+        // Latin + Cyrillic, plus general punctuation (dashes, ellipsis, quotes: U+2010..U+2027) and the arrows U+2190 / U+2192
+        static std::vector<ImWchar> textRanges;
+        if (textRanges.empty())
+        {
+            for (const ImWchar* range = io.Fonts->GetGlyphRangesCyrillic(); range[0] != 0; range += 2)
+            {
+                textRanges.push_back(range[0]);
+                textRanges.push_back(range[1]);
+            }
+            const ImWchar extra[] = {0x2010, 0x2027, 0x2190, 0x2190, 0x2192, 0x2192};
+            textRanges.insert(textRanges.end(), std::begin(extra), std::end(extra));
+            textRanges.push_back(0);
+        }
+        const ImWchar* glyphRanges = textRanges.data();
         const auto fontRoot = ResolveFontRoot();
 
         // Text fonts (Cyrillic) with the Lucide icons merged in, plus icon-only fonts for DrawIcon. Every size is baked

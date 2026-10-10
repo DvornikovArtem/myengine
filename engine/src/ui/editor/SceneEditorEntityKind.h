@@ -11,11 +11,6 @@
 #include "EditorIcons.h"
 #include "EditorStyle.h"
 
-// Lucide eye-off (U+E0BF): the glyph is in lucide.ttf, EditorIcons.h has no define for it yet
-#ifndef ICON_EYE_OFF
-#define ICON_EYE_OFF "\xEE\x82\xBF"
-#endif
-
 namespace myengine::ui::detail
 {
     struct EntityKindInfo

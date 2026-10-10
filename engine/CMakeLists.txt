@@ -132,6 +132,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorAssets.cpp
   src/ui/editor/SceneEditorAssistant.cpp
   src/ui/editor/SceneEditorDetails.cpp
+  src/ui/editor/SceneEditorEntityKind.h
   src/ui/editor/SceneEditorInternal.h
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
