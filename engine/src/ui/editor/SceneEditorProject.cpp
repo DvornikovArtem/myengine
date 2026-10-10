@@ -265,7 +265,7 @@ namespace myengine::ui
                     ImGui::AlignTextToFramePadding();
                     ImGui::TextUnformatted("Name");
                     ImGui::SameLine(90.0f);
-                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 16.0f);
                     if (ImGui::InputText("##map_name", &state.mapName))
                     {
                         state.message.clear();
@@ -516,14 +516,14 @@ namespace myengine::ui
                     ImGui::AlignTextToFramePadding();
                     ImGui::TextUnformatted("Name");
                     ImGui::SameLine(82.0f);
-                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 16.0f);
                     ImGui::InputText("##new_project_name", &state.newProjectName);
                     FocusOutline();
 
                     ImGui::AlignTextToFramePadding();
                     ImGui::TextUnformatted("Location");
                     ImGui::SameLine(82.0f);
-                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 32.0f);
+                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 44.0f);
                     ImGui::InputText("##new_project_folder", &state.newProjectFolder);
                     FocusOutline();
                     ImGui::SameLine();

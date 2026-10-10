@@ -112,7 +112,17 @@ namespace myengine::ui
         if (ImGuiWindow* viewportWindow = ImGui::FindWindowByName(kViewportWindowName);
             viewportWindow != nullptr && viewportWindow->DockNode != nullptr)
         {
-            viewportWindow->DockNode->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
+            // NoTabBar (not AutoHideTabBar) so that no tab-strip toggle triangle shows in the corner; a node with
+            // several windows gets its strip back, otherwise the extra tabs could not be switched
+            ImGuiDockNode* node = viewportWindow->DockNode;
+            if (node->Windows.Size <= 1)
+            {
+                node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+            }
+            else
+            {
+                node->LocalFlags &= ~ImGuiDockNodeFlags_NoTabBar;
+            }
         }
 
         // After a fresh layout the windows exist from the second frame on: bring Content Browser and Details to
@@ -326,9 +336,14 @@ namespace myengine::ui
         ImGuiID dockBottom = 0;
         ImGuiID dockCenter = dockspaceId;
 
-        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Right, 0.22f, &dockRight, &dockCenter);
+        // Split ratios are relative to the size the layout is built at (the window may be small and get maximised
+        // later), so the target sizes are absolute: right column 400..480 px, bottom area 270..340 px
+        const ImVec2 workSize = ImGui::GetMainViewport()->WorkSize;
+        const float rightWidth = std::clamp(workSize.x * 0.22f, 400.0f, 480.0f);
+        const float bottomHeight = std::clamp(workSize.y * 0.30f, 270.0f, 340.0f);
+        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Right, std::min(rightWidth / std::max(workSize.x, 1.0f), 0.5f), &dockRight, &dockCenter);
         ImGui::DockBuilderSplitNode(dockRight, ImGuiDir_Up, 0.38f, &dockRightTop, &dockRightBottom);
-        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Down, 0.30f, &dockBottom, &dockCenter);
+        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Down, std::min(bottomHeight / std::max(workSize.y, 1.0f), 0.5f), &dockBottom, &dockCenter);
 
         ImGui::DockBuilderDockWindow(kHierarchyWindowName, dockRightTop);
         ImGui::DockBuilderDockWindow(kInspectorWindowName, dockRightBottom);
