@@ -14,6 +14,7 @@ namespace myengine::ui
         gizmo_ = std::make_unique<editor::TransformGizmo>();
         prefabInspector_ = std::make_unique<PrefabInspector>();
         scriptConsole_ = std::make_unique<ScriptConsole>();
+        assistantPanel_ = std::make_unique<AssistantPanel>(AssistantPanelConfig{std::filesystem::u8path(MYENGINE_SOURCE_DIR), services_.logger});
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -30,6 +31,7 @@ namespace myengine::ui
         gizmo_.reset();
         prefabInspector_.reset();
         scriptConsole_.reset();
+        assistantPanel_.reset(); // ends a running claude process
         history_.reset();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -68,6 +70,7 @@ namespace myengine::ui
         BuildAssetBrowserPanel(windowContext);
         BuildPrefabsPanel(windowContext);
         BuildScriptConsolePanel(windowContext);
+        BuildAssistantPanel(windowContext);
 
         if (editorState.showImGuiDemo)
         {
@@ -150,6 +153,7 @@ namespace myengine::ui
                 ImGui::MenuItem(kAssetBrowserWindowName, nullptr, &editorState.showAssetBrowser);
                 ImGui::MenuItem(kPrefabsWindowName, nullptr, &editorState.showPrefabs);
                 ImGui::MenuItem(kScriptConsoleWindowName, nullptr, &editorState.showScriptConsole);
+                ImGui::MenuItem(kAssistantWindowName, nullptr, &editorState.showAssistant);
                 ImGui::EndMenu();
             }
 
@@ -188,6 +192,7 @@ namespace myengine::ui
         ImGui::DockBuilderDockWindow(kStatisticsWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kPrefabsWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kScriptConsoleWindowName, dockBottom);
+        ImGui::DockBuilderDockWindow(kAssistantWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kViewportWindowName, dockCenter);
         ImGui::DockBuilderFinish(dockspaceId);
     }

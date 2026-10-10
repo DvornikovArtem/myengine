@@ -1,4 +1,8 @@
 ﻿set(ENGINE_HEADERS
+  include/myengine/assistant/AssistantService.h
+  include/myengine/assistant/ClaudeCliBackend.h
+  include/myengine/assistant/ClaudeStreamParser.h
+  include/myengine/assistant/IAssistantBackend.h
   include/myengine/config/AppConfig.h
   include/myengine/core/Application.h
   include/myengine/core/FileWatcher.h
@@ -56,6 +60,7 @@
   include/myengine/spatial/UniformGrid3D.h
   include/myengine/state/IGameState.h
   include/myengine/state/StateMachine.h
+  include/myengine/ui/AssistantPanel.h
   include/myengine/ui/SceneEditor.h
   include/myengine/ui/PrefabInspector.h
   include/myengine/ui/ScriptConsole.h
@@ -64,6 +69,9 @@
 )
 
 set(ENGINE_SOURCES
+  src/assistant/AssistantService.cpp
+  src/assistant/ClaudeCliBackend.cpp
+  src/assistant/ClaudeStreamParser.cpp
   src/config/AppConfig.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
@@ -103,6 +111,7 @@ set(ENGINE_SOURCES
   src/scripting/ScriptRuntime.cpp
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
+  src/ui/AssistantPanel.cpp
   src/ui/editor/SceneEditor.cpp
   src/ui/editor/SceneEditorAssets.cpp
   src/ui/editor/SceneEditorDetails.cpp
