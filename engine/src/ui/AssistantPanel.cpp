@@ -615,7 +615,7 @@ namespace myengine::ui
 
             PushFontRole(FontRole::Mono);
             drawList->PushClipRect(ImVec2(min.x + 26.0f, min.y), ImVec2(max.x - chipWidth - 16.0f, max.y), true);
-            drawList->AddText(ImVec2(min.x + 26.0f, std::floor(centerY - style::kFontMono * 0.5f - 0.5f)),
+            drawList->AddText(ImVec2(min.x + 26.0f, std::floor(centerY - FontRoleSize(FontRole::Mono) * 0.5f - 0.5f)),
                               failed ? style::kErrorText : style::kTextDim, header.c_str());
             drawList->PopClipRect();
             PopFontRole();
