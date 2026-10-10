@@ -43,6 +43,14 @@ namespace myengine::assistant
         turnOpen_ = false;
     }
 
+    void AssistantService::AddNotice(const std::string& text)
+    {
+        AssistantMessage message;
+        message.kind = AssistantMessage::Kind::Notice;
+        message.text = text;
+        Append(std::move(message));
+    }
+
     bool AssistantService::IsBusy() const
     {
         return backend_ != nullptr && backend_->IsBusy();

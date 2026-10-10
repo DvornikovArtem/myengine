@@ -4,14 +4,21 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 
+#include <windows.h>
+
 #include <imgui/imgui.h>
 #include <imgui/misc/imgui_stdlib.h>
 
+#include <myengine/assistant/AssistantBridge.h>
+#include <myengine/assistant/AssistantTools.h>
 #include <myengine/assistant/ClaudeCliBackend.h>
+#include <myengine/core/Logger.h>
 
 namespace myengine::ui
 {
@@ -77,9 +84,53 @@ namespace myengine::ui
         cli.workingDirectory = std::filesystem::is_directory(config.repositoryRoot, error) ? config.repositoryRoot : std::filesystem::current_path(error);
         cli.systemPromptFile = cli.workingDirectory / "assets" / "assistant" / "system_prompt.md";
         cli.logger = config.logger;
+
+        // Engine tools and confirmations go through myengine_mcp.exe (a separate process the CLI starts)
+        if (config.tools != nullptr)
+        {
+            auto bridgeExecutable = config.bridgeExecutable;
+            if (bridgeExecutable.empty())
+            {
+                wchar_t module[32768]{};
+                const DWORD length = GetModuleFileNameW(nullptr, module, static_cast<DWORD>(std::size(module)));
+                if (length > 0 && length < std::size(module))
+                {
+                    bridgeExecutable = std::filesystem::path(module).parent_path() / "myengine_mcp.exe";
+                }
+            }
+            if (!bridgeExecutable.empty() && std::filesystem::is_regular_file(bridgeExecutable, error))
+            {
+                assistant::AssistantBridgeConfig bridgeConfig;
+                bridgeConfig.repositoryRoot = cli.workingDirectory;
+                auto bridge = std::make_unique<assistant::AssistantBridge>(*config.tools, std::move(bridgeConfig));
+                std::string bridgeError;
+                if (bridge->Start(bridgeError))
+                {
+                    cli.bridge.executable = bridgeExecutable;
+                    cli.bridge.pipeName = bridge->GetPipeName();
+                    cli.bridge.token = bridge->GetToken();
+                    cli.bridge.allowedTools = bridge->ReadOnlyToolNames();
+                    cli.bridge.approveTool = assistant::AssistantBridge::ApproveToolFullName();
+                    bridge_ = std::move(bridge);
+                }
+                else if (config.logger != nullptr)
+                {
+                    config.logger->Warning("Assistant: the engine tool bridge is off: " + bridgeError);
+                }
+            }
+            else if (config.logger != nullptr)
+            {
+                config.logger->Warning("Assistant: myengine_mcp.exe was not found next to the editor; the assistant works with files only");
+            }
+        }
+
         auto backend = std::make_unique<assistant::ClaudeCliBackend>(std::move(cli));
         cli_ = backend.get();
         service_ = std::make_unique<assistant::AssistantService>(std::move(backend));
+        if (bridge_ != nullptr)
+        {
+            bridge_->onNotice = [this](const std::string& text) { service_->AddNotice(text); };
+        }
     }
 
     AssistantPanel::AssistantPanel(std::unique_ptr<assistant::IAssistantBackend> backend)
@@ -91,12 +142,24 @@ namespace myengine::ui
 
     void AssistantPanel::Update()
     {
+        if (bridge_ != nullptr)
+        {
+            bridge_->Update();
+            if (!service_->IsBusy() && !bridge_->GetPending().empty())
+            {
+                bridge_->RejectAll("The turn ended before the action was confirmed.");
+            }
+        }
         service_->Update();
     }
 
     void AssistantPanel::Shutdown()
     {
         service_->Shutdown();
+        if (bridge_ != nullptr)
+        {
+            bridge_->Stop();
+        }
     }
 
     void AssistantPanel::Submit()
@@ -223,8 +286,60 @@ namespace myengine::ui
             }
             drawnRevision_ = revision;
         }
+        DrawApprovals();
+        const auto pending = bridge_ != nullptr ? bridge_->GetPending().size() : 0;
+        if (pending > drawnPending_)
+        {
+            ImGui::SetScrollHereY(1.0f); // a new card: show it
+        }
+        drawnPending_ = pending;
         scrollToBottom_ = false;
         ImGui::EndChild();
+    }
+
+    void AssistantPanel::DrawApprovals()
+    {
+        if (bridge_ == nullptr || bridge_->GetPending().empty())
+        {
+            return;
+        }
+        const auto pending = bridge_->GetPending(); // a copy: Resolve changes the list
+        for (const auto& approval : pending)
+        {
+            ImGui::PushID(static_cast<int>(approval.id));
+            ImGui::Separator();
+            ImGui::TextColored(kFilesColor, "Confirm");
+            ImGui::SameLine();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(approval.title.c_str());
+            ImGui::PopTextWrapPos();
+            if (!approval.detail.empty() && ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                if (approval.detail.front() == '+' || approval.detail.front() == '-')
+                {
+                    DrawDiff(approval.detail);
+                }
+                else
+                {
+                    WrappedText(approval.detail);
+                }
+                ImGui::TreePop();
+            }
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.5f, 0.24f, 1.0f));
+            const bool apply = ImGui::Button("Apply");
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            const bool reject = ImGui::Button("Reject");
+            ImGui::PopID();
+            if (apply)
+            {
+                bridge_->Resolve(approval.id, true);
+            }
+            else if (reject)
+            {
+                bridge_->Resolve(approval.id, false);
+            }
+        }
     }
 
     void AssistantPanel::DrawMessage(const assistant::AssistantMessage& message)
@@ -243,7 +358,12 @@ namespace myengine::ui
         case Kind::Tool:
         {
             const char* state = message.toolFailed ? "[failed]" : (message.toolDone ? "[done]" : "[...]");
-            std::string header = std::string(state) + " " + message.toolName;
+            std::string toolName = message.toolName;
+            if (toolName.rfind("mcp__myengine__", 0) == 0)
+            {
+                toolName = "engine." + toolName.substr(15); // an engine tool through the bridge
+            }
+            std::string header = std::string(state) + " " + toolName;
             if (!message.text.empty())
             {
                 header += "  " + message.text;

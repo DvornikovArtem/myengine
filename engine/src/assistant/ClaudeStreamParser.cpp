@@ -188,6 +188,34 @@ namespace myengine::assistant
         }
     }
 
+    std::string ClaudeStreamParser::BuildToolDetail(const std::string& toolName, const nlohmann::json& input)
+    {
+        std::string detail;
+        if (toolName == "Edit")
+        {
+            AppendDiffLines(detail, GetString(input, "old_string"), "- ");
+            AppendDiffLines(detail, GetString(input, "new_string"), "+ ");
+        }
+        else if (toolName == "MultiEdit")
+        {
+            const auto* edits = GetChild(input, "edits");
+            if (edits != nullptr && edits->is_array())
+            {
+                for (const auto& edit : *edits)
+                {
+                    AppendDiffLines(detail, GetString(edit, "old_string"), "- ");
+                    AppendDiffLines(detail, GetString(edit, "new_string"), "+ ");
+                    detail += "@@\n";
+                }
+            }
+        }
+        else if (toolName == "Write")
+        {
+            AppendDiffLines(detail, GetString(input, "content"), "+ ");
+        }
+        return detail;
+    }
+
     void ClaudeStreamParser::SetRootDirectory(std::string root)
     {
         std::replace(root.begin(), root.end(), '\\', '/');
@@ -343,28 +371,7 @@ namespace myengine::assistant
                         event.filePath = displayPath;
                         toolFiles_[event.toolId] = displayPath;
                     }
-                    if (event.toolName == "Edit")
-                    {
-                        AppendDiffLines(event.detail, GetString(input, "old_string"), "- ");
-                        AppendDiffLines(event.detail, GetString(input, "new_string"), "+ ");
-                    }
-                    else if (event.toolName == "MultiEdit")
-                    {
-                        const auto* edits = GetChild(input, "edits");
-                        if (edits != nullptr && edits->is_array())
-                        {
-                            for (const auto& edit : *edits)
-                            {
-                                AppendDiffLines(event.detail, GetString(edit, "old_string"), "- ");
-                                AppendDiffLines(event.detail, GetString(edit, "new_string"), "+ ");
-                                event.detail += "@@\n";
-                            }
-                        }
-                    }
-                    else if (event.toolName == "Write")
-                    {
-                        AppendDiffLines(event.detail, GetString(input, "content"), "+ ");
-                    }
+                    event.detail = BuildToolDetail(event.toolName, input);
                     // `filePath` on ToolUse only tells the panel which file the call targets; the change is reported by ToolResult
                     events.push_back(std::move(event));
                 }

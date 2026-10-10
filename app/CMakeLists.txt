@@ -32,3 +32,10 @@ myengine_copy_runtime_assets(myengine)
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Include" FILES ${APP_HEADERS})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Source" FILES ${APP_CPP})
 source_group("Shaders" FILES ${APP_SHADER_FILES})
+
+# MCP server for the assistant: the Claude Code CLI starts it and it talks to the editor through a named pipe
+add_executable(myengine_mcp mcp_bridge/main.cpp)
+target_include_directories(myengine_mcp PRIVATE ${CMAKE_SOURCE_DIR}/engine/include)
+target_link_libraries(myengine_mcp PRIVATE myengine_nlohmann_json)
+myengine_apply_compiler_options(myengine_mcp)
+add_dependencies(myengine myengine_mcp)

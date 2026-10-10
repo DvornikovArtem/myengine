@@ -52,6 +52,8 @@ namespace myengine::assistant
         // Cancels a running turn, clears the transcript and forgets the session
         void NewConversation();
         void Shutdown();
+        // A service line in the transcript (confirmations, bridge events)
+        void AddNotice(const std::string& text);
 
         bool IsBusy() const;
         const std::deque<AssistantMessage>& GetMessages() const { return messages_; }
