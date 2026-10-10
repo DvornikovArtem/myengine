@@ -12,35 +12,43 @@ namespace myengine::ui
             std::string value;
         };
 
-        // One statistics group: a category band with the title, then label (left) / mono value (right) rows
+        // One statistics group: a collapsible category, then label (left) / mono value (right) property rows
         void DrawStatsGroup(const char* title, const std::vector<StatRow>& rows)
         {
-            ImGuiWindow* window = ImGui::GetCurrentWindow();
-            const float x0 = window->DC.CursorPos.x;
-            const float x1 = x0 + ImGui::GetContentRegionAvail().x;
-            const float y = ImGui::GetCursorScreenPos().y;
-            auto* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(ImVec2(x0, y), ImVec2(x1, y + style::kCategoryHeight), style::kHeader);
-            drawList->AddLine(ImVec2(x0, y), ImVec2(x1, y), style::kInput, 1.0f);
-            PushFontRole(FontRole::Strong);
-            drawList->AddText(ImGui::GetFont(), style::kFontStrong,
-                              ImVec2(x0 + 12.0f, std::floor(y + (style::kCategoryHeight - style::kFontStrong) * 0.5f - 0.5f)),
-                              style::kTextStrong, title);
-            PopFontRole();
-            ImGui::Dummy(ImVec2(0.0f, style::kCategoryHeight));
-
-            for (const StatRow& row : rows)
+            if (!BeginCategory(title))
             {
-                const ImVec2 position = ImGui::GetCursorScreenPos();
-                const float centerY = position.y + style::kPropRowHeight * 0.5f;
-                drawList->AddText(ImVec2(x0 + 12.0f, std::floor(centerY - style::kFontBody * 0.5f - 0.5f)), style::kText, row.label);
-                PushFontRole(FontRole::Mono);
-                const float valueWidth = ImGui::CalcTextSize(row.value.c_str()).x;
-                drawList->AddText(ImVec2(x1 - 12.0f - valueWidth, std::floor(centerY - style::kFontMono * 0.5f - 0.5f)),
-                                  style::kTextStrong, row.value.c_str());
-                PopFontRole();
-                ImGui::Dummy(ImVec2(0.0f, style::kPropRowHeight));
+                return;
             }
+            if (BeginPropertyGrid(title))
+            {
+                for (const StatRow& row : rows)
+                {
+                    // Label and value are centred in the row by hand: PropertyLabel pins the text to the cell top,
+                    // which suits rows with a 24 px field but leaves a text-only row top-heavy
+                    ImGui::TableNextRow(ImGuiTableRowFlags_None, style::kPropRowHeight);
+                    ImGui::TableSetColumnIndex(0);
+                    const ImVec2 labelPosition = ImGui::GetCursorScreenPos();
+                    const ImVec2 labelSize = ImGui::CalcTextSize(row.label);
+                    ImGui::GetWindowDrawList()->AddText(
+                        ImVec2(labelPosition.x, std::floor(labelPosition.y + (style::kFrameHeight - labelSize.y) * 0.5f)),
+                        style::kText, row.label);
+                    ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, style::kFrameHeight));
+                    ImGui::TableSetColumnIndex(1);
+                    const ImVec2 position = ImGui::GetCursorScreenPos();
+                    const float available = ImGui::GetContentRegionAvail().x;
+                    PushFontRole(FontRole::Mono);
+                    // The mono role font carries the icon font's taller line box, so centre by the measured height
+                    const ImVec2 valueSize = ImGui::CalcTextSize(row.value.c_str());
+                    ImGui::GetWindowDrawList()->AddText(
+                        ImVec2(std::floor(position.x + std::max(available - valueSize.x, 0.0f)),
+                               std::floor(position.y + (style::kFrameHeight - valueSize.y) * 0.5f)),
+                        style::kTextStrong, row.value.c_str());
+                    PopFontRole();
+                    ImGui::Dummy(ImVec2(available, style::kFrameHeight));
+                }
+                EndPropertyGrid();
+            }
+            EndCategory();
         }
 
         std::string Fixed(const double value, const int decimals, const char* unit = nullptr)
@@ -48,32 +56,6 @@ namespace myengine::ui
             char buffer[48];
             std::snprintf(buffer, sizeof(buffer), "%.*f%s%s", decimals, value, unit != nullptr ? " " : "", unit != nullptr ? unit : "");
             return buffer;
-        }
-
-        void DrawStatsGrid(const char* id, const std::vector<std::pair<const char*, const std::vector<StatRow>*>>& groups, const bool columns)
-        {
-            ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, 0.0f));
-            if (columns)
-            {
-                if (ImGui::BeginTable(id, static_cast<int>(groups.size()), ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings))
-                {
-                    ImGui::TableNextRow();
-                    for (std::size_t index = 0; index < groups.size(); ++index)
-                    {
-                        ImGui::TableSetColumnIndex(static_cast<int>(index));
-                        DrawStatsGroup(groups[index].first, *groups[index].second);
-                    }
-                    ImGui::EndTable();
-                }
-            }
-            else
-            {
-                for (const auto& group : groups)
-                {
-                    DrawStatsGroup(group.first, *group.second);
-                }
-            }
-            ImGui::PopStyleVar();
         }
     }
 
@@ -116,9 +98,9 @@ namespace myengine::ui
                 {"Errors", std::to_string(scriptStats.errors)},
             };
 
-            // Three columns when there is room, one group under another otherwise
-            const bool wide = ImGui::GetContentRegionAvail().x >= 700.0f;
-            DrawStatsGrid("##stats", {{"Frame", &frame}, {"Scene", &scene}, {"Scripts", &scripts}}, wide);
+            DrawStatsGroup("Frame", frame);
+            DrawStatsGroup("Scene", scene);
+            DrawStatsGroup("Scripts", scripts);
         }
         ImGui::End();
     }

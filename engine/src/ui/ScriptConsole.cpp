@@ -168,6 +168,9 @@ namespace myengine::ui
         ObserveGeneration(services);
         const auto errors = services.errors ? services.errors() : std::vector<scripting::ScriptError>{};
 
+        // The tools row, the well and the input row stack without gaps: a spacing between them would push the
+        // content past the window and bring an outer scrollbar
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
         DrawToolbar(services, errors.size());
         if (showErrors_)
         {
@@ -177,6 +180,7 @@ namespace myengine::ui
         {
             DrawConsole(services, commandsEnabled);
         }
+        ImGui::PopStyleVar();
     }
 
     // Tools row: Console | Errors (N) on the left, auto-scroll / clear / more on the right
@@ -186,7 +190,8 @@ namespace myengine::ui
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(style::kPanel));
-        ImGui::BeginChild("##console_tools", ImVec2(0.0f, style::kPanelToolsHeight), ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::BeginChild("##console_tools", ImVec2(0.0f, style::kPanelToolsHeight), ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
 

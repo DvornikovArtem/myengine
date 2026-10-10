@@ -188,7 +188,8 @@ namespace myengine::ui
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(style::kPanel));
-        ImGui::BeginChild("##assistant_tools", ImVec2(0.0f, style::kPanelToolsHeight), ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::BeginChild("##assistant_tools", ImVec2(0.0f, style::kPanelToolsHeight), ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
 
