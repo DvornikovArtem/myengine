@@ -75,4 +75,24 @@ namespace myengine::ui
         }
         ImGui::End();
     }
+
+    void SceneEditor::BuildAssistantPanel(const SceneEditorWindowContext& windowContext)
+    {
+        (void)windowContext;
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (assistantPanel_ == nullptr)
+        {
+            return;
+        }
+        assistantPanel_->Update(); // pumps the pipe even while the window is hidden
+        if (!editorState.showAssistant)
+        {
+            return;
+        }
+        if (ImGui::Begin(kAssistantWindowName, &editorState.showAssistant))
+        {
+            assistantPanel_->Draw();
+        }
+        ImGui::End();
+    }
 }

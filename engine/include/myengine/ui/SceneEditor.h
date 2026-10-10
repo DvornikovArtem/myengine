@@ -45,6 +45,7 @@ namespace myengine::scene
 
 namespace myengine::ui
 {
+    class AssistantPanel;
     class PrefabInspector;
 
     struct SceneEditorServices
@@ -99,6 +100,7 @@ namespace myengine::ui
         void BuildAssetBrowserPanel(const SceneEditorWindowContext& windowContext);
         void BuildPrefabsPanel(const SceneEditorWindowContext& windowContext);
         void BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext);
+        void BuildAssistantPanel(const SceneEditorWindowContext& windowContext);
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void ValidateSelection() const;
         void CreateDefaultDockLayout(const SceneEditorWindowContext& windowContext);
@@ -127,6 +129,7 @@ namespace myengine::ui
         std::unique_ptr<editor::TransformGizmo> gizmo_;
         std::unique_ptr<PrefabInspector> prefabInspector_;
         std::unique_ptr<ScriptConsole> scriptConsole_;
+        std::unique_ptr<AssistantPanel> assistantPanel_;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;

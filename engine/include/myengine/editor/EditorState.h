@@ -121,6 +121,7 @@ namespace myengine::editor
         bool showAssetBrowser = true;
         bool showPrefabs = true;
         bool showScriptConsole = true;
+        bool showAssistant = true;
         bool showImGuiDemo = false;
         bool selectionLocked = false;
         bool sceneDirty = false;
