@@ -238,6 +238,45 @@ namespace myengine::assistant
         return settings.dump(2);
     }
 
+    std::string ClaudeCliBackend::BuildSettingsJson(const ClaudeCliConfig& config)
+    {
+        if (config.bridge.executable.empty())
+        {
+            return BuildSettingsJson(config.editableGlobs);
+        }
+        // With the bridge every file edit goes through the permission prompt tool (a card in the panel), so no Edit rule is
+        // allowed here: the editor decides. Only the engine's read-only tools run without asking.
+        using json = nlohmann::json;
+        json allow = json::array();
+        for (const auto& tool : config.bridge.allowedTools)
+        {
+            allow.push_back(tool);
+        }
+        json deny = json::array({"Bash", "PowerShell", "WebFetch", "WebSearch", "Edit(./assets/scenes/**)"});
+        const json settings = {{"permissions", {{"allow", allow}, {"deny", deny}}}};
+        return settings.dump(2);
+    }
+
+    std::string ClaudeCliBackend::BuildMcpConfigJson(const ClaudeCliBridge& bridge)
+    {
+        using json = nlohmann::json;
+        std::string pipe;
+        for (const wchar_t c : bridge.pipeName)
+        {
+            pipe += static_cast<char>(c); // the pipe name is ASCII
+        }
+        const json config = {
+            {"mcpServers", {
+                {bridge.serverName, {
+                    {"command", bridge.executable.u8string()},
+                    {"args", json::array({"--pipe", pipe})},
+                    {"env", {{"MYENGINE_BRIDGE_TOKEN", bridge.token}}},
+                }},
+            }},
+        };
+        return config.dump(2);
+    }
+
     bool ClaudeCliBackend::IsValidSessionId(const std::string& sessionId)
     {
         return !sessionId.empty() && sessionId.size() <= 64 && std::all_of(sessionId.begin(), sessionId.end(), [](const char c)
@@ -250,15 +289,28 @@ namespace myengine::assistant
         const std::filesystem::path& executable,
         const ClaudeCliConfig& config,
         const std::filesystem::path& settingsFile,
-        const std::string& sessionId)
+        const std::string& sessionId,
+        const std::filesystem::path& mcpConfigFile)
     {
+        const bool bridge = !config.bridge.executable.empty() && !mcpConfigFile.empty() && !config.bridge.approveTool.empty();
         std::wstring line = Quote(executable.wstring());
         line += L" -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages";
-        // Nobody can answer a permission prompt in -p mode: whatever is not allowed in the settings file is denied
-        line += L" --permission-mode dontAsk";
+        if (bridge)
+        {
+            // Prompts go to the editor through the permission prompt tool and wait for the user's card
+            line += L" --permission-mode default";
+            line += L" --mcp-config " + Quote(mcpConfigFile.wstring());
+            line += L" --strict-mcp-config";
+            line += L" --permission-prompt-tool " + std::wstring(config.bridge.approveTool.begin(), config.bridge.approveTool.end());
+        }
+        else
+        {
+            // Nobody can answer a permission prompt in -p mode: whatever is not allowed in the settings file is denied
+            line += L" --permission-mode dontAsk";
+        }
         line += L" --tools \"Read,Glob,Grep,Edit,Write\"";
         // --tools limits the built-in tools only; connectors of the user's account (claude.ai MCP tools) stay in the context otherwise
-        line += L" --disallowedTools \"mcp__*\"";
+        line += bridge ? L" --disallowedTools \"mcp__claude_ai_*\"" : L" --disallowedTools \"mcp__*\"";
         line += L" --settings " + Quote(settingsFile.wstring());
         if (!config.systemPromptFile.empty() && IsRegularFile(config.systemPromptFile))
         {
@@ -331,15 +383,27 @@ namespace myengine::assistant
         settingsFile_ = config_.stateDirectory / ("settings-" + std::to_string(GetCurrentProcessId()) + ".json");
         {
             std::ofstream settings(settingsFile_, std::ios::binary | std::ios::trunc);
-            settings << BuildSettingsJson(config_.editableGlobs);
+            settings << BuildSettingsJson(config_);
             if (!settings)
             {
                 error = "Could not write the assistant settings file: " + settingsFile_.u8string();
                 return false;
             }
         }
+        mcpConfigFile_.clear();
+        if (!config_.bridge.executable.empty())
+        {
+            mcpConfigFile_ = config_.stateDirectory / ("mcp-" + std::to_string(GetCurrentProcessId()) + ".json");
+            std::ofstream mcp(mcpConfigFile_, std::ios::binary | std::ios::trunc);
+            mcp << BuildMcpConfigJson(config_.bridge);
+            if (!mcp)
+            {
+                error = "Could not write the MCP config file: " + mcpConfigFile_.u8string();
+                return false;
+            }
+        }
 
-        std::wstring commandLine = BuildCommandLine(resolved_, config_, settingsFile_, sessionId);
+        std::wstring commandLine = BuildCommandLine(resolved_, config_, settingsFile_, sessionId, mcpConfigFile_);
         const bool viaShell = HasExtension(resolved_, L".cmd") || HasExtension(resolved_, L".bat");
         if (viaShell)
         {
@@ -533,6 +597,12 @@ namespace myengine::assistant
             std::error_code error;
             std::filesystem::remove(settingsFile_, error);
             settingsFile_.clear();
+        }
+        if (!mcpConfigFile_.empty())
+        {
+            std::error_code error;
+            std::filesystem::remove(mcpConfigFile_, error); // holds the pipe token
+            mcpConfigFile_.clear();
         }
     }
 

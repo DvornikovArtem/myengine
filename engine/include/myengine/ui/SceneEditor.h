@@ -32,6 +32,11 @@ namespace myengine::editor
     class TransformGizmo;
 }
 
+namespace myengine::assistant
+{
+    class AssistantTools;
+}
+
 namespace myengine::resource
 {
     class ResourceManager;
@@ -112,6 +117,7 @@ namespace myengine::ui
         void BuildPrefabsPanel(const SceneEditorWindowContext& windowContext);
         void BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext);
         void BuildAssistantPanel(const SceneEditorWindowContext& windowContext);
+        void InitializeAssistant();
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void ValidateSelection() const;
         void CreateDefaultDockLayout(const SceneEditorWindowContext& windowContext);
@@ -145,6 +151,7 @@ namespace myengine::ui
         std::string pendingOpenScenePath_; // waits for the answer of the unsaved changes prompt
         std::string pinnedMaterialPath_; // a material opened from the Content Browser, shown instead of the selected entity's one
         ecs::EntityId pinnedMaterialEntity_ = ecs::kInvalidEntity; // selection when it was pinned; another selection unpins
+        std::unique_ptr<assistant::AssistantTools> assistantTools_; // before the panel: the panel's bridge calls into it
         std::unique_ptr<AssistantPanel> assistantPanel_;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;

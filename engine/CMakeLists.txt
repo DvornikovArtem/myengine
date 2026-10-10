@@ -1,8 +1,12 @@
 ﻿set(ENGINE_HEADERS
+  include/myengine/assistant/AssistantBridge.h
+  include/myengine/assistant/AssistantBridgeServer.h
   include/myengine/assistant/AssistantService.h
+  include/myengine/assistant/AssistantTools.h
   include/myengine/assistant/ClaudeCliBackend.h
   include/myengine/assistant/ClaudeStreamParser.h
   include/myengine/assistant/IAssistantBackend.h
+  include/myengine/assistant/McpBridgeCore.h
   include/myengine/config/AppConfig.h
   include/myengine/core/Application.h
   include/myengine/core/FileWatcher.h
@@ -71,7 +75,10 @@
 )
 
 set(ENGINE_SOURCES
+  src/assistant/AssistantBridge.cpp
+  src/assistant/AssistantBridgeServer.cpp
   src/assistant/AssistantService.cpp
+  src/assistant/AssistantTools.cpp
   src/assistant/ClaudeCliBackend.cpp
   src/assistant/ClaudeStreamParser.cpp
   src/config/AppConfig.cpp
@@ -117,6 +124,7 @@ set(ENGINE_SOURCES
   src/ui/AssistantPanel.cpp
   src/ui/editor/SceneEditor.cpp
   src/ui/editor/SceneEditorAssets.cpp
+  src/ui/editor/SceneEditorAssistant.cpp
   src/ui/editor/SceneEditorDetails.cpp
   src/ui/editor/SceneEditorInternal.h
   src/ui/editor/SceneEditorOutliner.cpp

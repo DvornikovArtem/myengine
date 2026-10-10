@@ -152,5 +152,18 @@ add_executable(myengine_assistant_live
   assistant/AssistantLive.cpp)
 
 target_link_libraries(myengine_assistant_live PRIVATE myengine_engine)
+add_dependencies(myengine_assistant_live myengine_mcp)
 myengine_apply_compiler_options(myengine_assistant_live)
 set_property(TARGET myengine_assistant_live PROPERTY FOLDER "Tests")
+
+# AI2: engine tools, MCP bridge (the real myengine_mcp.exe over a named pipe), confirmations
+add_executable(myengine_assistant_bridge_tests
+  assistant/AssistantBridgeTests.cpp)
+
+target_link_libraries(myengine_assistant_bridge_tests PRIVATE myengine_engine)
+target_include_directories(myengine_assistant_bridge_tests SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+add_dependencies(myengine_assistant_bridge_tests myengine_mcp myengine_fake_claude)
+myengine_apply_compiler_options(myengine_assistant_bridge_tests)
+set_property(TARGET myengine_assistant_bridge_tests PROPERTY FOLDER "Tests")
+add_test(NAME assistant_bridge COMMAND myengine_assistant_bridge_tests)
+set_tests_properties(assistant_bridge PROPERTIES TIMEOUT 120)

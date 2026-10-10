@@ -17,6 +17,17 @@ namespace myengine::core
 
 namespace myengine::assistant
 {
+    // The editor's MCP bridge (myengine_mcp.exe): engine tools and confirmations. Without it the CLI only edits files
+    struct ClaudeCliBridge
+    {
+        std::filesystem::path executable; // empty: bridge disabled
+        std::wstring pipeName;
+        std::string token;
+        std::string serverName = "myengine";
+        std::vector<std::string> allowedTools; // full MCP names the CLI may call without asking (the read-only ones)
+        std::string approveTool;               // full MCP name of the permission prompt tool
+    };
+
     struct ClaudeCliConfig
     {
         // Explicit path to claude(.exe/.cmd). Empty: MYENGINE_CLAUDE_PATH, then PATH, then the usual install folders
@@ -29,6 +40,7 @@ namespace myengine::assistant
         std::filesystem::path stateDirectory;
         // Folders (relative to workingDirectory) the assistant may edit. Everything else is read-only
         std::vector<std::string> editableGlobs{"assets/scripts/**", "assets/prefabs/**"};
+        ClaudeCliBridge bridge;
         std::string model; // empty: the CLI's default
         double maxBudgetUsd = 2.0; // per turn; 0 disables the flag
         int maxTurns = 40;
@@ -61,11 +73,14 @@ namespace myengine::assistant
         // Pure helpers, covered by tests without starting a process
         static std::filesystem::path FindExecutable(const std::filesystem::path& override, std::string& problem);
         static std::string BuildSettingsJson(const std::vector<std::string>& editableGlobs);
+        static std::string BuildSettingsJson(const ClaudeCliConfig& config);
+        static std::string BuildMcpConfigJson(const ClaudeCliBridge& bridge);
         static std::wstring BuildCommandLine(
             const std::filesystem::path& executable,
             const ClaudeCliConfig& config,
             const std::filesystem::path& settingsFile,
-            const std::string& sessionId);
+            const std::string& sessionId,
+            const std::filesystem::path& mcpConfigFile = {});
         static std::string BuildUserMessageLine(const std::string& prompt);
         static bool IsValidSessionId(const std::string& sessionId);
 
@@ -79,6 +94,7 @@ namespace myengine::assistant
         ClaudeCliConfig config_;
         std::filesystem::path resolved_;
         std::filesystem::path settingsFile_;
+        std::filesystem::path mcpConfigFile_;
         std::unique_ptr<Process> process_;
         ClaudeStreamParser parser_;
         std::string outputBuffer_;
