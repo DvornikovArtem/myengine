@@ -259,6 +259,21 @@ namespace myengine::core
         };
         sceneEditorServices.captureSceneSnapshot = [this]() { return CaptureSceneSnapshot(); };
         sceneEditorServices.restoreSceneSnapshot = [this](std::string_view snapshot) { return RestoreSceneSnapshot(snapshot); };
+        sceneEditorServices.isVSyncEnabled = [this]() { return renderAdapter_ != nullptr && renderAdapter_->IsVSyncEnabled(); };
+        sceneEditorServices.setVSync = [this](const bool enabled)
+        {
+            if (renderAdapter_ != nullptr)
+            {
+                renderAdapter_->SetVSync(enabled);
+            }
+        };
+        sceneEditorServices.setWireframe = [this](const bool enabled)
+        {
+            if (renderAdapter_ != nullptr)
+            {
+                renderAdapter_->SetWireframe(enabled);
+            }
+        };
         sceneEditorServices.reloadScripts = [this]()
         {
             if (scriptSystem_ != nullptr)

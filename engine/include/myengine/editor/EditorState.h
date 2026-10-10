@@ -93,7 +93,8 @@ namespace myengine::editor
     struct WindowEditorState
     {
         ViewportRect viewport{};
-        ViewportRect viewportToolbar{};
+        ViewportRect viewportToolbar{};      // bounds of the left group of the viewport toolbar
+        ViewportRect viewportToolbarRight{}; // bounds of the right group; the gap between them stays clickable for the scene
         bool viewportHovered = false;
         bool viewportFocused = false;
         bool viewportAcceptsCameraNavigation = false;
@@ -123,6 +124,8 @@ namespace myengine::editor
         bool showScriptConsole = true;
         bool showAssistant = true;
         bool showImGuiDemo = false;
+        bool showStatsOverlay = true;   // FPS / ms in the corner of the viewport (viewport toolbar > Show)
+        bool viewportWireframe = false; // view mode Wireframe (viewport toolbar > Lit)
         bool showProjectBrowser = false; // the Project Browser window (File > Open Project, --project-browser)
         std::string mapPath; // the open map as a project path ("Maps/Main.json")
         bool selectionLocked = false;
@@ -155,6 +158,7 @@ namespace myengine::editor
             windowState.gizmoActive = false;
             windowState.viewport = {};
             windowState.viewportToolbar = {};
+            windowState.viewportToolbarRight = {};
         }
     };
 }
