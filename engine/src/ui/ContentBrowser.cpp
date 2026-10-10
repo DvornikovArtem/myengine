@@ -667,12 +667,13 @@ namespace myengine::ui
             DrawIcon(drawList, IconSize::Chevron12, open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT, ImVec2(nodeX + 9.0f, centerY), style::kTextDim);
         }
 
+        // folder-open only for the root and the current folder; every folder keeps the folder type colour
         DrawIcon(
             drawList,
             IconSize::Row14,
-            (isRoot || open || selected) ? ICON_FOLDER_OPEN : ICON_FOLDER,
+            (isRoot || selected) ? ICON_FOLDER_OPEN : ICON_FOLDER,
             ImVec2(nodeX + 29.0f, centerY),
-            selected ? style::kTextStrong : style::kTypeFolder);
+            style::kTypeFolder);
 
         ImFont* font = nullptr;
         float size = 0.0f;

@@ -323,19 +323,14 @@ namespace myengine::ui
                 const float buttonWidth = 104.0f;
                 const float textRight = start.x + available - (pinned ? buttonWidth + 8.0f : 0.0f);
 
-                PushFontRole(FontRole::Strong);
-                ImFont* nameFont = ImGui::GetFont();
-                const float nameSize = ImGui::GetFontSize();
-                PopFontRole();
-                PushFontRole(FontRole::Secondary);
-                ImFont* pathFont = ImGui::GetFont();
-                const float pathSize = ImGui::GetFontSize();
-                PopFontRole();
-
                 const float textX = start.x + squareSize + 8.0f;
                 drawList->PushClipRect(ImVec2(textX, start.y - 2.0f), ImVec2(textRight, start.y + squareSize + 2.0f), true);
-                drawList->AddText(nameFont, nameSize, ImVec2(textX, start.y - 1.0f), style::kTextStrong, AssetName(materialPath).c_str());
-                drawList->AddText(pathFont, pathSize, ImVec2(textX, start.y + 15.0f), style::kTextDim, materialPath.c_str());
+                PushFontRole(FontRole::Strong); // the name is SemiBold 14
+                drawList->AddText(ImVec2(textX, start.y - 1.0f), style::kTextStrong, AssetName(materialPath).c_str());
+                PopFontRole();
+                PushFontRole(FontRole::Secondary);
+                drawList->AddText(ImVec2(textX, start.y + 15.0f), style::kTextDim, materialPath.c_str());
+                PopFontRole();
                 drawList->PopClipRect();
 
                 if (pinned)
