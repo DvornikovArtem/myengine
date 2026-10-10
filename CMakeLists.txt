@@ -151,7 +151,7 @@ target_include_directories(myengine_python SYSTEM
 target_link_libraries(myengine_python INTERFACE myengine_python_lib)
 
 add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
-target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE> $<$<CONFIG:RelWithDebInfo>:TRACY_FIBERS>)
+target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE> $<$<CONFIG:RelWithDebInfo>:TRACY_FIBERS> $<$<CONFIG:RelWithDebInfo>:TRACY_ON_DEMAND>)
 add_subdirectory(engine)
 add_subdirectory(app)
 
