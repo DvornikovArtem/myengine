@@ -232,18 +232,18 @@ namespace myengine::ui
             ImGui::OpenPopup(kMorePopup);
         }
         ImGui::SetNextWindowPos(ImVec2(morePosition.x + buttonSize, morePosition.y + buttonSize + 2.0f), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-        if (ImGui::BeginPopup(kMorePopup))
+        if (BeginMenuPopup(kMorePopup))
         {
             if (showErrors_)
             {
-                if (ImGui::MenuItem(ICON_TRASH_2 "  Clear Errors", nullptr, false, services.clearErrors != nullptr))
+                if (MenuItemIcon(ICON_TRASH_2, "Clear Errors", nullptr, false, services.clearErrors != nullptr, false, 180.0f))
                 {
                     services.clearErrors();
                 }
             }
             else
             {
-                if (ImGui::MenuItem(ICON_ROTATE_CCW "  Reset Python..."))
+                if (MenuItemIcon(ICON_ROTATE_CCW, "Reset Python...", nullptr, false, true, false, 180.0f))
                 {
                     Reset(services);
                 }

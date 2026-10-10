@@ -668,12 +668,18 @@ namespace myengine::ui
         bool submit = ImGui::InputTextMultiline("##assistant_input", &input_, size, flags);
         ImGui::PopStyleVar();
         const ImVec2 inputMin = ImGui::GetItemRectMin();
+        const ImVec2 inputMax = ImGui::GetItemRectMax();
         FocusOutline();
-        if (input_.empty() && !ImGui::IsItemActive())
+        // The multiline input is a child window drawn after its parent, so the placeholder goes to the foreground list
+        // (clipped to the field, skipped while a popup could cover it)
+        if (input_.empty() && !ImGui::IsItemActive() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
         {
             PushFontRole(FontRole::Body);
-            ImGui::GetWindowDrawList()->AddText(ImVec2(inputMin.x + 10.0f, inputMin.y + 8.0f), style::kTextDim,
-                                                "Ask about the project or request a change... (Enter: send, Ctrl+Enter: new line)");
+            ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+            foreground->PushClipRect(inputMin, inputMax, true);
+            foreground->AddText(ImVec2(inputMin.x + 10.0f, inputMin.y + 8.0f), style::kTextDim,
+                                "Ask about the project or request a change... (Enter: send, Ctrl+Enter: new line)");
+            foreground->PopClipRect();
             PopFontRole();
         }
 
