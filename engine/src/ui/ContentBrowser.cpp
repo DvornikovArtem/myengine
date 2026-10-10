@@ -15,14 +15,18 @@
 
 #include <myengine/ui/ContentBrowser.h>
 
+#include "editor/EditorWidgets.h"
+
 namespace myengine::ui
 {
     namespace
     {
         constexpr int kMaxTreeDepth = 8;
         constexpr std::size_t kMaxVisibleEntries = 1000;
-        constexpr float kMinTileSize = 56.0f;
+        constexpr float kMinTileSize = 72.0f;
         constexpr float kMaxTileSize = 160.0f;
+        constexpr float kToolsHeight = 36.0f; // spec 5.4: the tools row
+        constexpr float kFooterHeight = 24.0f; // "N items (1 selected)"
 
         namespace fs = std::filesystem;
 
@@ -42,39 +46,39 @@ namespace myengine::ui
             return text.size() >= tail.size() && text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
         }
 
-        // Each type gets its own stripe colour, like Unreal's asset tiles
+        // Each type has its own colour and icon (spec 2.1), like Unreal's asset tiles
         ImU32 KindColor(const ContentKind kind)
         {
             switch (kind)
             {
-                case ContentKind::Folder: return IM_COL32(222, 170, 70, 255);
-                case ContentKind::Scene: return IM_COL32(164, 108, 214, 255);
-                case ContentKind::Script: return IM_COL32(86, 190, 110, 255);
-                case ContentKind::Prefab: return IM_COL32(70, 190, 214, 255);
-                case ContentKind::Material: return IM_COL32(226, 96, 84, 255);
-                case ContentKind::Mesh: return IM_COL32(86, 140, 230, 255);
-                case ContentKind::Texture: return IM_COL32(230, 150, 70, 255);
-                case ContentKind::Shader: return IM_COL32(228, 112, 170, 255);
+                case ContentKind::Folder: return style::kTypeFolder;
+                case ContentKind::Scene: return style::kTypeScene;
+                case ContentKind::Script: return style::kTypeScript;
+                case ContentKind::Prefab: return style::kTypePrefab;
+                case ContentKind::Material: return style::kTypeMaterial;
+                case ContentKind::Mesh: return style::kTypeMesh;
+                case ContentKind::Texture: return style::kTypeTexture;
+                case ContentKind::Shader: return style::kTypeShader;
                 case ContentKind::Other: break;
             }
-            return IM_COL32(130, 138, 150, 255);
+            return style::kTypeOther;
         }
 
-        const char* KindTag(const ContentKind kind)
+        const char* KindIcon(const ContentKind kind)
         {
             switch (kind)
             {
-                case ContentKind::Folder: return "";
-                case ContentKind::Scene: return "SCENE";
-                case ContentKind::Script: return "PY";
-                case ContentKind::Prefab: return "PREFAB";
-                case ContentKind::Material: return "MAT";
-                case ContentKind::Mesh: return "MESH";
-                case ContentKind::Texture: return "TEX";
-                case ContentKind::Shader: return "SHADER";
+                case ContentKind::Folder: return ICON_FOLDER;
+                case ContentKind::Scene: return ICON_MAP;
+                case ContentKind::Script: return ICON_FILE_CODE;
+                case ContentKind::Prefab: return ICON_PACKAGE;
+                case ContentKind::Material: return ICON_PALETTE;
+                case ContentKind::Mesh: return ICON_BOX;
+                case ContentKind::Texture: return ICON_IMAGE;
+                case ContentKind::Shader: return ICON_CODE_XML;
                 case ContentKind::Other: break;
             }
-            return "FILE";
+            return ICON_FILE;
         }
 
         const char* KindName(const ContentKind kind)
@@ -82,7 +86,7 @@ namespace myengine::ui
             switch (kind)
             {
                 case ContentKind::Folder: return "Folder";
-                case ContentKind::Scene: return "Scene";
+                case ContentKind::Scene: return "Map";
                 case ContentKind::Script: return "Script";
                 case ContentKind::Prefab: return "Prefab";
                 case ContentKind::Material: return "Material";
@@ -92,6 +96,87 @@ namespace myengine::ui
                 case ContentKind::Other: break;
             }
             return "File";
+        }
+
+        // The font and size of a role, for ImDrawList::AddText (which takes both explicitly)
+        void RoleFontOf(const FontRole role, ImFont*& font, float& size)
+        {
+            PushFontRole(role);
+            font = ImGui::GetFont();
+            size = ImGui::GetFontSize();
+            PopFontRole();
+        }
+
+        float RoleTextWidth(const FontRole role, const char* text)
+        {
+            PushFontRole(role);
+            const float width = ImGui::CalcTextSize(text).x;
+            PopFontRole();
+            return width;
+        }
+
+        // Next UTF-8 character boundary after `index`
+        std::size_t NextCharacter(const std::string& text, std::size_t index)
+        {
+            ++index;
+            while (index < text.size() && (static_cast<unsigned char>(text[index]) & 0xC0) == 0x80)
+            {
+                ++index;
+            }
+            return index;
+        }
+
+        // Splits a file name into at most two lines by characters (names have no spaces to wrap at);
+        // the end of the second line gets "..." when it does not fit
+        void WrapName(ImFont* font, const float size, const std::string& name, const float maxWidth, std::string& line1, std::string& line2)
+        {
+            line1.clear();
+            line2.clear();
+            const auto width = [&](const std::string& text)
+            {
+                return font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str()).x;
+            };
+
+            if (width(name) <= maxWidth)
+            {
+                line1 = name;
+                return;
+            }
+
+            std::size_t position = 0;
+            while (position < name.size())
+            {
+                const std::size_t next = NextCharacter(name, position);
+                if (width(name.substr(0, next)) > maxWidth)
+                {
+                    break;
+                }
+                position = next;
+            }
+            if (position == 0)
+            {
+                position = NextCharacter(name, 0);
+            }
+            line1 = name.substr(0, position);
+
+            const std::string rest = name.substr(position);
+            if (width(rest) <= maxWidth)
+            {
+                line2 = rest;
+                return;
+            }
+
+            std::size_t end = 0;
+            while (end < rest.size())
+            {
+                const std::size_t next = NextCharacter(rest, end);
+                if (width(rest.substr(0, next) + "...") > maxWidth)
+                {
+                    break;
+                }
+                end = next;
+            }
+            line2 = rest.substr(0, end) + "...";
         }
 
         std::string StemWithoutSuffix(const std::string& fileName, const char* suffix)
@@ -540,34 +625,73 @@ namespace myengine::ui
             });
     }
 
-    void ContentBrowser::DrawTree(const FolderNode& node, const bool isRoot)
+    void ContentBrowser::DrawTree(const FolderNode& node, const bool isRoot, const bool panelFocused)
     {
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
-        if (node.children.empty())
-        {
-            flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-        }
-        if (node.relative == currentFolder_)
-        {
-            flags |= ImGuiTreeNodeFlags_Selected;
-        }
+        const bool hasChildren = !node.children.empty();
+        const bool selected = node.relative == currentFolder_;
+
+        ImGuiTreeNodeFlags flags =
+            ImGuiTreeNodeFlags_OpenOnArrow |
+            ImGuiTreeNodeFlags_SpanFullWidth |
+            ImGuiTreeNodeFlags_FramePadding |
+            (selected ? ImGuiTreeNodeFlags_Selected : 0) |
+            (!hasChildren ? ImGuiTreeNodeFlags_Leaf : 0);
         if (isRoot)
         {
             ImGui::SetNextItemOpen(true, ImGuiCond_Once);
         }
 
-        const std::string label = node.name + "##tree_" + node.relative;
-        const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+        // The node gives the row (hit area, hover, selection); its arrow and text are drawn below
+        const float nodeX = ImGui::GetCursorScreenPos().x;
+        const std::string id = "##tree_" + node.relative;
+        PushSelectionColors(panelFocused);
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, (style::kRowHeight - ImGui::GetFontSize()) * 0.5f));
+        const bool open = ImGui::TreeNodeEx(id.c_str(), flags);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        PopSelectionColors();
+
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen())
         {
             OpenFolder(node.relative);
         }
 
-        if (open && !node.children.empty())
+        const ImVec2 rowMin = ImGui::GetItemRectMin();
+        const ImVec2 rowMax = ImGui::GetItemRectMax();
+        const float centerY = std::floor((rowMin.y + rowMax.y) * 0.5f);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        if (hasChildren)
+        {
+            DrawIcon(drawList, IconSize::Chevron12, open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT, ImVec2(nodeX + 9.0f, centerY), style::kTextDim);
+        }
+
+        // folder-open only for the root and the current folder; every folder keeps the folder type colour
+        DrawIcon(
+            drawList,
+            IconSize::Row14,
+            (isRoot || selected) ? ICON_FOLDER_OPEN : ICON_FOLDER,
+            ImVec2(nodeX + 29.0f, centerY),
+            style::kTypeFolder);
+
+        ImFont* font = nullptr;
+        float size = 0.0f;
+        RoleFontOf(isRoot ? FontRole::Strong : FontRole::Body, font, size);
+        drawList->PushClipRect(ImVec2(nodeX, rowMin.y), ImVec2(rowMax.x - 4.0f, rowMax.y), true);
+        drawList->AddText(
+            font,
+            size,
+            ImVec2(nodeX + 42.0f, std::floor(centerY - size * 0.5f)),
+            (selected || isRoot) ? style::kTextStrong : style::kText,
+            node.name.c_str());
+        drawList->PopClipRect();
+
+        if (open)
         {
             for (const auto& child : node.children)
             {
-                DrawTree(child, false);
+                DrawTree(child, false, panelFocused);
             }
             ImGui::TreePop();
         }
@@ -575,85 +699,108 @@ namespace myengine::ui
 
     void ContentBrowser::DrawTile(const ContentEntry& entry, const float tileSize, const ContentBrowserHooks& hooks)
     {
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        const float labelHeight = ImGui::GetTextLineHeight() * 2.0f + 6.0f;
+        const float previewSize = tileSize - 12.0f;
+        const float tileHeight = previewSize + 55.0f;
+        const bool isFolder = entry.kind == ContentKind::Folder;
 
-        ImGui::InvisibleButton("##tile", ImVec2(tileSize, tileSize + labelHeight));
+        ImGui::InvisibleButton("##tile", ImVec2(tileSize, tileHeight));
         const bool hovered = ImGui::IsItemHovered();
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left) || ImGui::IsItemClicked(ImGuiMouseButton_Right))
         {
             selectedPath_ = entry.path;
         }
+        Tooltip(entry.path.c_str(), nullptr, KindName(entry.kind));
+
+        // The source tile is dimmed while its own drag is in progress
+        float alpha = 1.0f;
+        if (const ImGuiPayload* payload = ImGui::GetDragDropPayload();
+            payload != nullptr && payload->Data != nullptr && payload->DataSize > 0 &&
+            entry.path == static_cast<const char*>(payload->Data))
+        {
+            alpha = 0.45f;
+        }
+        const auto faded = [alpha](const ImU32 color) { return alpha < 1.0f ? style::WithAlpha(color, alpha) : color; };
 
         const bool selected = selectedPath_ == entry.path;
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
-        const ImU32 background = selected
-            ? ImGui::GetColorU32(ImGuiCol_Header)
-            : (hovered ? ImGui::GetColorU32(ImGuiCol_FrameBgHovered) : ImGui::GetColorU32(ImGuiCol_FrameBg));
-        drawList->AddRectFilled(min, max, background, 5.0f);
-        if (selected)
-        {
-            drawList->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_CheckMark), 5.0f, 0, 1.5f);
-        }
+        const ImU32 typeColor = KindColor(entry.kind);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-        // Thumbnail area: a dark plate, the type stripe along its bottom edge and the type tag in the middle
-        const float inset = 6.0f;
-        const ImVec2 plateMin(min.x + inset, min.y + inset);
-        const ImVec2 plateMax(max.x - inset, min.y + tileSize - inset);
-        const ImU32 kindColor = KindColor(entry.kind);
-        drawList->AddRectFilled(plateMin, plateMax, IM_COL32(22, 25, 31, 255), 4.0f);
-        drawList->AddRectFilled(
-            ImVec2(plateMin.x, plateMax.y - 5.0f),
-            plateMax,
-            kindColor,
-            4.0f,
-            ImDrawFlags_RoundCornersBottom);
+        ImFont* nameFont = nullptr;
+        float nameSize = 0.0f;
+        RoleFontOf(FontRole::Secondary, nameFont, nameSize);
+        ImFont* typeFont = nullptr;
+        float typeSize = 0.0f;
+        RoleFontOf(FontRole::Tiny, typeFont, typeSize);
 
-        if (entry.kind == ContentKind::Folder)
+        if (isFolder)
         {
-            const ImVec2 center((plateMin.x + plateMax.x) * 0.5f, (plateMin.y + plateMax.y) * 0.5f - 3.0f);
-            const float half = (plateMax.x - plateMin.x) * 0.28f;
-            drawList->AddRectFilled(
-                ImVec2(center.x - half, center.y - half * 0.75f),
-                ImVec2(center.x - half * 0.1f, center.y - half * 0.4f),
-                kindColor,
-                2.0f);
-            drawList->AddRectFilled(
-                ImVec2(center.x - half, center.y - half * 0.5f),
-                ImVec2(center.x + half, center.y + half * 0.7f),
-                kindColor,
-                3.0f);
+            // No card: a big folder icon, the name and "Folder" under it; the highlight is a 100 px high zone
+            const ImVec2 zoneMax(max.x, min.y + std::min(100.0f, tileHeight));
+            if (selected)
+            {
+                drawList->AddRectFilled(min, zoneMax, style::kSelectTileFill, style::kRounding);
+                drawList->AddRect(min, zoneMax, style::kPrimary, style::kRounding, 0, 2.0f);
+            }
+            else if (hovered)
+            {
+                drawList->AddRectFilled(min, zoneMax, style::kControl, style::kRounding);
+            }
+
+            const float centerX = (min.x + max.x) * 0.5f;
+            DrawIcon(drawList, IconSize::Folder58, ICON_FOLDER, ImVec2(centerX, min.y + 34.0f), faded(typeColor));
+
+            // One line, centred: cut at the tile width and end with "..."
+            std::string oneLine = entry.name;
+            const float maxNameWidth = tileSize - 12.0f;
+            if (nameFont->CalcTextSizeA(nameSize, FLT_MAX, 0.0f, oneLine.c_str()).x > maxNameWidth)
+            {
+                while (!oneLine.empty() &&
+                       nameFont->CalcTextSizeA(nameSize, FLT_MAX, 0.0f, (oneLine + "...").c_str()).x > maxNameWidth)
+                {
+                    oneLine.pop_back();
+                }
+                oneLine += "...";
+            }
+            const float nameWidth = nameFont->CalcTextSizeA(nameSize, FLT_MAX, 0.0f, oneLine.c_str()).x;
+            drawList->AddText(nameFont, nameSize, ImVec2(std::floor(centerX - nameWidth * 0.5f), min.y + 66.0f), faded(style::kTextStrong), oneLine.c_str());
+            const char* typeText = "Folder";
+            const float typeWidth = typeFont->CalcTextSizeA(typeSize, FLT_MAX, 0.0f, typeText).x;
+            drawList->AddText(typeFont, typeSize, ImVec2(std::floor(centerX - typeWidth * 0.5f), min.y + 83.0f), faded(style::kTextDim), typeText);
         }
         else
         {
-            const char* tag = KindTag(entry.kind);
-            ImFont* font = ImGui::GetFont();
-            const float fontSize = ImGui::GetFontSize() * 1.2f;
-            const ImVec2 tagSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, tag);
-            drawList->AddText(
-                font,
-                fontSize,
-                ImVec2((plateMin.x + plateMax.x - tagSize.x) * 0.5f, (plateMin.y + plateMax.y - tagSize.y) * 0.5f - 3.0f),
-                kindColor,
-                tag);
-        }
+            const ImU32 cardFill = selected ? style::kSelectTileFill : (hovered ? style::kControl : style::kPanel);
+            drawList->AddRectFilled(min, max, faded(cardFill), style::kRounding);
+            if (selected)
+            {
+                drawList->AddRect(min, max, faded(style::kPrimary), style::kRounding, 0, 2.0f);
+            }
 
-        // Name: up to two lines, clipped to the tile
-        drawList->PushClipRect(ImVec2(min.x + 3.0f, min.y + tileSize), ImVec2(max.x - 3.0f, max.y), true);
-        drawList->AddText(
-            ImGui::GetFont(),
-            ImGui::GetFontSize(),
-            ImVec2(min.x + 6.0f, min.y + tileSize + 1.0f),
-            ImGui::GetColorU32(ImGuiCol_Text),
-            entry.name.c_str(),
-            nullptr,
-            tileSize - 12.0f);
-        drawList->PopClipRect();
+            // Preview: a dark plate with the type icon, and the 3 px type stripe under it
+            const ImVec2 previewMin(min.x + 6.0f, min.y + 6.0f);
+            const ImVec2 previewMax(max.x - 6.0f, min.y + 6.0f + previewSize);
+            drawList->AddRectFilled(previewMin, previewMax, faded(style::kViewportBackdrop), 3.0f, ImDrawFlags_RoundCornersTop);
+            drawList->AddRectFilled(ImVec2(previewMin.x, previewMax.y), ImVec2(previewMax.x, previewMax.y + style::kTileStripe), faded(typeColor));
+            DrawIcon(
+                drawList,
+                IconSize::Tile40,
+                KindIcon(entry.kind),
+                ImVec2((previewMin.x + previewMax.x) * 0.5f, (previewMin.y + previewMax.y) * 0.5f),
+                faded(typeColor));
 
-        if (hovered && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
-        {
-            ImGui::SetTooltip("%s\n%s", entry.path.c_str(), KindName(entry.kind));
+            // Name: up to two lines wrapped by characters, then the type, dim, pinned to the bottom
+            std::string line1;
+            std::string line2;
+            WrapName(nameFont, nameSize, entry.name, tileSize - 16.0f, line1, line2);
+            const float nameTop = previewMax.y + style::kTileStripe + 3.0f;
+            drawList->AddText(nameFont, nameSize, ImVec2(min.x + 8.0f, nameTop), faded(style::kTextStrong), line1.c_str());
+            if (!line2.empty())
+            {
+                drawList->AddText(nameFont, nameSize, ImVec2(min.x + 8.0f, nameTop + 14.0f), faded(style::kTextStrong), line2.c_str());
+            }
+            drawList->AddText(typeFont, typeSize, ImVec2(min.x + 8.0f, max.y - typeSize - 2.0f), faded(style::kTextDim), KindName(entry.kind));
         }
 
         const char* payloadType = nullptr;
@@ -668,10 +815,14 @@ namespace myengine::ui
         if (payloadType != nullptr && ImGui::BeginDragDropSource())
         {
             ImGui::SetDragDropPayload(payloadType, entry.path.c_str(), entry.path.size() + 1u);
-            ImGui::TextUnformatted(entry.path.c_str());
+            // The drag preview: the type icon and the name
+            ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(typeColor));
+            ImGui::TextUnformatted(KindIcon(entry.kind));
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::TextUnformatted(entry.name.c_str());
             ImGui::EndDragDropSource();
         }
-
     }
 
     void ContentBrowser::Draw(const ContentBrowserHooks& hooks)
@@ -690,119 +841,241 @@ namespace myengine::ui
         }
         wasFocused_ = focused;
 
-        if (ImGui::Button("Refresh"))
-        {
-            Refresh();
-        }
+        // Edge to edge: the tools row, the two wells and the footer lay themselves out
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const ImVec2 region = ImGui::GetContentRegionAvail();
+        const float width = std::max(region.x, 160.0f);
+        const float height = std::max(region.y, kToolsHeight + kFooterHeight + 40.0f);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-        const std::vector<std::string> crumbs = GetBreadcrumbs();
-        std::string navigateTo;
-        bool navigate = false;
-        for (std::size_t index = 0; index < crumbs.size(); ++index)
+        // ---- 1. Tools row: Refresh | breadcrumbs ...... search, View Options
         {
-            ImGui::SameLine();
-            if (index > 0)
+            const float centerY = origin.y + kToolsHeight * 0.5f;
+            const float buttonY = origin.y + (kToolsHeight - style::kPanelIconButton) * 0.5f;
+            float x = origin.x + 8.0f;
+
+            ImGui::SetCursorScreenPos(ImVec2(x, buttonY));
+            if (IconButton("##content_refresh", ICON_REFRESH_CW, "Refresh"))
             {
-                ImGui::TextDisabled(">");
-                ImGui::SameLine();
+                Refresh();
             }
+            x += style::kPanelIconButton + 8.0f;
+            drawList->AddLine(ImVec2(x, origin.y + 10.0f), ImVec2(x, origin.y + kToolsHeight - 10.0f), style::kBorderLight, 1.0f);
+            x += 10.0f;
 
-            ImGui::PushID(static_cast<int>(index));
-            if (ImGui::SmallButton(crumbs[index].c_str()))
+            const float searchWidth = std::min(260.0f, std::max(width * 0.3f, 120.0f));
+            const float settingsX = origin.x + width - 8.0f - style::kPanelIconButton;
+            const float searchX = settingsX - 6.0f - searchWidth;
+            const float crumbsRight = searchX - 12.0f;
+
+            ImFont* bodyFont = nullptr;
+            float bodySize = 0.0f;
+            RoleFontOf(FontRole::Body, bodyFont, bodySize);
+
+            const std::vector<std::string> crumbs = GetBreadcrumbs();
+            std::string navigateTo;
+            bool navigate = false;
+            for (std::size_t index = 0; index < crumbs.size(); ++index)
             {
-                navigate = true;
-                navigateTo.clear();
-                for (std::size_t part = 1; part <= index; ++part)
+                const bool last = index + 1 == crumbs.size();
+                if (index > 0)
                 {
-                    navigateTo += (part > 1 ? "/" : "") + crumbs[part];
+                    DrawIcon(drawList, IconSize::Chevron12, ICON_CHEVRON_RIGHT, ImVec2(x + 6.0f, centerY), style::kTextDim);
+                    x += 14.0f;
                 }
+
+                const float iconWidth = index == 0 ? 20.0f : 0.0f;
+                const float partWidth = iconWidth + RoleTextWidth(FontRole::Body, crumbs[index].c_str()) + 12.0f;
+                if (x + partWidth > crumbsRight)
+                {
+                    break; // too narrow: the rest of the path is cut off
+                }
+
+                ImGui::SetCursorScreenPos(ImVec2(x, buttonY));
+                ImGui::PushID(static_cast<int>(index));
+                const bool pressed = ImGui::InvisibleButton("##crumb", ImVec2(partWidth, style::kPanelIconButton));
+                const bool hovered = ImGui::IsItemHovered();
+                ImGui::PopID();
+                if (hovered)
+                {
+                    drawList->AddRectFilled(ImVec2(x, buttonY), ImVec2(x + partWidth, buttonY + style::kPanelIconButton), style::kControl, style::kRounding);
+                }
+                if (index == 0)
+                {
+                    DrawIcon(drawList, IconSize::Row14, last ? ICON_FOLDER_OPEN : ICON_FOLDER, ImVec2(x + 13.0f, centerY), style::kTypeFolder);
+                }
+                drawList->AddText(
+                    bodyFont,
+                    bodySize,
+                    ImVec2(x + 6.0f + iconWidth, std::floor(centerY - bodySize * 0.5f)),
+                    last ? style::kTextStrong : style::kText,
+                    crumbs[index].c_str());
+
+                if (pressed)
+                {
+                    navigate = true;
+                    navigateTo.clear();
+                    for (std::size_t part = 1; part <= index; ++part)
+                    {
+                        navigateTo += (part > 1 ? "/" : "") + crumbs[part];
+                    }
+                }
+                x += partWidth + 2.0f;
             }
-            ImGui::PopID();
-        }
-        if (navigate)
-        {
-            OpenFolder(navigateTo);
+            if (navigate)
+            {
+                OpenFolder(navigateTo);
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(searchX, origin.y + (kToolsHeight - style::kFrameHeight) * 0.5f));
+            std::string searchText = search_;
+            const std::string hint = "Search " + (currentFolder_.empty() ? rootLabel_ : fs::u8path(currentFolder_).filename().u8string());
+            if (SearchField("##content_search", &searchText, hint.c_str(), searchWidth))
+            {
+                SetSearch(searchText);
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(settingsX, buttonY));
+            if (IconButton("##content_view_options", ICON_SETTINGS, "View Options"))
+            {
+                ImGui::OpenPopup("##content_view_options_popup");
+            }
+            if (ImGui::BeginPopup("##content_view_options_popup"))
+            {
+                ImGui::TextUnformatted("Tile Size");
+                ImGui::SetNextItemWidth(180.0f);
+                ImGui::SliderFloat("##tile_size", &tileSize_, kMinTileSize, kMaxTileSize, "%.0f");
+                ImGui::EndPopup();
+            }
         }
 
-        std::string searchText = search_;
-        const float sliderWidth = 120.0f;
-        ImGui::SetNextItemWidth(std::max(ImGui::GetContentRegionAvail().x - sliderWidth - ImGui::GetStyle().ItemSpacing.x, 80.0f));
-        if (ImGui::InputTextWithHint("##content_search", "Search by name", &searchText))
-        {
-            SetSearch(searchText);
-        }
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(sliderWidth);
-        ImGui::SliderFloat("##content_tile_size", &tileSize_, kMinTileSize, kMaxTileSize, "Size %.0f");
+        // ---- 2. Sources tree and the tiles
+        const float bodyTop = origin.y + kToolsHeight;
+        const float bodyHeight = std::max(height - kToolsHeight - kFooterHeight, 40.0f);
+        const float treeWidth = std::clamp(width * 0.2f, 140.0f, 230.0f);
 
-        const float treeWidth = std::clamp(ImGui::GetContentRegionAvail().x * 0.24f, 120.0f, 260.0f);
-        ImGui::BeginChild("##content_tree", ImVec2(treeWidth, 0.0f), ImGuiChildFlags_Borders);
-        DrawTree(tree_, true);
+        ImGui::SetCursorScreenPos(ImVec2(origin.x, bodyTop));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, style::ToVec4(style::kRecessed));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 4.0f));
+        const bool treeShown = ImGui::BeginChild("##content_sources", ImVec2(treeWidth, bodyHeight), ImGuiChildFlags_None);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+        if (treeShown)
+        {
+            DrawTree(tree_, true, ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows));
+        }
         ImGui::EndChild();
 
-        ImGui::SameLine();
-        ImGui::BeginChild("##content_tiles", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + treeWidth + style::kSplitter, bodyTop));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, style::ToVec4(style::kRecessed));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+        const bool tilesShown = ImGui::BeginChild(
+            "##content_tiles",
+            ImVec2(std::max(width - treeWidth - style::kSplitter, 40.0f), bodyHeight),
+            ImGuiChildFlags_None);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
 
         ContentEntry toActivate;
         bool activate = false;
-        if (entries_.empty())
+        bool clearSearch = false;
+        if (tilesShown)
         {
-            ImGui::TextDisabled(search_.empty() ? "This folder is empty." : "Nothing matches the search.");
-        }
-        else
-        {
-            const float spacing = ImGui::GetStyle().ItemSpacing.x;
-            const float available = ImGui::GetContentRegionAvail().x;
-            const int columns = std::max(1, static_cast<int>((available + spacing) / (tileSize_ + spacing)));
-
-            for (std::size_t index = 0; index < entries_.size(); ++index)
+            if (entries_.empty())
             {
-                if (index % static_cast<std::size_t>(columns) != 0)
+                if (search_.empty())
                 {
-                    ImGui::SameLine();
+                    EmptyState(ICON_FOLDER_OPEN, nullptr, "This folder is empty.");
                 }
-
-                const ContentEntry& entry = entries_[index];
-                ImGui::PushID(static_cast<int>(index));
-                ImGui::BeginGroup();
-                DrawTile(entry, tileSize_, hooks);
-                ImGui::EndGroup();
-
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                else
                 {
-                    toActivate = entry;
-                    activate = true;
+                    const std::string message = "No items match \"" + search_ + "\".";
+                    clearSearch = EmptyState(ICON_SEARCH, nullptr, message.c_str(), "Clear search");
                 }
+            }
+            else
+            {
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 8.0f));
+                const float available = ImGui::GetContentRegionAvail().x;
+                const int columns = std::max(1, static_cast<int>((available + 8.0f) / (tileSize_ + 8.0f)));
 
-                if (ImGui::BeginPopupContextItem("##tile_menu"))
+                for (std::size_t index = 0; index < entries_.size(); ++index)
                 {
-                    selectedPath_ = entry.path;
-                    if (ImGui::MenuItem("Open"))
+                    if (index % static_cast<std::size_t>(columns) != 0)
+                    {
+                        ImGui::SameLine();
+                    }
+
+                    const ContentEntry& entry = entries_[index];
+                    ImGui::PushID(static_cast<int>(index));
+                    DrawTile(entry, tileSize_, hooks);
+
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                     {
                         toActivate = entry;
                         activate = true;
                     }
-                    if (ImGui::MenuItem("Show in Explorer"))
+
+                    if (ImGui::BeginPopupContextItem("##tile_menu"))
                     {
-                        ShowInExplorer(ToAbsolute(root_, entry.relative), entry.kind == ContentKind::Folder);
+                        selectedPath_ = entry.path;
+                        if (ImGui::MenuItem(ICON_FOLDER_OPEN "  Open"))
+                        {
+                            toActivate = entry;
+                            activate = true;
+                        }
+                        if (ImGui::MenuItem(ICON_FOLDER "  Show in Explorer"))
+                        {
+                            ShowInExplorer(ToAbsolute(root_, entry.relative), entry.kind == ContentKind::Folder);
+                        }
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Copy Path"))
+                        {
+                            ImGui::SetClipboardText(entry.path.c_str());
+                        }
+                        if (ImGui::MenuItem("Copy Full Path"))
+                        {
+                            ImGui::SetClipboardText(ToAbsolute(root_, entry.relative).u8string().c_str());
+                        }
+                        ImGui::EndPopup();
                     }
-                    ImGui::Separator();
-                    if (ImGui::MenuItem("Copy path"))
-                    {
-                        ImGui::SetClipboardText(entry.path.c_str());
-                    }
-                    if (ImGui::MenuItem("Copy full path"))
-                    {
-                        ImGui::SetClipboardText(ToAbsolute(root_, entry.relative).u8string().c_str());
-                    }
-                    ImGui::EndPopup();
+                    ImGui::PopID();
                 }
-                ImGui::PopID();
+                ImGui::PopStyleVar();
             }
         }
         ImGui::EndChild();
 
-        // After the loop: opening a folder rebuilds the list that the tiles above came from
+        // ---- 3. Footer: "N items (1 selected)"
+        {
+            const float footerTop = origin.y + height - kFooterHeight;
+            drawList->AddRectFilled(ImVec2(origin.x, footerTop), ImVec2(origin.x + width, footerTop + kFooterHeight), style::kPanel);
+            drawList->AddLine(ImVec2(origin.x, footerTop), ImVec2(origin.x + width, footerTop), style::kInput, 1.0f);
+
+            const bool anySelected = std::any_of(
+                entries_.begin(),
+                entries_.end(),
+                [this](const ContentEntry& entry) { return entry.path == selectedPath_; });
+            std::string text = std::to_string(entries_.size()) + (entries_.size() == 1 ? " item" : " items");
+            if (anySelected)
+            {
+                text += " (1 selected)";
+            }
+
+            ImFont* font = nullptr;
+            float size = 0.0f;
+            RoleFontOf(FontRole::Secondary, font, size);
+            drawList->AddText(font, size, ImVec2(origin.x + 12.0f, std::floor(footerTop + (kFooterHeight - size) * 0.5f)), style::kTextDim, text.c_str());
+        }
+
+        ImGui::SetCursorScreenPos(origin);
+        ImGui::Dummy(ImVec2(width, height));
+
+        // After the loops: these rebuild the list that the tiles above came from
+        if (clearSearch)
+        {
+            SetSearch(std::string());
+        }
         if (activate)
         {
             Activate(toActivate, hooks);

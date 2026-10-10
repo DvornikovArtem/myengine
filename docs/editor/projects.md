@@ -172,7 +172,7 @@ sequenceDiagram
     participant N as myengine.exe (процесс 2)
     U->>E: Open Project / Create Project / двойной клик
     alt карта изменена (Edit)
-        E-->>U: Save and switch / Switch without saving / Cancel
+        E-->>U: Save and Switch / Don't Save / Cancel
     end
     E->>N: CreateProcess: --project файл --wait-for-pid pid1
     E->>E: RequestQuit (без записи карты на выходе)
@@ -181,7 +181,7 @@ sequenceDiagram
 ```
 
 - `RestartWithProject` запускает тот же exe с `--project <файл> --wait-for-pid <pid>` и вызывает `RequestQuit`. Если процесс не удалось создать, редактор остаётся открытым, в лог пишется ошибка.
-- Если карта не изменена (или режим Play), диалога нет. Если изменена, спрашивается: **Save and switch** (сохранить текущую карту и перейти), **Switch without saving**, **Cancel**.
+- Если карта не изменена (или режим Play), диалога нет. Если изменена, спрашивается: **Save and Switch** (сохранить текущую карту и перейти), **Don't Save**, **Cancel**.
 - Запись карты на выходе при смене проекта отключена (`discardSceneOnExit_`): карта либо уже сохранена, либо сброшена сознательно.
 - Новый процесс ждёт старый, потому что файл лога, класс окна и GPU у них общие.
 
@@ -214,6 +214,7 @@ sequenceDiagram
 - Остальные папки в корне проекта (например, `.git`) в Content Browser не показываются.
 - `.json` внутри папки `scenes` или `Maps` на любой глубине считается картой (двойной клик открывает её), остальные `.json` — обычные файлы.
 - Ключ ассета — тот же путь, который записывается в сцены и prefab (`meshPath`, `materialPath`), поэтому ключи не зависят от расположения проекта на диске.
+- Интерфейс: строка инструментов (Refresh, крошки пути, поиск по текущей папке, **View Options** с размером плиток 72–160), дерево папок слева, плитки справа с иконкой и цветом типа, внизу счётчик `N items (1 selected)`. Контекстное меню плитки: Open, Show in Explorer, Copy Path, Copy Full Path.
 
 ## Как создать скрипт в проекте
 
@@ -228,7 +229,7 @@ Prefab лежат в `prefabsDir` и подхватываются так же ([
 1. **Проект по умолчанию.** Запустить `run.bat`: в названии окна `| myengine — coin_guard_demo`, в Content Browser корень `Content` с `assets/...`, скрипты и сцена работают как раньше.
 2. **Создание проекта.** File → Open Project..., в **New project** ввести имя и нажать **Create Project**. Открывается новое окно редактора, в названии `| <Имя> — Main`; на диске появилась структура из раздела выше; в Content Browser узлы `Content` и `Maps`.
 3. **Скрипт и карта в новом проекте.** Положить `.py` в `Content/Scripts`, добавить его на объект: hot reload срабатывает. File → New Map... → `Second` (карта открывается, в названии `— Second`), изменить что-нибудь, File → Save Scene, затем File → Open Map... и выбрать `Maps/Main.json`.
-4. **Смена проекта с изменённой картой.** Передвинуть любой объект, File → Open Project... и выбрать другой проект: появляется запрос **Save and switch / Switch without saving / Cancel**. **Cancel** возвращает в редактор, остальные варианты открывают новый процесс.
+4. **Смена проекта с изменённой картой.** Передвинуть любой объект, File → Open Project... и выбрать другой проект: появляется запрос **Save and Switch / Don't Save / Cancel**. **Cancel** возвращает в редактор, остальные варианты открывают новый процесс.
 5. **Запуск из командной строки.** `myengine.exe --project <путь к .myproject> --scene Maps/Second.json`: открывается указанная карта; `myengine.exe --project-browser` показывает Project Browser поверх редактора.
 
 ### Автотест

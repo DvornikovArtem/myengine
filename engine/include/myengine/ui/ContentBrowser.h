@@ -96,7 +96,7 @@ namespace myengine::ui
         bool ShowsFilesIn(const std::string& relative) const; // with visiblePaths: inside one of them
         void RebuildEntries();
         ContentEntry MakeEntry(const std::filesystem::path& absolute, bool isFolder) const;
-        void DrawTree(const FolderNode& node, bool isRoot);
+        void DrawTree(const FolderNode& node, bool isRoot, bool panelFocused);
         void DrawTile(const ContentEntry& entry, float tileSize, const ContentBrowserHooks& hooks);
 
         std::filesystem::path root_;
@@ -109,7 +109,7 @@ namespace myengine::ui
         std::string selectedPath_;
         std::vector<ContentEntry> entries_;
         FolderNode tree_;
-        float tileSize_ = 92.0f;
+        float tileSize_ = 104.0f; // 72..160, set in View Options
         bool wasFocused_ = false;
     };
 }
