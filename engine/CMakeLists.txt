@@ -122,6 +122,8 @@ set(ENGINE_SOURCES
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
   src/ui/AssistantPanel.cpp
+  src/ui/editor/EditorTheme.cpp
+  src/ui/editor/EditorTheme.h
   src/ui/editor/SceneEditor.cpp
   src/ui/editor/SceneEditorAssets.cpp
   src/ui/editor/SceneEditorAssistant.cpp
@@ -130,6 +132,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
   src/ui/editor/SceneEditorProject.cpp
+  src/ui/editor/SceneEditorToolbar.cpp
   src/ui/editor/SceneEditorViewport.cpp
   src/ui/ContentBrowser.cpp
   src/ui/PrefabInspector.cpp

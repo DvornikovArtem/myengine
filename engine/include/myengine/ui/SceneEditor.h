@@ -101,6 +101,9 @@ namespace myengine::ui
 
     private:
         void BuildDockSpace(const SceneEditorWindowContext& windowContext);
+        void BuildMainMenuBar(const SceneEditorWindowContext& windowContext);
+        void BuildMainToolbar(const SceneEditorWindowContext& windowContext);
+        void BuildStatusBar(const SceneEditorWindowContext& windowContext);
         bool BuildToolbar(const SceneEditorWindowContext& windowContext, const editor::ViewportRect& viewportRect);
         void BuildHierarchyPanel(const SceneEditorWindowContext& windowContext);
         void BuildInspectorPanel(const SceneEditorWindowContext& windowContext);
@@ -157,5 +160,6 @@ namespace myengine::ui
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;
         bool initialized_ = false;
+        bool resetLayoutRequested_ = false;
     };
 }

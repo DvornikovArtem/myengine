@@ -205,158 +205,22 @@ namespace myengine::ui
     {
         (void)windowContext;
 
+        // Global actions (Play/Stop, gizmo mode, undo...) live in the main toolbar now (BuildMainToolbar).
+        // The viewport only marks Play with a frame of the same colour as the mode badge.
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        auto& physicsState = core::ServiceLocator::GetPhysicsWorldState();
-        const float overlayWidth = std::min(std::max(viewportRect.width - kViewportToolbarPadding * 2.0f, 320.0f), 860.0f);
-        const ImVec2 overlayPosition{viewportRect.x + kViewportToolbarPadding, viewportRect.y + kViewportToolbarPadding};
-
-        ImGui::SetCursorScreenPos(overlayPosition);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.17f, 0.20f, 0.24f, 0.92f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.24f, 0.29f, 0.34f, 0.96f));
-        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.28f, 0.34f, 0.40f, 0.98f));
-
-        ImGui::BeginGroup();
-
-        const bool isEditMode = editorState.mode == editor::RuntimeMode::Edit;
-
-        // Mode badge: bright in Play, calm in Edit; the viewport gets a frame of the same colour in Play
+        if (editorState.mode == editor::RuntimeMode::Play)
         {
-            const ImU32 badgeColor = isEditMode ? kEditBadgeColor : kPlayBadgeColor;
-            const char* badgeText = isEditMode ? "EDIT" : "PLAYING";
-            const ImVec2 textSize = ImGui::CalcTextSize(badgeText);
-            const ImVec2 badgePadding{10.0f, 3.0f};
-            const ImVec2 badgeMin = ImGui::GetCursorScreenPos();
-            const ImVec2 badgeSize{textSize.x + badgePadding.x * 2.0f, ImGui::GetFrameHeight()};
-            auto* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(badgeMin, ImVec2(badgeMin.x + badgeSize.x, badgeMin.y + badgeSize.y), badgeColor, 6.0f);
-            drawList->AddText(
-                ImVec2(badgeMin.x + badgePadding.x, badgeMin.y + (badgeSize.y - textSize.y) * 0.5f),
-                IM_COL32(255, 255, 255, 255),
-                badgeText);
-            ImGui::Dummy(badgeSize);
-
-            if (!isEditMode)
-            {
-                const float half = kPlayFrameThickness * 0.5f;
-                drawList->AddRect(
-                    ImVec2(viewportRect.x + half, viewportRect.y + half),
-                    ImVec2(viewportRect.x + viewportRect.width - half, viewportRect.y + viewportRect.height - half),
-                    badgeColor,
-                    0.0f,
-                    0,
-                    kPlayFrameThickness);
-            }
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-
-        ImGui::BeginDisabled(!isEditMode);
-        if (ImGui::Button("Play"))
-        {
-            if (isEditMode && services_.captureSceneSnapshot)
-            {
-                editorState.playModeSnapshot = services_.captureSceneSnapshot();
-                editorState.mode = editor::RuntimeMode::Play;
-                physicsState.physicsPaused = false;
-            }
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(isEditMode);
-        const bool stopPressed = ImGui::Button("Stop");
-        ImGui::EndDisabled();
-        if (stopPressed && editorState.mode == editor::RuntimeMode::Play)
-        {
-            const bool restoredScene =
-                editorState.playModeSnapshot.empty() ||
-                (services_.restoreSceneSnapshot != nullptr &&
-                    services_.restoreSceneSnapshot(editorState.playModeSnapshot));
-
-            if (restoredScene)
-            {
-                editorState.mode = editor::RuntimeMode::Edit;
-                physicsState.physicsPaused = true;
-                editorState.playModeSnapshot.clear();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Reload scripts") && services_.reloadScripts)
-        {
-            services_.reloadScripts();
-        }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Hot reload of every script (F5). Saved files are reloaded automatically");
-        }
-        ImGui::SameLine();
-        ImGui::Checkbox("Keep script state", &editorState.scriptReloadKeepsState);
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip(
-                "Hot reload in Play.\n"
-                "On: running objects keep their state, fields with a changed default take the new value (L2).\n"
-                "Off: running objects start over with OnStart (L1)");
+            const float half = kPlayFrameThickness * 0.5f;
+            ImGui::GetWindowDrawList()->AddRect(
+                ImVec2(viewportRect.x + half, viewportRect.y + half),
+                ImVec2(viewportRect.x + viewportRect.width - half, viewportRect.y + viewportRect.height - half),
+                kPlayBadgeColor,
+                0.0f,
+                0,
+                kPlayFrameThickness);
         }
 
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-
-        const bool editEnabled = isEditMode;
-        if (!editEnabled)
-        {
-            ImGui::BeginDisabled();
-        }
-
-        if (ImGui::RadioButton("Translate", editorState.gizmoOperation == editor::GizmoOperation::Translate))
-        {
-            editorState.gizmoOperation = editor::GizmoOperation::Translate;
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Rotate", editorState.gizmoOperation == editor::GizmoOperation::Rotate))
-        {
-            editorState.gizmoOperation = editor::GizmoOperation::Rotate;
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Scale", editorState.gizmoOperation == editor::GizmoOperation::Scale))
-        {
-            editorState.gizmoOperation = editor::GizmoOperation::Scale;
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Local", editorState.gizmoSpace == editor::GizmoSpace::Local))
-        {
-            editorState.gizmoSpace = editor::GizmoSpace::Local;
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("World", editorState.gizmoSpace == editor::GizmoSpace::World))
-        {
-            editorState.gizmoSpace = editor::GizmoSpace::World;
-        }
-
-        if (!editEnabled)
-        {
-            ImGui::EndDisabled();
-        }
-
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", editorState.sceneDirty ? "modified" : "saved");
-
-        ImGui::EndGroup();
-
-        const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-        (void)overlayWidth;
-
-        ImGui::PopStyleColor(4);
-        ImGui::PopStyleVar(2);
-        return hovered;
+        return false;
     }
 
     bool SceneEditor::CanStartSceneNavigation(const core::WindowId windowId, const float mouseX, const float mouseY) const
