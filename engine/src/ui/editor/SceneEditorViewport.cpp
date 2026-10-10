@@ -760,10 +760,9 @@ namespace myengine::ui
                     int sliderLevel = level;
                     char value[16];
                     std::snprintf(value, sizeof(value), "%.2f", controller->moveSpeed);
-                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 8.0f);
-                    ImGui::TextUnformatted("Camera Speed");
+                    // The section title says what this is; the current speed sits right above the slider
                     PushFontRole(FontRole::Secondary);
-                    ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(value).x - 8.0f);
+                    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(value).x - 8.0f);
                     ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(style::kTextDim));
                     ImGui::TextUnformatted(value);
                     ImGui::PopStyleColor();

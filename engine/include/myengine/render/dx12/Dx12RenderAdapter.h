@@ -192,5 +192,6 @@ namespace myengine::render::dx12
         bool allowTearing_ = false;
         bool vsyncEnabled_ = true;
         bool wireframe_ = false;
+        Microsoft::WRL::ComPtr<ID3DBlob> wireframePixelShader_; // constant colour, shared by every wireframe PSO
     };
 }

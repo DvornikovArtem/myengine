@@ -350,7 +350,22 @@ namespace myengine::render::dx12
             return {};
         }
 
-        // The wireframe view mode uses the same shaders with another fill mode; without it the mode is simply not drawn
+        // The wireframe view mode: the same vertex shader, a constant light pixel shader (lines of the texture colour
+        // vanish on a dark background), wireframe fill. Without this variant the mode is simply not drawn.
+        if (wireframePixelShader_ == nullptr)
+        {
+            static constexpr char kWireframePixelShader[] = "float4 main() : SV_Target { return float4(0.753, 0.753, 0.753, 1.0); }";
+            Microsoft::WRL::ComPtr<ID3DBlob> wireframeErrors;
+            if (FAILED(D3DCompile(kWireframePixelShader, sizeof(kWireframePixelShader) - 1, "wireframe_ps", nullptr, nullptr, "main", "ps_5_0",
+                    D3DCOMPILE_ENABLE_STRICTNESS, 0, wireframePixelShader_.GetAddressOf(), wireframeErrors.GetAddressOf())))
+            {
+                wireframePixelShader_.Reset();
+            }
+        }
+        if (wireframePixelShader_ != nullptr)
+        {
+            pipelineDesc.PS = {wireframePixelShader_->GetBufferPointer(), wireframePixelShader_->GetBufferSize()};
+        }
         pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
         pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
         if (FAILED(context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(shaderRecord.wireframePipelineState.GetAddressOf()))))
