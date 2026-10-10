@@ -124,6 +124,40 @@ namespace
         Check(camera.position.y == 5.0f, "Camera must not move outside navigation mode");
     }
 
+    // me.camera.set marks the controller: in Play the keys must not move a camera that a script drives (D1c / RL1)
+    void TestScriptControlledCamera()
+    {
+        auto& editorState = myengine::core::ServiceLocator::GetEditorRuntimeState();
+        const auto previousMode = editorState.mode;
+
+        ecs::World world;
+        const auto entity = world.CreateEntity();
+        auto& camera = world.Emplace<components::CameraComponent>(entity);
+        camera.position = {1.0f, 2.0f, 3.0f};
+        auto& controller = world.Emplace<components::CameraControllerComponent>(entity);
+        controller.moveSpeed = 4.0f;
+        controller.scriptControlled = true;
+        world.Emplace<components::WindowBindingComponent>(entity).windowId = 1;
+
+        myengine::input::InputManager input;
+        input.BindAction("camera_up", 'E');
+        myengine::core::WindowId navigationWindow = 1;
+        systems::CameraControlSystem system(input, navigationWindow);
+
+        editorState.mode = myengine::editor::RuntimeMode::Play;
+        input.OnKeyDown('E');
+        system.Update(world, 0.25f);
+        Check(camera.position.y == 2.0f, "A script-controlled camera must ignore the free-fly keys in Play");
+        Check(controller.scriptControlled, "The flag must stay while Play runs");
+
+        editorState.mode = myengine::editor::RuntimeMode::Edit;
+        system.Update(world, 0.25f);
+        Check(!controller.scriptControlled, "The script control must end with Play");
+        Check(camera.position.y == 3.0f, "The free-fly camera must work again in Edit");
+
+        editorState.mode = previousMode;
+    }
+
     void TestInputRelease()
     {
         myengine::input::InputManager input;
@@ -159,6 +193,7 @@ int main()
             TestWorldAxisMovementFromRest(cameraYawDeg);
         }
         TestVerticalCameraMovement();
+        TestScriptControlledCamera();
         TestInputRelease();
         myengine::jobs::Shutdown();
         std::cout << "OK: player movement from rest, vertical camera navigation and input release\n";

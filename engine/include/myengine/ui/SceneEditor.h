@@ -168,6 +168,7 @@ namespace myengine::ui
         bool initialized_ = false;
         bool resetLayoutRequested_ = false;
         int layoutFocusFrames_ = 0; // frames until a fresh default layout gets its active tabs
+        bool wasPlaying_ = false;   // Edit -> Play edge: the viewport takes the keyboard from any text field
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
     };
 }

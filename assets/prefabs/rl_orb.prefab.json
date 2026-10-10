@@ -1,0 +1,33 @@
+{
+  "name": "RlOrb",
+  "entities": [
+    {
+      "id": 1,
+      "Tag": {
+        "name": "RlOrb"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_sphere.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      }
+    }
+  ]
+}

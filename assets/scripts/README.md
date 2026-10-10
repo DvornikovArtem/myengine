@@ -10,3 +10,7 @@
 
 Поля шаблонов можно менять и сохранять через окно `Prefabs` (`View → Prefabs`): [T8: редактор prefab](../../docs/scripting/t8-prefab-editor.md).
 После `Save` новые значения получают следующие заспавненные объекты; существующие экземпляры не меняются.
+
+Rocket League (RL1): `rocket_league.py`, шаблоны `assets/prefabs/rl_*.prefab.json`, карта `assets/scenes/rocket_league.json`. Play, затем `1`–`4`:
+`W`/`S` газ и тормоз, `A`/`D` руль, `Space` прыжок (второй `Space` с направлением — рывок), `Shift` буст, `Ctrl` powerslide,
+`Q`/`E` air roll, `C` камера на мяч, `M`/`Esc` меню. Текстуры и сетки генерирует `tools/gen_rl_assets.py`; подробности — в [RL1](../../docs/scripting/rl1-rocket-league.md).
