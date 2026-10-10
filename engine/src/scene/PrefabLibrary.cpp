@@ -217,6 +217,11 @@ namespace myengine::scene
                     {
                         return;
                     }
+                    if (logger_ != nullptr)
+                    {
+                        // The only trace of a prefab hot reload (also written for the first scan at startup)
+                        logger_->Info("PrefabLibrary: " + name + (change.removed ? " removed" : " detected / changed on disk"));
+                    }
                     // Windows accepts "COIN" and "coin" for the same file. Invalidate every cached alias.
                     for (auto it = impl_->cache.begin(); it != impl_->cache.end();)
                     {

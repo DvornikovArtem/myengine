@@ -41,6 +41,7 @@
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scene/TransformUtils.h>
 #include <myengine/ui/ContentBrowser.h>
+#include <myengine/ui/AssistantPanel.h>
 #include <myengine/ui/SceneEditor.h>
 #include <myengine/ui/PrefabInspector.h>
 #include <myengine/ui/ScriptInspector.h>
@@ -55,6 +56,7 @@ namespace myengine::ui::detail
     inline constexpr char kAssetBrowserWindowName[] = "Content Browser";
     inline constexpr char kPrefabsWindowName[] = "Prefabs";
     inline constexpr char kScriptConsoleWindowName[] = "Script Console";
+    inline constexpr char kAssistantWindowName[] = "Assistant";
     inline constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
     inline constexpr char kMaterialPayloadType[] = "MYENGINE_ASSET_MATERIAL";
     inline constexpr char kTexturePayloadType[] = "MYENGINE_ASSET_TEXTURE";

@@ -118,3 +118,30 @@ myengine_copy_runtime_assets(myengine_script_console_tests)
 set_property(TARGET myengine_script_console_tests PROPERTY FOLDER "Tests")
 add_test(NAME script_console COMMAND myengine_script_console_tests)
 set_tests_properties(script_console PROPERTIES TIMEOUT 30)
+
+# AI1: stand-in for the claude CLI. The assistant tests start it through the real pipes and CreateProcess path
+add_executable(myengine_fake_claude
+  assistant/FakeClaude.cpp)
+
+target_link_libraries(myengine_fake_claude PRIVATE myengine_nlohmann_json)
+myengine_apply_compiler_options(myengine_fake_claude)
+set_property(TARGET myengine_fake_claude PROPERTY FOLDER "Tests")
+
+add_executable(myengine_assistant_tests
+  assistant/AssistantTests.cpp)
+
+target_link_libraries(myengine_assistant_tests PRIVATE myengine_engine)
+target_include_directories(myengine_assistant_tests SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+add_dependencies(myengine_assistant_tests myengine_fake_claude)
+myengine_apply_compiler_options(myengine_assistant_tests)
+set_property(TARGET myengine_assistant_tests PROPERTY FOLDER "Tests")
+add_test(NAME assistant COMMAND myengine_assistant_tests)
+set_tests_properties(assistant PROPERTIES TIMEOUT 120)
+
+# Manual check against the real Claude Code CLI (needs a login, spends money): not part of CTest
+add_executable(myengine_assistant_live
+  assistant/AssistantLive.cpp)
+
+target_link_libraries(myengine_assistant_live PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_assistant_live)
+set_property(TARGET myengine_assistant_live PROPERTY FOLDER "Tests")

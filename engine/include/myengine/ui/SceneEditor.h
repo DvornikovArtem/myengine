@@ -46,6 +46,7 @@ namespace myengine::scene
 namespace myengine::ui
 {
     class ContentBrowser;
+    class AssistantPanel;
     class PrefabInspector;
 
     struct SceneEditorServices
@@ -104,6 +105,7 @@ namespace myengine::ui
         void DrawOpenScenePrompt();
         void BuildPrefabsPanel(const SceneEditorWindowContext& windowContext);
         void BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext);
+        void BuildAssistantPanel(const SceneEditorWindowContext& windowContext);
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void ValidateSelection() const;
         void CreateDefaultDockLayout(const SceneEditorWindowContext& windowContext);
@@ -136,6 +138,7 @@ namespace myengine::ui
         std::string pendingOpenScenePath_; // waits for the answer of the unsaved changes prompt
         std::string pinnedMaterialPath_; // a material opened from the Content Browser, shown instead of the selected entity's one
         ecs::EntityId pinnedMaterialEntity_ = ecs::kInvalidEntity; // selection when it was pinned; another selection unpins
+        std::unique_ptr<AssistantPanel> assistantPanel_;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;
