@@ -61,9 +61,18 @@ namespace myengine::editor
         // overlay (for example the viewport toolbar). ImGuizmo::Enable(false)
         // clears its internal mouse/handle state, so disabling it mid-drag
         // makes the gizmo disappear until the mouse button is released.
-        const bool wasUsing = using_ || ImGuizmo::IsUsing();
+        bool wasUsing = using_ || ImGuizmo::IsUsingAny();
         hovered_ = false;
         using_ = false;
+
+        // ImGuizmo keys a drag by the entity ID pushed around Manipulate. When another entity
+        // gets selected mid-drag (hierarchy click, undo), the drag stays armed with a stale plane
+        // and resumes from the current mouse position once the old entity is selected again.
+        if (wasUsing && editedEntity_ != context.entity)
+        {
+            ImGuizmo::Enable(false);
+            wasUsing = false;
+        }
 
         if ((!context.enabled && !wasUsing) ||
             context.entity == ecs::kInvalidEntity ||
@@ -100,10 +109,17 @@ namespace myengine::editor
             ToImGuizmoOperation(context.operation),
             ToImGuizmoMode(context.operation, context.space),
             model.data());
-        ImGuizmo::PopID();
 
+        // IsOver/IsUsing compare the editing ID with the top of ImGuizmo's ID stack,
+        // so they only report the drag while this entity's ID is still pushed.
         hovered_ = ImGuizmo::IsOver();
         using_ = ImGuizmo::IsUsing();
+        ImGuizmo::PopID();
+
+        if (using_)
+        {
+            editedEntity_ = context.entity;
+        }
 
         if (!changed)
         {

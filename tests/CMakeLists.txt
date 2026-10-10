@@ -86,6 +86,18 @@ set_property(TARGET myengine_prefab_inspector_tests PROPERTY FOLDER "Tests")
 add_test(NAME prefab_inspector COMMAND myengine_prefab_inspector_tests)
 set_tests_properties(prefab_inspector PROPERTIES TIMEOUT 30)
 
+add_executable(myengine_transform_gizmo_tests
+  ui/TransformGizmoTests.cpp)
+
+target_link_libraries(myengine_transform_gizmo_tests PRIVATE myengine_engine)
+target_include_directories(myengine_transform_gizmo_tests SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/external/imgui/Include"
+  "${CMAKE_SOURCE_DIR}/external/ImGuizmo")
+myengine_apply_compiler_options(myengine_transform_gizmo_tests)
+set_property(TARGET myengine_transform_gizmo_tests PROPERTY FOLDER "Tests")
+add_test(NAME transform_gizmo COMMAND myengine_transform_gizmo_tests)
+set_tests_properties(transform_gizmo PROPERTIES TIMEOUT 30)
+
 add_executable(myengine_script_console_tests
   scripting/ScriptConsoleTests.cpp)
 
