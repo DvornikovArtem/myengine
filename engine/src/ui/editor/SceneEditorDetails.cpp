@@ -145,7 +145,7 @@ namespace myengine::ui
 
             if (!editEnabled)
             {
-                Banner(BannerKind::Play, "Playing - live values. Edit them after Stop.");
+                Banner(BannerKind::Play, "Playing \xE2\x80\x94 live values. Edit them after Stop.");
                 ImGui::Dummy(ImVec2(0.0f, 6.0f));
             }
 
@@ -435,12 +435,21 @@ namespace myengine::ui
                     if (BeginPropertyGrid("##collider"))
                     {
                         PropertyLabel("Type");
-                        int type = collider->type == ecs::components::ColliderType::Sphere ? 1 : 0;
-                        if (ImGui::Combo("##type", &type, "Box\0Sphere\0"))
+                        const int type = collider->type == ecs::components::ColliderType::Sphere ? 1 : 0;
+                        ImGui::SetNextItemWidth(-FLT_MIN);
+                        if (BeginCombo("##type", type == 1 ? "Sphere" : "Box"))
                         {
-                            const std::string beforeTypeSnapshot = CaptureSceneSnapshot();
-                            collider->type = type == 1 ? ecs::components::ColliderType::Sphere : ecs::components::ColliderType::Box;
-                            RecordSceneMutationImmediate("Change Collider Type", beforeTypeSnapshot);
+                            static constexpr const char* kTypeNames[] = {"Box", "Sphere"};
+                            for (int index = 0; index < 2; ++index)
+                            {
+                                if (ImGui::Selectable(kTypeNames[index], index == type) && index != type)
+                                {
+                                    const std::string beforeTypeSnapshot = CaptureSceneSnapshot();
+                                    collider->type = index == 1 ? ecs::components::ColliderType::Sphere : ecs::components::ColliderType::Box;
+                                    RecordSceneMutationImmediate("Change Collider Type", beforeTypeSnapshot);
+                                }
+                            }
+                            EndCombo();
                         }
 
                         if (collider->type == ecs::components::ColliderType::Box)

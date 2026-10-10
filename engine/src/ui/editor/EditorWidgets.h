@@ -178,6 +178,12 @@ namespace myengine::ui
     // Popup with the editor menu look (4 px padding, light border); use like BeginPopup / EndPopup
     bool BeginMenuPopup(const char* id);
 
+    // ---- combo ----
+    // The editor's drop-down: like ImGui::BeginCombo, with the chevron icon of the asset pickers instead of the arrow
+    // button. if (BeginCombo(...)) { Selectable(...); EndCombo(); }; the width comes from SetNextItemWidth.
+    bool BeginCombo(const char* label, const char* preview, ImGuiComboFlags flags = 0);
+    void EndCombo();
+
     // ---- developer ----
     // Help > Developer > Widgets gallery: every helper in every state (acceptance tool, off by default)
     void DrawWidgetsGallery(bool* open);

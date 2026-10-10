@@ -346,7 +346,7 @@ namespace myengine::ui
 
             if (!editEnabled)
             {
-                Banner(BannerKind::Play, "Playing - edit the material after Stop.");
+                Banner(BannerKind::Play, "Playing â edit the material after Stop.");
                 ImGui::Dummy(ImVec2(0.0f, 6.0f));
             }
 

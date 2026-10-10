@@ -43,15 +43,24 @@ namespace myengine::ui
         ImFont* RoleFont(const FontRole role, float& sizeOut)
         {
             const EditorFonts& fonts = CurrentFonts();
+            ImFont* font = nullptr;
             switch (role)
             {
-                case FontRole::Strong: sizeOut = style::kFontStrong; return fonts.strong;
-                case FontRole::Secondary: sizeOut = style::kFontSecondary; return fonts.secondary;
-                case FontRole::Tiny: sizeOut = style::kFontTiny; return fonts.tiny;
-                case FontRole::Mono: sizeOut = style::kFontMono; return fonts.mono;
+                case FontRole::Strong: sizeOut = style::kFontStrong; font = fonts.strong; break;
+                case FontRole::Secondary: sizeOut = style::kFontSecondary; font = fonts.secondary; break;
+                case FontRole::Tiny: sizeOut = style::kFontTiny; font = fonts.tiny; break;
+                case FontRole::Mono: sizeOut = style::kFontMono; font = fonts.mono; break;
                 case FontRole::Body:
-                default: sizeOut = style::kFontBody; return fonts.body;
+                default: sizeOut = style::kFontBody; font = fonts.body; break;
             }
+            if (font == nullptr)
+            {
+                // A context without editor fonts (headless tests): the font that is current, so that callers
+                // never meet a null role font
+                font = ImGui::GetFont();
+                sizeOut = ImGui::GetFontSize();
+            }
+            return font;
         }
 
         ImFont* IconFont(const IconSize size, float& sizeOut)
@@ -1261,5 +1270,30 @@ namespace myengine::ui
             EndDialog();
         }
         ImGui::End();
+    }
+
+    // ---- combo (D1b) ----
+
+    bool BeginCombo(const char* label, const char* preview, const ImGuiComboFlags flags)
+    {
+        const float width = std::max(ImGui::CalcItemWidth(), 40.0f);
+        const ImVec2 min = ImGui::GetCursorScreenPos();
+        const ImVec2 max(min.x + width, min.y + ImGui::GetFrameHeight());
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, Vec4(style::kControl));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Vec4(style::kControlHover));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Vec4(style::kControlActive));
+        const bool open = ImGui::BeginCombo(label, preview, flags | ImGuiComboFlags_NoArrowButton);
+        ImGui::PopStyleColor(3);
+
+        // The same chevron as the asset pickers instead of ImGui's arrow button
+        DrawIcon(drawList, IconSize::Chevron12, ICON_CHEVRON_DOWN, ImVec2(max.x - 14.0f, (min.y + max.y) * 0.5f), style::kTextDim);
+        return open;
+    }
+
+    void EndCombo()
+    {
+        ImGui::EndCombo();
     }
 }

@@ -724,7 +724,7 @@ namespace myengine::ui
             const bool local = editorState.gizmoSpace == editor::GizmoSpace::Local;
             if (ToolbarIconButton(
                     drawList, "##tool_space", local ? ICON_BOX : ICON_GLOBE, position, false, enabled,
-                    local ? "Local space - click for World" : "World space - click for Local"))
+                    local ? "Local space â click for World" : "World space â click for Local"))
             {
                 editorState.gizmoSpace = local ? editor::GizmoSpace::World : editor::GizmoSpace::Local;
             }
