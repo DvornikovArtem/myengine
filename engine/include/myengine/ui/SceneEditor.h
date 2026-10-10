@@ -51,6 +51,7 @@ namespace myengine::scene
 namespace myengine::ui
 {
     class ContentBrowser;
+    struct ProjectUiState;
     class AssistantPanel;
     class PrefabInspector;
 
@@ -63,6 +64,8 @@ namespace myengine::ui
         std::function<void()> requestQuit;
         std::function<bool()> saveScene;
         std::function<bool()> loadScene;
+        std::function<bool(const std::string& scenePath)> saveSceneAs; // writes the map and makes it the open one
+        std::function<bool(const std::string& projectFile, bool discardScene)> restartWithProject; // new process, then quit
         std::function<bool(const std::string& scenePath)> openScene; // scene file by asset key ("assets/scenes/x.json"); it becomes the one Save writes
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
@@ -105,6 +108,9 @@ namespace myengine::ui
         void BuildViewportPanel(const SceneEditorWindowContext& windowContext);
         void BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext);
         void BuildAssetBrowserPanel(const SceneEditorWindowContext& windowContext);
+        void DrawProjectMenuItems(bool editMode); // inside the File menu
+        void BuildProjectDialogs(); // Project Browser and the map dialogs
+        void RequestOpenProject(const std::string& projectFile);
         void RequestOpenScene(const std::string& scenePath);
         void OpenSceneNow(const std::string& scenePath);
         void DrawOpenScenePrompt();
@@ -141,6 +147,7 @@ namespace myengine::ui
         std::unique_ptr<PrefabInspector> prefabInspector_;
         std::unique_ptr<ScriptConsole> scriptConsole_;
         std::unique_ptr<ContentBrowser> contentBrowser_;
+        std::unique_ptr<ProjectUiState> projectUi_;
         std::string pendingOpenScenePath_; // waits for the answer of the unsaved changes prompt
         std::string pinnedMaterialPath_; // a material opened from the Content Browser, shown instead of the selected entity's one
         ecs::EntityId pinnedMaterialEntity_ = ecs::kInvalidEntity; // selection when it was pinned; another selection unpins

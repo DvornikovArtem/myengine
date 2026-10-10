@@ -90,7 +90,8 @@ namespace myengine::ui
 
     void SceneEditor::DrawOpenScenePrompt()
     {
-        if (pendingOpenScenePath_.empty())
+        const bool forProject = projectUi_ != nullptr && !projectUi_->pendingOpenProject.empty();
+        if (pendingOpenScenePath_.empty() && !forProject)
         {
             return;
         }
@@ -107,33 +108,59 @@ namespace myengine::ui
             return;
         }
 
-        ImGui::Text("The current scene has unsaved changes.");
-        ImGui::TextDisabled("Open %s?", pendingOpenScenePath_.c_str());
+        ImGui::Text("The current map has unsaved changes.");
+        if (forProject)
+        {
+            ImGui::TextDisabled("Switch to the project %s? The editor restarts.", projectUi_->pendingOpenProject.c_str());
+        }
+        else
+        {
+            ImGui::TextDisabled("Open %s?", pendingOpenScenePath_.c_str());
+        }
         ImGui::Spacing();
 
-        const std::string target = pendingOpenScenePath_;
-        if (ImGui::Button("Save and open"))
+        // The answer is applied once: the pending request is cleared first, then the action runs
+        const auto proceed = [&]()
+        {
+            const std::string scenePath = std::exchange(pendingOpenScenePath_, {});
+            const std::string projectFile = forProject ? std::exchange(projectUi_->pendingOpenProject, {}) : std::string();
+            ImGui::CloseCurrentPopup();
+            if (forProject)
+            {
+                // The map was saved or is being dropped on purpose: nothing is written on exit
+                if (services_.restartWithProject)
+                {
+                    services_.restartWithProject(projectFile, true);
+                }
+            }
+            else
+            {
+                OpenSceneNow(scenePath);
+            }
+        };
+
+        if (ImGui::Button(forProject ? "Save and switch" : "Save and open"))
         {
             const bool saved = services_.saveScene && services_.saveScene();
             if (saved)
             {
                 core::ServiceLocator::GetEditorRuntimeState().sceneDirty = false;
-                pendingOpenScenePath_.clear();
-                ImGui::CloseCurrentPopup();
-                OpenSceneNow(target);
+                proceed();
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Open without saving"))
+        if (ImGui::Button(forProject ? "Switch without saving" : "Open without saving"))
         {
-            pendingOpenScenePath_.clear();
-            ImGui::CloseCurrentPopup();
-            OpenSceneNow(target);
+            proceed();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel"))
         {
             pendingOpenScenePath_.clear();
+            if (projectUi_ != nullptr)
+            {
+                projectUi_->pendingOpenProject.clear();
+            }
             ImGui::CloseCurrentPopup();
         }
 

@@ -93,6 +93,8 @@ namespace
         Check(ContentBrowser::Classify("models", true) == ContentKind::Folder, "A directory is a folder");
         Check(ContentBrowser::Classify("scenes/level.json", false) == ContentKind::Scene, ".json in scenes is a scene");
         Check(ContentBrowser::Classify("manifests/demo.json", false) == ContentKind::Other, ".json elsewhere is not a scene");
+        Check(ContentBrowser::Classify("Maps/Main.json", false) == ContentKind::Scene, ".json in Maps is a scene");
+        Check(ContentBrowser::Classify("Maps/Sub/Level.json", false) == ContentKind::Scene, "a nested map is a scene");
         Check(ContentBrowser::Classify("prefabs/coin.prefab.json", false) == ContentKind::Prefab, "prefab");
         Check(ContentBrowser::Classify("materials/gold.material.json", false) == ContentKind::Material, "material");
         Check(ContentBrowser::Classify("shaders/lit.shader.json", false) == ContentKind::Shader, "shader descriptor");
@@ -198,6 +200,50 @@ namespace
         Check(!browser.Activate(*Find(browser, "debug.bmp"), hooks), "A texture has no open action");
     }
 
+    // A project folder with Content/ and Maps/ next to each other: the browser shows only those two,
+    // and the asset keys are paths inside the project
+    void TestProjectRoot()
+    {
+        Fixture fixture;
+        const fs::path project = fixture.base / "game";
+        Touch(project / "Content/Models/box.obj");
+        Touch(project / "Content/Scripts/mover.py");
+        Touch(project / "Maps/Main.json");
+        Touch(project / "Maps/Sub/Level2.json");
+        Touch(project / "Saved/cache.bin");
+        Touch(project / "game.myproject");
+
+        ContentBrowser browser;
+        browser.SetRoot(project, "", {"Content", "Maps"});
+
+        const auto top = Names(browser);
+        const std::vector<std::string> expected{"Content", "Maps"};
+        Check(top == expected, "Only the content and maps folders are shown, no project files");
+
+        Check(browser.OpenFolder("Content/Models"), "Opening a folder of the content");
+        const ContentEntry* box = Find(browser, "box.obj");
+        Check(box != nullptr && box->path == "Content/Models/box.obj", "The key is a path inside the project");
+
+        Check(browser.OpenFolder("Maps"), "Opening the maps folder");
+        const ContentEntry* main = Find(browser, "Main.json");
+        Check(main != nullptr && main->kind == ContentKind::Scene, "A .json in Maps is a map");
+        Check(main->path == "Maps/Main.json", "The map key");
+        Check(browser.OpenFolder("Maps/Sub"), "A nested maps folder");
+        const ContentEntry* level = Find(browser, "Level2.json");
+        Check(level != nullptr && level->kind == ContentKind::Scene, "A nested map is a map");
+
+        Check(!browser.OpenFolder("Saved") || Find(browser, "cache.bin") == nullptr, "Other project folders are not listed");
+
+        browser.SetSearch("mover");
+        Check(browser.OpenFolder("") && browser.GetVisibleEntries().size() == 2, "The root lists the two folders again");
+        browser.SetSearch("mover");
+        Check(Find(browser, "mover.py") != nullptr, "Search finds a script below Content");
+        browser.SetSearch("cache");
+        Check(browser.GetVisibleEntries().empty(), "Search does not enter hidden folders");
+        browser.SetSearch("game");
+        Check(browser.GetVisibleEntries().empty(), "The project file is not listed");
+    }
+
     void TestRefreshAndMissingRoot()
     {
         Fixture fixture;
@@ -266,6 +312,7 @@ int main()
         TestNavigation();
         TestSearch();
         TestActivate();
+        TestProjectRoot();
         TestRefreshAndMissingRoot();
         TestDrawFrame();
         std::cout << "OK: content browser classifies assets, lists and searches folders, navigates, activates and draws\n";

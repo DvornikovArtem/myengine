@@ -142,11 +142,27 @@ namespace myengine::ui
 
     void ContentBrowser::SetRoot(const fs::path& root)
     {
+        std::string name = root.filename().u8string();
+        if (name.empty())
+        {
+            name = root.parent_path().filename().u8string();
+        }
+        SetRoot(root, name, {});
+    }
+
+    void ContentBrowser::SetRoot(const fs::path& root, const std::string& keyPrefix, const std::vector<std::string>& visiblePaths)
+    {
         root_ = root;
         rootName_ = root_.filename().u8string();
         if (rootName_.empty())
         {
             rootName_ = root_.parent_path().filename().u8string();
+        }
+        keyPrefix_ = keyPrefix;
+        visiblePaths_.clear();
+        for (const auto& visible : visiblePaths)
+        {
+            visiblePaths_.push_back(ToLower(fs::u8path(visible).generic_u8string()));
         }
         currentFolder_.clear();
         search_.clear();
@@ -154,9 +170,53 @@ namespace myengine::ui
         Refresh();
     }
 
+    bool ContentBrowser::IsVisibleFolder(const std::string& relative) const
+    {
+        if (visiblePaths_.empty())
+        {
+            return true;
+        }
+
+        const std::string lower = ToLower(relative);
+        for (const auto& visible : visiblePaths_)
+        {
+            const bool below = lower == visible || lower.rfind(visible + "/", 0) == 0;
+            const bool leadsTo = visible.rfind(lower + "/", 0) == 0;
+            if (below || leadsTo)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool ContentBrowser::ShowsFilesIn(const std::string& relative) const
+    {
+        if (visiblePaths_.empty())
+        {
+            return true;
+        }
+
+        const std::string lower = ToLower(relative);
+        for (const auto& visible : visiblePaths_)
+        {
+            if (lower == visible || lower.rfind(visible + "/", 0) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     const fs::path& ContentBrowser::GetRoot() const
     {
         return root_;
+    }
+
+    void ContentBrowser::SetRootLabel(const std::string& label)
+    {
+        rootLabel_ = label.empty() ? "Content" : label;
+        Refresh();
     }
 
     const std::string& ContentBrowser::GetRootName() const
@@ -167,7 +227,7 @@ namespace myengine::ui
     void ContentBrowser::Refresh()
     {
         tree_ = FolderNode{};
-        tree_.name = "Content";
+        tree_.name = rootLabel_;
         std::error_code error;
         if (!root_.empty() && fs::is_directory(root_, error))
         {
@@ -220,7 +280,7 @@ namespace myengine::ui
 
     std::vector<std::string> ContentBrowser::GetBreadcrumbs() const
     {
-        std::vector<std::string> crumbs{"Content"};
+        std::vector<std::string> crumbs{rootLabel_};
         if (!currentFolder_.empty())
         {
             for (const auto& part : fs::path(currentFolder_))
@@ -319,7 +379,15 @@ namespace myengine::ui
         }
         if (EndsWith(lower, ".json"))
         {
-            return lower.rfind("scenes/", 0) == 0 ? ContentKind::Scene : ContentKind::Other;
+            // A map is a .json inside a "scenes" or "Maps" folder, at any depth
+            for (const auto& part : fs::u8path(lower).parent_path())
+            {
+                if (part == "scenes" || part == "maps")
+                {
+                    return ContentKind::Scene;
+                }
+            }
+            return ContentKind::Other;
         }
         if (EndsWith(lower, ".py"))
         {
@@ -377,6 +445,10 @@ namespace myengine::ui
             FolderNode child;
             child.name = folder.filename().u8string();
             child.relative = node.relative.empty() ? child.name : node.relative + "/" + child.name;
+            if (!IsVisibleFolder(child.relative))
+            {
+                continue;
+            }
             BuildTree(child, depth + 1);
             node.children.push_back(std::move(child));
         }
@@ -387,7 +459,7 @@ namespace myengine::ui
         ContentEntry entry;
         entry.name = absolute.filename().u8string();
         entry.relative = absolute.lexically_relative(root_).generic_u8string();
-        entry.path = rootName_ + "/" + entry.relative;
+        entry.path = keyPrefix_.empty() ? entry.relative : keyPrefix_ + "/" + entry.relative;
         entry.kind = Classify(entry.relative, isFolder);
         return entry;
     }
@@ -419,7 +491,8 @@ namespace myengine::ui
             }
 
             ContentEntry entry = MakeEntry(item.path(), isFolder);
-            if (!isFolder && IsHiddenFile(ToLower(entry.name)))
+            if (isFolder ? !IsVisibleFolder(entry.relative) : (IsHiddenFile(ToLower(entry.name)) ||
+                    !ShowsFilesIn(fs::u8path(entry.relative).parent_path().generic_u8string())))
             {
                 return;
             }

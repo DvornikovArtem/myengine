@@ -525,3 +525,33 @@ namespace myengine::ui::detail
         return true;
     }
 }
+
+namespace myengine::ui
+{
+    // State of the Project Browser and the map dialogs (SceneEditorProject.cpp)
+    struct ProjectUiState
+    {
+        enum class MapDialog
+        {
+            None,
+            NewMap,
+            OpenMap,
+            SaveMapAs,
+        };
+
+        MapDialog mapDialog = MapDialog::None;
+        bool openMapDialogRequested = false;
+        std::string mapName;
+        std::string message;
+        bool confirmOverwrite = false;
+        std::vector<std::string> mapChoices; // project paths of the maps that Open Map lists
+
+        bool browserWasOpen = false;
+        std::vector<std::string> recentProjects; // project files, newest first
+        std::string newProjectName = "NewProject";
+        std::string newProjectFolder;
+        std::string browserMessage;
+
+        std::string pendingOpenProject; // waits for the answer of the unsaved changes prompt
+    };
+}

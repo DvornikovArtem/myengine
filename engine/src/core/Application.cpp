@@ -140,10 +140,38 @@ namespace myengine::core
         logger_.Info("Job system initialized: " + std::to_string(jobs::GetWorkerCount(jobs::Priority::High)) + " high, " + 
             std::to_string(jobs::GetWorkerCount(jobs::Priority::Streaming)) + " streaming worker(s)");
 
-        // Python lives on this (main) thread for the whole session. Scripts are read from the source tree,
+        // The project decides where scripts, prefabs, maps and assets are looked up. Without --project it is the
+        // project of the engine folder (myengine.myproject, or the assets/ layout when the file is missing).
+        auto& project = ServiceLocator::GetProjectContext();
+        {
+            if (!projectFile_.empty())
+            {
+                std::string projectError;
+                if (!project.Load(projectFile_, &projectError))
+                {
+                    logger_.Error("Failed to open the project: " + projectError);
+                    MessageBoxW(nullptr, Utf8ToWide("Failed to open the project:\n" + projectError).c_str(), L"myengine", MB_OK | MB_ICONERROR);
+                    return false;
+                }
+
+                project::AddRecentProject(project::DefaultRecentProjectsFile(), project.ProjectFile());
+            }
+            else
+            {
+                std::string ignored;
+                if (!project.Load(ProjectContext::EngineRoot() / kEngineProjectFileName, &ignored))
+                {
+                    project.InitializeDefault();
+                }
+            }
+
+            logger_.Info("Project: " + project.Name() + " (" + project.Root().u8string() + ")");
+        }
+
+        // Python lives on this (main) thread for the whole session. Scripts are read from the project folder,
         // so hot reload sees the edits; the copy next to the exe is the fallback.
         {
-            const auto sourceScriptsDir = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/scripts";
+            const auto sourceScriptsDir = project.ScriptsDir();
             std::error_code scriptsDirError;
             scripting::ScriptRuntimeDesc scriptDesc;
             scriptDesc.exeDir = GetExecutableDirectory();
@@ -159,7 +187,7 @@ namespace myengine::core
 
         // Like scripts, prefabs use the source assets for hot reload, with a packaged copy as the fallback.
         {
-            const auto sourcePrefabsDir = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/prefabs";
+            const auto sourcePrefabsDir = project.PrefabsDir();
             std::error_code error;
             const auto prefabsDir = std::filesystem::is_directory(sourcePrefabsDir, error)
                 ? sourcePrefabsDir : GetExecutableDirectory() / "assets/prefabs";
@@ -224,6 +252,11 @@ namespace myengine::core
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };
         sceneEditorServices.openScene = [this](const std::string& scenePath) { return OpenSceneFromDisk(scenePath); };
+        sceneEditorServices.saveSceneAs = [this](const std::string& scenePath) { return SaveSceneAs(scenePath); };
+        sceneEditorServices.restartWithProject = [this](const std::string& projectFile, const bool discardScene)
+        {
+            return RestartWithProject(std::filesystem::u8path(projectFile), discardScene);
+        };
         sceneEditorServices.captureSceneSnapshot = [this]() { return CaptureSceneSnapshot(); };
         sceneEditorServices.restoreSceneSnapshot = [this](std::string_view snapshot) { return RestoreSceneSnapshot(snapshot); };
         sceneEditorServices.reloadScripts = [this]()
@@ -310,26 +343,31 @@ namespace myengine::core
         }
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
-        const auto requestedScenePath = scenePath.empty() ? std::filesystem::path(kDefaultScenePath) : scenePath;
-        const auto sourceScenePath = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / requestedScenePath;
-        const auto executableScenePath = GetExecutableDirectory() / requestedScenePath;
+        // --scene is a file path or a path inside the project; without it the project's default map is opened
         std::error_code scenePathError;
-        if (!scenePath.empty() && (scenePath.is_absolute() || std::filesystem::exists(scenePath, scenePathError)))
+        if (scenePath.empty())
+        {
+            sceneSavePath_ = project.DefaultMap();
+        }
+        else if (scenePath.is_absolute() || std::filesystem::exists(scenePath, scenePathError))
         {
             sceneSavePath_ = std::filesystem::absolute(scenePath).lexically_normal();
         }
         else
         {
-            sceneSavePath_ = std::filesystem::exists(sourceScenePath, scenePathError)
-                ? sourceScenePath
-                : executableScenePath;
+            sceneSavePath_ = project.ResolveContentPath(scenePath);
         }
 
         BindRuntimeEventListeners();
 
         if (resourceManager_ != nullptr)
         {
-            resourceManager_->LoadManifest("assets/manifests/demo_assets.json");
+            const auto manifestPath = project.ContentDir() / "manifests/demo_assets.json";
+            std::error_code manifestError;
+            if (std::filesystem::exists(manifestPath, manifestError))
+            {
+                resourceManager_->LoadManifest(manifestPath);
+            }
         }
 
         if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
@@ -352,6 +390,8 @@ namespace myengine::core
         sceneLoaded_ = true;
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         editorState.selectedEntity = ecs::kInvalidEntity;
+        editorState.mapPath = project.ToProjectRelative(sceneSavePath_);
+        editorState.showProjectBrowser = showProjectBrowser_;
         if (startInPlay)
         {
             editorState.playModeSnapshot = CaptureSceneSnapshot();
@@ -542,7 +582,7 @@ namespace myengine::core
             core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         }
 
-        if (sceneLoaded_ && !sceneSavePath_.empty())
+        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_)
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
@@ -947,6 +987,10 @@ namespace myengine::core
     {
         titleShowsPlay_ = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
         std::wstring suffix;
+        if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized() && !sceneSavePath_.empty())
+        {
+            suffix += L" | " + Utf8ToWide(project.Name()) + L" \u2014 " + Utf8ToWide(sceneSavePath_.stem().u8string());
+        }
         if (!stateLabel_.empty())
         {
             suffix += L" [" + Utf8ToWide(stateLabel_) + L"]";
@@ -1007,7 +1051,81 @@ namespace myengine::core
         // From now on Save Scene and the save on exit go to this file
         sceneSavePath_ = resolvedPath;
         RebindWindowControlledEntities();
+        core::ServiceLocator::GetEditorRuntimeState().mapPath =
+            core::ServiceLocator::GetProjectContext().ToProjectRelative(sceneSavePath_);
+        UpdateWindowTitles();
         return true;
+    }
+
+    bool Application::SaveSceneAs(const std::string& scenePath)
+    {
+        if (!sceneLoaded_ || scenePath.empty())
+        {
+            return false;
+        }
+
+        // A file that does not exist yet resolves inside the project
+        const std::filesystem::path target = core::ServiceLocator::GetProjectContext().ResolveContentPath(std::filesystem::u8path(scenePath));
+        if (!scene::SaveWorldToJson(world_, target, &logger_))
+        {
+            return false;
+        }
+
+        sceneSavePath_ = target;
+        core::ServiceLocator::GetEditorRuntimeState().mapPath =
+            core::ServiceLocator::GetProjectContext().ToProjectRelative(sceneSavePath_);
+        UpdateWindowTitles();
+        return true;
+    }
+
+    bool Application::RestartWithProject(const std::filesystem::path& projectFile, const bool discardScene)
+    {
+        const std::filesystem::path executable = ProjectContext::ExecutableDirectory() / "myengine.exe";
+        std::wstring modulePath(MAX_PATH * 2, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+        const std::filesystem::path self = length > 0 && length < modulePath.size()
+            ? std::filesystem::path(modulePath.substr(0, length))
+            : executable;
+
+        // The new process waits for this one to finish (the log file, the window class and the GPU are shared)
+        std::wstring commandLine = L"\"" + self.wstring() + L"\" --project \"" + projectFile.wstring() +
+            L"\" --wait-for-pid " + std::to_wstring(GetCurrentProcessId());
+
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        const std::wstring workingDirectory = self.parent_path().wstring();
+        if (!CreateProcessW(
+                self.c_str(),
+                commandLine.data(),
+                nullptr,
+                nullptr,
+                FALSE,
+                0,
+                nullptr,
+                workingDirectory.c_str(),
+                &startup,
+                &process))
+        {
+            logger_.Error("Failed to start myengine for the project: " + projectFile.u8string());
+            return false;
+        }
+
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        discardSceneOnExit_ = discardScene;
+        RequestQuit();
+        return true;
+    }
+
+    void Application::SetProjectFile(const std::filesystem::path& projectFile)
+    {
+        projectFile_ = projectFile;
+    }
+
+    void Application::SetShowProjectBrowser(const bool show)
+    {
+        showProjectBrowser_ = show;
     }
 
     std::string Application::CaptureSceneSnapshot() const
