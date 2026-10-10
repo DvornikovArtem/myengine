@@ -602,9 +602,12 @@ namespace myengine::ui
         const float available = ImGui::GetContentRegionAvail().x;
         const float labelWidth = std::clamp(available * 0.38f, 110.0f, 200.0f);
         ImGui::Indent(indent);
+        // Row height is the 24 px field plus a pixel of padding on each side (26), not the global 4 px padding
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(ImGui::GetStyle().CellPadding.x, 1.0f));
         const bool open = ImGui::BeginTable(id, 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings);
         if (!open)
         {
+            ImGui::PopStyleVar();
             ImGui::Unindent(indent);
             return false;
         }
@@ -658,6 +661,7 @@ namespace myengine::ui
     void EndPropertyGrid()
     {
         ImGui::EndTable();
+        ImGui::PopStyleVar();
         ImGui::Unindent(g_gridIndent);
     }
 
@@ -712,10 +716,11 @@ namespace myengine::ui
         ImGui::PushStyleColor(ImGuiCol_FrameBg, Vec4(style::kControl));
         ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Vec4(style::kControlHover));
         ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Vec4(style::kControlActive));
-        const bool open = ImGui::BeginCombo("##picker", "");
+        const bool open = ImGui::BeginCombo("##picker", "", ImGuiComboFlags_NoArrowButton);
         ImGui::PopStyleColor(3);
 
         parentDrawList->AddRectFilled(min, ImVec2(min.x + 3.0f, max.y), stripeColor, style::kRounding, ImDrawFlags_RoundCornersLeft);
+        DrawIcon(parentDrawList, IconSize::Chevron12, ICON_CHEVRON_DOWN, ImVec2(max.x - 14.0f, (min.y + max.y) * 0.5f), style::kTextDim);
         float sizePx = 0.0f;
         ImFont* font = RoleFont(FontRole::Body, sizePx);
         if (icon != nullptr)
