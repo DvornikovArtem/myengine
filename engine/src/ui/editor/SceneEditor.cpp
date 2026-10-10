@@ -14,6 +14,12 @@ namespace myengine::ui
         gizmo_ = std::make_unique<editor::TransformGizmo>();
         prefabInspector_ = std::make_unique<PrefabInspector>();
         scriptConsole_ = std::make_unique<ScriptConsole>();
+        contentBrowser_ = std::make_unique<ContentBrowser>();
+        if (services_.resourceManager != nullptr)
+        {
+            // Same lookup as for every asset path: <project>/assets, else the copy next to the executable
+            contentBrowser_->SetRoot(services_.resourceManager->ResolvePath("assets"));
+        }
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -30,6 +36,9 @@ namespace myengine::ui
         gizmo_.reset();
         prefabInspector_.reset();
         scriptConsole_.reset();
+        contentBrowser_.reset();
+        pendingOpenScenePath_.clear();
+        pinnedMaterialPath_.clear();
         history_.reset();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();

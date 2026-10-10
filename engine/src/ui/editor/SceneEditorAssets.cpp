@@ -9,65 +9,135 @@ namespace myengine::ui
         (void)windowContext;
 
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        if (!editorState.showAssetBrowser)
+        if (!editorState.showAssetBrowser || contentBrowser_ == nullptr)
         {
             return;
         }
 
         if (ImGui::Begin(kAssetBrowserWindowName))
         {
-            if (ImGui::BeginTabBar("asset_tabs"))
+            ContentBrowserHooks hooks;
+            hooks.meshPayloadType = kMeshPayloadType;
+            hooks.materialPayloadType = kMaterialPayloadType;
+            hooks.texturePayloadType = kTexturePayloadType;
+            hooks.openScene = [this](const std::string& scenePath) { RequestOpenScene(scenePath); };
+            hooks.openPrefab = [this](const std::string& prefabName)
             {
-                const auto drawAssetList =
-                    [](const char* payloadType, const std::vector<std::string>& assets)
-                    {
-                        for (const auto& asset : assets)
-                        {
-                            ImGui::Selectable(FileNameLabel(asset).c_str(), false);
-                            if (ImGui::BeginDragDropSource())
-                            {
-                                ImGui::SetDragDropPayload(payloadType, asset.c_str(), asset.size() + 1u);
-                                ImGui::TextUnformatted(asset.c_str());
-                                ImGui::EndDragDropSource();
-                            }
-                        }
-                    };
-
-                if (ImGui::BeginTabItem("Meshes"))
+                if (services_.prefabLibrary == nullptr || prefabInspector_ == nullptr)
                 {
-                    drawAssetList(kMeshPayloadType, services_.resourceManager->GetKnownMeshKeys());
-                    ImGui::EndTabItem();
+                    return;
                 }
 
-                if (ImGui::BeginTabItem("Materials"))
-                {
-                    drawAssetList(kMaterialPayloadType, services_.resourceManager->GetKnownMaterialKeys());
-                    ImGui::EndTabItem();
-                }
+                core::ServiceLocator::GetEditorRuntimeState().showPrefabs = true;
+                prefabInspector_->Select(*services_.prefabLibrary, prefabName);
+                ImGui::SetWindowFocus(kPrefabsWindowName);
+            };
+            hooks.openMaterial = [this](const std::string& materialPath)
+            {
+                auto& state = core::ServiceLocator::GetEditorRuntimeState();
+                state.showMaterialEditor = true;
+                pinnedMaterialPath_ = materialPath;
+                pinnedMaterialEntity_ = state.selectedEntity;
+                ImGui::SetWindowFocus(kMaterialEditorWindowName);
+            };
 
-                if (ImGui::BeginTabItem("Textures"))
-                {
-                    drawAssetList(kTexturePayloadType, services_.resourceManager->GetKnownTextureKeys());
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Shaders"))
-                {
-                    const auto shaders = services_.resourceManager->GetKnownShaderKeys();
-                    for (const auto& shader : shaders)
-                    {
-                        ImGui::BulletText("%s", shader.c_str());
-                    }
-                    ImGui::EndTabItem();
-                }
-
-                ImGui::EndTabBar();
-            }
-
-            ImGui::Separator();
-            ImGui::TextDisabled("Drag meshes or textures to the viewport to create entities.");
+            contentBrowser_->Draw(hooks);
         }
         ImGui::End();
+
+        DrawOpenScenePrompt();
+    }
+
+    void SceneEditor::RequestOpenScene(const std::string& scenePath)
+    {
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (!services_.openScene || editorState.mode != editor::RuntimeMode::Edit)
+        {
+            return;
+        }
+
+        if (editorState.sceneDirty)
+        {
+            pendingOpenScenePath_ = scenePath; // DrawOpenScenePrompt asks what to do with the changes
+            return;
+        }
+
+        OpenSceneNow(scenePath);
+    }
+
+    void SceneEditor::OpenSceneNow(const std::string& scenePath)
+    {
+        if (!services_.openScene || !services_.openScene(scenePath))
+        {
+            if (services_.logger != nullptr)
+            {
+                services_.logger->Warning("Content Browser: failed to open the scene " + scenePath);
+            }
+            return;
+        }
+
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        editorState.selectedEntity = ecs::kInvalidEntity;
+        editorState.sceneDirty = false;
+        pinnedMaterialPath_.clear();
+        pendingSceneMutationSnapshot_.clear();
+        pendingGizmoMutationSnapshot_.clear();
+        if (history_ != nullptr)
+        {
+            history_->Clear();
+        }
+    }
+
+    void SceneEditor::DrawOpenScenePrompt()
+    {
+        if (pendingOpenScenePath_.empty())
+        {
+            return;
+        }
+
+        constexpr char kPromptName[] = "Unsaved changes##open_scene";
+        if (!ImGui::IsPopupOpen(kPromptName))
+        {
+            ImGui::OpenPopup(kPromptName);
+        }
+
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (!ImGui::BeginPopupModal(kPromptName, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui::Text("The current scene has unsaved changes.");
+        ImGui::TextDisabled("Open %s?", pendingOpenScenePath_.c_str());
+        ImGui::Spacing();
+
+        const std::string target = pendingOpenScenePath_;
+        if (ImGui::Button("Save and open"))
+        {
+            const bool saved = services_.saveScene && services_.saveScene();
+            if (saved)
+            {
+                core::ServiceLocator::GetEditorRuntimeState().sceneDirty = false;
+                pendingOpenScenePath_.clear();
+                ImGui::CloseCurrentPopup();
+                OpenSceneNow(target);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Open without saving"))
+        {
+            pendingOpenScenePath_.clear();
+            ImGui::CloseCurrentPopup();
+            OpenSceneNow(target);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            pendingOpenScenePath_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 
     void SceneEditor::BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext)
@@ -82,29 +152,51 @@ namespace myengine::ui
 
         if (ImGui::Begin(kMaterialEditorWindowName))
         {
-            if (editorState.selectedEntity == ecs::kInvalidEntity)
+            // Another selection drops a material that was opened from the Content Browser
+            if (!pinnedMaterialPath_.empty() && editorState.selectedEntity != pinnedMaterialEntity_)
             {
-                ImGui::TextDisabled("Select an entity with MeshRenderer.");
-                ImGui::End();
-                return;
+                pinnedMaterialPath_.clear();
             }
 
-            if (!MatchesWindowBinding(*services_.world, editorState.selectedEntity, windowContext.windowId))
+            std::string materialPath = pinnedMaterialPath_;
+            if (!materialPath.empty())
             {
-                ImGui::TextDisabled("Selected entity belongs to another window.");
-                ImGui::End();
-                return;
+                ImGui::TextDisabled("Opened from the Content Browser");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Back to selection"))
+                {
+                    pinnedMaterialPath_.clear();
+                    ImGui::End();
+                    return;
+                }
+            }
+            else
+            {
+                if (editorState.selectedEntity == ecs::kInvalidEntity)
+                {
+                    ImGui::TextDisabled("Select an entity with MeshRenderer.");
+                    ImGui::End();
+                    return;
+                }
+
+                if (!MatchesWindowBinding(*services_.world, editorState.selectedEntity, windowContext.windowId))
+                {
+                    ImGui::TextDisabled("Selected entity belongs to another window.");
+                    ImGui::End();
+                    return;
+                }
+
+                auto* renderer = services_.world->TryGet<ecs::components::MeshRendererComponent>(editorState.selectedEntity);
+                if (renderer == nullptr || renderer->materialPath.empty())
+                {
+                    ImGui::TextDisabled("Selected entity has no material.");
+                    ImGui::End();
+                    return;
+                }
+                materialPath = renderer->materialPath;
             }
 
-            auto* renderer = services_.world->TryGet<ecs::components::MeshRendererComponent>(editorState.selectedEntity);
-            if (renderer == nullptr || renderer->materialPath.empty())
-            {
-                ImGui::TextDisabled("Selected entity has no material.");
-                ImGui::End();
-                return;
-            }
-
-            auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(renderer->materialPath);
+            auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(materialPath);
             if (materialResource == nullptr)
             {
                 ImGui::TextDisabled("Failed to load material.");
@@ -112,7 +204,7 @@ namespace myengine::ui
                 return;
             }
 
-            ImGui::TextDisabled("%s", renderer->materialPath.c_str());
+            ImGui::TextDisabled("%s", materialPath.c_str());
             ImGui::TextWrapped("Live preview is applied to all entities using this material.");
             ImGui::TextWrapped("A dedicated preview mesh is shown in the viewport overlay.");
             ImGui::Separator();
@@ -124,7 +216,7 @@ namespace myengine::ui
                     previewShape == 1 ? editor::MaterialPreviewShape::Cube : editor::MaterialPreviewShape::Sphere;
             }
             windowState.materialPreviewEnabled = true;
-            windowState.materialPreviewMaterialPath = renderer->materialPath;
+            windowState.materialPreviewMaterialPath = materialPath;
 
             const bool editEnabled = editorState.mode == editor::RuntimeMode::Edit;
             if (!editEnabled)
@@ -152,7 +244,7 @@ namespace myengine::ui
             {
                 PushMaterialAssetCommand(
                     "Change Material Shader",
-                    renderer->materialPath,
+                    materialPath,
                     beforeAsset,
                     CloneMaterialAsset(materialResource->asset));
             }
@@ -176,7 +268,7 @@ namespace myengine::ui
             {
                 PushMaterialAssetCommand(
                     "Change Material Texture",
-                    renderer->materialPath,
+                    materialPath,
                     beforeAsset,
                     CloneMaterialAsset(materialResource->asset));
             }
@@ -196,7 +288,7 @@ namespace myengine::ui
             {
                 PushMaterialAssetCommand(
                     "Change Material Tint",
-                    renderer->materialPath,
+                    materialPath,
                     beforeAsset,
                     CloneMaterialAsset(materialResource->asset));
             }

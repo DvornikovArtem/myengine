@@ -223,6 +223,7 @@ namespace myengine::core
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };
+        sceneEditorServices.openScene = [this](const std::string& scenePath) { return OpenSceneFromDisk(scenePath); };
         sceneEditorServices.captureSceneSnapshot = [this]() { return CaptureSceneSnapshot(); };
         sceneEditorServices.restoreSceneSnapshot = [this](std::string_view snapshot) { return RestoreSceneSnapshot(snapshot); };
         sceneEditorServices.reloadScripts = [this]()
@@ -985,6 +986,26 @@ namespace myengine::core
             return false;
         }
 
+        RebindWindowControlledEntities();
+        return true;
+    }
+
+    bool Application::OpenSceneFromDisk(const std::string& scenePath)
+    {
+        if (!sceneLoaded_ || scenePath.empty() || resourceManager_ == nullptr)
+        {
+            return false;
+        }
+
+        // Same lookup as for any asset: the project folder first, then the copy next to the executable
+        const std::filesystem::path resolvedPath = resourceManager_->ResolvePath(std::filesystem::u8path(scenePath));
+        if (!scene::LoadWorldFromJson(world_, resolvedPath, &logger_))
+        {
+            return false;
+        }
+
+        // From now on Save Scene and the save on exit go to this file
+        sceneSavePath_ = resolvedPath;
         RebindWindowControlledEntities();
         return true;
     }

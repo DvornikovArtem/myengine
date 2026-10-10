@@ -56,6 +56,7 @@
   include/myengine/spatial/UniformGrid3D.h
   include/myengine/state/IGameState.h
   include/myengine/state/StateMachine.h
+  include/myengine/ui/ContentBrowser.h
   include/myengine/ui/SceneEditor.h
   include/myengine/ui/PrefabInspector.h
   include/myengine/ui/ScriptConsole.h
@@ -110,6 +111,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
   src/ui/editor/SceneEditorViewport.cpp
+  src/ui/ContentBrowser.cpp
   src/ui/PrefabInspector.cpp
   src/ui/ScriptConsole.cpp
   src/ui/ScriptInspector.cpp

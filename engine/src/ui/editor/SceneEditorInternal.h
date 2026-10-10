@@ -40,6 +40,7 @@
 #include <myengine/physics/PhysicsWorldState.h>
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scene/TransformUtils.h>
+#include <myengine/ui/ContentBrowser.h>
 #include <myengine/ui/SceneEditor.h>
 #include <myengine/ui/PrefabInspector.h>
 #include <myengine/ui/ScriptInspector.h>
@@ -51,7 +52,7 @@ namespace myengine::ui::detail
     inline constexpr char kStatisticsWindowName[] = "Statistics";
     inline constexpr char kViewportWindowName[] = "Viewport";
     inline constexpr char kMaterialEditorWindowName[] = "Material Editor";
-    inline constexpr char kAssetBrowserWindowName[] = "Asset Browser";
+    inline constexpr char kAssetBrowserWindowName[] = "Content Browser";
     inline constexpr char kPrefabsWindowName[] = "Prefabs";
     inline constexpr char kScriptConsoleWindowName[] = "Script Console";
     inline constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
