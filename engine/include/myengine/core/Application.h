@@ -82,6 +82,9 @@ namespace myengine::core
         void SetInputOwnerWindow(WindowId id);
         void SetCursorVisible(bool visible);
         void WarpCursorToWindowCenter(const Window& window);
+        // The OS capture is shared by the buttons that are held: it stays until the last one is released
+        void AcquireMouseCapture(const Window& window, std::uint32_t button);
+        void ReleaseMouseCapture(std::uint32_t button);
         void UpdateWindowTitles();
         void ConfigureInputBindings();
         void BindRuntimeEventListeners();
@@ -131,6 +134,7 @@ namespace myengine::core
         bool titleShowsPlay_ = false;
         bool sceneLoaded_ = false;
         bool cameraControlActive_ = false;
+        std::uint32_t mouseCaptureButtons_ = 0;
         bool cursorHidden_ = false;
         bool runtimeEventsBound_ = false;
 

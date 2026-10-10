@@ -43,6 +43,10 @@ namespace myengine::core
         // The scene opened without --scene (benchmark.json stays available through --scene for LR1 measurements)
         constexpr char kDefaultScenePath[] = "assets/scenes/coin_guard_demo.json";
 
+        // Buttons that hold the OS mouse capture (bits of Application::mouseCaptureButtons_)
+        constexpr std::uint32_t kCaptureLeftButton = 1u << 0;
+        constexpr std::uint32_t kCaptureRightButton = 1u << 1;
+
         std::wstring Utf8ToWide(const std::string& text)
         {
             if (text.empty())
@@ -634,6 +638,7 @@ namespace myengine::core
                     runtime->controlledEntity = ecs::kInvalidEntity;
                 }
                 uiManager_.UnregisterWindow(window.Id());
+                mouseCaptureButtons_ = 0; // the destroyed window takes the capture with it
                 if (inputOwnerWindowId_ == window.Id())
                 {
                     cameraControlActive_ = false;
@@ -687,7 +692,35 @@ namespace myengine::core
                     cameraControlActive_ = false;
                     input_.OnMouseUp(MouseButton::Right);
                     SetCursorVisible(true);
+                    SetInputOwnerWindow(0);
+                }
+                // The held buttons are dropped (ImGui clears them on focus loss), so is the capture
+                if (mouseCaptureButtons_ != 0)
+                {
+                    mouseCaptureButtons_ = 0;
                     ReleaseCapture();
+                }
+                return 0;
+            }
+
+            case WM_CAPTURECHANGED:
+            {
+                // Someone else took the capture (a dialog, another application) while a button was held,
+                // its button-up will never reach this window
+                if (mouseCaptureButtons_ == 0 || reinterpret_cast<HWND>(lparam) == window.Handle())
+                {
+                    return 0;
+                }
+
+                mouseCaptureButtons_ = 0;
+                uiManager_.HandleWindowMessage(window.Id(), window.Handle(), WM_LBUTTONUP, 0, lparam);
+                uiManager_.HandleWindowMessage(window.Id(), window.Handle(), WM_RBUTTONUP, 0, lparam);
+                input_.OnMouseUp(MouseButton::Left);
+                if (cameraControlActive_ && inputOwnerWindowId_ == window.Id())
+                {
+                    cameraControlActive_ = false;
+                    input_.OnMouseUp(MouseButton::Right);
+                    SetCursorVisible(true);
                     SetInputOwnerWindow(0);
                 }
                 return 0;
@@ -746,6 +779,10 @@ namespace myengine::core
             case WM_LBUTTONDOWN:
             case WM_LBUTTONDBLCLK:
             {
+                // Without the capture a drag that ends outside the window never gets its button-up,
+                // and ImGui keeps the button held until the next click
+                AcquireMouseCapture(window, kCaptureLeftButton);
+
                 if (uiWantsMouseCapture)
                 {
                     return 0;
@@ -761,6 +798,8 @@ namespace myengine::core
 
             case WM_LBUTTONUP:
             {
+                ReleaseMouseCapture(kCaptureLeftButton);
+
                 if (uiWantsMouseCapture)
                 {
                     return 0;
@@ -784,7 +823,7 @@ namespace myengine::core
                 input_.SetActiveWindow(window.Id());
                 SetInputOwnerWindow(window.Id());
                 cameraControlActive_ = true;
-                SetCapture(window.Handle());
+                AcquireMouseCapture(window, kCaptureRightButton);
                 input_.OnMouseDown(MouseButton::Right);
                 SetCursorVisible(false);
                 WarpCursorToWindowCenter(window);
@@ -803,7 +842,7 @@ namespace myengine::core
 
                 input_.SetActiveWindow(window.Id());
                 cameraControlActive_ = false;
-                ReleaseCapture();
+                ReleaseMouseCapture(kCaptureRightButton);
                 input_.OnMouseUp(MouseButton::Right);
                 SetCursorVisible(true);
                 SetInputOwnerWindow(0);
@@ -1041,6 +1080,29 @@ namespace myengine::core
         {
         }
         cursorHidden_ = true;
+    }
+
+    void Application::AcquireMouseCapture(const Window& window, const std::uint32_t button)
+    {
+        if (mouseCaptureButtons_ == 0)
+        {
+            SetCapture(window.Handle());
+        }
+        mouseCaptureButtons_ |= button;
+    }
+
+    void Application::ReleaseMouseCapture(const std::uint32_t button)
+    {
+        if ((mouseCaptureButtons_ & button) == 0)
+        {
+            return;
+        }
+
+        mouseCaptureButtons_ &= ~button;
+        if (mouseCaptureButtons_ == 0)
+        {
+            ReleaseCapture();
+        }
     }
 
     void Application::WarpCursorToWindowCenter(const Window& window)
