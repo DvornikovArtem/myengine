@@ -77,6 +77,10 @@ namespace myengine::ui
         std::function<nlohmann::json(ecs::EntityId entity, std::size_t scriptIndex)> liveScriptFields;
         std::function<std::vector<std::string>()> scriptHudLines;
         ScriptConsoleServices scriptConsole;
+        // Viewport toolbar > Graphics / Lit: renderer switches
+        std::function<bool()> isVSyncEnabled;
+        std::function<void(bool)> setVSync;
+        std::function<void(bool)> setWireframe;
     };
 
     struct SceneEditorWindowContext

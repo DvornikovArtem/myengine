@@ -350,6 +350,14 @@ namespace myengine::render::dx12
             return {};
         }
 
+        // The wireframe view mode uses the same shaders with another fill mode; without it the mode is simply not drawn
+        pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+        pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        if (FAILED(context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(shaderRecord.wireframePipelineState.GetAddressOf()))))
+        {
+            logger_.Warning("CreateGraphicsPipelineState (wireframe) failed; the shader has no wireframe variant");
+        }
+
         const std::uint32_t shaderId = nextShaderId_++;
         shaders_.insert_or_assign(shaderId, std::move(shaderRecord));
         return ShaderHandle{shaderId};
@@ -619,7 +627,8 @@ namespace myengine::render::dx12
         const TextureRecord& texture = textureIt->second;
         const ShaderRecord& shader = shaderIt->second;
 
-        context_.commandList->SetPipelineState(shader.pipelineState.Get());
+        context_.commandList->SetPipelineState(
+            wireframe_ && shader.wireframePipelineState != nullptr ? shader.wireframePipelineState.Get() : shader.pipelineState.Get());
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
         context_.commandList->IASetIndexBuffer(&mesh.indexBufferView);

@@ -36,6 +36,12 @@ namespace myengine::render
         virtual void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) = 0;
         virtual void EndFrame(RenderSurfaceHandle surface) = 0;
 
+        // Present with vertical sync (true) or immediately (false). Safe to call between frames
+        virtual void SetVSync(bool enabled) { (void)enabled; }
+        virtual bool IsVSyncEnabled() const { return false; }
+        // View mode: draw the meshes of Draw() as wireframe (debug lines and the UI are not affected)
+        virtual void SetWireframe(bool enabled) { (void)enabled; }
+
         virtual void Shutdown() = 0;
     };
 }

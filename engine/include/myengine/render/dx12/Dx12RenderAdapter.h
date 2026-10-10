@@ -47,6 +47,9 @@ namespace myengine::render::dx12
         void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) override;
         void EndFrame(RenderSurfaceHandle surface) override;
 
+        void SetVSync(bool enabled) override { vsyncEnabled_ = enabled; }
+        bool IsVSyncEnabled() const override { return vsyncEnabled_; }
+        void SetWireframe(bool enabled) override { wireframe_ = enabled; }
         void Shutdown() override;
 
         ID3D12Device* GetDevice() const;
@@ -132,6 +135,7 @@ namespace myengine::render::dx12
         struct ShaderRecord
         {
             Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> wireframePipelineState; // same shaders, fill mode wireframe (may be empty)
         };
 
         bool CreateDevice();
@@ -187,5 +191,6 @@ namespace myengine::render::dx12
         HANDLE fenceEvent_ = nullptr;
         bool allowTearing_ = false;
         bool vsyncEnabled_ = true;
+        bool wireframe_ = false;
     };
 }
