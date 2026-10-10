@@ -17,7 +17,9 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ui/UiManager.h>
 
+#include "editor/EditorIcons.h"
 #include "editor/EditorTheme.h"
+#include "editor/EditorWidgets.h"
 
 #include <tracy/Tracy.hpp>
 
@@ -158,7 +160,8 @@ namespace myengine::ui
             ImFontAtlas& atlas,
             const std::filesystem::path& path,
             const float sizePixels,
-            const ImWchar* glyphRanges)
+            const ImWchar* glyphRanges,
+            const ImFontConfig* config = nullptr)
         {
             std::ifstream fontFile(path, std::ios::binary | std::ios::ate);
             if (!fontFile.is_open())
@@ -192,7 +195,7 @@ namespace myengine::ui
                 fontData,
                 static_cast<int>(dataSize),
                 sizePixels,
-                nullptr,
+                config,
                 glyphRanges);
         }
 
@@ -385,6 +388,7 @@ namespace myengine::ui
             if (it->second->imguiContext != nullptr)
             {
                 ImGui::SetCurrentContext(it->second->imguiContext);
+                ClearEditorFonts();
                 ImGui::DestroyContext(it->second->imguiContext);
             }
         }
@@ -752,13 +756,72 @@ namespace myengine::ui
         const ImWchar* glyphRanges = io.Fonts->GetGlyphRangesCyrillic();
         const auto fontRoot = ResolveFontRoot();
 
-        windowContext->bodyFont = LoadFontFromPath(*io.Fonts, fontRoot / "Inter-Regular.ttf", 15.0f, glyphRanges);
-        windowContext->monoFont = LoadFontFromPath(*io.Fonts, fontRoot / "JetBrainsMono-Regular.ttf", 14.0f, glyphRanges);
+        // Text fonts (Cyrillic) with the Lucide icons merged in, plus icon-only fonts for DrawIcon. Every size is baked
+        // here once: the renderer uploads the atlas a single time. Roles and sizes: EditorWidgets.h / EditorStyle.h.
+        static std::vector<ImWchar> iconRanges;
+        if (iconRanges.empty())
+        {
+            const ImWchar codepoints[] = {EDITOR_ICON_CODEPOINTS};
+            for (const ImWchar codepoint : codepoints)
+            {
+                iconRanges.push_back(codepoint);
+                iconRanges.push_back(codepoint);
+            }
+            iconRanges.push_back(0);
+        }
+
+        const std::filesystem::path interRegular = fontRoot / "Inter-Regular.ttf";
+        const std::filesystem::path interSemiBold = fontRoot / "Inter-SemiBold.ttf";
+        const std::filesystem::path mono = fontRoot / "JetBrainsMono-Regular.ttf";
+        const std::filesystem::path lucide = fontRoot / "lucide.ttf";
+
+        auto addTextFont = [&](const std::filesystem::path& file, const float size, const bool mergeIcons) -> ImFont*
+        {
+            // Inter has its own glyphs in the Private Use Area; they would shadow the icons that merge in later
+            static const ImWchar kExcludePrivateUse[] = {0xE000, 0xF8FF, 0};
+            ImFontConfig textConfig;
+            textConfig.GlyphExcludeRanges = kExcludePrivateUse;
+            ImFont* font = LoadFontFromPath(*io.Fonts, file, size, glyphRanges, &textConfig);
+            if (font != nullptr && mergeIcons)
+            {
+                ImFontConfig iconConfig;
+                iconConfig.MergeMode = true;
+                iconConfig.PixelSnapH = true;
+                iconConfig.GlyphMinAdvanceX = size;
+                iconConfig.GlyphOffset = ImVec2(0.0f, 1.0f);
+                LoadFontFromPath(*io.Fonts, lucide, size, iconRanges.data(), &iconConfig);
+            }
+            return font;
+        };
+        auto addIconFont = [&](const float size) -> ImFont*
+        {
+            ImFontConfig iconConfig;
+            iconConfig.PixelSnapH = true;
+            return LoadFontFromPath(*io.Fonts, lucide, size, iconRanges.data(), &iconConfig);
+        };
+
+        EditorFonts editorFonts;
+        editorFonts.body = addTextFont(interRegular, style::kFontBody, true);
+        editorFonts.strong = addTextFont(interSemiBold, style::kFontStrong, true);
+        editorFonts.secondary = addTextFont(interRegular, style::kFontSecondary, true);
+        editorFonts.tiny = addTextFont(interRegular, style::kFontTiny, true);
+        editorFonts.mono = LoadFontFromPath(*io.Fonts, mono, style::kFontMono, glyphRanges);
+        editorFonts.icon12 = addIconFont(12.0f);
+        editorFonts.icon14 = addIconFont(14.0f);
+        editorFonts.icon16 = addIconFont(16.0f);
+        editorFonts.icon18 = addIconFont(18.0f);
+        editorFonts.icon30 = addIconFont(30.0f);
+        editorFonts.icon40 = addIconFont(40.0f);
+        editorFonts.icon58 = addIconFont(58.0f);
+
+        windowContext->bodyFont = editorFonts.body;
+        windowContext->monoFont = editorFonts.mono;
         const bool customBodyFont = windowContext->bodyFont != nullptr;
         const bool customMonoFont = windowContext->monoFont != nullptr;
         if (windowContext->bodyFont == nullptr)
         {
             windowContext->bodyFont = io.Fonts->AddFontDefault();
+            editorFonts.body = windowContext->bodyFont;
         }
         if (windowContext->bodyFont != nullptr)
         {
@@ -767,7 +830,25 @@ namespace myengine::ui
         if (windowContext->monoFont == nullptr)
         {
             windowContext->monoFont = io.FontDefault;
+            editorFonts.mono = windowContext->monoFont;
         }
+        // Missing font files fall back to the default font so every helper still draws
+        for (ImFont** font : {&editorFonts.strong, &editorFonts.secondary, &editorFonts.tiny})
+        {
+            if (*font == nullptr)
+            {
+                *font = editorFonts.body;
+            }
+        }
+        for (ImFont** font : {&editorFonts.icon12, &editorFonts.icon14, &editorFonts.icon16, &editorFonts.icon18,
+                              &editorFonts.icon30, &editorFonts.icon40, &editorFonts.icon58})
+        {
+            if (*font == nullptr)
+            {
+                *font = editorFonts.body;
+            }
+        }
+        SetEditorFonts(editorFonts);
 
         if (logger_ != nullptr)
         {

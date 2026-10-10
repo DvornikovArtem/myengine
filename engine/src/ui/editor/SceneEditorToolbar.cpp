@@ -320,7 +320,7 @@ namespace myengine::ui
 
             // Mode badge: bright in Play, calm in Edit
             {
-                const ImU32 badgeColor = isEditMode ? kEditBadgeColor : kPlayBadgeColor;
+                const ImU32 badgeColor = isEditMode ? style::kEditIndicator : style::kPlay;
                 const char* badgeText = isEditMode ? "EDIT" : "PLAYING";
                 const ImVec2 textSize = ImGui::CalcTextSize(badgeText);
                 const ImVec2 badgeMin = ImGui::GetCursorScreenPos();
@@ -335,7 +335,7 @@ namespace myengine::ui
             }
             ImGui::SameLine(0.0f, gap);
 
-            if (ToolButton("##play", ToolIcon::Play, !isEditMode, isEditMode, "Play", kPlayBadgeColor))
+            if (ToolButton("##play", ToolIcon::Play, !isEditMode, isEditMode, "Play", style::kPlay))
             {
                 if (isEditMode && services_.captureSceneSnapshot)
                 {
@@ -408,7 +408,7 @@ namespace myengine::ui
 
             // Mode: coloured dot + text
             const ImVec2 dotCenter{ImGui::GetCursorScreenPos().x + 5.0f, ImGui::GetCursorScreenPos().y + ImGui::GetFrameHeight() * 0.5f};
-            ImGui::GetWindowDrawList()->AddCircleFilled(dotCenter, 4.0f, isEditMode ? kEditBadgeColor : kPlayBadgeColor);
+            ImGui::GetWindowDrawList()->AddCircleFilled(dotCenter, 4.0f, isEditMode ? style::kEditIndicator : style::kPlay);
             ImGui::Dummy(ImVec2(10.0f, 0.0f));
             ImGui::SameLine();
             ImGui::TextUnformatted(isEditMode ? "Edit" : "Play");

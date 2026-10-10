@@ -23,13 +23,7 @@ namespace myengine::ui
 
             if (ImGui::Button("Create Empty"))
             {
-                const std::string beforeSnapshot = services_.captureSceneSnapshot != nullptr ? services_.captureSceneSnapshot() : std::string();
-                const ecs::EntityId entity = world.CreateEntity();
-                world.Emplace<ecs::components::TagComponent>(entity).name = "Empty_" + std::to_string(entity);
-                world.Emplace<ecs::components::TransformComponent>(entity);
-                world.Emplace<ecs::components::WindowBindingComponent>(entity).windowId = windowContext.windowId;
-                editorState.selectedEntity = entity;
-                RecordSceneMutationImmediate("Create Empty Entity", beforeSnapshot);
+                CreateEmptyEntity(windowContext.windowId);
             }
 
             ImGui::SameLine();
@@ -121,6 +115,19 @@ namespace myengine::ui
 
             ImGui::TreePop();
         }
+    }
+
+    void SceneEditor::CreateEmptyEntity(const core::WindowId windowId)
+    {
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        ecs::World& world = *services_.world;
+        const std::string beforeSnapshot = services_.captureSceneSnapshot != nullptr ? services_.captureSceneSnapshot() : std::string();
+        const ecs::EntityId entity = world.CreateEntity();
+        world.Emplace<ecs::components::TagComponent>(entity).name = "Empty_" + std::to_string(entity);
+        world.Emplace<ecs::components::TransformComponent>(entity);
+        world.Emplace<ecs::components::WindowBindingComponent>(entity).windowId = windowId;
+        editorState.selectedEntity = entity;
+        RecordSceneMutationImmediate("Create Empty Entity", beforeSnapshot);
     }
 
     void SceneEditor::DeleteSelectedEntity()

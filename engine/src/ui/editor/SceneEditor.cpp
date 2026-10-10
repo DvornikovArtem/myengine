@@ -112,6 +112,7 @@ namespace myengine::ui
         {
             ImGui::ShowDemoWindow(&editorState.showImGuiDemo);
         }
+        DrawWidgetsGallery(&showWidgetsGallery_);
     }
 
     void SceneEditor::BuildDockSpace(const SceneEditorWindowContext& windowContext)
@@ -229,7 +230,12 @@ namespace myengine::ui
 
             if (ImGui::BeginMenu("Help"))
             {
-                ImGui::MenuItem("ImGui Demo", nullptr, &editorState.showImGuiDemo);
+                if (ImGui::BeginMenu("Developer"))
+                {
+                    ImGui::MenuItem("ImGui Demo", nullptr, &editorState.showImGuiDemo);
+                    ImGui::MenuItem("Widgets Gallery", nullptr, &showWidgetsGallery_);
+                    ImGui::EndMenu();
+                }
                 ImGui::EndMenu();
             }
 

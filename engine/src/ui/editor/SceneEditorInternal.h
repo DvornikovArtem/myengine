@@ -46,17 +46,22 @@
 #include <myengine/ui/PrefabInspector.h>
 #include <myengine/ui/ScriptInspector.h>
 
+#include "EditorIcons.h"
+#include "EditorStyle.h"
+#include "EditorWidgets.h"
+
 namespace myengine::ui::detail
 {
-    inline constexpr char kHierarchyWindowName[] = "Outliner";
-    inline constexpr char kInspectorWindowName[] = "Details";
-    inline constexpr char kStatisticsWindowName[] = "Statistics";
-    inline constexpr char kViewportWindowName[] = "Viewport";
-    inline constexpr char kMaterialEditorWindowName[] = "Material Editor";
-    inline constexpr char kAssetBrowserWindowName[] = "Content Browser";
-    inline constexpr char kPrefabsWindowName[] = "Prefabs";
-    inline constexpr char kScriptConsoleWindowName[] = "Output Log";
-    inline constexpr char kAssistantWindowName[] = "Assistant";
+    // Window titles: icon + name, with a stable ID after ### so a saved layout survives title changes
+    inline constexpr char kHierarchyWindowName[] = ICON_LIST_TREE " Outliner###Outliner";
+    inline constexpr char kInspectorWindowName[] = ICON_SLIDERS_HORIZONTAL " Details###Details";
+    inline constexpr char kStatisticsWindowName[] = ICON_ACTIVITY " Statistics###Statistics";
+    inline constexpr char kViewportWindowName[] = ICON_MONITOR " Viewport###Viewport";
+    inline constexpr char kMaterialEditorWindowName[] = ICON_PALETTE " Material Editor###MaterialEditor";
+    inline constexpr char kAssetBrowserWindowName[] = ICON_FOLDER " Content Browser###ContentBrowser";
+    inline constexpr char kPrefabsWindowName[] = ICON_PACKAGE " Prefabs###Prefabs";
+    inline constexpr char kScriptConsoleWindowName[] = ICON_SCROLL_TEXT " Output Log###OutputLog";
+    inline constexpr char kAssistantWindowName[] = ICON_SPARKLES " Assistant###Assistant";
     inline constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
     inline constexpr char kMaterialPayloadType[] = "MYENGINE_ASSET_MATERIAL";
     inline constexpr char kTexturePayloadType[] = "MYENGINE_ASSET_TEXTURE";
@@ -65,8 +70,6 @@ namespace myengine::ui::detail
     inline constexpr char kCubeMeshPath[] = "assets/models/crate.obj";
     inline constexpr char kSphereMeshPath[] = "assets/models/sphere.obj";
     inline constexpr float kViewportToolbarPadding = 12.0f;
-    inline constexpr ImU32 kPlayBadgeColor = IM_COL32(46, 160, 67, 255);
-    inline constexpr ImU32 kEditBadgeColor = IM_COL32(70, 78, 90, 255);
     inline constexpr float kPlayFrameThickness = 3.0f;
     // The overlay toolbar moved to the main toolbar (U1); the viewport overlay is empty until U2 adds view controls
     inline constexpr float kViewportToolbarHeight = 0.0f;
