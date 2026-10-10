@@ -45,6 +45,34 @@ namespace myengine::ui
             ImGui::PopTextWrapPos();
         }
 
+        // Natural heights of a confirmation card: the title, the detail block and the whole card
+        struct ApprovalMetrics
+        {
+            float title = 0.0f;
+            float detail = 0.0f;
+            float card = 0.0f;
+        };
+
+        ApprovalMetrics MeasureApproval(const assistant::AssistantApproval& approval, const float width)
+        {
+            ApprovalMetrics metrics;
+            const std::string title = "Confirm: " + approval.title;
+            PushFontRole(FontRole::Strong);
+            metrics.title = std::max(ImGui::CalcTextSize(title.c_str(), nullptr, false, std::max(width - 14.0f - 24.0f - 12.0f, 40.0f)).y, 18.0f);
+            PopFontRole();
+            if (!approval.detail.empty())
+            {
+                const std::size_t shown = std::min(approval.detail.size(), kMaxShownBytes);
+                PushFontRole(FontRole::Mono);
+                metrics.detail = ImGui::CalcTextSize(approval.detail.c_str(), approval.detail.c_str() + shown, false,
+                                                     std::max(width - 14.0f - 12.0f - 16.0f, 40.0f)).y + 10.0f;
+                PopFontRole();
+            }
+            // top 4 + title + gap 4 + detail + gap 6 + buttons + bottom 6
+            metrics.card = 4.0f + metrics.title + (metrics.detail > 0.0f ? 4.0f + metrics.detail : 0.0f) + 6.0f + style::kFrameHeight + 6.0f;
+            return metrics;
+        }
+
         void DrawDiff(const std::string& diff)
         {
             std::size_t position = 0;
@@ -176,8 +204,28 @@ namespace myengine::ui
 
         const float inputHeight = ImGui::GetTextLineHeight() * 3.0f + style::kFrameHeight * 0.5f + 12.0f;
         const float footerHeight = inputHeight + 20.0f;
-        DrawTranscript(footerHeight);
-        DrawInput(inputHeight);
+
+        // While the model waits for a decision the card takes the input row's place: it is always fully
+        // visible with its buttons, and a strip of the transcript stays above it
+        std::vector<assistant::AssistantApproval> pending;
+        if (bridge_ != nullptr)
+        {
+            pending = bridge_->GetPending();
+        }
+        if (!pending.empty())
+        {
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            const ApprovalMetrics metrics = MeasureApproval(pending.front(), std::max(available.x - 20.0f, 80.0f));
+            const float preferred = metrics.card + 16.0f + (pending.size() > 1 ? 20.0f : 0.0f);
+            const float cardsHeight = std::min(preferred, std::max(available.y - 44.0f, 110.0f));
+            DrawTranscript(cardsHeight + ImGui::GetStyle().ItemSpacing.y);
+            DrawApprovals(pending, cardsHeight);
+        }
+        else
+        {
+            DrawTranscript(footerHeight);
+            DrawInput(inputHeight);
+        }
     }
 
     // Tools row (36): New Chat, Stop, status, then backend chip, cost and settings on the right.
@@ -374,54 +422,66 @@ namespace myengine::ui
             }
             drawnRevision_ = revision;
         }
-        DrawApprovals();
-        const auto pending = bridge_ != nullptr ? bridge_->GetPending().size() : 0;
-        if (pending > drawnPending_)
-        {
-            ImGui::SetScrollHereY(1.0f); // a new card: show it
-        }
-        drawnPending_ = pending;
         scrollToBottom_ = false;
         ImGui::EndChild();
     }
 
-    // Confirmation card: light border, panel fill, amber stripe on the left, Reject / Apply on the right
-    void AssistantPanel::DrawApprovals()
+    // Confirmation card, pinned under the transcript while the model waits for the decision: light border,
+    // panel fill, amber stripe on the left, a scrollable detail block and Reject / Apply that never scroll away
+    void AssistantPanel::DrawApprovals(const std::vector<assistant::AssistantApproval>& pending, const float height)
     {
-        if (bridge_ == nullptr || bridge_->GetPending().empty())
+        constexpr float kRegionPad = 8.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, kRegionPad));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(style::kRecessed));
+        const bool shown = ImGui::BeginChild("assistant_approvals", ImVec2(0.0f, height), ImGuiChildFlags_AlwaysUseWindowPadding,
+                                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        if (!shown || pending.empty())
         {
+            ImGui::EndChild();
             return;
         }
-        const auto pending = bridge_->GetPending(); // a copy: Resolve changes the list
-        for (const auto& approval : pending)
+
+        const auto& approval = pending.front();
+        const bool more = pending.size() > 1;
+        auto* drawList = ImGui::GetWindowDrawList();
+        const float width = std::max(ImGui::GetContentRegionAvail().x, 80.0f);
+        const ApprovalMetrics metrics = MeasureApproval(approval, width);
+        const float moreHeight = more ? 20.0f : 0.0f;
+        const float cardHeight = std::min(metrics.card, std::max(height - 2.0f * kRegionPad - moreHeight, 60.0f));
+        const float detailHeight = metrics.detail > 0.0f
+            ? std::clamp(metrics.detail, 24.0f, std::max(cardHeight - (metrics.card - metrics.detail), 24.0f))
+            : 0.0f;
+        const float cardBottomPad = 6.0f;
+
+        ImGui::PushID(static_cast<int>(approval.id));
+        const ImVec2 cardMin = ImGui::GetCursorScreenPos();
+        const ImVec2 cardMax(cardMin.x + width, cardMin.y + cardHeight);
+        drawList->AddRectFilled(cardMin, cardMax, style::kPanel, style::kRoundingDialog);
+        drawList->AddRectFilled(cardMin, ImVec2(cardMin.x + 3.0f, cardMax.y), style::kWarning, style::kRoundingDialog, ImDrawFlags_RoundCornersLeft);
+        drawList->AddRect(cardMin, cardMax, style::kBorderLight, style::kRoundingDialog, 0, 1.0f);
+
+        // Title row
+        float y = cardMin.y + 4.0f;
+        DrawIcon(drawList, IconSize::Row14, ICON_TRIANGLE_ALERT, ImVec2(cardMin.x + 14.0f + 7.0f, y + 9.0f), style::kWarning);
+        ImGui::SetCursorScreenPos(ImVec2(cardMin.x + 14.0f + 24.0f, y));
+        PushFontRole(FontRole::Strong);
+        ImGui::PushTextWrapPos(cardMin.x + width - 12.0f);
+        ImGui::Text("Confirm: %s", approval.title.c_str());
+        ImGui::PopTextWrapPos();
+        PopFontRole();
+        y += metrics.title + 4.0f;
+
+        // Detail: its own scroll area, so that long JSON or a diff never pushes the buttons out of view
+        if (detailHeight > 0.0f)
         {
-            ImGui::PushID(static_cast<int>(approval.id));
-            auto* drawList = ImGui::GetWindowDrawList();
-            const float width = std::max(ImGui::GetContentRegionAvail().x, 80.0f);
-            const ImVec2 cardMin = ImGui::GetCursorScreenPos();
-
-            drawList->ChannelsSplit(2);
-            drawList->ChannelsSetCurrent(1);
-            ImGui::BeginGroup();
-            ImGui::Indent(14.0f);
-            ImGui::Dummy(ImVec2(0.0f, 2.0f));
-
-            // Title row
-            const ImVec2 titlePosition = ImGui::GetCursorScreenPos();
-            DrawIcon(drawList, IconSize::Row14, ICON_TRIANGLE_ALERT, ImVec2(titlePosition.x + 7.0f, titlePosition.y + 9.0f), style::kWarning);
-            ImGui::SetCursorScreenPos(ImVec2(titlePosition.x + 24.0f, titlePosition.y));
-            PushFontRole(FontRole::Strong);
-            ImGui::PushTextWrapPos(cardMin.x + width - 12.0f);
-            ImGui::Text("Confirm: %s", approval.title.c_str());
-            ImGui::PopTextWrapPos();
-            PopFontRole();
-
-            if (!approval.detail.empty())
+            ImGui::SetCursorScreenPos(ImVec2(cardMin.x + 14.0f, y));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 5.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, style::kRounding);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(style::kInput));
+            if (ImGui::BeginChild("##approval_detail", ImVec2(width - 14.0f - 12.0f, detailHeight), ImGuiChildFlags_AlwaysUseWindowPadding))
             {
-                ImGui::Dummy(ImVec2(0.0f, 2.0f));
-                const ImVec2 blockMin = ImGui::GetCursorScreenPos();
-                drawList->ChannelsSetCurrent(1);
-                ImGui::BeginGroup();
                 PushFontRole(FontRole::Mono);
                 if (approval.detail.front() == '+' || approval.detail.front() == '-')
                 {
@@ -432,42 +492,39 @@ namespace myengine::ui
                     WrappedText(approval.detail);
                 }
                 PopFontRole();
-                ImGui::EndGroup();
-                const ImVec2 blockMax(cardMin.x + width - 12.0f, ImGui::GetItemRectMax().y + 4.0f);
-                drawList->ChannelsSetCurrent(0);
-                drawList->AddRectFilled(ImVec2(blockMin.x - 6.0f, blockMin.y - 2.0f), blockMax, style::kInput, style::kRounding);
-                drawList->ChannelsSetCurrent(1);
-                ImGui::Dummy(ImVec2(0.0f, 4.0f));
             }
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar(2);
+        }
 
-            // Buttons on the right
-            ImGui::Dummy(ImVec2(0.0f, 2.0f));
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(width - 14.0f - 12.0f - 2.0f * 88.0f - 8.0f, 0.0f));
-            const bool reject = Button("Reject", ICON_X, true, 88.0f);
-            ImGui::SameLine();
-            const bool apply = PrimaryButton("Apply", ICON_CHECK, true, 88.0f);
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::Unindent(14.0f);
-            ImGui::EndGroup();
+        // Buttons on the right, on the bottom edge of the card
+        const float buttonsY = cardMax.y - cardBottomPad - style::kFrameHeight;
+        ImGui::SetCursorScreenPos(ImVec2(cardMax.x - 12.0f - 2.0f * 88.0f - 8.0f, buttonsY));
+        const bool reject = Button("Reject", ICON_X, true, 88.0f);
+        ImGui::SameLine();
+        const bool apply = PrimaryButton("Apply", ICON_CHECK, true, 88.0f);
 
-            const ImVec2 cardMax(cardMin.x + width, ImGui::GetItemRectMax().y + 4.0f);
-            drawList->ChannelsSetCurrent(0);
-            drawList->AddRectFilled(cardMin, cardMax, style::kPanel, style::kRoundingDialog);
-            drawList->AddRectFilled(cardMin, ImVec2(cardMin.x + 3.0f, cardMax.y), style::kWarning, style::kRoundingDialog, ImDrawFlags_RoundCornersLeft);
-            drawList->AddRect(cardMin, cardMax, style::kBorderLight, style::kRoundingDialog, 0, 1.0f);
-            drawList->ChannelsMerge();
-            ImGui::SetCursorScreenPos(ImVec2(cardMin.x, cardMax.y));
-            ImGui::Dummy(ImVec2(0.0f, 2.0f));
-            ImGui::PopID();
+        ImGui::SetCursorScreenPos(ImVec2(cardMin.x, cardMax.y + 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, 0.0f)); // ends the positioned drawing with an item
+        if (more)
+        {
+            PushFontRole(FontRole::Secondary);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
+            ImGui::Text("+%zu more waiting for your decision", pending.size() - 1);
+            ImGui::PopStyleColor();
+            PopFontRole();
+        }
+        ImGui::PopID();
+        ImGui::EndChild();
 
-            if (apply)
-            {
-                bridge_->Resolve(approval.id, true);
-            }
-            else if (reject)
-            {
-                bridge_->Resolve(approval.id, false);
-            }
+        if (apply)
+        {
+            bridge_->Resolve(approval.id, true);
+        }
+        else if (reject)
+        {
+            bridge_->Resolve(approval.id, false);
         }
     }
 
@@ -537,23 +594,21 @@ namespace myengine::ui
             const float rowWidth = std::max(ImGui::GetContentRegionAvail().x, 60.0f);
             const ImVec2 min = ImGui::GetCursorScreenPos();
             const float rowHeight = 24.0f;
-            const bool pressed = ImGui::InvisibleButton("##tool", ImVec2(rowWidth, rowHeight));
-            const bool hovered = ImGui::IsItemHovered();
-            if (pressed && expandable)
-            {
-                open = !open;
-                storage->SetBool(openId, open);
-            }
             const ImVec2 max(min.x + rowWidth, min.y + rowHeight);
+            const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseHoveringRect(min, max);
             if (hovered && expandable)
             {
                 drawList->AddRectFilled(min, max, style::kHeader, style::kRounding);
             }
             const float centerY = min.y + rowHeight * 0.5f;
-            DrawIcon(drawList, IconSize::Row14, ICON_WRENCH, ImVec2(min.x + 12.0f, centerY), message.toolFailed ? style::kError : style::kTextDim);
+            // The user's own "no" is a decision, not a failure: neutral icon, text and chip
+            const bool rejected = message.toolFailed && message.toolOutput.rfind(assistant::kUserRejectedText, 0) == 0;
+            const bool failed = message.toolFailed && !rejected;
+            DrawIcon(drawList, IconSize::Row14, rejected ? ICON_CIRCLE_X : ICON_WRENCH, ImVec2(min.x + 12.0f, centerY),
+                     failed ? style::kError : style::kTextDim);
 
-            const char* chipText = message.toolFailed ? "failed" : (message.toolDone ? "done" : "running");
-            const ChipKind chipKind = message.toolFailed ? ChipKind::Red : (message.toolDone ? ChipKind::Green : ChipKind::Gray);
+            const char* chipText = rejected ? "rejected" : (failed ? "failed" : (message.toolDone ? "done" : "running"));
+            const ChipKind chipKind = (rejected || (!failed && !message.toolDone)) ? ChipKind::Gray : (failed ? ChipKind::Red : ChipKind::Green);
             PushFontRole(FontRole::Tiny);
             const float chipWidth = ImGui::CalcTextSize(chipText).x + 16.0f + 12.0f;
             PopFontRole();
@@ -561,17 +616,24 @@ namespace myengine::ui
             PushFontRole(FontRole::Mono);
             drawList->PushClipRect(ImVec2(min.x + 26.0f, min.y), ImVec2(max.x - chipWidth - 16.0f, max.y), true);
             drawList->AddText(ImVec2(min.x + 26.0f, std::floor(centerY - style::kFontMono * 0.5f - 0.5f)),
-                              message.toolFailed ? style::kErrorText : style::kTextDim, header.c_str());
+                              failed ? style::kErrorText : style::kTextDim, header.c_str());
             drawList->PopClipRect();
             PopFontRole();
 
-            const ImVec2 after = ImGui::GetCursorScreenPos();
             ImGui::SetCursorScreenPos(ImVec2(max.x - chipWidth - (expandable ? 14.0f : 4.0f), min.y + 3.0f));
             Chip(chipText, chipKind, !message.toolDone && !message.toolFailed);
-            ImGui::SetCursorScreenPos(after);
             if (expandable)
             {
                 DrawIcon(drawList, IconSize::Chevron12, open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT, ImVec2(max.x - 8.0f, centerY), style::kTextDim);
+            }
+
+            // The row's own button last: it ends the row with an item and keeps the cursor spacing
+            ImGui::SetCursorScreenPos(min);
+            const bool pressed = ImGui::InvisibleButton("##tool", ImVec2(rowWidth, rowHeight));
+            if (pressed && expandable)
+            {
+                open = !open;
+                storage->SetBool(openId, open);
             }
 
             if (expandable && open)
@@ -582,7 +644,7 @@ namespace myengine::ui
                 PopFontRole();
                 ImGui::Unindent(24.0f);
             }
-            if (message.toolFailed && !message.toolOutput.empty())
+            if (failed && !message.toolOutput.empty())
             {
                 ImGui::Indent(24.0f);
                 ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kErrorText));

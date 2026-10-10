@@ -16,6 +16,71 @@ namespace myengine::assistant
     {
         using json = nlohmann::json;
 
+        // The JSON shown on a confirmation card: objects and arrays of objects/arrays go one entry per line,
+        // arrays of plain values stay on one line (`"position": [1, 0.5, 2]`)
+        void AppendCardJson(const json& value, const int depth, std::string& out)
+        {
+            const auto scalar = [](const json& item) { return !item.is_array() && !item.is_object(); };
+            const auto dumpScalar = [](const json& item) { return item.dump(-1, ' ', false, json::error_handler_t::replace); };
+            const std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
+            const std::string inner(static_cast<std::size_t>(depth + 1) * 2, ' ');
+
+            if (value.is_object())
+            {
+                if (value.empty())
+                {
+                    out += "{}";
+                    return;
+                }
+                out += "{\n";
+                std::size_t index = 0;
+                for (const auto& [key, child] : value.items())
+                {
+                    out += inner + json(key).dump(-1, ' ', false, json::error_handler_t::replace) + ": ";
+                    AppendCardJson(child, depth + 1, out);
+                    out += ++index < value.size() ? ",\n" : "\n";
+                }
+                out += indent + "}";
+            }
+            else if (value.is_array())
+            {
+                if (value.empty())
+                {
+                    out += "[]";
+                    return;
+                }
+                if (std::all_of(value.begin(), value.end(), scalar))
+                {
+                    out += "[";
+                    for (std::size_t index = 0; index < value.size(); ++index)
+                    {
+                        out += (index == 0 ? "" : ", ") + dumpScalar(value[index]);
+                    }
+                    out += "]";
+                    return;
+                }
+                out += "[\n";
+                for (std::size_t index = 0; index < value.size(); ++index)
+                {
+                    out += inner;
+                    AppendCardJson(value[index], depth + 1, out);
+                    out += index + 1 < value.size() ? ",\n" : "\n";
+                }
+                out += indent + "]";
+            }
+            else
+            {
+                out += dumpScalar(value);
+            }
+        }
+
+        std::string CardJson(const json& value)
+        {
+            std::string text;
+            AppendCardJson(value, 0, text);
+            return text;
+        }
+
         constexpr std::size_t kMaxResultChars = 60 * 1024;
         const std::string kMcpPrefix = std::string("mcp__") + AssistantBridge::kServerName + "__";
 
@@ -304,7 +369,7 @@ namespace myengine::assistant
             entry.view.id = nextApproval_++;
             entry.view.tool = toolName;
             entry.view.title = tools_.Describe(name, input);
-            entry.view.detail = input.empty() ? std::string() : input.dump(2, ' ', false, json::error_handler_t::replace);
+            entry.view.detail = input.empty() ? std::string() : CardJson(input);
             pending_.push_back(std::move(entry));
             RebuildView();
             return;
@@ -375,7 +440,7 @@ namespace myengine::assistant
         else
         {
             ReplyPermission(entry.request, false, entry.input,
-                reason.empty() ? std::string("The user rejected this action. Do not repeat it; ask what they want instead.") : reason);
+                reason.empty() ? std::string(kUserRejectedText) : reason);
             Notice("Rejected: " + entry.view.title);
         }
     }
