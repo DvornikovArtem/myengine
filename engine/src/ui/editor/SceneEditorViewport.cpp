@@ -214,7 +214,7 @@ namespace myengine::ui
             ImGui::GetWindowDrawList()->AddRect(
                 ImVec2(viewportRect.x + half, viewportRect.y + half),
                 ImVec2(viewportRect.x + viewportRect.width - half, viewportRect.y + viewportRect.height - half),
-                kPlayBadgeColor,
+                style::kPlay,
                 0.0f,
                 0,
                 kPlayFrameThickness);

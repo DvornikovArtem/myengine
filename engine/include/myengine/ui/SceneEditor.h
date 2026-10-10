@@ -143,6 +143,7 @@ namespace myengine::ui
         void RecordSceneMutationImmediate(const char* label, const std::string& beforeSnapshot);
         void CommitPendingGizmoMutation();
         void DeleteSelectedEntity();
+        void CreateEmptyEntity(core::WindowId windowId);
 
         SceneEditorServices services_{};
         std::unique_ptr<editor::EditorCommandHistory> history_;
@@ -161,5 +162,6 @@ namespace myengine::ui
         bool gizmoWasUsing_ = false;
         bool initialized_ = false;
         bool resetLayoutRequested_ = false;
+        bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
     };
 }

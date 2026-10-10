@@ -267,3 +267,10 @@ Default executable path:
 
 Log file:
 - `build/app/<Config>/logs/myengine.log`
+
+## 14. Fonts and Icons
+
+Editor UI fonts live in `assets/fonts`:
+- `Inter-Regular.ttf`, `Inter-SemiBold.ttf` - Inter (SIL Open Font License 1.1)
+- `JetBrainsMono-Regular.ttf` - JetBrains Mono (SIL Open Font License 1.1)
+- `lucide.ttf` - Lucide icons, lucide-static 0.460.0 (ISC License, text in `assets/fonts/LICENSE-lucide.txt`); the icon codes used by the editor are listed in `engine/src/ui/editor/EditorIcons.h` and must be regenerated if the font version changes

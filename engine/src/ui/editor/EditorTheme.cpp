@@ -1,100 +1,104 @@
 #include "EditorTheme.h"
 
+#include "EditorStyle.h"
+
 #include <imgui/imgui.h>
 
 namespace myengine::ui::detail
 {
     void ApplyEditorTheme()
     {
+        using namespace style;
+
         ImGuiStyle& style = ImGui::GetStyle();
 
-        // Shape: soft 2-4 px corners, dense spacing
-        style.WindowRounding = 3.0f;
-        style.ChildRounding = 3.0f;
-        style.FrameRounding = 3.0f;
-        style.PopupRounding = 3.0f;
-        style.ScrollbarRounding = 3.0f;
+        // Metrics (spec 2.7)
+        style.WindowPadding = ImVec2(8.0f, 8.0f);
+        style.FramePadding = ImVec2(8.0f, 5.0f);
+        style.ItemSpacing = ImVec2(6.0f, 4.0f);
+        style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+        style.CellPadding = ImVec2(8.0f, 4.0f);
+        style.IndentSpacing = kIndent;
+        style.ScrollbarSize = 10.0f;
+        style.GrabMinSize = 10.0f;
+
+        style.WindowRounding = 0.0f;   // docked panels are square
+        style.ChildRounding = 0.0f;
+        style.PopupRounding = kRounding;
+        style.FrameRounding = kRounding;
+        style.TabRounding = kRounding;
+        style.ScrollbarRounding = 5.0f;
         style.GrabRounding = 3.0f;
-        style.TabRounding = 3.0f;
-        style.WindowBorderSize = 1.0f;
-        style.ChildBorderSize = 1.0f;
+
+        style.WindowBorderSize = 0.0f;
+        style.ChildBorderSize = 0.0f;
         style.PopupBorderSize = 1.0f;
         style.FrameBorderSize = 0.0f;
         style.TabBorderSize = 0.0f;
-        style.WindowPadding = ImVec2(8.0f, 6.0f);
-        style.FramePadding = ImVec2(6.0f, 3.0f);
-        style.CellPadding = ImVec2(6.0f, 3.0f);
-        style.ItemSpacing = ImVec2(6.0f, 4.0f);
-        style.ItemInnerSpacing = ImVec2(4.0f, 4.0f);
-        style.IndentSpacing = 14.0f;
-        style.ScrollbarSize = 12.0f;
-        style.GrabMinSize = 10.0f;
-        style.WindowMenuButtonPosition = ImGuiDir_Left;
+        style.TabBarBorderSize = 0.0f;
+        style.TabBarOverlineSize = 2.0f;
+        style.DockingSeparatorSize = kSplitter;
+        style.DisabledAlpha = 0.45f;
+        style.WindowMenuButtonPosition = ImGuiDir_None;       // no window menu arrow on tabs
+        style.TabCloseButtonMinWidthSelected = 0.0f;          // the close button shows on hover / on the active tab only
+        style.TabCloseButtonMinWidthUnselected = 0.0f;
+        style.DockingNodeHasCloseButton = false;              // no group close button at the right of the tab strip
+        style.SeparatorTextBorderSize = 1.0f;
+        style.SeparatorTextPadding = ImVec2(10.0f, 4.0f);
 
-        const ImVec4 text(0.82f, 0.82f, 0.83f, 1.0f);
-        const ImVec4 textDisabled(0.46f, 0.46f, 0.48f, 1.0f);
-        const ImVec4 panel(0.135f, 0.135f, 0.142f, 1.0f);       // window and panel background
-        const ImVec4 panelDark(0.098f, 0.098f, 0.104f, 1.0f);   // inputs, tab strip, menu bar
-        const ImVec4 panelDeep(0.075f, 0.075f, 0.080f, 1.0f);   // behind the panels
-        const ImVec4 border(0.045f, 0.045f, 0.050f, 1.0f);
-        const ImVec4 control(0.200f, 0.200f, 0.212f, 1.0f);
-        const ImVec4 controlHovered(0.275f, 0.275f, 0.292f, 1.0f);
-        const ImVec4 controlActive(0.340f, 0.340f, 0.360f, 1.0f);
-        const ImVec4 accent(0.000f, 0.447f, 0.890f, 1.0f);        // the single accent colour
-        const ImVec4 accentHovered(0.110f, 0.530f, 0.950f, 1.0f);
-        const ImVec4 accentDim(0.050f, 0.290f, 0.540f, 1.0f);
-
+        // Colours (spec 2.7). The global Header colour is neutral: blue selection comes only from PushSelectionColors.
         ImVec4* c = style.Colors;
-        c[ImGuiCol_Text] = text;
-        c[ImGuiCol_TextDisabled] = textDisabled;
-        c[ImGuiCol_WindowBg] = panel;
-        c[ImGuiCol_ChildBg] = panelDark;
-        c[ImGuiCol_PopupBg] = ImVec4(0.118f, 0.118f, 0.125f, 0.98f);
-        c[ImGuiCol_Border] = border;
+        c[ImGuiCol_Text] = ToVec4(kText);
+        c[ImGuiCol_TextDisabled] = ToVec4(kTextDim);
+        c[ImGuiCol_WindowBg] = ToVec4(kPanel);
+        c[ImGuiCol_ChildBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);   // children paint kRecessed themselves
+        c[ImGuiCol_PopupBg] = ToVec4(kRecessed);
+        c[ImGuiCol_Border] = ToVec4(kBorderLight);              // only popups, menus and tooltips draw a border (2.4)
         c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        c[ImGuiCol_FrameBg] = panelDark;
-        c[ImGuiCol_FrameBgHovered] = ImVec4(0.165f, 0.165f, 0.176f, 1.0f);
-        c[ImGuiCol_FrameBgActive] = ImVec4(0.205f, 0.205f, 0.220f, 1.0f);
-        c[ImGuiCol_TitleBg] = panelDeep;
-        c[ImGuiCol_TitleBgActive] = panelDark;
-        c[ImGuiCol_TitleBgCollapsed] = panelDeep;
-        c[ImGuiCol_MenuBarBg] = panelDark;
-        c[ImGuiCol_ScrollbarBg] = panelDark;
-        c[ImGuiCol_ScrollbarGrab] = ImVec4(0.260f, 0.260f, 0.275f, 1.0f);
-        c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.340f, 0.340f, 0.360f, 1.0f);
-        c[ImGuiCol_ScrollbarGrabActive] = accent;
-        c[ImGuiCol_CheckMark] = accentHovered;
-        c[ImGuiCol_SliderGrab] = accent;
-        c[ImGuiCol_SliderGrabActive] = accentHovered;
-        c[ImGuiCol_Button] = control;
-        c[ImGuiCol_ButtonHovered] = controlHovered;
-        c[ImGuiCol_ButtonActive] = controlActive;
-        c[ImGuiCol_Header] = accentDim;
-        c[ImGuiCol_HeaderHovered] = ImVec4(0.215f, 0.215f, 0.230f, 1.0f);
-        c[ImGuiCol_HeaderActive] = accent;
-        c[ImGuiCol_Separator] = border;
-        c[ImGuiCol_SeparatorHovered] = accentHovered;
-        c[ImGuiCol_SeparatorActive] = accent;
+        c[ImGuiCol_FrameBg] = ToVec4(kInput);
+        c[ImGuiCol_FrameBgHovered] = ImVec4(0x16 / 255.0f, 0x16 / 255.0f, 0x16 / 255.0f, 1.0f);
+        c[ImGuiCol_FrameBgActive] = ImVec4(0x0B / 255.0f, 0x0B / 255.0f, 0x0B / 255.0f, 1.0f);
+        c[ImGuiCol_TitleBg] = ToVec4(kTitle);
+        c[ImGuiCol_TitleBgActive] = ToVec4(kTitle);
+        c[ImGuiCol_TitleBgCollapsed] = ToVec4(kTitle);
+        c[ImGuiCol_MenuBarBg] = ToVec4(kTitle);
+        c[ImGuiCol_ScrollbarBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+        c[ImGuiCol_ScrollbarGrab] = ImVec4(0x3A / 255.0f, 0x3A / 255.0f, 0x3A / 255.0f, 1.0f);
+        c[ImGuiCol_ScrollbarGrabHovered] = ToVec4(kControlActive);
+        c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0x6A / 255.0f, 0x6A / 255.0f, 0x6A / 255.0f, 1.0f);
+        c[ImGuiCol_CheckMark] = ToVec4(kTextStrong);
+        c[ImGuiCol_SliderGrab] = ToVec4(kPrimary);
+        c[ImGuiCol_SliderGrabActive] = ToVec4(kPrimaryHover);
+        c[ImGuiCol_Button] = ToVec4(kControl);
+        c[ImGuiCol_ButtonHovered] = ToVec4(kControlHover);
+        c[ImGuiCol_ButtonActive] = ToVec4(kControlActive);
+        c[ImGuiCol_Header] = ToVec4(kHeader);
+        c[ImGuiCol_HeaderHovered] = ToVec4(kControl);
+        c[ImGuiCol_HeaderActive] = ToVec4(kControlActive);
+        c[ImGuiCol_Separator] = ToVec4(kInput);
+        c[ImGuiCol_SeparatorHovered] = ToVec4(kPrimary);
+        c[ImGuiCol_SeparatorActive] = ToVec4(kPrimary);
         c[ImGuiCol_ResizeGrip] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        c[ImGuiCol_ResizeGripHovered] = ImVec4(accent.x, accent.y, accent.z, 0.55f);
-        c[ImGuiCol_ResizeGripActive] = accent;
-        c[ImGuiCol_Tab] = panelDark;
-        c[ImGuiCol_TabHovered] = ImVec4(0.215f, 0.215f, 0.230f, 1.0f);
-        c[ImGuiCol_TabSelected] = panel;
-        c[ImGuiCol_TabSelectedOverline] = accent;
-        c[ImGuiCol_TabDimmed] = panelDeep;
-        c[ImGuiCol_TabDimmedSelected] = panelDark;
-        c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(accent.x, accent.y, accent.z, 0.0f);
-        c[ImGuiCol_DockingPreview] = ImVec4(accent.x, accent.y, accent.z, 0.55f);
-        c[ImGuiCol_DockingEmptyBg] = panelDeep;
-        c[ImGuiCol_TableHeaderBg] = panelDark;
-        c[ImGuiCol_TableBorderStrong] = border;
-        c[ImGuiCol_TableBorderLight] = ImVec4(0.070f, 0.070f, 0.076f, 1.0f);
+        c[ImGuiCol_ResizeGripHovered] = ToVec4(WithAlpha(kPrimary, 0.55f));
+        c[ImGuiCol_ResizeGripActive] = ToVec4(kPrimary);
+        c[ImGuiCol_Tab] = ToVec4(kTitle);
+        c[ImGuiCol_TabHovered] = ImVec4(0x1E / 255.0f, 0x1E / 255.0f, 0x1E / 255.0f, 1.0f);
+        c[ImGuiCol_TabSelected] = ToVec4(kPanel);
+        c[ImGuiCol_TabSelectedOverline] = ToVec4(kPrimary);
+        c[ImGuiCol_TabDimmed] = ToVec4(kTitle);
+        c[ImGuiCol_TabDimmedSelected] = ToVec4(kPanel);
+        c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+        c[ImGuiCol_DockingPreview] = ToVec4(WithAlpha(kPrimary, 0.5f));
+        c[ImGuiCol_DockingEmptyBg] = ToVec4(kTitle);
+        c[ImGuiCol_TableHeaderBg] = ToVec4(kHeader);
+        c[ImGuiCol_TableBorderStrong] = ToVec4(kInput);
+        c[ImGuiCol_TableBorderLight] = ToVec4(kInput);
         c[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        c[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.025f);
-        c[ImGuiCol_TextSelectedBg] = ImVec4(accent.x, accent.y, accent.z, 0.35f);
-        c[ImGuiCol_DragDropTarget] = accentHovered;
-        c[ImGuiCol_NavCursor] = accentHovered;
+        c[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.018f);
+        c[ImGuiCol_TextLink] = ToVec4(kLink);
+        c[ImGuiCol_TextSelectedBg] = ToVec4(WithAlpha(kPrimary, 0.35f));
+        c[ImGuiCol_DragDropTarget] = ToVec4(kPrimary);
+        c[ImGuiCol_NavCursor] = ToVec4(kPrimary);
         c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.0f, 1.0f, 1.0f, 0.70f);
         c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.45f);
         c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.55f);

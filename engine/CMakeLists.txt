@@ -122,8 +122,12 @@ set(ENGINE_SOURCES
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
   src/ui/AssistantPanel.cpp
+  src/ui/editor/EditorIcons.h
+  src/ui/editor/EditorStyle.h
   src/ui/editor/EditorTheme.cpp
   src/ui/editor/EditorTheme.h
+  src/ui/editor/EditorWidgets.cpp
+  src/ui/editor/EditorWidgets.h
   src/ui/editor/SceneEditor.cpp
   src/ui/editor/SceneEditorAssets.cpp
   src/ui/editor/SceneEditorAssistant.cpp
