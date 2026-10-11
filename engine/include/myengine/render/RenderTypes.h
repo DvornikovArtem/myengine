@@ -60,6 +60,17 @@ namespace myengine::render
         }
     };
 
+    // An offscreen colour + depth target (IRenderAdapter::CreateRenderTarget)
+    struct RenderTargetHandle
+    {
+        std::uint32_t value = 0;
+
+        bool IsValid() const
+        {
+            return value != 0;
+        }
+    };
+
     struct MeshHandle
     {
         std::uint32_t value = 0;

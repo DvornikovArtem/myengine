@@ -1370,6 +1370,13 @@ namespace myengine::resource
         }
     }
 
+    bool ResourceManager::IsLoadPending(const std::filesystem::path& path) const
+    {
+        const std::string key = NormalizeKey(ResolvePath(path));
+        return pendingMeshLoads_.find(key) != pendingMeshLoads_.end() ||
+            pendingTextureLoads_.find(key) != pendingTextureLoads_.end();
+    }
+
     void ResourceManager::UpdateHotReload()
     {
         PumpAsyncLoads();

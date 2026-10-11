@@ -27,6 +27,7 @@ compile_commands.json
 
 # Logs and runtime output
 logs/
+Saved/
 *.myemesh
 *.myetex
 

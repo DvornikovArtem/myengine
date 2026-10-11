@@ -29,6 +29,7 @@ namespace myengine::ecs
 namespace myengine::editor
 {
     class EditorCommandHistory;
+    class ThumbnailService;
     class TransformGizmo;
 }
 
@@ -61,6 +62,7 @@ namespace myengine::ui
         resource::ResourceManager* resourceManager = nullptr;
         core::Logger* logger = nullptr;
         scene::PrefabLibrary* prefabLibrary = nullptr;
+        editor::ThumbnailService* thumbnails = nullptr; // asset previews (null without a render adapter)
         std::function<void()> requestQuit;
         std::function<bool()> saveScene;
         std::function<bool()> loadScene;
@@ -118,6 +120,7 @@ namespace myengine::ui
         void DrawFileMenu(bool editMode); // the File menu entries (maps, project, quit)
         void OpenMapDialog();
         void BuildProjectDialogs(); // Project Browser and the map dialogs
+        void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void RequestOpenProject(const std::string& projectFile);
         void RequestOpenScene(const std::string& scenePath);
         void OpenSceneNow(const std::string& scenePath);
@@ -170,5 +173,8 @@ namespace myengine::ui
         int layoutFocusFrames_ = 0; // frames until a fresh default layout gets its active tabs
         bool wasPlaying_ = false;   // Edit -> Play edge: the viewport takes the keyboard from any text field
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
+        bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
+        std::vector<std::string> thumbnailDebugAssets_;
+        int thumbnailDebugSize_ = 128;
     };
 }

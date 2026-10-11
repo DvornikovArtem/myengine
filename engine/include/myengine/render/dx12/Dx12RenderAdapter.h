@@ -50,6 +50,15 @@ namespace myengine::render::dx12
         void SetVSync(bool enabled) override { vsyncEnabled_ = enabled; }
         bool IsVSyncEnabled() const override { return vsyncEnabled_; }
         void SetWireframe(bool enabled) override { wireframe_ = enabled; }
+
+        RenderTargetHandle CreateRenderTarget(std::uint32_t width, std::uint32_t height) override;
+        void DestroyRenderTarget(RenderTargetHandle target) override;
+        TextureHandle GetRenderTargetTexture(RenderTargetHandle target) const override;
+        bool BeginRenderTarget(RenderTargetHandle target, const core::Color& clearColor) override;
+        void EndRenderTarget(RenderTargetHandle target) override;
+        bool ReadRenderTargetPixels(RenderTargetHandle target, std::vector<std::uint8_t>& outRgba8) override;
+        bool GetRenderTargetSize(RenderTargetHandle target, std::uint32_t& outWidth, std::uint32_t& outHeight) const override;
+
         void Shutdown() override;
 
         ID3D12Device* GetDevice() const;
@@ -62,7 +71,8 @@ namespace myengine::render::dx12
     private:
         static constexpr UINT kBackBufferCount = 2;
         static constexpr DXGI_FORMAT kDepthFormat = DXGI_FORMAT_D32_FLOAT;
-        static constexpr UINT kMaxTextureDescriptors = 512;
+        static constexpr UINT kMaxTextureDescriptors = 2048;
+        static constexpr UINT kMaxRenderTargets = 64;
 
         struct FrameUploadBuffer
         {
@@ -130,6 +140,30 @@ namespace myengine::render::dx12
         {
             Microsoft::WRL::ComPtr<ID3D12Resource> textureResource;
             UINT descriptorIndex = 0;
+            bool ownedByRenderTarget = false; // DestroyTexture leaves it to DestroyRenderTarget
+        };
+
+        struct RenderTargetRecord
+        {
+            Microsoft::WRL::ComPtr<ID3D12Resource> color;
+            Microsoft::WRL::ComPtr<ID3D12Resource> depth;
+            std::uint32_t width = 0;
+            std::uint32_t height = 0;
+            UINT slot = 0; // index in the RTV and DSV heaps
+            TextureHandle texture{};
+            Matrix4 viewProjection = Matrix4::Identity();
+        };
+
+        // A resource that the GPU may still read: released once the fence reaches `fenceValue`
+        struct RetiredResource
+        {
+            Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+            Microsoft::WRL::ComPtr<ID3D12Resource> secondResource;
+            UINT64 fenceValue = 0;
+            UINT descriptorIndex = 0;
+            bool hasDescriptor = false;
+            bool hasSlot = false;
+            UINT slot = 0;
         };
 
         struct ShaderRecord
@@ -144,6 +178,11 @@ namespace myengine::render::dx12
         bool BuildRootSignature();
         bool BuildDebugLinePipeline();
         bool BuildTextureDescriptorHeap();
+        bool BuildRenderTargetHeaps();
+        bool AllocateTextureDescriptor(UINT& outIndex);
+        void RetireResources(RetiredResource&& retired);
+        void CollectRetiredResources();
+        const Matrix4& CurrentViewProjection(const SurfaceData& surface) const;
         bool BuildUiPipeline();
         bool ResetCommandList();
         bool ExecuteCommandListAndWait(const char* contextLabel);
@@ -181,6 +220,17 @@ namespace myengine::render::dx12
 
         std::unordered_map<std::uint32_t, TextureRecord> textures_;
         std::uint32_t nextTextureId_ = 1;
+        std::vector<UINT> freeTextureDescriptors_;
+
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> targetRtvHeap_;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> targetDsvHeap_;
+        UINT targetRtvDescriptorSize_ = 0;
+        UINT targetDsvDescriptorSize_ = 0;
+        std::vector<UINT> freeTargetSlots_;
+        std::unordered_map<std::uint32_t, RenderTargetRecord> renderTargets_;
+        std::uint32_t nextRenderTargetId_ = 1;
+        RenderTargetRecord* activeTarget_ = nullptr; // between BeginRenderTarget and EndRenderTarget
+        std::vector<RetiredResource> retiredResources_;
         TextureHandle defaultWhiteTexture_{};
 
         std::unordered_map<std::uint32_t, ShaderRecord> shaders_;
@@ -192,6 +242,7 @@ namespace myengine::render::dx12
         bool allowTearing_ = false;
         bool vsyncEnabled_ = true;
         bool wireframe_ = false;
+        bool wireframeBeforeTarget_ = false; // the view mode is off while a render target is drawn (thumbnails)
         Microsoft::WRL::ComPtr<ID3DBlob> wireframePixelShader_; // constant colour, shared by every wireframe PSO
     };
 }
