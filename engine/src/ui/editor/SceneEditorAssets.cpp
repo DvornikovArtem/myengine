@@ -88,12 +88,111 @@ namespace myengine::ui
                 pinnedMaterialEntity_ = state.selectedEntity;
                 ImGui::SetWindowFocus(kMaterialEditorWindowName);
             };
+            // One entry point for "open this asset". Today it does what the kinds always did; the asset viewers
+            // (textures, meshes, prefabs) are added here. Anything it does not handle goes back to the browser.
+            hooks.onOpenAsset = [this, &hooks](const std::string& assetPath, const ContentKind kind)
+            {
+                switch (kind)
+                {
+                    case ContentKind::Scene:
+                        hooks.openScene(assetPath);
+                        return true;
+                    case ContentKind::Prefab:
+                    {
+                        std::string name = std::filesystem::path(assetPath).filename().string();
+                        const std::string suffix = ".prefab.json";
+                        if (name.size() > suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+                        {
+                            name.resize(name.size() - suffix.size());
+                        }
+                        hooks.openPrefab(name);
+                        return true;
+                    }
+                    case ContentKind::Material:
+                        hooks.openMaterial(assetPath);
+                        return true;
+                    case ContentKind::Folder:
+                    case ContentKind::Script:
+                    case ContentKind::Mesh:
+                    case ContentKind::Texture:
+                    case ContentKind::Shader:
+                    case ContentKind::Other:
+                        break;
+                }
+                return false;
+            };
+            hooks.thumbnail = [this](const ContentEntry& entry) { return MakeContentThumbnail(entry); };
 
             contentBrowser_->Draw(hooks);
         }
         ImGui::End();
 
         DrawOpenScenePrompt();
+    }
+
+    ContentThumbnail SceneEditor::MakeContentThumbnail(const ContentEntry& entry) const
+    {
+        ContentThumbnail thumbnail;
+        if (services_.resourceManager == nullptr)
+        {
+            return thumbnail;
+        }
+
+        // A texture is its own picture. A material shows its base colour map with the tint until the
+        // render-to-texture thumbnails (sphere with the material) come; meshes and the rest keep the type icon.
+        std::string texturePath;
+        core::Color tint{1.0f, 1.0f, 1.0f, 1.0f};
+        if (entry.kind == ContentKind::Texture)
+        {
+            texturePath = entry.path;
+        }
+        else if (entry.kind == ContentKind::Material)
+        {
+            if (const auto material = services_.resourceManager->Load<resource::MaterialAsset>(entry.path); material != nullptr)
+            {
+                texturePath = material->asset.texturePath;
+                tint = material->asset.tint;
+            }
+        }
+        if (texturePath.empty())
+        {
+            return thumbnail;
+        }
+
+        // Textures load in the background: the first Load starts it and returns a placeholder
+        const auto texture = services_.resourceManager->Load<resource::TextureAsset>(texturePath);
+        if (services_.resourceManager->IsLoadPending(texturePath))
+        {
+            thumbnail.pending = true;
+            return thumbnail;
+        }
+        if (texture == nullptr || !texture->asset.gpuHandle.IsValid() ||
+            texture->asset.gpuHandle.value == services_.resourceManager->GetFallbackTextureHandle().value)
+        {
+            return thumbnail; // the file could not be read: the type icon stays
+        }
+
+        // UiManager turns this id back into the render::TextureHandle when it draws the image
+        const auto channel = [](const float value)
+        {
+            return static_cast<std::uint32_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+        };
+        thumbnail.textureId = static_cast<std::uint64_t>(texture->asset.gpuHandle.value);
+        thumbnail.width = texture->asset.data.width;
+        thumbnail.height = texture->asset.data.height;
+        thumbnail.tint = IM_COL32(channel(tint.r), channel(tint.g), channel(tint.b), channel(tint.a));
+
+        // Transparent pixels get a checkerboard under the picture (RGBA8, alpha is every 4th byte)
+        const auto& pixels = texture->asset.data.pixelsRgba8;
+        for (std::size_t index = 3; index < pixels.size(); index += 4)
+        {
+            if (pixels[index] != 255u)
+            {
+                thumbnail.hasAlpha = true;
+                break;
+            }
+        }
+        return thumbnail;
     }
 
     void SceneEditor::RequestOpenScene(const std::string& scenePath)

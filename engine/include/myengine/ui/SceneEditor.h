@@ -52,6 +52,8 @@ namespace myengine::scene
 namespace myengine::ui
 {
     class ContentBrowser;
+    struct ContentEntry;
+    struct ContentThumbnail;
     struct ProjectUiState;
     class AssistantPanel;
     class PrefabInspector;
@@ -126,6 +128,7 @@ namespace myengine::ui
         void BuildProjectDialogs(); // Project Browser and the map dialogs
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void RequestOpenProject(const std::string& projectFile);
+        ContentThumbnail MakeContentThumbnail(const ContentEntry& entry) const;
         void RequestOpenScene(const std::string& scenePath);
         void OpenSceneNow(const std::string& scenePath);
         void DrawOpenScenePrompt();

@@ -156,6 +156,8 @@ namespace myengine::resource
         // True while the mesh or the texture of this path is still streaming: Load() then returns a placeholder
         // (the fallback asset), whose GPU handle is valid but is not the asset's own
         bool IsLoadPending(const std::filesystem::path& path) const;
+        // The placeholder texture itself: a loaded texture that has this handle is a file that could not be read
+        render::TextureHandle GetFallbackTextureHandle() const;
         std::vector<std::string> GetKnownMeshKeys() const;
         std::vector<std::string> GetKnownTextureKeys() const;
         std::vector<std::string> GetKnownShaderKeys() const;
