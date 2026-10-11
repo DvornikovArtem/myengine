@@ -32,7 +32,7 @@ namespace myengine::editor
         constexpr char kDefaultMaterial[] = "assets/materials/default.material.json";
         constexpr std::uint64_t kFnvOffset = 1469598103934665603ull;
         constexpr std::uint64_t kFnvPrime = 1099511628211ull;
-        constexpr std::uint64_t kCacheVersion = 2; // bump when the way thumbnails are drawn changes
+        constexpr std::uint64_t kCacheVersion = 3; // bump when the way thumbnails are drawn changes
         constexpr int kMaxWaitFrames = 1200;       // a resource that has not loaded by then fails the thumbnail
         constexpr std::size_t kDiskLoadsPerUpdate = 4;
         constexpr std::uint64_t kStalenessInterval = 30; // frames between staleness passes
@@ -80,6 +80,23 @@ namespace myengine::editor
                 index += extra + 1;
             }
             return true;
+        }
+
+        // The light of every preview (thumbnails and live views): a key light from the top left in front of the
+        // camera and a soft fill, so that the darkest side keeps about a third of the colour. It follows the camera:
+        // orbiting does not turn the shadow side to the viewer. The scene viewport has its own light.
+        constexpr float kPreviewAmbient = 0.35f;
+
+        void ApplyPreviewLight(render::IRenderAdapter& adapter, const render::Matrix4& view)
+        {
+            // the way the light travels in view space: to the right, down and away from the camera
+            const DirectX::XMVECTOR viewDirection = DirectX::XMVectorSet(0.5f, -0.65f, 0.6f, 0.0f);
+            DirectX::XMVECTOR determinant = DirectX::XMVectorZero();
+            const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(&determinant, scene::ToDirectXMatrix(view));
+            DirectX::XMFLOAT3 world{};
+            DirectX::XMStoreFloat3(
+                &world, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(viewDirection, inverseView)));
+            adapter.SetTargetLighting(render::Float3{world.x, world.y, world.z}, kPreviewAmbient);
         }
 
         fs::path PathFromText(const std::string& text)
@@ -811,6 +828,7 @@ namespace myengine::editor
                 return false;
             }
             adapter.SetViewProjection(surface, view, projection);
+            ApplyPreviewLight(adapter, view);
             for (const auto& item : items)
             {
                 adapter.Draw(surface, item);
@@ -867,6 +885,7 @@ namespace myengine::editor
                     continue;
                 }
                 adapter.SetViewProjection(surface, view.request.view, view.request.projection);
+                ApplyPreviewLight(adapter, view.request.view);
                 for (const auto& item : view.request.items)
                 {
                     adapter.Draw(surface, item);

@@ -839,17 +839,53 @@ namespace myengine::ui
                 }
             }
             const IconSize iconSize = size >= 60.0f ? IconSize::Tile40 : (size >= 30.0f ? IconSize::Toolbar18 : IconSize::Row14);
-            DrawIcon(drawList, iconSize, info.icon, ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f), IM_COL32(0x3D, 0x3D, 0x3D, 255));
+            // Shaders never have a picture: their icon keeps the colour of the type; the others are grey until the
+            // thumbnail is ready
+            const ImU32 iconColor = kind == PickerKind::Shader ? info.color : IM_COL32(0x3D, 0x3D, 0x3D, 255);
+            DrawIcon(drawList, iconSize, info.icon, ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f), iconColor);
         }
 
         void DrawPickerPreviewTooltip(
             const std::string& key,
             const PickerKindInfo& info,
             const PickerKind kind,
-            const AssetPickerOptions& options)
+            const AssetPickerOptions& options,
+            const ImVec2 anchorMin,
+            const ImVec2 anchorMax)
         {
-            ImGui::BeginTooltip();
             const float size = 256.0f;
+
+            // The size of the tooltip: the picture, the name, the meta line and the path wrapped at the picture width.
+            // It is placed by hand so that it stays inside the window: below the picker, above it when there is no
+            // room, or next to the cursor when it fits neither.
+            const ImGuiStyle& imguiStyle = ImGui::GetStyle();
+            PushFontRole(FontRole::Strong);
+            float height = size + 2.0f + ImGui::GetTextLineHeightWithSpacing();
+            PopFontRole();
+            PushFontRole(FontRole::Secondary);
+            height += ImGui::GetTextLineHeightWithSpacing() + ImGui::CalcTextSize(key.c_str(), nullptr, false, size).y +
+                imguiStyle.ItemSpacing.y;
+            PopFontRole();
+            const ImVec2 tooltipSize(size + 2.0f * imguiStyle.WindowPadding.x, height + 2.0f * imguiStyle.WindowPadding.y);
+            const ImGuiViewport* viewport = ImGui::GetMainViewport();
+            const float left = viewport->Pos.x + 4.0f;
+            const float top = viewport->Pos.y + 4.0f;
+            const float right = viewport->Pos.x + viewport->Size.x - 4.0f;
+            const float bottom = viewport->Pos.y + viewport->Size.y - 4.0f;
+            ImVec2 position(anchorMin.x, anchorMax.y + 6.0f);
+            if (position.y + tooltipSize.y > bottom)
+            {
+                position.y = anchorMin.y - 6.0f - tooltipSize.y;
+            }
+            if (position.y < top)
+            {
+                // Neither side has room: beside the picker, as high as the window allows
+                position.y = std::clamp(ImGui::GetIO().MousePos.y - tooltipSize.y * 0.5f, top, std::max(bottom - tooltipSize.y, top));
+                position.x = anchorMin.x - 6.0f - tooltipSize.x;
+            }
+            position.x = std::clamp(position.x, left, std::max(right - tooltipSize.x, left));
+            ImGui::SetNextWindowPos(position);
+            ImGui::BeginTooltip();
             const ImVec2 min = ImGui::GetCursorScreenPos();
             DrawPickerImage(ImGui::GetWindowDrawList(), min, size, info, kind, key, options.thumbnails, 256);
             ImGui::Dummy(ImVec2(size, size));
@@ -930,7 +966,7 @@ namespace myengine::ui
         if (!popupOpen && delayedHover && !current.empty() &&
             ImGui::IsMouseHoveringRect(thumbMin, ImVec2(thumbMin.x + kThumb, thumbMin.y + kThumb)))
         {
-            DrawPickerPreviewTooltip(current, info, options.kind, options);
+            DrawPickerPreviewTooltip(current, info, options.kind, options, min, max);
         }
         else if (!popupOpen && hovered && !current.empty() &&
             !ImGui::IsMouseHoveringRect(thumbMin, ImVec2(thumbMin.x + kThumb, thumbMin.y + kThumb)))

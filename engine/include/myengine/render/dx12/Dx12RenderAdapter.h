@@ -50,6 +50,11 @@ namespace myengine::render::dx12
         void SetVSync(bool enabled) override { vsyncEnabled_ = enabled; }
         bool IsVSyncEnabled() const override { return vsyncEnabled_; }
         void SetWireframe(bool enabled) override { wireframe_ = enabled; }
+        void SetTargetLighting(const Float3& direction, float ambient) override
+        {
+            targetLightDirection_ = direction;
+            targetAmbient_ = ambient;
+        }
 
         RenderTargetHandle CreateRenderTarget(std::uint32_t width, std::uint32_t height) override;
         void DestroyRenderTarget(RenderTargetHandle target) override;
@@ -243,6 +248,8 @@ namespace myengine::render::dx12
         bool vsyncEnabled_ = true;
         bool wireframe_ = false;
         bool wireframeBeforeTarget_ = false; // the view mode is off while a render target is drawn (thumbnails)
+        Float3 targetLightDirection_{0.35f, -1.0f, 0.25f}; // light of the meshes drawn into a render target
+        float targetAmbient_ = 0.25f;
         Microsoft::WRL::ComPtr<ID3DBlob> wireframePixelShader_; // constant colour, shared by every wireframe PSO
     };
 }

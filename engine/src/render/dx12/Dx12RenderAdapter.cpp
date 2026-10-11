@@ -700,10 +700,20 @@ namespace myengine::render::dx12
         constants.color[2] = drawItem.color.b;
         constants.color[3] = drawItem.color.a;
 
-        constants.lightDirection[0] = 0.35f;
-        constants.lightDirection[1] = -1.0f;
-        constants.lightDirection[2] = 0.25f;
-        constants.lightDirection[3] = 0.25f;
+        if (activeTarget_ != nullptr)
+        {
+            constants.lightDirection[0] = targetLightDirection_.x;
+            constants.lightDirection[1] = targetLightDirection_.y;
+            constants.lightDirection[2] = targetLightDirection_.z;
+            constants.lightDirection[3] = targetAmbient_;
+        }
+        else
+        {
+            constants.lightDirection[0] = 0.35f;
+            constants.lightDirection[1] = -1.0f;
+            constants.lightDirection[2] = 0.25f;
+            constants.lightDirection[3] = 0.25f;
+        }
 
         context_.commandList->SetGraphicsRoot32BitConstants(0, 40, &constants, 0);
         context_.commandList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);

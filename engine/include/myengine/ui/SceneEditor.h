@@ -182,8 +182,8 @@ namespace myengine::ui
         bool wasPlaying_ = false;   // Edit -> Play edge: the viewport takes the keyboard from any text field
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
-        float materialPreviewYaw_ = 0.55f;   // orbit camera of the Material Editor preview (radians)
-        float materialPreviewPitch_ = 0.32f;
+        float materialPreviewYaw_ = 0.61f;   // orbit camera of the Material Editor preview (radians)
+        float materialPreviewPitch_ = 0.44f;
         float materialPreviewDistance_ = 3.0f;
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
