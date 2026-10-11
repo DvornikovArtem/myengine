@@ -107,9 +107,9 @@ Shutdown:
 
 - `MenuState`:
   - `Enter` -> switch to `GameplayState`
-  - `Esc` -> exit app
+  - `Esc` -> exit app (the editor never enters `MenuState` now)
 - `GameplayState`:
-  - `Esc` -> back to `MenuState`
+  - `Esc` is handled by the editor: Play -> stop Play (same as the Stop button), Edit -> nothing; it never closes the app
 
 ### 6.2 Camera controls
 
