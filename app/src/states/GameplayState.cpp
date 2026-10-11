@@ -1,15 +1,8 @@
 // GameplayState.cpp
 
 #include <states/GameplayState.h>
-#include <states/MenuState.h>
 
 #include <myengine/core/Application.h>
-
-// If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
 
 namespace myengine::appstate
 {
@@ -43,10 +36,9 @@ namespace myengine::appstate
 
     void GameplayState::HandleEvent(core::Application& app, const core::InputEvent& event)
     {
-        if (event.type == core::InputEventType::KeyDown && event.key == VK_ESCAPE)
-        {
-            app.GetLogger().Info("GameplayState: Esc pressed -> MenuState");
-            app.GetStateMachine().ChangeState(std::make_unique<MenuState>(), app);
-        }
+        // Esc is the editor's: Play stops (SceneEditor::HandleKeyboardShortcuts), Edit ignores it. The state used to
+        // switch to MenuState on Esc, and Esc in MenuState quit the application
+        static_cast<void>(app);
+        static_cast<void>(event);
     }
 }

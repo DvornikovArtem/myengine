@@ -177,19 +177,9 @@ namespace myengine::ui
             ImGui::SameLine();
             const bool stopPressed = IconButton("##stop", ICON_SQUARE, "Stop", false, !isEditMode, style::kStop, style::kToolButton,
                                                 nullptr, IconSize::Toolbar18);
-            if (stopPressed && editorState.mode == editor::RuntimeMode::Play)
+            if (stopPressed)
             {
-                const bool restoredScene =
-                    editorState.playModeSnapshot.empty() ||
-                    (services_.restoreSceneSnapshot != nullptr &&
-                        services_.restoreSceneSnapshot(editorState.playModeSnapshot));
-
-                if (restoredScene)
-                {
-                    editorState.mode = editor::RuntimeMode::Edit;
-                    physicsState.physicsPaused = true;
-                    editorState.playModeSnapshot.clear();
-                }
+                StopPlayMode();
             }
             ImGui::SameLine();
             ToolbarSeparator();

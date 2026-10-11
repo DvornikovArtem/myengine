@@ -509,6 +509,31 @@ namespace myengine::ui
         {
             DeleteSelectedEntity();
         }
+
+        // Esc never closes the editor: it stops Play (like the Stop button) and does nothing in Edit
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && editorState.mode == editor::RuntimeMode::Play)
+        {
+            StopPlayMode();
+        }
+    }
+
+    void SceneEditor::StopPlayMode()
+    {
+        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+        if (editorState.mode != editor::RuntimeMode::Play)
+        {
+            return;
+        }
+
+        const bool restoredScene =
+            editorState.playModeSnapshot.empty() ||
+            (services_.restoreSceneSnapshot != nullptr && services_.restoreSceneSnapshot(editorState.playModeSnapshot));
+        if (restoredScene)
+        {
+            editorState.mode = editor::RuntimeMode::Edit;
+            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
+            editorState.playModeSnapshot.clear();
+        }
     }
 
     void SceneEditor::ValidateSelection() const

@@ -137,6 +137,7 @@ namespace myengine::ui
         void BuildAssistantPanel(const SceneEditorWindowContext& windowContext);
         void InitializeAssistant();
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
+        void StopPlayMode(); // Stop button and Esc: back to the scene snapshot taken at Play, no-op in Edit
         void ValidateSelection() const;
         void CreateDefaultDockLayout(const SceneEditorWindowContext& windowContext);
         void DrawEntityNode(core::WindowId windowId, ecs::EntityId entity);
