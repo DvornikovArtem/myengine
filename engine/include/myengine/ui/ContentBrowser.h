@@ -84,6 +84,10 @@ namespace myengine::ui
         const char* meshPayloadType = nullptr;
         const char* materialPayloadType = nullptr;
         const char* texturePayloadType = nullptr;
+        // The assistant takes these too (a prefab, a script, any other file: a map, a shader, a text file)
+        const char* prefabPayloadType = nullptr;
+        const char* scriptPayloadType = nullptr;
+        const char* filePayloadType = nullptr;
     };
 
     // Content Browser: a folder tree, breadcrumbs, search and tiles or a list for the asset root on disk.

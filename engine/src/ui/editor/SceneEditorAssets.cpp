@@ -69,6 +69,9 @@ namespace myengine::ui
             hooks.meshPayloadType = kMeshPayloadType;
             hooks.materialPayloadType = kMaterialPayloadType;
             hooks.texturePayloadType = kTexturePayloadType;
+            hooks.prefabPayloadType = kPrefabPayloadType;
+            hooks.scriptPayloadType = kScriptPayloadType;
+            hooks.filePayloadType = kFilePayloadType;
             hooks.openScene = [this](const std::string& scenePath) { RequestOpenScene(scenePath); };
             hooks.openPrefab = [this](const std::string& prefabName)
             {

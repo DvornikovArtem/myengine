@@ -1278,26 +1278,37 @@ namespace myengine::ui
             drawList->AddRectFilled(min, max, style::WithAlpha(style::kText, 0.03f));
         }
 
-        // Type stripe, then a 20 x 20 picture (or the icon)
+        // Type stripe, then a 20 x 20 plate with the picture (or the icon) on it, corners rounded by 3
         const ImU32 typeColor = KindColor(entry.kind);
         drawList->AddRectFilled(ImVec2(min.x + 10.0f, centerY - 8.0f), ImVec2(min.x + 13.0f, centerY + 8.0f), faded(typeColor));
-        const ImVec2 iconCenter(min.x + 28.0f, centerY);
+        const ImVec2 plateMin(min.x + 18.0f, centerY - 10.0f);
+        const ImVec2 plateMax(plateMin.x + 20.0f, plateMin.y + 20.0f);
+        drawList->AddRectFilled(plateMin, plateMax, faded(style::kViewportBackdrop), 3.0f);
         if (thumbnail.textureId != 0 && thumbnail.width > 0 && thumbnail.height > 0 && !thumbnail.pending)
         {
-            ImVec2 imageMin;
-            ImVec2 imageMax;
-            FitInto(ImVec2(iconCenter.x - 10.0f, iconCenter.y - 10.0f), 20.0f, thumbnail.width, thumbnail.height, imageMin, imageMax);
-            drawList->AddImage(
-                static_cast<ImTextureID>(thumbnail.textureId),
-                imageMin,
-                imageMax,
-                ImVec2(0.0f, 0.0f),
-                ImVec2(1.0f, 1.0f),
-                thumbnail.tint);
+            const ImTextureID textureId = static_cast<ImTextureID>(thumbnail.textureId);
+            if (thumbnail.width == thumbnail.height)
+            {
+                // A square picture (a sphere, a mesh, a square texture) fills the plate
+                drawList->AddImageRounded(
+                    textureId, plateMin, plateMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), thumbnail.tint, 3.0f);
+            }
+            else
+            {
+                ImVec2 imageMin;
+                ImVec2 imageMax;
+                FitInto(plateMin, 20.0f, thumbnail.width, thumbnail.height, imageMin, imageMax);
+                drawList->AddImage(textureId, imageMin, imageMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), thumbnail.tint);
+            }
         }
         else
         {
-            DrawIcon(drawList, IconSize::Row14, EntryIcon(entry), iconCenter, faded(typeColor));
+            DrawIcon(
+                drawList,
+                IconSize::Row14,
+                EntryIcon(entry),
+                ImVec2(plateMin.x + 10.0f, plateMin.y + 10.0f),
+                faded(typeColor));
         }
 
         const ListColumns columns = MakeListColumns(width);
@@ -1358,7 +1369,12 @@ namespace myengine::ui
             case ContentKind::Mesh: payloadType = hooks.meshPayloadType; break;
             case ContentKind::Material: payloadType = hooks.materialPayloadType; break;
             case ContentKind::Texture: payloadType = hooks.texturePayloadType; break;
-            default: break;
+            case ContentKind::Prefab: payloadType = hooks.prefabPayloadType; break;
+            case ContentKind::Script: payloadType = hooks.scriptPayloadType; break;
+            case ContentKind::Scene:
+            case ContentKind::Shader:
+            case ContentKind::Other: payloadType = hooks.filePayloadType; break;
+            case ContentKind::Folder: break;
         }
 
         if (payloadType != nullptr && ImGui::BeginDragDropSource())
