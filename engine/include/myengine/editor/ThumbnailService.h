@@ -63,6 +63,38 @@ namespace myengine::editor
         std::size_t leasedTargets = 0;
     };
 
+    // The world-space box of what is drawn (an invalid box has min > max)
+    struct BoundsBox
+    {
+        render::Float3 min{3.4e38f, 3.4e38f, 3.4e38f};
+        render::Float3 max{-3.4e38f, -3.4e38f, -3.4e38f};
+
+        bool IsValid() const { return min.x <= max.x; }
+        void Add(const render::Float3& point);
+        void Add(const BoundsBox& other);
+    };
+
+    enum class DrawItemStatus : std::uint8_t
+    {
+        Ready,
+        Pending, // the mesh or the texture is still streaming: ask again in a frame
+        Failed,
+    };
+
+    // A viewport that a panel draws every frame (the material preview, the viewers). The panel describes what to
+    // draw, the service draws it into a render target before the scene, so the image is one frame behind.
+    struct LiveViewRequest
+    {
+        std::string id;                  // stable per view, e.g. "material-editor" or "viewer:<path>"
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+        render::Matrix4 view = render::Matrix4::Identity();
+        render::Matrix4 projection = render::Matrix4::Identity();
+        core::Color clearColor{0.0f, 0.0f, 0.0f, 0.0f}; // transparent: the panel paints the background
+        std::vector<render::DrawItem> items;
+        std::vector<render::DebugLine> lines;           // grid, bounds
+    };
+
     struct ThumbnailServiceConfig
     {
         // <project>/Saved/Thumbnails; empty disables the disk cache
@@ -98,6 +130,20 @@ namespace myengine::editor
 
         // The material that a mesh thumbnail is drawn with; invalidate to apply a new rule to the images in memory
         void SetMaterialSuggestion(std::function<std::string(const std::string& meshPath)> suggest);
+
+        // Builds what the renderer needs to draw a mesh with a material (loads them through the ResourceManager).
+        // `worldBounds`, when given, is extended by the mesh bounds transformed by `model`.
+        DrawItemStatus BuildDrawItem(
+            const std::string& meshPath,
+            const std::string& materialPath,
+            const render::Matrix4& model,
+            render::DrawItem& item,
+            BoundsBox* worldBounds = nullptr);
+
+        // Describes a live view for this frame; returns the texture it was last drawn into (invalid until the first
+        // render, the handle is stable while the size does not change). A view that is not submitted for a while
+        // gives its target back to the pool.
+        render::TextureHandle SubmitLiveView(LiveViewRequest request);
 
         static ThumbnailKind KindOf(const std::filesystem::path& assetPath);
         // The supported sizes are 64, 128 and 256: a request is rounded up to one of them

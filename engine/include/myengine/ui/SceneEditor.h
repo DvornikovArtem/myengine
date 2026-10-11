@@ -120,6 +120,7 @@ namespace myengine::ui
         void DrawFileMenu(bool editMode); // the File menu entries (maps, project, quit)
         void OpenMapDialog();
         void BuildProjectDialogs(); // Project Browser and the map dialogs
+        void DrawMaterialPreview(const std::string& materialPath, editor::WindowEditorState& windowState);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void RequestOpenProject(const std::string& projectFile);
         void RequestOpenScene(const std::string& scenePath);
@@ -174,6 +175,9 @@ namespace myengine::ui
         bool wasPlaying_ = false;   // Edit -> Play edge: the viewport takes the keyboard from any text field
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
+        float materialPreviewYaw_ = 0.55f;   // orbit camera of the Material Editor preview (radians)
+        float materialPreviewPitch_ = 0.32f;
+        float materialPreviewDistance_ = 3.0f;
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
     };

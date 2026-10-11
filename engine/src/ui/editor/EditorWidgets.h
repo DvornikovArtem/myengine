@@ -4,13 +4,20 @@
 // undo, snapshots and any other editor logic stay with the caller.
 // Internal to engine/src/ui/editor.
 
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include <imgui/imgui.h>
 
 #include "EditorIcons.h"
 #include "EditorStyle.h"
+
+namespace myengine::editor
+{
+    class ThumbnailService;
+}
 
 namespace myengine::ui
 {
@@ -117,8 +124,9 @@ namespace myengine::ui
     // Three columns: label (38% of the width, 110..200), value (stretch), reset (22).
     // `indent` is the left offset under the category chevron (20) or deeper for nested rows (32).
     bool BeginPropertyGrid(const char* id, float indent = 20.0f);
-    // Starts a new row and draws the label in the first column; the value column is current afterwards
-    void PropertyLabel(const char* text, bool dim = false);
+    // Starts a new row and draws the label in the first column; the value column is current afterwards.
+    // `rowHeight` > 26 makes a taller row (asset pickers: 52) with the label centred in it.
+    void PropertyLabel(const char* text, bool dim = false, float rowHeight = 0.0f);
     // Draws the reset arrow in the third column and returns true when it was clicked
     bool PropertyReset(const char* tooltip = "Reset to the value from the script code");
     void EndPropertyGrid();
@@ -129,10 +137,34 @@ namespace myengine::ui
     bool DragVector3(const char* id, float values[3], float speed = 0.05f, const char* format = "%.3f",
                      const std::function<void(int axis)>& afterField = {});
 
-    // Combo-like picker with a type stripe, an icon and the item name; the full path is the tooltip.
-    // Returns true while the popup is open: `if (BeginAssetPicker(...)) { items; EndAssetPicker(); }`
-    bool BeginAssetPicker(const char* id, const char* label, const char* icon, ImU32 stripeColor, const char* tooltipPath = nullptr);
-    void EndAssetPicker();
+    // Asset picker with previews (48 px): a type stripe, the thumbnail (40 px), the name and a meta line; a big
+    // preview on the thumbnail after the hover delay; a drop-down of tiles (3 columns) or rows with a search field.
+    enum class PickerKind
+    {
+        Mesh,
+        Material,
+        Texture,
+        Shader,
+    };
+
+    struct AssetPickerOptions
+    {
+        PickerKind kind = PickerKind::Mesh;
+        editor::ThumbnailService* thumbnails = nullptr; // null: the type icon only
+        // The second line of the picker and of the big preview: "Mesh Â· 960 tris". Null: the kind name
+        std::function<std::string(const std::string& key)> meta;
+        // The same asset under two keys (resource keys are normalised paths). Null: plain equality
+        std::function<bool(const std::string& a, const std::string& b)> samePath;
+    };
+
+    // `current` is the key of the assigned asset (empty: none), `keys` what can be picked. Returns true when
+    // the user picked an asset; `chosen` is its key.
+    bool AssetPicker(
+        const char* id,
+        const std::string& current,
+        const std::vector<std::string>& keys,
+        const AssetPickerOptions& options,
+        std::string& chosen);
 
     // ---- chips, banners, empty states ----
     enum class ChipKind

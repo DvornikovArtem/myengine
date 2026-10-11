@@ -199,49 +199,37 @@ namespace myengine::ui
                     ImGui::BeginDisabled(!editEnabled);
                     if (BeginPropertyGrid("##mesh_renderer"))
                     {
-                        PropertyLabel("Mesh");
+                        PropertyLabel("Mesh", false, style::kPickerRowHeight);
                         {
                             const auto meshKeys = services_.resourceManager->GetKnownMeshKeys();
-                            if (BeginAssetPicker("##mesh", AssetName(renderer->meshPath).c_str(), ICON_BOX, style::kTypeMesh, renderer->meshPath.c_str()))
+                            std::string chosen;
+                            if (AssetPicker(
+                                    "##mesh",
+                                    renderer->meshPath,
+                                    meshKeys,
+                                    MakePickerOptions(PickerKind::Mesh, *services_.resourceManager, services_.thumbnails),
+                                    chosen))
                             {
-                                for (const auto& meshKey : meshKeys)
-                                {
-                                    const bool selected = ResourcePathsEqual(*services_.resourceManager, meshKey, renderer->meshPath);
-                                    if (ImGui::Selectable(PickerItem(ICON_BOX, AssetName(meshKey), meshKey).c_str(), selected))
-                                    {
-                                        const std::string beforeMeshSnapshot = CaptureSceneSnapshot();
-                                        renderer->meshPath = meshKey;
-                                        RecordSceneMutationImmediate("Change Mesh", beforeMeshSnapshot);
-                                    }
-                                    if (selected)
-                                    {
-                                        ImGui::SetItemDefaultFocus();
-                                    }
-                                }
-                                EndAssetPicker();
+                                const std::string beforeMeshSnapshot = CaptureSceneSnapshot();
+                                renderer->meshPath = chosen;
+                                RecordSceneMutationImmediate("Change Mesh", beforeMeshSnapshot);
                             }
                         }
 
-                        PropertyLabel("Material");
+                        PropertyLabel("Material", false, style::kPickerRowHeight);
                         {
                             const auto materialKeys = services_.resourceManager->GetKnownMaterialKeys();
-                            if (BeginAssetPicker("##material", AssetName(renderer->materialPath).c_str(), ICON_PALETTE, style::kTypeMaterial, renderer->materialPath.c_str()))
+                            std::string chosen;
+                            if (AssetPicker(
+                                    "##material",
+                                    renderer->materialPath,
+                                    materialKeys,
+                                    MakePickerOptions(PickerKind::Material, *services_.resourceManager, services_.thumbnails),
+                                    chosen))
                             {
-                                for (const auto& materialKey : materialKeys)
-                                {
-                                    const bool selected = ResourcePathsEqual(*services_.resourceManager, materialKey, renderer->materialPath);
-                                    if (ImGui::Selectable(PickerItem(ICON_PALETTE, AssetName(materialKey), materialKey).c_str(), selected))
-                                    {
-                                        const std::string beforeMaterialSnapshot = CaptureSceneSnapshot();
-                                        renderer->materialPath = materialKey;
-                                        RecordSceneMutationImmediate("Change Material", beforeMaterialSnapshot);
-                                    }
-                                    if (selected)
-                                    {
-                                        ImGui::SetItemDefaultFocus();
-                                    }
-                                }
-                                EndAssetPicker();
+                                const std::string beforeMaterialSnapshot = CaptureSceneSnapshot();
+                                renderer->materialPath = chosen;
+                                RecordSceneMutationImmediate("Change Material", beforeMaterialSnapshot);
                             }
 
                             // Third column: the same action as the old "Open Material Editor" button
@@ -292,30 +280,19 @@ namespace myengine::ui
                                 }
                             };
 
-                            PropertyLabel("Texture");
+                            PropertyLabel("Texture", false, style::kPickerRowHeight);
                             {
-                                auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
-                                const std::string textureLabel = materialResource->asset.texturePath.empty()
-                                    ? std::string("None")
-                                    : std::filesystem::path(materialResource->asset.texturePath).filename().string();
-                                if (BeginAssetPicker("##texture", textureLabel.c_str(), ICON_IMAGE, style::kTypeTexture, materialResource->asset.texturePath.c_str()))
+                                const auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
+                                std::string chosen;
+                                if (AssetPicker(
+                                        "##texture",
+                                        materialResource->asset.texturePath,
+                                        textureKeys,
+                                        MakePickerOptions(PickerKind::Texture, *services_.resourceManager, services_.thumbnails),
+                                        chosen))
                                 {
-                                    for (const auto& textureKey : textureKeys)
-                                    {
-                                        const bool selected = ResourcePathsEqual(*services_.resourceManager, textureKey, materialResource->asset.texturePath);
-                                        if (ImGui::Selectable(
-                                                PickerItem(ICON_IMAGE, std::filesystem::path(textureKey).filename().string(), textureKey).c_str(),
-                                                selected))
-                                        {
-                                            materialResource->asset.texturePath = textureKey;
-                                            services_.resourceManager->Load<resource::TextureAsset>(textureKey);
-                                        }
-                                        if (selected)
-                                        {
-                                            ImGui::SetItemDefaultFocus();
-                                        }
-                                    }
-                                    EndAssetPicker();
+                                    materialResource->asset.texturePath = chosen;
+                                    services_.resourceManager->Load<resource::TextureAsset>(chosen);
                                 }
                                 commitMaterialChange("Change Renderer Texture");
                             }

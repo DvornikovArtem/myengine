@@ -72,6 +72,7 @@ namespace myengine::ui::style
     inline constexpr float kFrameHeight = 24.0f;           // fields, combos, buttons in panels
     inline constexpr float kRowHeight = 24.0f;             // tree / list row
     inline constexpr float kPropRowHeight = 26.0f;         // property grid row
+    inline constexpr float kPickerRowHeight = 52.0f;       // property grid row that holds an asset picker (48 px)
     inline constexpr float kCategoryHeight = 28.0f;
     inline constexpr float kStatusBarHeight = 28.0f;
     inline constexpr float kViewportButton = 26.0f;        // viewport toolbar button (icon 16)

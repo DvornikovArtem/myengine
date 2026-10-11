@@ -59,3 +59,22 @@ else
 - `ctest`: `thumbnail_service` — заглушка, затем картинка, бюджет, пул и вытеснение, кеш на диске (второй сервис не рисует), инвалидация по времени файла. Работает на записывающем адаптере, без GPU.
 - Вручную (DX12, окно): `myengine_render_target_smoke` — треугольник в цель, текстура цели в UI-проходе, чтение пикселей, 300 созданий и уничтожений целей (слоты и дескрипторы возвращаются), пул.
 - В редакторе: Help → Developer → Thumbnails — окно со счётчиками сервиса и миниатюрами ассетов проекта (или `MYENGINE_THUMBNAILS_WINDOW=1` для открытия при старте).
+
+## Превью в панелях (PV)
+
+### Живые виды: `ThumbnailService::SubmitLiveView`
+
+Панель, которой нужен 3D-вид (превью материала, позже просмотрщики), каждый кадр описывает, что рисовать: `LiveViewRequest { id, width, height, view, projection, items, lines, clearColor }`. Сервис рисует вид в цель из того же пула в `Render()`, до сцены, и возвращает текстуру прошлого кадра (первый кадр — невалидная). Размер цели берётся из запроса и меняется вместе с панелью; вид, который не присылали 30 кадров, возвращает цель в пул.
+
+`BuildDrawItem(mesh, material, model, item, &bounds)` собирает `DrawItem` через `ResourceManager` и сообщает `Ready` / `Pending` (меш или текстура ещё грузятся) / `Failed`; `bounds` расширяется границами меша в мировых координатах.
+
+### Выбор ассета: `AssetPicker`
+
+`ui::AssetPicker(id, current, keys, options, chosen)` (`EditorWidgets`) заменяет `BeginAssetPicker`: пикер 48 px с полосой типа, миниатюрой 40 px, именем и строкой «Mesh · N tris» / «Texture · W×H»; по наведению на миниатюру — превью 256 px с именем и путём; выпадашка — поиск, сетка плиток 3 колонки (76 px) или список, текущий ассет выделен, внизу счётчик и переключатель Tiles | List. Строка сетки свойств с пикером — `PropertyLabel(text, dim, style::kPickerRowHeight)` (52 px, подпись по центру). `MakePickerOptions` (`SceneEditorInternal.h`) собирает опции для `ResourceManager`.
+
+Пикер заменил выпадашки в Details (Mesh, Material, Texture материала) и в Material Editor (Shader, Texture).
+
+### Material Editor и Prefabs
+
+- Material Editor: превью 220 px под шапкой — сфера или куб на живом виде; ЛКМ — орбита, колесо — зум (пока курсор над превью), Reset camera; переключатель Sphere | Cube на превью, категория Preview удалена. Превью-меш во вьюпорте сцены убран (`RenderSystem`, поля `materialPreviewEnabled` и `materialPreviewMaterialPath` удалены).
+- Prefabs: слева от комбо миниатюра шаблона 64 px (по наведению 256), под комбо путь и чип Saved / Unsaved, в выпадашке у строк миниатюры 20 px.

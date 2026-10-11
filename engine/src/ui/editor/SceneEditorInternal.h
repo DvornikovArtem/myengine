@@ -25,6 +25,7 @@
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorCommandHistory.h>
+#include <myengine/editor/ThumbnailService.h>
 #include <myengine/editor/TransformGizmo.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/CameraComponent.h>
@@ -122,6 +123,45 @@ namespace myengine::ui::detail
         }
 
         return resourceManager.ResolvePath(lhs) == resourceManager.ResolvePath(rhs);
+    }
+
+    // The options of an asset picker: thumbnails, the meta line ("Mesh · 960 tris") and the path comparison
+    inline AssetPickerOptions MakePickerOptions(
+        const PickerKind kind,
+        resource::ResourceManager& resourceManager,
+        editor::ThumbnailService* thumbnails)
+    {
+        AssetPickerOptions options;
+        options.kind = kind;
+        options.thumbnails = thumbnails;
+        options.samePath = [&resourceManager](const std::string& lhs, const std::string& rhs)
+        {
+            return ResourcePathsEqual(resourceManager, lhs, rhs);
+        };
+        options.meta = [&resourceManager, kind](const std::string& key) -> std::string
+        {
+            if (kind == PickerKind::Mesh)
+            {
+                const auto mesh = resourceManager.Load<resource::MeshAsset>(key);
+                if (mesh != nullptr && !resourceManager.IsLoadPending(key) && !mesh->asset.data.indices.empty())
+                {
+                    return "Mesh \xC2\xB7 " + std::to_string(mesh->asset.data.indices.size() / 3) + " tris";
+                }
+                return "Mesh";
+            }
+            if (kind == PickerKind::Texture)
+            {
+                const auto texture = resourceManager.Load<resource::TextureAsset>(key);
+                if (texture != nullptr && !resourceManager.IsLoadPending(key) && texture->asset.data.width > 0)
+                {
+                    return "Texture \xC2\xB7 " + std::to_string(texture->asset.data.width) + "\xC3\x97" +
+                        std::to_string(texture->asset.data.height);
+                }
+                return "Texture";
+            }
+            return kind == PickerKind::Material ? "Material" : "Shader";
+        };
+        return options;
     }
 
     inline std::string FormatBytes(const std::uint64_t bytes)

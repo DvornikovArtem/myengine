@@ -64,7 +64,11 @@ namespace
                 ++drawsOutsideTarget;
             }
         }
-        void DrawDebugLines(render::RenderSurfaceHandle, const std::vector<render::DebugLine>&) override {}
+        void DrawDebugLines(render::RenderSurfaceHandle, const std::vector<render::DebugLine>&) override
+        {
+            Check(inTarget, "Debug lines of a live view must go to the target");
+            ++lineDraws;
+        }
         void DrawUiGeometry(render::RenderSurfaceHandle, const render::UiDrawData&) override {}
         void EndFrame(render::RenderSurfaceHandle) override {}
         void Shutdown() override {}
@@ -131,6 +135,7 @@ namespace
         int drawsInTarget = 0;
         int drawsOutsideTarget = 0;
         int viewProjections = 0;
+        int lineDraws = 0;
         int createdTargets = 0;
         int destroyedTargets = 0;
         int createdTextures = 0;
@@ -352,6 +357,65 @@ namespace
         Check(harness.service->GetStats().diskHits == 1 && harness.adapter.createdTextures >= 1, "The image must come from the disk cache");
     }
 
+    // A panel's live view: described every frame, drawn into one target, released when it is not submitted
+    void TestLiveView()
+    {
+        Harness harness({}, 8, 2);
+        render::DrawItem item;
+        editor::BoundsBox bounds;
+        bool ready = false;
+        for (int frame = 0; frame < 2000 && !ready; ++frame)
+        {
+            harness.resources.UpdateHotReload();
+            const auto status = harness.service->BuildDrawItem(
+                "assets/models/sphere.obj", "assets/materials/gold.material.json", render::Matrix4::Identity(), item, &bounds);
+            Check(status != editor::DrawItemStatus::Failed, "The sphere with a material must build");
+            ready = status == editor::DrawItemStatus::Ready;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        Check(ready && bounds.IsValid() && bounds.min.x < bounds.max.x, "The draw item never became ready");
+
+        const auto submit = [&](const std::uint32_t width, const std::uint32_t height)
+        {
+            editor::LiveViewRequest request;
+            request.id = "test-view";
+            request.width = width;
+            request.height = height;
+            request.items.push_back(item);
+            request.lines.push_back(render::DebugLine{});
+            return harness.service->SubmitLiveView(std::move(request));
+        };
+
+        Check(!submit(200, 100).IsValid(), "A new live view has no texture before it is drawn");
+        harness.service->Update();
+        harness.service->Render(render::RenderSurfaceHandle{1});
+        Check(harness.adapter.passes == 1 && harness.adapter.drawsInTarget == 1 && harness.adapter.lineDraws == 1,
+            "The live view must be one pass with its items and lines");
+        uint32_t width = 0;
+        uint32_t height = 0;
+        Check(harness.adapter.GetRenderTargetSize({1}, width, height) && width == 200 && height == 100, "The live view target size is wrong");
+
+        const auto texture = submit(200, 100);
+        Check(texture.IsValid(), "A drawn live view must return its texture");
+        harness.service->Update();
+        harness.service->Render(render::RenderSurfaceHandle{1});
+        Check(harness.adapter.passes == 2 && harness.adapter.createdTargets == 1, "The live view must reuse its target");
+        Check(submit(200, 100).value == texture.value, "The texture handle must stay the same");
+
+        // A new size gets a new target
+        submit(300, 150);
+        harness.service->Update();
+        harness.service->Render(render::RenderSurfaceHandle{1});
+        Check(harness.adapter.createdTargets == 2, "A resized live view needs a target of the new size");
+
+        // Without submissions the target goes back to the pool
+        for (int frame = 0; frame < 40; ++frame)
+        {
+            harness.service->Update();
+        }
+        Check(harness.service->GetStats().leasedTargets == 0, "An abandoned live view must release its target");
+    }
+
     // Changing the file changes the signature: the image is dropped and drawn again (no stale image from disk)
     void TestInvalidationByFileTime(const fs::path& workDirectory)
     {
@@ -402,6 +466,7 @@ int main()
         TestEviction();
         TestDiskCacheReuse(cache);
         TestInvalidationByFileTime(directory);
+        TestLiveView();
 
         std::cout << "OK: thumbnail service: placeholder and image, kinds, budget, pool eviction, disk cache, invalidation\n";
     }
