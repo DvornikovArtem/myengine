@@ -66,6 +66,10 @@ namespace myengine::ui::detail
     inline constexpr char kMeshPayloadType[] = "MYENGINE_ASSET_MESH";
     inline constexpr char kMaterialPayloadType[] = "MYENGINE_ASSET_MATERIAL";
     inline constexpr char kTexturePayloadType[] = "MYENGINE_ASSET_TEXTURE";
+    // The assistant accepts these from the Content Browser (the viewport does not): the data is the asset key
+    inline constexpr char kPrefabPayloadType[] = "MYENGINE_ASSET_PREFAB";
+    inline constexpr char kScriptPayloadType[] = "MYENGINE_ASSET_SCRIPT";
+    inline constexpr char kFilePayloadType[] = "MYENGINE_ASSET_FILE";
     inline constexpr char kDefaultMaterialPath[] = "assets/materials/default.material.json";
     inline constexpr char kDefaultShaderPath[] = "assets/shaders/textured_lit.shader.json";
     inline constexpr char kCubeMeshPath[] = "assets/models/crate.obj";

@@ -45,6 +45,7 @@ namespace myengine::editor
         render::TextureHandle texture; // valid only when ready; until then draw a type icon (kind)
         ThumbnailKind kind = ThumbnailKind::Other;
         bool ready = false;
+        bool failed = false; // the asset cannot be drawn (not a readable mesh, an empty prefab ...): keep the icon
         std::uint32_t sourceWidth = 0;  // textures: the size of the image, for the aspect ratio
         std::uint32_t sourceHeight = 0;
 

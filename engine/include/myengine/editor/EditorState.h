@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <myengine/core/Types.h>
 #include <myengine/ecs/Entity.h>
@@ -106,6 +107,19 @@ namespace myengine::editor
         RenderStats renderStats{};
     };
 
+    // Files dragged from outside (Explorer) onto the editor window. Written by the OLE drop target of the window,
+    // read by whichever panel takes files (the assistant). Coordinates are in client pixels of the window.
+    struct FileDragState
+    {
+        core::WindowId windowId = 0;
+        bool dragging = false;       // a drag with files is over the window right now
+        float x = 0.0f;
+        float y = 0.0f;
+        std::vector<std::string> dropped; // UTF-8 paths of the last drop, until a panel takes them
+        float dropX = 0.0f;
+        float dropY = 0.0f;
+    };
+
     struct EditorRuntimeState
     {
         RuntimeMode mode = RuntimeMode::Edit;
@@ -126,6 +140,7 @@ namespace myengine::editor
         bool viewportWireframe = false; // view mode Wireframe (viewport toolbar > Lit)
         bool showProjectBrowser = false; // the Project Browser window (File > Open Project, --project-browser)
         std::string mapPath; // the open map as a project path ("Maps/Main.json")
+        FileDragState fileDrag{};
         bool selectionLocked = false;
         bool sceneDirty = false;
         core::WindowId lastInteractedWindowId = 0;

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -18,6 +19,9 @@ namespace
     using myengine::ui::ContentBrowserHooks;
     using myengine::ui::ContentEntry;
     using myengine::ui::ContentKind;
+    using myengine::ui::ContentSortKey;
+    using myengine::ui::ContentThumbnail;
+    using myengine::ui::ContentViewMode;
 
     void Check(const bool condition, const char* message)
     {
@@ -200,6 +204,52 @@ namespace
         Check(!browser.Activate(*Find(browser, "debug.bmp"), hooks), "A texture has no open action");
     }
 
+    // onOpenAsset is asked first for every file; its false answer falls back to the kind callbacks
+    void TestOpenAssetHook()
+    {
+        Fixture fixture;
+        ContentBrowser browser;
+        browser.SetRoot(fixture.root);
+
+        std::string openedPath;
+        ContentKind openedKind = ContentKind::Other;
+        int calls = 0;
+        bool accept = true;
+        std::string material;
+
+        ContentBrowserHooks hooks;
+        hooks.onOpenAsset = [&](const std::string& path, const ContentKind kind)
+        {
+            ++calls;
+            openedPath = path;
+            openedKind = kind;
+            return accept;
+        };
+        hooks.openMaterial = [&](const std::string& path) { material = path; };
+
+        Check(browser.OpenFolder("materials"), "materials");
+        Check(browser.Activate(*Find(browser, "gold.material.json"), hooks), "An accepted open is a success");
+        Check(openedPath == "assets/materials/gold.material.json" && openedKind == ContentKind::Material, "The hook gets the key and the kind");
+        Check(material.empty(), "An accepted open does not reach the fallback");
+
+        accept = false;
+        Check(browser.Activate(*Find(browser, "gold.material.json"), hooks), "A refused open falls back to the kind callback");
+        Check(material == "assets/materials/gold.material.json", "The fallback ran");
+        Check(calls == 2, "The hook was asked both times");
+
+        // A texture has no fallback: the hook is the only way to open it
+        Check(browser.OpenFolder("textures"), "textures");
+        accept = true;
+        Check(browser.Activate(*Find(browser, "debug.bmp"), hooks), "A texture opens through the hook");
+        Check(openedKind == ContentKind::Texture, "The texture kind");
+
+        // Folders never go to the hook
+        Check(browser.OpenFolder(""), "root");
+        calls = 0;
+        Check(browser.Activate(*Find(browser, "models"), hooks), "A folder is entered");
+        Check(calls == 0, "The hook is not asked about folders");
+    }
+
     // A project folder with Content/ and Maps/ next to each other: the browser shows only those two,
     // and the asset keys are paths inside the project
     void TestProjectRoot()
@@ -265,6 +315,275 @@ namespace
         Check(!empty.OpenFolder(""), "A browser without a root cannot navigate");
     }
 
+    void WriteBytes(const fs::path& path, const std::size_t count)
+    {
+        fs::create_directories(path.parent_path());
+        std::ofstream file(path, std::ios::binary);
+        file << std::string(count, 'x');
+    }
+
+    void TestServiceNamesAndFormats()
+    {
+        Check(ContentBrowser::IsServiceName(".git", true), "A dot folder is a service folder");
+        Check(ContentBrowser::IsServiceName("Saved", true) && ContentBrowser::IsServiceName("saved", true), "Saved is a service folder");
+        Check(!ContentBrowser::IsServiceName("Saved.txt", false), "A file called Saved is content");
+        Check(ContentBrowser::IsServiceName("crate.myemesh", false) && ContentBrowser::IsServiceName("a.MYETEX", false), "Caches are service files");
+        Check(!ContentBrowser::IsServiceName("readme.txt", false) && !ContentBrowser::IsServiceName("models", true), "Ordinary names are content");
+
+        Check(ContentBrowser::FormatSize(0) == "0 B", "Zero bytes");
+        Check(ContentBrowser::FormatSize(1536) == "1.5 KB", "Kilobytes");
+        Check(ContentBrowser::FormatSize(3ull * 1024 * 1024) == "3.0 MB", "Megabytes");
+        Check(ContentBrowser::FormatModified(0).empty(), "An unknown time is empty");
+        Check(ContentBrowser::FormatModified(1760000000).size() == 16, "A time is dd.mm.yyyy hh:mm");
+    }
+
+    // The tree and the list mirror the disk: everything except the service names
+    void TestMirrorsDisk()
+    {
+        Fixture fixture;
+        Touch(fixture.root / "Saved/thumb.tga");
+        Touch(fixture.root / ".git/config");
+        Touch(fixture.root / "textures/rl/ball.tga");
+        Touch(fixture.root / "textures/rl/ball.myetex");
+        Touch(fixture.root / "notes/todo.md");
+
+        ContentBrowser browser;
+        browser.SetRoot(fixture.root);
+        Check(Find(browser, "Saved") == nullptr && Find(browser, ".git") == nullptr, "Service folders are not listed");
+        Check(Find(browser, "notes") != nullptr, "Every other folder is listed");
+
+        Check(browser.OpenFolder("textures/rl"), "A nested folder opens");
+        Check(Find(browser, "ball.tga") != nullptr && Find(browser, "ball.myetex") == nullptr, "The cache next to a texture is hidden");
+
+        Check(browser.OpenFolder("notes"), "notes");
+        const ContentEntry* todo = Find(browser, "todo.md");
+        Check(todo != nullptr && todo->kind == ContentKind::Other, "An unknown file type is listed as a file");
+        Check(todo->sizeBytes == 1 && todo->modifiedTime > 0, "A file has its size and its write time");
+
+        browser.SetSearch("thumb");
+        Check(browser.GetVisibleEntries().empty(), "Search does not enter service folders");
+    }
+
+    void TestSortAndViewMode()
+    {
+        Fixture fixture;
+        const fs::path folder = fixture.root / "sorted";
+        WriteBytes(folder / "a.txt", 10);
+        WriteBytes(folder / "b.txt", 300);
+        WriteBytes(folder / "c.png", 50);
+        fs::create_directories(folder / "zdir");
+
+        const auto now = fs::file_time_type::clock::now();
+        fs::last_write_time(folder / "a.txt", now - std::chrono::hours(3));
+        fs::last_write_time(folder / "b.txt", now - std::chrono::hours(1));
+        fs::last_write_time(folder / "c.png", now - std::chrono::hours(2));
+
+        ContentBrowser browser;
+        browser.SetRoot(fixture.root);
+        Check(browser.OpenFolder("sorted"), "sorted");
+        Check(browser.GetViewMode() == ContentViewMode::Tiles, "Tiles are the default view");
+        Check(browser.GetSortKey() == ContentSortKey::Name && browser.IsSortAscending(), "Name ascending is the default order");
+
+        using Strings = std::vector<std::string>;
+        Check(Names(browser) == (Strings{"zdir", "a.txt", "b.txt", "c.png"}), "Name ascending, folders first");
+
+        browser.SetSort(ContentSortKey::Name, false);
+        Check(Names(browser) == (Strings{"zdir", "c.png", "b.txt", "a.txt"}), "Name descending keeps the folder on top");
+
+        browser.SetSort(ContentSortKey::Size, true);
+        Check(Names(browser) == (Strings{"zdir", "a.txt", "c.png", "b.txt"}), "Size ascending");
+        browser.SetSort(ContentSortKey::Size, false);
+        Check(Names(browser) == (Strings{"zdir", "b.txt", "c.png", "a.txt"}), "Size descending");
+
+        browser.SetSort(ContentSortKey::Modified, true);
+        Check(Names(browser) == (Strings{"zdir", "a.txt", "c.png", "b.txt"}), "Oldest first");
+        browser.SetSort(ContentSortKey::Modified, false);
+        Check(Names(browser) == (Strings{"zdir", "b.txt", "c.png", "a.txt"}), "Newest first");
+
+        browser.SetSort(ContentSortKey::Type, true);
+        Check(Names(browser) == (Strings{"zdir", "a.txt", "b.txt", "c.png"}), "File before Texture, then by name");
+
+        // The order survives a rescan and a change of folder
+        browser.Refresh();
+        Check(browser.GetSortKey() == ContentSortKey::Type, "Refresh keeps the sort key");
+        Check(browser.OpenFolder(""), "root");
+        Check(browser.GetSortKey() == ContentSortKey::Type, "Navigation keeps the sort key");
+
+        // Without "Folders first" the folder takes its place in the order
+        Check(browser.OpenFolder("sorted"), "sorted again");
+        browser.SetSort(ContentSortKey::Name, true);
+        browser.SetFoldersFirst(false);
+        Check(Names(browser) == (Strings{"a.txt", "b.txt", "c.png", "zdir"}), "A folder sorts like any item without Folders first");
+        browser.SetFoldersFirst(true);
+        Check(Names(browser).front() == "zdir", "Folders first is the default again");
+
+        browser.SetViewMode(ContentViewMode::List);
+        Check(browser.GetViewMode() == ContentViewMode::List, "The view mode is set");
+        browser.SetTileSize(1000.0f);
+        Check(browser.GetTileSize() == 160.0f, "The tile size is clamped from above");
+        browser.SetTileSize(1.0f);
+        Check(browser.GetTileSize() == 72.0f, "The tile size is clamped from below");
+    }
+
+    // Thumbnails are asked for on-screen items only, a few per frame, and the answer is kept
+    void TestThumbnailHook()
+    {
+        Fixture fixture;
+        for (int index = 0; index < 8; ++index)
+        {
+            Touch(fixture.root / "pics" / ("p" + std::to_string(index) + ".png"));
+        }
+
+        ContentBrowser browser;
+        browser.SetRoot(fixture.root);
+        Check(browser.OpenFolder("pics"), "pics");
+
+        IMGUI_CHECKVERSION();
+        ImGuiContext* context = ImGui::CreateContext();
+        auto& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
+        io.DisplaySize = ImVec2(1024.0f, 768.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        unsigned char* pixels = nullptr;
+        int width = 0, height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+        int calls = 0;
+        int pendingAnswers = 0;
+        ContentBrowserHooks hooks;
+        std::uint32_t lastSize = 0;
+        hooks.thumbnail = [&](const ContentEntry& entry, const std::uint32_t pixelSize)
+        {
+            ++calls;
+            lastSize = pixelSize;
+            ContentThumbnail thumbnail;
+            thumbnail.textureId = 5;
+            thumbnail.width = 64;
+            thumbnail.height = 32;
+            if (entry.name == "p0.png" && pendingAnswers < 2)
+            {
+                ++pendingAnswers;
+                thumbnail.pending = true;
+            }
+            return thumbnail;
+        };
+
+        const auto frame = [&]()
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f));
+            ImGui::Begin("Content Browser", nullptr, ImGuiWindowFlags_NoSavedSettings);
+            browser.Draw(hooks);
+            ImGui::End();
+            ImGui::Render();
+            Check(ImGui::GetDrawData()->TotalVtxCount > 0, "The content browser did not draw anything");
+        };
+
+        frame();
+        Check(calls > 0 && calls <= 3, "At most three pictures are made in one frame");
+
+        for (int index = 0; index < 6; ++index)
+        {
+            frame();
+        }
+        // 8 items, and p0 answered "pending" twice: 8 first answers + 2 repeats
+        Check(calls == 10, "Every item is asked once, a pending one until it is ready");
+
+        Check(lastSize == 104u, "A tile asks for a picture of its own size");
+
+        const int before = calls;
+        browser.SetViewMode(ContentViewMode::List);
+        for (int index = 0; index < 6; ++index)
+        {
+            frame();
+        }
+        Check(lastSize == 64u, "A list row asks for a small picture");
+        Check(calls == before + 8, "The small pictures are asked for once each");
+        browser.SetViewMode(ContentViewMode::Tiles);
+        for (int index = 0; index < 6; ++index)
+        {
+            frame();
+        }
+        Check(calls == before + 16, "Going back to tiles asks for the tile size again");
+        const int afterSwitch = calls;
+
+        // A file with a newer write time asks again
+        std::error_code error;
+        fs::last_write_time(fixture.root / "pics/p1.png", fs::file_time_type::clock::now() + std::chrono::hours(1), error);
+        browser.Refresh();
+        for (int index = 0; index < 3; ++index)
+        {
+            frame();
+        }
+        Check(calls == afterSwitch + 1, "A file that changed gets a new picture");
+
+        ImGui::DestroyContext(context);
+    }
+
+    // A live answer (an id that can die) is asked for again every frame, without using the budget of new items
+    void TestLiveThumbnails()
+    {
+        Fixture fixture;
+        for (int index = 0; index < 5; ++index)
+        {
+            Touch(fixture.root / "live" / ("m" + std::to_string(index) + ".material.json"));
+        }
+
+        ContentBrowser browser;
+        browser.SetRoot(fixture.root);
+        Check(browser.OpenFolder("live"), "live");
+
+        IMGUI_CHECKVERSION();
+        ImGuiContext* context = ImGui::CreateContext();
+        auto& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
+        io.DisplaySize = ImVec2(1024.0f, 768.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        unsigned char* pixels = nullptr;
+        int width = 0, height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+        int calls = 0;
+        ContentBrowserHooks hooks;
+        hooks.thumbnail = [&](const ContentEntry&, const std::uint32_t pixelSize)
+        {
+            ++calls;
+            ContentThumbnail thumbnail;
+            thumbnail.textureId = 9;
+            thumbnail.width = pixelSize;
+            thumbnail.height = pixelSize;
+            thumbnail.live = true;
+            return thumbnail;
+        };
+
+        const auto frame = [&]()
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f));
+            ImGui::Begin("Content Browser", nullptr, ImGuiWindowFlags_NoSavedSettings);
+            browser.Draw(hooks);
+            ImGui::End();
+            ImGui::Render();
+        };
+
+        frame();
+        Check(calls == 3, "The first frame asks for three new items (the budget)");
+        frame();
+        Check(calls == 8, "The three live items are asked again, the two new ones for the first time");
+        const int afterSecond = calls;
+        for (int index = 0; index < 4; ++index)
+        {
+            frame();
+        }
+        Check(calls == afterSecond + 4 * 5, "Five live items are asked once per frame");
+
+        ImGui::DestroyContext(context);
+    }
+
     // One headless frame: the panel must draw the tiles and the tree without touching anything it should not
     void TestDrawFrame()
     {
@@ -312,10 +631,16 @@ int main()
         TestNavigation();
         TestSearch();
         TestActivate();
+        TestOpenAssetHook();
         TestProjectRoot();
         TestRefreshAndMissingRoot();
         TestDrawFrame();
-        std::cout << "OK: content browser classifies assets, lists and searches folders, navigates, activates and draws\n";
+        TestServiceNamesAndFormats();
+        TestMirrorsDisk();
+        TestSortAndViewMode();
+        TestThumbnailHook();
+        TestLiveThumbnails();
+        std::cout << "OK: content browser classifies assets, mirrors folders, sorts, navigates, activates, gives thumbnails and draws\n";
         return 0;
     }
     catch (const std::exception& error)

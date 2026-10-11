@@ -1498,6 +1498,11 @@ namespace myengine::resource
         return CollectSortedKeys(meshCache_);
     }
 
+    render::TextureHandle ResourceManager::GetFallbackTextureHandle() const
+    {
+        return fallbackTexture_ != nullptr ? fallbackTexture_->asset.gpuHandle : render::TextureHandle{};
+    }
+
     std::vector<std::string> ResourceManager::GetKnownTextureKeys() const
     {
         return CollectSortedKeys(textureCache_);

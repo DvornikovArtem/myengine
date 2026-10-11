@@ -59,6 +59,7 @@ namespace myengine::assistant
         const char* GetName() const override { return "Claude Code CLI"; }
         std::string CheckAvailability() override;
         bool BeginTurn(const std::string& prompt, const std::string& sessionId, std::string& error) override;
+        bool BeginTurn(const AssistantTurnRequest& request, std::string& error) override;
         void Cancel() override;
         bool IsBusy() const override;
         void Poll(std::vector<AssistantEvent>& events) override;
@@ -80,8 +81,18 @@ namespace myengine::assistant
             const ClaudeCliConfig& config,
             const std::filesystem::path& settingsFile,
             const std::string& sessionId,
-            const std::filesystem::path& mcpConfigFile = {});
+            const std::filesystem::path& mcpConfigFile = {},
+            const std::string& modelOverride = {},
+            const std::string& effort = {},
+            const std::vector<std::filesystem::path>& extraDirectories = {});
         static std::string BuildUserMessageLine(const std::string& prompt);
+        // The prompt plus the attachments: images become base64 image blocks (a file that is too big or not readable
+        // falls back to a path), other files are listed in the text so that the model reads them itself
+        static std::string BuildUserMessageLine(const AssistantTurnRequest& request, const std::filesystem::path& root);
+        static bool IsValidEffort(const std::string& effort);
+        static bool IsSafeModelName(const std::string& model);
+        // Folders of the non-image attachments that are outside `root`: they are passed to the CLI as --add-dir
+        static std::vector<std::filesystem::path> ExtraDirectoriesFor(const AssistantTurnRequest& request, const std::filesystem::path& root);
         static bool IsValidSessionId(const std::string& sessionId);
 
     private:

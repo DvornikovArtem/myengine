@@ -375,6 +375,28 @@ namespace myengine::ui
         IMGUI_CHECKVERSION();
         renderAdapter_ = &renderAdapter;
         logger_ = &logger;
+        services.createUiTexture = [this](const unsigned char* rgba, const std::uint32_t width, const std::uint32_t height) -> std::uint64_t
+        {
+            if (renderAdapter_ == nullptr || rgba == nullptr || width == 0 || height == 0)
+            {
+                return 0;
+            }
+            render::TextureData data;
+            data.width = width;
+            data.height = height;
+            data.channels = 4;
+            data.srgb = false;
+            data.pixelsRgba8.assign(rgba, rgba + static_cast<std::size_t>(width) * height * 4);
+            const auto handle = renderAdapter_->CreateTexture(data);
+            return handle.IsValid() ? static_cast<std::uint64_t>(handle.value) : 0;
+        };
+        services.destroyUiTexture = [this](const std::uint64_t texture)
+        {
+            if (renderAdapter_ != nullptr && texture != 0)
+            {
+                renderAdapter_->DestroyTexture(render::TextureHandle{static_cast<std::uint32_t>(texture)});
+            }
+        };
         sceneEditor_.Initialize(std::move(services));
         initialized_ = true;
         logger_->Info("UiManager: initialized");

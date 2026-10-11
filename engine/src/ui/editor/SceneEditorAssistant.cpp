@@ -32,6 +32,8 @@ namespace myengine::ui
         config.repositoryRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
         config.logger = services_.logger;
         config.tools = assistantTools_.get();
+        config.createTexture = services_.createUiTexture;
+        config.destroyTexture = services_.destroyUiTexture;
         assistantPanel_ = std::make_unique<AssistantPanel>(config);
     }
 }
