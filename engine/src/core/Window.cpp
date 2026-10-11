@@ -283,7 +283,8 @@ namespace myengine::core
             wc.lpfnWndProc = &Window::StaticWndProc;
             wc.hInstance = instance;
             wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-            wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+            // The editor background (kTitle): before the first frame the window is dark, not white
+            wc.hbrBackground = CreateSolidBrush(RGB(0x15, 0x15, 0x15));
             wc.lpszClassName = Window::ClassName();
 
             registered = RegisterClassExW(&wc) != 0;

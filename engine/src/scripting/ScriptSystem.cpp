@@ -959,6 +959,11 @@ namespace myengine::scripting
         impl_->expectFullBatch = true;
     }
 
+    bool ScriptSystem::IsReloadPending() const
+    {
+        return impl_->expectFullBatch;
+    }
+
     void ScriptSystem::ResetInstances()
     {
         // Invalidate saved handles before releasing old objects: __del__ must not touch the new scene.

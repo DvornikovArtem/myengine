@@ -283,8 +283,12 @@ namespace myengine::core
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
-        sceneEditorServices.loadScene = [this]() { return LoadSceneFromDisk(); };
-        sceneEditorServices.openScene = [this](const std::string& scenePath) { return OpenSceneFromDisk(scenePath); };
+        sceneEditorServices.loadScene = [this](std::function<void(bool)> done) { BeginRevertScene(std::move(done)); };
+        sceneEditorServices.openScene = [this](const std::string& scenePath, std::function<void(bool)> done)
+        {
+            BeginOpenScene(scenePath, std::move(done));
+        };
+        sceneEditorServices.loading = &loadingService_;
         sceneEditorServices.saveSceneAs = [this](const std::string& scenePath) { return SaveSceneAs(scenePath); };
         sceneEditorServices.restartWithProject = [this](const std::string& projectFile, const bool discardScene)
         {
@@ -418,6 +422,63 @@ namespace myengine::core
             }
         }
 
+        // What follows the start map: the state of the editor and the mode
+        const auto finishStartup = [this, startInPlay]()
+        {
+            auto& startProject = core::ServiceLocator::GetProjectContext();
+            sceneLoaded_ = true;
+            auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+            editorState.selectedEntity = ecs::kInvalidEntity;
+            editorState.mapPath = startProject.ToProjectRelative(sceneSavePath_);
+            editorState.showProjectBrowser = showProjectBrowser_;
+            if (startInPlay)
+            {
+                editorState.playModeSnapshot = CaptureSceneSnapshot();
+                editorState.mode = editor::RuntimeMode::Play;
+                core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
+            }
+            else
+            {
+                editorState.playModeSnapshot.clear();
+                editorState.mode = editor::RuntimeMode::Edit;
+                core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
+            }
+
+            timer_.Reset();
+            logger_.Info("Application initialization finished");
+        };
+
+        // The map file is there: read it in the background and show the splash meanwhile. Without a file (a project
+        // without a map yet) the demo scene is built at once, as always.
+        std::error_code mapExistsError;
+        if (deferredSceneLoad_ && std::filesystem::exists(sceneSavePath_, mapExistsError))
+        {
+            const bool explicitScene = !scenePath.empty();
+            const std::string subtitle = "Opening project " + project.Name() + "  \xC2\xB7  " + sceneSavePath_.stem().u8string();
+            StartSceneLoad(sceneSavePath_, true, "myengine", subtitle, editor::LoadingMode::Splash,
+                [this, explicitScene, finishStartup](const bool loaded)
+                {
+                    if (!loaded)
+                    {
+                        // A typo or invalid explicit scene must not overwrite the file with the default demo.
+                        if (explicitScene)
+                        {
+                            logger_.Error("Failed to load the requested scene: " + sceneSavePath_.u8string());
+                            sceneSavePath_.clear();
+                            RequestQuit();
+                            return;
+                        }
+                        BuildDemoScene();
+                        scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
+                        core::ServiceLocator::GetEventBus().Publish(scene::SceneLoadedEvent{&world_});
+                    }
+                    finishStartup();
+                });
+            timer_.Reset();
+            logger_.Info("Application initialization finished (the map loads in the background)");
+            return true;
+        }
+
         if (!scene::LoadWorldFromJson(world_, sceneSavePath_, &logger_))
         {
             // A typo or invalid explicit scene must not overwrite the file with the default demo.
@@ -435,26 +496,7 @@ namespace myengine::core
         {
             RebindWindowControlledEntities();
         }
-        sceneLoaded_ = true;
-        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        editorState.selectedEntity = ecs::kInvalidEntity;
-        editorState.mapPath = project.ToProjectRelative(sceneSavePath_);
-        editorState.showProjectBrowser = showProjectBrowser_;
-        if (startInPlay)
-        {
-            editorState.playModeSnapshot = CaptureSceneSnapshot();
-            editorState.mode = editor::RuntimeMode::Play;
-            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = false;
-        }
-        else
-        {
-            editorState.playModeSnapshot.clear();
-            editorState.mode = editor::RuntimeMode::Edit;
-            core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
-        }
-
-        timer_.Reset();
-        logger_.Info("Application initialization finished");
+        finishStartup();
         return true;
     }
 
@@ -497,6 +539,18 @@ namespace myengine::core
             {
                 break;
             }
+
+            if (restartPending_ && std::chrono::steady_clock::now() >= restartQuitTime_)
+            {
+                restartPending_ = false;
+                RequestQuit();
+                PostQuitMessage(0);
+            }
+
+            // A map that was read on a worker is applied here, between frames
+            PumpPendingSceneLoad();
+            SyncBackgroundOperations();
+            loadingService_.Update();
 
             timer_.Tick();
             const float deltaTime = timer_.DeltaTime();
@@ -618,6 +672,9 @@ namespace myengine::core
     {
         cameraControlActive_ = false;
         SetCursorVisible(true);
+
+        // A map that is still being read on a worker must finish before anything it may touch goes away
+        WaitPendingSceneLoad();
 
         // 1. Release every Python object while the interpreter is still alive
         if (scriptSystem_ != nullptr)
@@ -1110,6 +1167,149 @@ namespace myengine::core
         return true;
     }
 
+    struct Application::PendingSceneLoad
+    {
+        std::filesystem::path path;
+        ecs::World loaded; // built on the worker, swapped into the live world on the main thread
+        jobs::Context context;
+        std::atomic<bool> finished{false};
+        bool success = false;
+        bool makeCurrent = false; // Open: the file becomes the one that Save writes. Revert: it already is.
+        editor::LoadingId loadingId = 0;
+        std::function<void(bool)> done;
+    };
+
+    bool Application::IsSceneLoaded() const
+    {
+        return sceneLoaded_;
+    }
+
+    editor::LoadingService& Application::GetLoadingService()
+    {
+        return loadingService_;
+    }
+
+    void Application::BeginOpenScene(const std::string& scenePath, std::function<void(bool)> done)
+    {
+        if (!sceneLoaded_ || scenePath.empty() || resourceManager_ == nullptr || pendingSceneLoad_ != nullptr)
+        {
+            if (done)
+            {
+                done(false);
+            }
+            return;
+        }
+
+        // Same lookup as for any asset: the project folder first, then the copy next to the executable
+        const std::filesystem::path resolved = resourceManager_->ResolvePath(std::filesystem::u8path(scenePath));
+        StartSceneLoad(resolved, true, "Loading map...", resolved.stem().u8string(), editor::LoadingMode::Modal, std::move(done));
+    }
+
+    void Application::BeginRevertScene(std::function<void(bool)> done)
+    {
+        if (sceneSavePath_.empty() || pendingSceneLoad_ != nullptr)
+        {
+            if (done)
+            {
+                done(false);
+            }
+            return;
+        }
+
+        StartSceneLoad(sceneSavePath_, false, "Reverting map...", sceneSavePath_.stem().u8string(), editor::LoadingMode::Modal,
+            std::move(done));
+    }
+
+    void Application::StartSceneLoad(
+        const std::filesystem::path& path,
+        const bool makeCurrent,
+        std::string label,
+        std::string subtitle,
+        const editor::LoadingMode mode,
+        std::function<void(bool)> done)
+    {
+        auto load = std::make_unique<PendingSceneLoad>();
+        load->path = path;
+        load->makeCurrent = makeCurrent;
+        load->done = std::move(done);
+        load->loadingId = loadingService_.Begin(std::move(label), mode);
+        loadingService_.SetSubtitle(load->loadingId, std::move(subtitle));
+        load->context.priority = jobs::Priority::Streaming;
+        PendingSceneLoad* raw = load.get();
+        pendingSceneLoad_ = std::move(load);
+
+        // Nothing here touches the live world: the file is read and built into `raw->loaded`
+        jobs::Execute(raw->context, [this, raw](jobs::JobArgs)
+        {
+            const auto progress = [this, raw](const float fraction, const char* stage)
+            {
+                loadingService_.SetProgress(raw->loadingId, fraction, stage);
+            };
+            raw->success = scene::ReadWorldFromFile(raw->loaded, raw->path, &logger_, progress);
+            raw->finished.store(true, std::memory_order_release);
+        });
+    }
+
+    void Application::PumpPendingSceneLoad()
+    {
+        if (pendingSceneLoad_ == nullptr || !pendingSceneLoad_->finished.load(std::memory_order_acquire))
+        {
+            return;
+        }
+
+        std::unique_ptr<PendingSceneLoad> load = std::move(pendingSceneLoad_);
+        jobs::Wait(load->context);
+
+        if (load->success)
+        {
+            scene::CommitLoadedWorld(world_, load->loaded);
+            if (load->makeCurrent)
+            {
+                // From now on Save Scene and the save on exit go to this file
+                sceneSavePath_ = load->path;
+                core::ServiceLocator::GetEditorRuntimeState().mapPath =
+                    core::ServiceLocator::GetProjectContext().ToProjectRelative(sceneSavePath_);
+                UpdateWindowTitles();
+            }
+            RebindWindowControlledEntities();
+            logger_.Info("SceneSerializer: scene loaded from " + load->path.u8string());
+        }
+
+        loadingService_.End(load->loadingId);
+        if (load->done)
+        {
+            load->done(load->success);
+        }
+    }
+
+    void Application::WaitPendingSceneLoad()
+    {
+        if (pendingSceneLoad_ != nullptr)
+        {
+            jobs::Wait(pendingSceneLoad_->context);
+            loadingService_.End(pendingSceneLoad_->loadingId);
+            pendingSceneLoad_.reset();
+        }
+    }
+
+    void Application::SyncBackgroundOperations()
+    {
+        if (thumbnailService_ != nullptr)
+        {
+            const std::size_t queued = thumbnailService_->GetStats().queued;
+            loadingService_.Sync("thumbnails", queued > 0, "Generating thumbnails", -1.0f, std::to_string(queued) + " left");
+        }
+        if (scriptSystem_ != nullptr)
+        {
+            loadingService_.Sync("scripts", scriptSystem_->IsReloadPending(), "Reloading scripts");
+        }
+        if (resourceManager_ != nullptr)
+        {
+            const std::size_t pending = resourceManager_->PendingLoadCount();
+            loadingService_.Sync("assets", pending > 0, "Loading assets", -1.0f, std::to_string(pending) + " left");
+        }
+    }
+
     bool Application::SaveSceneAs(const std::string& scenePath)
     {
         if (!sceneLoaded_ || scenePath.empty())
@@ -1167,7 +1367,14 @@ namespace myengine::core
         CloseHandle(process.hThread);
         CloseHandle(process.hProcess);
         discardSceneOnExit_ = discardScene;
-        RequestQuit();
+
+        // This window shows "Opening project..." for a moment before it goes, so that the hand-over to the new
+        // process (which waits for this one to exit) is not a blank screen
+        const editor::LoadingId opening = loadingService_.Begin("Opening project...", editor::LoadingMode::Modal);
+        loadingService_.SetSubtitle(opening, projectFile.stem().u8string());
+        loadingService_.SetProgress(opening, -1.0f, "Starting the editor");
+        restartPending_ = true;
+        restartQuitTime_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(700);
         return true;
     }
 
@@ -1179,6 +1386,11 @@ namespace myengine::core
     void Application::SetShowProjectBrowser(const bool show)
     {
         showProjectBrowser_ = show;
+    }
+
+    void Application::SetDeferredSceneLoad(const bool deferred)
+    {
+        deferredSceneLoad_ = deferred;
     }
 
     std::string Application::CaptureSceneSnapshot() const

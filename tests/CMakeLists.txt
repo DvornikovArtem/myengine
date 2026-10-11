@@ -177,6 +177,15 @@ set_property(TARGET myengine_assistant_bridge_tests PROPERTY FOLDER "Tests")
 add_test(NAME assistant_bridge COMMAND myengine_assistant_bridge_tests)
 set_tests_properties(assistant_bridge PROPERTIES TIMEOUT 120)
 
+# LD1: the loading service: thresholds, progress, polled sources
+add_executable(myengine_loading_tests
+  core/LoadingServiceTests.cpp)
+
+target_link_libraries(myengine_loading_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_loading_tests)
+set_property(TARGET myengine_loading_tests PROPERTY FOLDER "Tests")
+add_test(NAME loading_service COMMAND myengine_loading_tests)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)

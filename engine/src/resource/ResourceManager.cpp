@@ -1410,6 +1410,11 @@ namespace myengine::resource
         return failedKeys_.find(NormalizeKey(ResolvePath(path))) != failedKeys_.end();
     }
 
+    std::size_t ResourceManager::PendingLoadCount() const
+    {
+        return pendingMeshLoads_.size() + pendingTextureLoads_.size();
+    }
+
     void ResourceManager::UpdateHotReload()
     {
         PumpAsyncLoads();

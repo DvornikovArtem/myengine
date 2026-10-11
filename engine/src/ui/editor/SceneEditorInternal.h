@@ -25,6 +25,7 @@
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorCommandHistory.h>
+#include <myengine/editor/LoadingService.h>
 #include <myengine/editor/ThumbnailService.h>
 #include <myengine/editor/TransformGizmo.h>
 #include <myengine/ecs/World.h>
@@ -593,6 +594,7 @@ namespace myengine::ui
         bool open = true;
         bool docked = false;
         bool focusRequested = false;
+        double loadingSince = -1.0; // ImGui time when the file began to stream; negative: not loading
 
         // 3D (mesh, prefab) camera
         float yaw = 0.55f;

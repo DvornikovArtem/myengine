@@ -112,15 +112,21 @@ namespace myengine::ui
         // Re-reads the open map from disk (what "Load Scene" did before)
         if (MenuItemIcon(ICON_ROTATE_CCW, "Revert Map", nullptr, false, editMode && services_.loadScene != nullptr, false, width))
         {
-            if (services_.loadScene())
+            services_.loadScene([this](const bool reverted)
             {
-                editorState.selectedEntity = ecs::kInvalidEntity;
-                editorState.sceneDirty = false;
+                if (!reverted)
+                {
+                    ReportLoadError("Cannot revert the map", "The file could not be read. See the Output Log for the reason.");
+                    return;
+                }
+                auto& state = core::ServiceLocator::GetEditorRuntimeState();
+                state.selectedEntity = ecs::kInvalidEntity;
+                state.sceneDirty = false;
                 if (history_ != nullptr)
                 {
                     history_->Clear();
                 }
-            }
+            });
         }
 
         ImGui::Separator();

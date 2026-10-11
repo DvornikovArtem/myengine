@@ -20,5 +20,6 @@ namespace myengine::appstate
 
 	private:
 		float elapsed_ = 0.0f;
+		unsigned frames_ = 0;
 	};
 }

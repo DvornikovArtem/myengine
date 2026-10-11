@@ -19,6 +19,7 @@ namespace myengine::core
     class Logger;
 }
 
+struct ImDrawList;
 struct ImFont;
 struct ImVec2;
 
@@ -29,6 +30,7 @@ namespace myengine::ecs
 
 namespace myengine::editor
 {
+    class LoadingService;
     class EditorCommandHistory;
     class ThumbnailService;
     class TransformGizmo;
@@ -68,12 +70,16 @@ namespace myengine::ui
         core::Logger* logger = nullptr;
         scene::PrefabLibrary* prefabLibrary = nullptr;
         editor::ThumbnailService* thumbnails = nullptr; // asset previews (null without a render adapter)
+        editor::LoadingService* loading = nullptr;      // the long operations to show (null: none are shown)
         std::function<void()> requestQuit;
         std::function<bool()> saveScene;
-        std::function<bool()> loadScene;
+        // Re-read the open map from disk; `done(success)` runs on the main thread when it has been applied
+        std::function<void(std::function<void(bool)> done)> loadScene;
         std::function<bool(const std::string& scenePath)> saveSceneAs; // writes the map and makes it the open one
         std::function<bool(const std::string& projectFile, bool discardScene)> restartWithProject; // new process, then quit
-        std::function<bool(const std::string& scenePath)> openScene; // scene file by asset key ("assets/scenes/x.json"); it becomes the one Save writes
+        // Scene file by asset key ("assets/scenes/x.json"); it becomes the one Save writes. The map is read in the
+        // background behind a loading window; `done(success)` runs on the main thread when it has been applied.
+        std::function<void(const std::string& scenePath, std::function<void(bool)> done)> openScene;
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
         std::function<void()> reloadScripts; // hot reload of every script, same as F5
@@ -145,6 +151,13 @@ namespace myengine::ui
         void DrawPrefabCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
         void DrawPrefabPanel(AssetViewerTab& tab);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
+        // The loading window of a long operation (SceneEditorLoading.cpp). Also blocks the input while one runs.
+        void DrawLoadingUi();
+        // The startup splash instead of the editor; true while it is on (nothing else is drawn then)
+        bool DrawStartupSplash();
+        // The button of the background tasks in the status bar (its right edge at `rightEdge`) and their popup
+        void DrawBackgroundTasks(ImDrawList* drawList, float rightEdge, float centerY);
+        void ReportLoadError(const std::string& title, const std::string& text);
         void RequestOpenProject(const std::string& projectFile);
         ContentThumbnail MakeContentThumbnail(const ContentEntry& entry, std::uint32_t pixelSize) const;
         void RequestOpenScene(const std::string& scenePath);
@@ -205,6 +218,8 @@ namespace myengine::ui
         bool resetLayoutRequested_ = false;
         int layoutFocusFrames_ = 0; // frames until a fresh default layout gets its active tabs
         bool wasPlaying_ = false;   // Edit -> Play edge: the viewport takes the keyboard from any text field
+        std::string loadErrorTitle_; // a map that could not be opened: shown as a dialog when the loading window is gone
+        std::string loadErrorText_;
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
         float materialPreviewYaw_ = 0.61f;   // orbit camera of the Material Editor preview (radians)

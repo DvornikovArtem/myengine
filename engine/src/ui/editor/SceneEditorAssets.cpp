@@ -242,25 +242,36 @@ namespace myengine::ui
 
     void SceneEditor::OpenSceneNow(const std::string& scenePath)
     {
-        if (!services_.openScene || !services_.openScene(scenePath))
+        if (!services_.openScene)
         {
-            if (services_.logger != nullptr)
-            {
-                services_.logger->Warning("Content Browser: failed to open the scene " + scenePath);
-            }
             return;
         }
 
-        auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
-        editorState.selectedEntity = ecs::kInvalidEntity;
-        editorState.sceneDirty = false;
-        pinnedMaterialPath_.clear();
-        pendingSceneMutationSnapshot_.clear();
-        pendingGizmoMutationSnapshot_.clear();
-        if (history_ != nullptr)
+        // The map is read in the background behind the loading window; the editor state of the old map is dropped
+        // when the new one has been applied
+        services_.openScene(scenePath, [this, scenePath](const bool opened)
         {
-            history_->Clear();
-        }
+            if (!opened)
+            {
+                if (services_.logger != nullptr)
+                {
+                    services_.logger->Warning("Content Browser: failed to open the scene " + scenePath);
+                }
+                ReportLoadError("Cannot open the map", scenePath + "\nThe map stays as it was. See the Output Log for the reason.");
+                return;
+            }
+
+            auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
+            editorState.selectedEntity = ecs::kInvalidEntity;
+            editorState.sceneDirty = false;
+            pinnedMaterialPath_.clear();
+            pendingSceneMutationSnapshot_.clear();
+            pendingGizmoMutationSnapshot_.clear();
+            if (history_ != nullptr)
+            {
+                history_->Clear();
+            }
+        });
     }
 
     void SceneEditor::DrawOpenScenePrompt()
