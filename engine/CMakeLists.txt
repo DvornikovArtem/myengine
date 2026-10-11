@@ -18,6 +18,7 @@
   include/myengine/core/Window.h
   include/myengine/editor/EditorCommandHistory.h
   include/myengine/editor/EditorState.h
+  include/myengine/editor/ThumbnailService.h
   include/myengine/editor/TransformGizmo.h
   include/myengine/ecs/Component.h
   include/myengine/ecs/Entity.h
@@ -50,6 +51,7 @@
   include/myengine/physics/PhysicsEvents.h
   include/myengine/physics/PhysicsWorldState.h
   include/myengine/render/IRenderAdapter.h
+  include/myengine/render/RenderTargetPool.h
   include/myengine/render/RenderTypes.h
   include/myengine/render/dx12/Dx12Context.h
   include/myengine/render/dx12/Dx12RenderAdapter.h
@@ -89,6 +91,7 @@ set(ENGINE_SOURCES
   src/core/Timer.cpp
   src/core/Window.cpp
   src/editor/EditorCommandHistory.cpp
+  src/editor/ThumbnailService.cpp
   src/editor/TransformGizmo.cpp
   src/ecs/World.cpp
   src/ecs/systems/CameraControlSystem.cpp
@@ -103,6 +106,7 @@ set(ENGINE_SOURCES
   src/jobs/JobQueue.cpp
   src/jobs/JobQueue.h
   src/jobs/JobSystem.cpp
+  src/render/RenderTargetPool.cpp
   src/render/dx12/Dx12RenderAdapter.cpp
   src/resource/ResourceManager.cpp
   src/scene/PrefabLibrary.cpp

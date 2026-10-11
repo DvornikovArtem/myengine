@@ -153,6 +153,9 @@ namespace myengine::resource
         bool SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset);
 
         std::filesystem::path ResolvePath(const std::filesystem::path& path) const;
+        // True while the mesh or the texture of this path is still streaming: Load() then returns a placeholder
+        // (the fallback asset), whose GPU handle is valid but is not the asset's own
+        bool IsLoadPending(const std::filesystem::path& path) const;
         std::vector<std::string> GetKnownMeshKeys() const;
         std::vector<std::string> GetKnownTextureKeys() const;
         std::vector<std::string> GetKnownShaderKeys() const;

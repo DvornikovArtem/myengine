@@ -11,6 +11,7 @@
 #include <myengine/core/Application.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
+#include <myengine/editor/ThumbnailService.h>
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/CameraControllerComponent.h>
 #include <myengine/ecs/components/ColliderComponent.h>
@@ -206,6 +207,16 @@ namespace myengine::core
 
         resourceManager_ = std::make_unique<resource::ResourceManager>(*renderAdapter_, logger_);
 
+        {
+            // Asset previews: images are cached under <project>/Saved/Thumbnails
+            editor::ThumbnailServiceConfig thumbnailConfig;
+            if (const auto& projectContext = ServiceLocator::GetProjectContext(); projectContext.IsInitialized())
+            {
+                thumbnailConfig.cacheDirectory = projectContext.Root() / "Saved" / "Thumbnails";
+            }
+            thumbnailService_ = std::make_unique<editor::ThumbnailService>(*renderAdapter_, *resourceManager_, logger_, std::move(thumbnailConfig));
+        }
+
         WindowId nextWindowId = 1;
         windows_.reserve(config_.windows.size());
 
@@ -246,6 +257,7 @@ namespace myengine::core
         ui::SceneEditorServices sceneEditorServices;
         sceneEditorServices.world = &world_;
         sceneEditorServices.resourceManager = resourceManager_.get();
+        sceneEditorServices.thumbnails = thumbnailService_.get();
         sceneEditorServices.logger = &logger_;
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
@@ -497,6 +509,10 @@ namespace myengine::core
                 {
                     resourceManager_->UpdateHotReload();
                 }
+                if (thumbnailService_ != nullptr)
+                {
+                    thumbnailService_->Update();
+                }
             }
             const auto hotReloadEndTime = std::chrono::steady_clock::now();
 
@@ -603,6 +619,7 @@ namespace myengine::core
         }
 
         uiManager_.Shutdown();
+        thumbnailService_.reset();
         resourceManager_.reset();
 
         // 2. Stop the prefab watcher while the Streaming workers still exist.
@@ -1717,6 +1734,12 @@ namespace myengine::core
             if (!renderAdapter_->BeginFrame(runtime.surface, runtime.clearColor))
             {
                 continue;
+            }
+
+            // Asset thumbnails are drawn into their own targets before the scene and the UI use the back buffer
+            if (thumbnailService_ != nullptr)
+            {
+                thumbnailService_->Render(runtime.surface);
             }
 
             render::IntRect renderRegion{};

@@ -156,6 +156,10 @@ namespace myengine::render::dx12
         {
             return false;
         }
+        if (!BuildRenderTargetHeaps())
+        {
+            return false;
+        }
         if (!BuildUiPipeline())
         {
             return false;
@@ -266,7 +270,9 @@ namespace myengine::render::dx12
             logger_.Warning("CreateTexture failed: pixel buffer size does not match texture dimensions");
             return {};
         }
-        if (nextTextureDescriptorIndex_ >= kMaxTextureDescriptors)
+        CollectRetiredResources();
+        UINT descriptorIndex = 0;
+        if (!AllocateTextureDescriptor(descriptorIndex))
         {
             logger_.Warning("CreateTexture failed: descriptor heap is full");
             return {};
@@ -275,10 +281,11 @@ namespace myengine::render::dx12
         TextureRecord textureRecord;
         if (!CreateTextureResource(textureData, textureRecord.textureResource))
         {
+            freeTextureDescriptors_.push_back(descriptorIndex);
             return {};
         }
 
-        textureRecord.descriptorIndex = nextTextureDescriptorIndex_++;
+        textureRecord.descriptorIndex = descriptorIndex;
 
         D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -303,7 +310,18 @@ namespace myengine::render::dx12
             return;
         }
 
-        textures_.erase(texture.value);
+        const auto it = textures_.find(texture.value);
+        if (it == textures_.end() || it->second.ownedByRenderTarget)
+        {
+            return;
+        }
+
+        RetiredResource retired;
+        retired.resource = std::move(it->second.textureResource);
+        retired.descriptorIndex = it->second.descriptorIndex;
+        retired.hasDescriptor = true;
+        textures_.erase(it);
+        RetireResources(std::move(retired));
     }
 
     ShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderProgramData& shaderProgram)
@@ -504,6 +522,8 @@ namespace myengine::render::dx12
             return false;
         }
 
+        CollectRetiredResources();
+
         surface->currentBackBuffer = surface->swapChain->GetCurrentBackBufferIndex();
         const UINT backBufferIndex = surface->currentBackBuffer;
 
@@ -595,7 +615,7 @@ namespace myengine::render::dx12
             surface->scissorRect = {left, top, right, bottom};
         }
 
-        if (activeSurface_ == nullptr || surface != activeSurface_)
+        if (activeSurface_ == nullptr || surface != activeSurface_ || activeTarget_ != nullptr)
         {
             return;
         }
@@ -612,7 +632,13 @@ namespace myengine::render::dx12
             return;
         }
 
-        surface->viewProjection = XmToMatrix(DirectX::XMMatrixMultiply(MatrixToXm(view), MatrixToXm(projection)));
+        const Matrix4 viewProjection = XmToMatrix(DirectX::XMMatrixMultiply(MatrixToXm(view), MatrixToXm(projection)));
+        if (activeTarget_ != nullptr && surface == activeSurface_)
+        {
+            activeTarget_->viewProjection = viewProjection;
+            return;
+        }
+        surface->viewProjection = viewProjection;
     }
 
     void Dx12RenderAdapter::Draw(const RenderSurfaceHandle handle, const DrawItem& drawItem)
@@ -664,7 +690,7 @@ namespace myengine::render::dx12
         } constants{};
 
         const DirectX::XMMATRIX modelMatrix = MatrixToXm(drawItem.model);
-        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(surface->viewProjection);
+        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(CurrentViewProjection(*surface));
 
         DirectX::XMStoreFloat4x4(&constants.model, DirectX::XMMatrixTranspose(modelMatrix));
         DirectX::XMStoreFloat4x4(&constants.viewProjection, DirectX::XMMatrixTranspose(viewProjectionMatrix));
@@ -699,7 +725,7 @@ namespace myengine::render::dx12
         std::vector<DxDebugVertex> vertices;
         vertices.reserve(lines.size() * 2);
 
-        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(surface->viewProjection);
+        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(CurrentViewProjection(*surface));
 
         for (const auto& line : lines)
         {
@@ -748,7 +774,7 @@ namespace myengine::render::dx12
     {
         ZoneScoped;
 
-        if (activeSurface_ == nullptr || uiPipelineState_ == nullptr || uiRootSignature_ == nullptr)
+        if (activeSurface_ == nullptr || uiPipelineState_ == nullptr || uiRootSignature_ == nullptr || activeTarget_ != nullptr)
         {
             return;
         }
@@ -889,6 +915,395 @@ namespace myengine::render::dx12
         activeSurface_ = nullptr;
     }
 
+    RenderTargetHandle Dx12RenderAdapter::CreateRenderTarget(const std::uint32_t width, const std::uint32_t height)
+    {
+        ZoneScoped;
+
+        constexpr std::uint32_t kMaxTargetSize = 4096;
+        if (context_.device == nullptr || targetRtvHeap_ == nullptr || targetDsvHeap_ == nullptr || textureSrvHeap_ == nullptr)
+        {
+            logger_.Warning("CreateRenderTarget failed: the adapter is not initialized");
+            return {};
+        }
+        if (width == 0 || height == 0 || width > kMaxTargetSize || height > kMaxTargetSize)
+        {
+            logger_.Warning("CreateRenderTarget failed: invalid size " + std::to_string(width) + "x" + std::to_string(height));
+            return {};
+        }
+
+        CollectRetiredResources();
+        if (freeTargetSlots_.empty())
+        {
+            logger_.Warning("CreateRenderTarget failed: the render target limit is reached");
+            return {};
+        }
+        UINT descriptorIndex = 0;
+        if (!AllocateTextureDescriptor(descriptorIndex))
+        {
+            logger_.Warning("CreateRenderTarget failed: descriptor heap is full");
+            return {};
+        }
+
+        RenderTargetRecord record;
+        record.width = width;
+        record.height = height;
+
+        const CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+
+        const auto colorDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+        D3D12_CLEAR_VALUE colorClear{};
+        colorClear.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        HRESULT hr = context_.device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &colorDesc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            &colorClear,
+            IID_PPV_ARGS(record.color.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource for the render target failed: " + HrToString(hr));
+            freeTextureDescriptors_.push_back(descriptorIndex);
+            return {};
+        }
+
+        const auto depthDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            kDepthFormat, width, height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+        D3D12_CLEAR_VALUE depthClear{};
+        depthClear.Format = kDepthFormat;
+        depthClear.DepthStencil.Depth = 1.0f;
+        hr = context_.device->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &depthDesc,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &depthClear,
+            IID_PPV_ARGS(record.depth.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource for the render target depth failed: " + HrToString(hr));
+            freeTextureDescriptors_.push_back(descriptorIndex);
+            return {};
+        }
+
+        record.slot = freeTargetSlots_.back();
+        freeTargetSlots_.pop_back();
+
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = targetRtvHeap_->GetCPUDescriptorHandleForHeapStart();
+        rtvHandle.ptr += static_cast<UINT64>(record.slot) * static_cast<UINT64>(targetRtvDescriptorSize_);
+        context_.device->CreateRenderTargetView(record.color.Get(), nullptr, rtvHandle);
+
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = targetDsvHeap_->GetCPUDescriptorHandleForHeapStart();
+        dsvHandle.ptr += static_cast<UINT64>(record.slot) * static_cast<UINT64>(targetDsvDescriptorSize_);
+        context_.device->CreateDepthStencilView(record.depth.Get(), nullptr, dsvHandle);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = 1;
+        D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = textureSrvHeap_->GetCPUDescriptorHandleForHeapStart();
+        srvHandle.ptr += static_cast<UINT64>(descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+        context_.device->CreateShaderResourceView(record.color.Get(), &srvDesc, srvHandle);
+
+        // The target is a texture like any other, so the UI pass (ImGui::Image) and DrawItem::texture can use it
+        TextureRecord textureRecord;
+        textureRecord.textureResource = record.color;
+        textureRecord.descriptorIndex = descriptorIndex;
+        textureRecord.ownedByRenderTarget = true;
+        const std::uint32_t textureId = nextTextureId_++;
+        textures_.insert_or_assign(textureId, std::move(textureRecord));
+        record.texture = TextureHandle{textureId};
+
+        const std::uint32_t targetId = nextRenderTargetId_++;
+        renderTargets_.insert_or_assign(targetId, std::move(record));
+        return RenderTargetHandle{targetId};
+    }
+
+    void Dx12RenderAdapter::DestroyRenderTarget(const RenderTargetHandle target)
+    {
+        const auto it = renderTargets_.find(target.value);
+        if (it == renderTargets_.end())
+        {
+            return;
+        }
+        if (activeTarget_ == &it->second)
+        {
+            logger_.Warning("DestroyRenderTarget ignored: the target is being rendered");
+            return;
+        }
+
+        RetiredResource retired;
+        retired.resource = std::move(it->second.color);
+        retired.secondResource = std::move(it->second.depth);
+        retired.hasSlot = true;
+        retired.slot = it->second.slot;
+        if (const auto textureIt = textures_.find(it->second.texture.value); textureIt != textures_.end())
+        {
+            retired.descriptorIndex = textureIt->second.descriptorIndex;
+            retired.hasDescriptor = true;
+            textures_.erase(textureIt);
+        }
+        renderTargets_.erase(it);
+        RetireResources(std::move(retired));
+    }
+
+    TextureHandle Dx12RenderAdapter::GetRenderTargetTexture(const RenderTargetHandle target) const
+    {
+        const auto it = renderTargets_.find(target.value);
+        return it != renderTargets_.end() ? it->second.texture : TextureHandle{};
+    }
+
+    bool Dx12RenderAdapter::GetRenderTargetSize(const RenderTargetHandle target, std::uint32_t& outWidth, std::uint32_t& outHeight) const
+    {
+        const auto it = renderTargets_.find(target.value);
+        if (it == renderTargets_.end())
+        {
+            outWidth = 0;
+            outHeight = 0;
+            return false;
+        }
+        outWidth = it->second.width;
+        outHeight = it->second.height;
+        return true;
+    }
+
+    bool Dx12RenderAdapter::BeginRenderTarget(const RenderTargetHandle target, const core::Color& clearColor)
+    {
+        ZoneScoped;
+
+        if (activeSurface_ == nullptr || activeTarget_ != nullptr)
+        {
+            return false;
+        }
+        const auto it = renderTargets_.find(target.value);
+        if (it == renderTargets_.end() || it->second.color == nullptr)
+        {
+            return false;
+        }
+
+        RenderTargetRecord& record = it->second;
+        const auto toRenderTarget = CD3DX12_RESOURCE_BARRIER::Transition(
+            record.color.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        context_.commandList->ResourceBarrier(1, &toRenderTarget);
+
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = targetRtvHeap_->GetCPUDescriptorHandleForHeapStart();
+        rtvHandle.ptr += static_cast<UINT64>(record.slot) * static_cast<UINT64>(targetRtvDescriptorSize_);
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = targetDsvHeap_->GetCPUDescriptorHandleForHeapStart();
+        dsvHandle.ptr += static_cast<UINT64>(record.slot) * static_cast<UINT64>(targetDsvDescriptorSize_);
+
+        const D3D12_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(record.width), static_cast<float>(record.height), 0.0f, 1.0f};
+        const D3D12_RECT scissor{0, 0, static_cast<LONG>(record.width), static_cast<LONG>(record.height)};
+        const float color[4] = {clearColor.r, clearColor.g, clearColor.b, clearColor.a};
+
+        context_.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+        context_.commandList->RSSetViewports(1, &viewport);
+        context_.commandList->RSSetScissorRects(1, &scissor);
+        context_.commandList->ClearRenderTargetView(rtvHandle, color, 0, nullptr);
+        context_.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
+
+        record.viewProjection = Matrix4::Identity();
+        activeTarget_ = &record;
+        wireframeBeforeTarget_ = wireframe_;
+        wireframe_ = false;
+        return true;
+    }
+
+    void Dx12RenderAdapter::EndRenderTarget(const RenderTargetHandle target)
+    {
+        ZoneScoped;
+
+        const auto it = renderTargets_.find(target.value);
+        if (it == renderTargets_.end() || activeTarget_ != &it->second || activeSurface_ == nullptr)
+        {
+            return;
+        }
+
+        const auto toShaderResource = CD3DX12_RESOURCE_BARRIER::Transition(
+            it->second.color.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        context_.commandList->ResourceBarrier(1, &toShaderResource);
+
+        // Back to the surface that the frame draws into
+        SurfaceData& surface = *activeSurface_;
+        const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(
+            surface.rtvHeap->GetCPUDescriptorHandleForHeapStart(), static_cast<INT>(surface.currentBackBuffer), static_cast<INT>(surface.rtvDescriptorSize));
+        const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = surface.dsvHeap->GetCPUDescriptorHandleForHeapStart();
+        context_.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+        context_.commandList->RSSetViewports(1, &surface.viewport);
+        context_.commandList->RSSetScissorRects(1, &surface.scissorRect);
+
+        activeTarget_ = nullptr;
+        wireframe_ = wireframeBeforeTarget_;
+    }
+
+    bool Dx12RenderAdapter::ReadRenderTargetPixels(const RenderTargetHandle target, std::vector<std::uint8_t>& outRgba8)
+    {
+        ZoneScoped;
+
+        outRgba8.clear();
+        const auto it = renderTargets_.find(target.value);
+        if (it == renderTargets_.end() || it->second.color == nullptr || activeSurface_ != nullptr)
+        {
+            return false;
+        }
+
+        const RenderTargetRecord& record = it->second;
+        const D3D12_RESOURCE_DESC colorDesc = record.color->GetDesc();
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+        UINT rowCount = 0;
+        UINT64 rowSize = 0;
+        UINT64 totalSize = 0;
+        context_.device->GetCopyableFootprints(&colorDesc, 0, 1, 0, &footprint, &rowCount, &rowSize, &totalSize);
+
+        Microsoft::WRL::ComPtr<ID3D12Resource> readback;
+        const CD3DX12_HEAP_PROPERTIES readbackHeap(D3D12_HEAP_TYPE_READBACK);
+        const auto readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(totalSize);
+        HRESULT hr = context_.device->CreateCommittedResource(
+            &readbackHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &readbackDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(readback.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateCommittedResource for the readback buffer failed: " + HrToString(hr));
+            return false;
+        }
+
+        if (!ResetCommandList())
+        {
+            return false;
+        }
+
+        const auto toCopySource = CD3DX12_RESOURCE_BARRIER::Transition(
+            record.color.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        context_.commandList->ResourceBarrier(1, &toCopySource);
+
+        const CD3DX12_TEXTURE_COPY_LOCATION destination(readback.Get(), footprint);
+        const CD3DX12_TEXTURE_COPY_LOCATION source(record.color.Get(), 0);
+        context_.commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+
+        const auto toShaderResource = CD3DX12_RESOURCE_BARRIER::Transition(
+            record.color.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        context_.commandList->ResourceBarrier(1, &toShaderResource);
+
+        if (!ExecuteCommandListAndWait("render target readback"))
+        {
+            return false;
+        }
+
+        const D3D12_RANGE readRange{0, static_cast<SIZE_T>(totalSize)};
+        void* mapped = nullptr;
+        if (FAILED(readback->Map(0, &readRange, &mapped)) || mapped == nullptr)
+        {
+            logger_.Error("Mapping the readback buffer failed");
+            return false;
+        }
+
+        const std::size_t rowBytes = static_cast<std::size_t>(record.width) * 4;
+        outRgba8.resize(rowBytes * static_cast<std::size_t>(record.height));
+        const auto* sourceBytes = static_cast<const std::uint8_t*>(mapped) + footprint.Offset;
+        for (std::uint32_t row = 0; row < record.height; ++row)
+        {
+            std::memcpy(outRgba8.data() + static_cast<std::size_t>(row) * rowBytes, sourceBytes + static_cast<std::size_t>(row) * footprint.Footprint.RowPitch, rowBytes);
+        }
+        const D3D12_RANGE writtenRange{0, 0};
+        readback->Unmap(0, &writtenRange);
+        return true;
+    }
+
+    bool Dx12RenderAdapter::BuildRenderTargetHeaps()
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
+        rtvDesc.NumDescriptors = kMaxRenderTargets;
+        rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        HRESULT hr = context_.device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(targetRtvHeap_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateDescriptorHeap for the render target RTVs failed: " + HrToString(hr));
+            return false;
+        }
+
+        D3D12_DESCRIPTOR_HEAP_DESC dsvDesc{};
+        dsvDesc.NumDescriptors = kMaxRenderTargets;
+        dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        hr = context_.device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(targetDsvHeap_.GetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateDescriptorHeap for the render target DSVs failed: " + HrToString(hr));
+            return false;
+        }
+
+        targetRtvDescriptorSize_ = context_.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        targetDsvDescriptorSize_ = context_.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+        freeTargetSlots_.clear();
+        for (UINT slot = kMaxRenderTargets; slot > 0; --slot)
+        {
+            freeTargetSlots_.push_back(slot - 1);
+        }
+        return true;
+    }
+
+    bool Dx12RenderAdapter::AllocateTextureDescriptor(UINT& outIndex)
+    {
+        if (!freeTextureDescriptors_.empty())
+        {
+            outIndex = freeTextureDescriptors_.back();
+            freeTextureDescriptors_.pop_back();
+            return true;
+        }
+        if (nextTextureDescriptorIndex_ >= kMaxTextureDescriptors)
+        {
+            return false;
+        }
+        outIndex = nextTextureDescriptorIndex_++;
+        return true;
+    }
+
+    // The GPU may still be reading a destroyed texture or target: keep it until the next submitted work is done
+    void Dx12RenderAdapter::RetireResources(RetiredResource&& retired)
+    {
+        retired.fenceValue = context_.fenceValue + 1;
+        retiredResources_.push_back(std::move(retired));
+    }
+
+    void Dx12RenderAdapter::CollectRetiredResources()
+    {
+        if (retiredResources_.empty() || context_.fence == nullptr)
+        {
+            return;
+        }
+
+        const UINT64 completed = context_.fence->GetCompletedValue();
+        for (auto it = retiredResources_.begin(); it != retiredResources_.end();)
+        {
+            if (it->fenceValue > completed)
+            {
+                ++it;
+                continue;
+            }
+            if (it->hasDescriptor)
+            {
+                freeTextureDescriptors_.push_back(it->descriptorIndex);
+            }
+            if (it->hasSlot)
+            {
+                freeTargetSlots_.push_back(it->slot);
+            }
+            it = retiredResources_.erase(it);
+        }
+    }
+
+    const Matrix4& Dx12RenderAdapter::CurrentViewProjection(const SurfaceData& surface) const
+    {
+        return activeTarget_ != nullptr ? activeTarget_->viewProjection : surface.viewProjection;
+    }
+
     void Dx12RenderAdapter::Shutdown()
     {
         if (context_.device == nullptr)
@@ -916,6 +1331,13 @@ namespace myengine::render::dx12
 
         surfaces_.clear();
         meshes_.clear();
+        renderTargets_.clear();
+        retiredResources_.clear();
+        freeTextureDescriptors_.clear();
+        freeTargetSlots_.clear();
+        activeTarget_ = nullptr;
+        targetRtvHeap_.Reset();
+        targetDsvHeap_.Reset();
         textures_.clear();
         shaders_.clear();
 

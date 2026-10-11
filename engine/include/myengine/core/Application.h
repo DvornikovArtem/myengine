@@ -28,6 +28,11 @@ namespace myengine::scripting
     class ScriptSystem;
 }
 
+namespace myengine::editor
+{
+    class ThumbnailService;
+}
+
 namespace myengine::core
 {
     class Application
@@ -136,6 +141,7 @@ namespace myengine::core
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;
+        std::unique_ptr<editor::ThumbnailService> thumbnailService_; // after the adapter and the resources it uses
         ui::UiManager uiManager_;
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;

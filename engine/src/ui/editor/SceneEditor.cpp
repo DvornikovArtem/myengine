@@ -1,6 +1,9 @@
 #include "SceneEditorInternal.h"
 
+#include <cstdlib>
+
 #include <myengine/assistant/AssistantTools.h>
+#include <myengine/editor/ThumbnailService.h>
 
 namespace myengine::ui
 {
@@ -44,6 +47,16 @@ namespace myengine::ui
             contentBrowser_->SetRoot(services_.resourceManager->ResolvePath("assets"));
         }
         InitializeAssistant();
+        {
+            // Acceptance of the preview service: MYENGINE_THUMBNAILS_WINDOW=1 opens Help > Developer > Thumbnails at start
+            char* value = nullptr;
+            std::size_t length = 0;
+            if (_dupenv_s(&value, &length, "MYENGINE_THUMBNAILS_WINDOW") == 0 && value != nullptr)
+            {
+                showThumbnailsDebug_ = value[0] == '1';
+                std::free(value);
+            }
+        }
         history_->Clear();
         pendingSceneMutationSnapshot_.clear();
         pendingGizmoMutationSnapshot_.clear();
@@ -156,6 +169,90 @@ namespace myengine::ui
             ImGui::ShowDemoWindow(&editorState.showImGuiDemo);
         }
         DrawWidgetsGallery(&showWidgetsGallery_);
+        DrawThumbnailsDebugWindow();
+    }
+
+    // Developer tool: the assets of the engine folder as thumbnails, with the counters of the service.
+    // It shows what the preview service does before the Content Browser and the pickers use it.
+    void SceneEditor::DrawThumbnailsDebugWindow()
+    {
+        if (!showThumbnailsDebug_ || services_.thumbnails == nullptr)
+        {
+            return;
+        }
+
+        if (thumbnailDebugAssets_.empty())
+        {
+            std::error_code error;
+            const std::filesystem::path assets = core::ServiceLocator::GetProjectContext().Root() / "assets";
+            for (const char* folder : {"models", "materials", "prefabs", "textures"})
+            {
+                for (std::filesystem::directory_iterator it(assets / folder, error), end; !error && it != end; it.increment(error))
+                {
+                    if (!it->is_regular_file(error))
+                    {
+                        continue;
+                    }
+                    const std::string name = it->path().filename().u8string();
+                    if (editor::ThumbnailService::KindOf(it->path()) != editor::ThumbnailKind::Other)
+                    {
+                        thumbnailDebugAssets_.push_back(std::string("assets/") + folder + "/" + name);
+                    }
+                }
+                error.clear();
+            }
+        }
+
+        ImGui::SetNextWindowSize(ImVec2(720.0f, 460.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Thumbnails###ThumbnailsDebug", &showThumbnailsDebug_))
+        {
+            const auto stats = services_.thumbnails->GetStats();
+            ImGui::Text("entries %zu | queued %zu | ready %zu | rendered %llu | disk hits %llu | disk writes %llu | targets %zu",
+                stats.entries, stats.queued, stats.ready, static_cast<unsigned long long>(stats.rendered),
+                static_cast<unsigned long long>(stats.diskHits), static_cast<unsigned long long>(stats.diskWrites), stats.leasedTargets);
+            for (const int size : {64, 128, 256})
+            {
+                ImGui::SameLine();
+                ImGui::RadioButton(std::to_string(size).c_str(), &thumbnailDebugSize_, size);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Invalidate all"))
+            {
+                services_.thumbnails->InvalidateAll();
+            }
+            ImGui::Separator();
+
+            const float cell = static_cast<float>(thumbnailDebugSize_) + 12.0f;
+            const int columns = std::max(1, static_cast<int>(ImGui::GetContentRegionAvail().x / cell));
+            int column = 0;
+            for (const std::string& asset : thumbnailDebugAssets_)
+            {
+                const auto thumbnail = services_.thumbnails->Request(asset, static_cast<std::uint32_t>(thumbnailDebugSize_));
+                ImGui::BeginGroup();
+                const ImVec2 size(static_cast<float>(thumbnailDebugSize_), static_cast<float>(thumbnailDebugSize_));
+                if (thumbnail.ready)
+                {
+                    ImGui::Image(static_cast<ImTextureID>(thumbnail.ImGuiTextureId()), size);
+                }
+                else
+                {
+                    ImGui::Dummy(size);
+                    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(90, 90, 90, 255));
+                }
+                const std::string label = std::filesystem::u8path(asset).stem().u8string();
+                ImGui::TextUnformatted(label.c_str());
+                ImGui::EndGroup();
+                if (++column < columns)
+                {
+                    ImGui::SameLine();
+                }
+                else
+                {
+                    column = 0;
+                }
+            }
+        }
+        ImGui::End();
     }
 
     void SceneEditor::BuildDockSpace(const SceneEditorWindowContext& windowContext)
@@ -272,6 +369,7 @@ namespace myengine::ui
                 {
                     ImGui::MenuItem("ImGui Demo", nullptr, &editorState.showImGuiDemo);
                     ImGui::MenuItem("Widgets Gallery", nullptr, &showWidgetsGallery_);
+                    ImGui::MenuItem("Thumbnails", nullptr, &showThumbnailsDebug_, services_.thumbnails != nullptr);
                     ImGui::EndMenu();
                 }
                 ImGui::EndMenu();

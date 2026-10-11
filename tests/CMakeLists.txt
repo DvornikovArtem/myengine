@@ -167,3 +167,21 @@ myengine_apply_compiler_options(myengine_assistant_bridge_tests)
 set_property(TARGET myengine_assistant_bridge_tests PROPERTY FOLDER "Tests")
 add_test(NAME assistant_bridge COMMAND myengine_assistant_bridge_tests)
 set_tests_properties(assistant_bridge PROPERTIES TIMEOUT 120)
+
+# R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
+add_executable(myengine_thumbnail_tests
+  render/ThumbnailServiceTests.cpp)
+
+target_link_libraries(myengine_thumbnail_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_thumbnail_tests)
+set_property(TARGET myengine_thumbnail_tests PROPERTY FOLDER "Tests")
+add_test(NAME thumbnail_service COMMAND myengine_thumbnail_tests)
+set_tests_properties(thumbnail_service PROPERTIES TIMEOUT 120)
+
+# R2: render-to-texture on a real DX12 device and window: manual, not part of CTest
+add_executable(myengine_render_target_smoke
+  render/RenderTargetSmoke.cpp)
+
+target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_render_target_smoke)
+set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
