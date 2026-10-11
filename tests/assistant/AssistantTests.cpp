@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include <myengine/assistant/AssistantService.h>
+#include <myengine/assistant/AssistantSettings.h>
 #include <myengine/assistant/ClaudeCliBackend.h>
 #include <myengine/assistant/ClaudeStreamParser.h>
 #include <myengine/ui/AssistantPanel.h>
@@ -634,13 +635,44 @@ namespace
             Check(perFrameMs < 100.0, "A frame with a full transcript is too slow");
         }
 
-        // The panel built from a repository root creates the CLI backend without starting anything
+        // A clean installation: the assistant is off, the panel draws "Assistant is off" and starts nothing
         {
             ui::AssistantPanelConfig config;
             config.repositoryRoot = fixture.directory;
             ui::AssistantPanel panel(config);
             imgui.Frame(panel);
-            Check(!panel.GetService().IsBusy(), "The panel started a process by itself");
+            Check(!panel.IsEnabled() && panel.GetBridge() == nullptr, "The assistant is not off by default");
+            Check(panel.GetBackendKind() == assistant::AssistantBackendKind::None, "The default backend is not None");
+        }
+
+        // The panel built from a repository root creates the CLI backend without starting anything
+        {
+            ui::AssistantPanelConfig config;
+            config.repositoryRoot = fixture.directory;
+            config.settings.backend = assistant::AssistantBackendKind::Claude;
+            ui::AssistantPanel panel(config);
+            imgui.Frame(panel);
+            Check(panel.IsEnabled() && !panel.GetService().IsBusy(), "The panel started a process by itself");
+        }
+
+        // Enable and disable from the panel: applied on the next frame, saved to the settings file
+        {
+            ui::AssistantPanelConfig config;
+            config.repositoryRoot = fixture.directory;
+            config.settingsFile = fixture.directory / "settings" / "editor_settings.json";
+            ui::AssistantPanel panel(config);
+            imgui.Frame(panel);
+            Check(!panel.IsEnabled(), "The panel is not off");
+            panel.SetBackend(assistant::AssistantBackendKind::Codex);
+            Check(!panel.IsEnabled(), "The change was applied before the next frame");
+            imgui.Frame(panel);
+            Check(panel.IsEnabled() && std::string(panel.GetService().GetBackend().GetBackendId()) == "codex", "Enable -> Codex failed");
+            const auto saved = assistant::AssistantSettings::Load(config.settingsFile);
+            Check(saved.backend == assistant::AssistantBackendKind::Codex, "The choice was not saved");
+            panel.SetBackend(assistant::AssistantBackendKind::None);
+            imgui.Frame(panel);
+            Check(!panel.IsEnabled(), "Turn off failed");
+            Check(assistant::AssistantSettings::Load(config.settingsFile).backend == assistant::AssistantBackendKind::None, "Off was not saved");
         }
     }
 }

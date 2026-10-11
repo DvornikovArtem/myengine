@@ -2,10 +2,13 @@
   include/myengine/assistant/AssistantBridge.h
   include/myengine/assistant/AssistantBridgeServer.h
   include/myengine/assistant/AssistantService.h
+  include/myengine/assistant/AssistantSettings.h
   include/myengine/assistant/AssistantTools.h
   include/myengine/assistant/ChatStore.h
   include/myengine/assistant/ClaudeCliBackend.h
   include/myengine/assistant/ClaudeStreamParser.h
+  include/myengine/assistant/CodexCliBackend.h
+  include/myengine/assistant/CodexStreamParser.h
   include/myengine/assistant/IAssistantBackend.h
   include/myengine/assistant/Markdown.h
   include/myengine/assistant/McpBridgeCore.h
@@ -83,10 +86,15 @@ set(ENGINE_SOURCES
   src/assistant/AssistantBridge.cpp
   src/assistant/AssistantBridgeServer.cpp
   src/assistant/AssistantService.cpp
+  src/assistant/AssistantSettings.cpp
   src/assistant/AssistantTools.cpp
   src/assistant/ChatStore.cpp
   src/assistant/ClaudeCliBackend.cpp
   src/assistant/ClaudeStreamParser.cpp
+  src/assistant/CliProcess.cpp
+  src/assistant/CliProcess.h
+  src/assistant/CodexCliBackend.cpp
+  src/assistant/CodexStreamParser.cpp
   src/assistant/Markdown.cpp
   src/config/AppConfig.cpp
   src/core/Application.cpp

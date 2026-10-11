@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <iterator>
 #include <random>
 #include <utility>
 
@@ -226,19 +228,54 @@ namespace myengine::assistant
             {
                 list.push_back({{"name", info.name}, {"description", info.description}, {"inputSchema", info.inputSchema}});
             }
-            list.push_back({
-                {"name", kApproveTool},
-                {"description", "Internal: asks the user to confirm an action. The host calls it, do not call it yourself."},
-                {"inputSchema", {
-                    {"type", "object"},
-                    {"properties", {
-                        {"tool_name", {{"type", "string"}}},
-                        {"input", {{"type", "object"}}},
-                        {"tool_use_id", {{"type", "string"}}},
+            if (config_.offerApproveTool)
+            {
+                list.push_back({
+                    {"name", kApproveTool},
+                    {"description", "Internal: asks the user to confirm an action. The host calls it, do not call it yourself."},
+                    {"inputSchema", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"tool_name", {{"type", "string"}}},
+                            {"input", {{"type", "object"}}},
+                            {"tool_use_id", {{"type", "string"}}},
+                        }},
+                        {"required", json::array({"tool_name", "input"})},
                     }},
-                    {"required", json::array({"tool_name", "input"})},
-                }},
-            });
+                });
+            }
+            if (config_.fileTools)
+            {
+                list.push_back({
+                    {"name", kEditFileTool},
+                    {"description", "Replaces text in a project file. Only .py files in assets/scripts and .prefab.json files in "
+                                    "assets/prefabs may be edited. The user confirms the change in the editor. old_text must be "
+                                    "found exactly once unless replace_all is true."},
+                    {"inputSchema", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"path", {{"type", "string"}, {"description", "File path relative to the project root, e.g. assets/scripts/coin.py"}}},
+                            {"old_text", {{"type", "string"}, {"description", "Text to replace, exactly as it is in the file"}}},
+                            {"new_text", {{"type", "string"}, {"description", "Replacement text"}}},
+                            {"replace_all", {{"type", "boolean"}, {"description", "Replace every occurrence"}}},
+                        }},
+                        {"required", json::array({"path", "old_text", "new_text"})},
+                    }},
+                });
+                list.push_back({
+                    {"name", kWriteFileTool},
+                    {"description", "Creates or overwrites a project file with the given content. Only .py files in assets/scripts "
+                                    "and .prefab.json files in assets/prefabs may be written. The user confirms the change in the editor."},
+                    {"inputSchema", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"path", {{"type", "string"}, {"description", "File path relative to the project root, e.g. assets/scripts/coin.py"}}},
+                            {"content", {{"type", "string"}, {"description", "The whole new content of the file"}}},
+                        }},
+                        {"required", json::array({"path", "content"})},
+                    }},
+                });
+            }
             server_.Reply(request, {{"tools", std::move(list)}});
             return;
         }
@@ -257,6 +294,11 @@ namespace myengine::assistant
             HandleApprove(request);
             return;
         }
+        if (config_.fileTools && (request.tool == kEditFileTool || request.tool == kWriteFileTool))
+        {
+            HandleFileTool(request);
+            return;
+        }
         const auto* info = tools_.Find(request.tool);
         if (info == nullptr)
         {
@@ -268,6 +310,22 @@ namespace myengine::assistant
             auto ticket = tickets_.find(request.tool);
             if (ticket == tickets_.end() || ticket->second <= 0)
             {
+                if (config_.confirmInCall)
+                {
+                    // No separate permission prompt: this very call waits for the card
+                    Pending entry;
+                    entry.request = request;
+                    entry.input = request.arguments;
+                    entry.mcpTool = request.tool;
+                    entry.reply = Pending::Reply::Call;
+                    entry.view.id = nextApproval_++;
+                    entry.view.tool = kMcpPrefix + request.tool;
+                    entry.view.title = tools_.Describe(request.tool, request.arguments);
+                    entry.view.detail = request.arguments.empty() ? std::string() : CardJson(request.arguments);
+                    pending_.push_back(std::move(entry));
+                    RebuildView();
+                    return;
+                }
                 ReplyText(request, "This change was not confirmed in the editor, so it was not made.", true);
                 return;
             }
@@ -335,6 +393,111 @@ namespace myengine::assistant
             }
         }
         return false;
+    }
+
+    void AssistantBridge::HandleFileTool(const BridgeRequest& request)
+    {
+        const auto& arguments = request.arguments;
+        const auto text = [&](const char* key) -> std::string
+        {
+            return arguments.contains(key) && arguments[key].is_string() ? arguments[key].get<std::string>() : std::string();
+        };
+        const auto path = text("path");
+        std::string displayPath;
+        if (path.empty() || !IsEditable(path, displayPath))
+        {
+            ReplyText(request,
+                "Only .py files in assets/scripts and .prefab.json files in assets/prefabs may be changed. "
+                "Scenes are changed with the engine tools or in the Inspector, not as files.", true);
+            return;
+        }
+        auto file = std::filesystem::u8path(path);
+        if (file.is_relative())
+        {
+            file = config_.repositoryRoot / file;
+        }
+        file = file.lexically_normal();
+
+        constexpr std::size_t kMaxFileBytes = 256 * 1024;
+        std::string before;
+        bool exists = false;
+        {
+            std::ifstream stream(file, std::ios::binary);
+            if (stream)
+            {
+                exists = true;
+                before.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+            }
+        }
+
+        json shown;
+        std::string content;
+        std::string toolName;
+        if (request.tool == kEditFileTool)
+        {
+            const auto oldText = text("old_text");
+            const auto newText = text("new_text");
+            const bool all = arguments.contains("replace_all") && arguments["replace_all"].is_boolean() && arguments["replace_all"].get<bool>();
+            if (!exists)
+            {
+                ReplyText(request, "The file does not exist: " + displayPath + ". Use write_file to create it.", true);
+                return;
+            }
+            if (oldText.empty())
+            {
+                ReplyText(request, "old_text is empty.", true);
+                return;
+            }
+            std::size_t count = 0;
+            for (auto position = before.find(oldText); position != std::string::npos; position = before.find(oldText, position + oldText.size()))
+            {
+                ++count;
+            }
+            if (count == 0)
+            {
+                ReplyText(request, "old_text was not found in " + displayPath + ". Read the file and copy the text exactly.", true);
+                return;
+            }
+            if (count > 1 && !all)
+            {
+                ReplyText(request, "old_text was found " + std::to_string(count) + " times in " + displayPath +
+                    ". Add more context to make it unique or set replace_all.", true);
+                return;
+            }
+            content = before;
+            for (auto position = content.find(oldText); position != std::string::npos;)
+            {
+                content.replace(position, oldText.size(), newText);
+                position = all ? content.find(oldText, position + newText.size()) : std::string::npos;
+            }
+            shown = {{"file_path", displayPath}, {"old_string", oldText}, {"new_string", newText}};
+            toolName = "Edit";
+        }
+        else
+        {
+            content = text("content");
+            shown = {{"file_path", displayPath}, {"content", content}};
+            toolName = "Write";
+        }
+        if (content.size() > kMaxFileBytes)
+        {
+            ReplyText(request, "The file would be larger than 256 KB.", true);
+            return;
+        }
+
+        Pending entry;
+        entry.request = request;
+        entry.input = arguments;
+        entry.reply = Pending::Reply::FileWrite;
+        entry.file = file;
+        entry.content = std::move(content);
+        entry.displayPath = displayPath;
+        entry.view.id = nextApproval_++;
+        entry.view.tool = toolName;
+        entry.view.title = (toolName == "Write" ? (exists ? "Overwrite " : "Create ") : "Edit ") + displayPath;
+        entry.view.detail = ClaudeStreamParser::BuildToolDetail(toolName, shown);
+        pending_.push_back(std::move(entry));
+        RebuildView();
     }
 
     void AssistantBridge::HandleApprove(const BridgeRequest& request)
@@ -427,22 +590,66 @@ namespace myengine::assistant
         Pending entry = std::move(*it);
         pending_.erase(it);
         RebuildView();
+        FinishPending(entry, allow, reason);
+    }
 
-        if (allow)
+    void AssistantBridge::FinishPending(Pending& entry, const bool allow, const std::string& reason)
+    {
+        const std::string rejection = reason.empty() ? std::string(kUserRejectedText) : reason;
+        switch (entry.reply)
         {
-            if (!entry.mcpTool.empty())
-            {
-                ++tickets_[entry.mcpTool];
-            }
-            ReplyPermission(entry.request, true, entry.input, {});
-            Notice("Applied: " + entry.view.title);
+            case Pending::Reply::Permission:
+                if (allow)
+                {
+                    if (!entry.mcpTool.empty())
+                    {
+                        ++tickets_[entry.mcpTool];
+                    }
+                    ReplyPermission(entry.request, true, entry.input, {});
+                }
+                else
+                {
+                    ReplyPermission(entry.request, false, entry.input, rejection);
+                }
+                break;
+
+            case Pending::Reply::Call:
+                if (allow)
+                {
+                    const auto result = tools_.Call(entry.mcpTool, entry.input);
+                    ReplyText(entry.request, result.ok ? result.value.dump(-1, ' ', false, json::error_handler_t::replace) : result.message,
+                              !result.ok);
+                }
+                else
+                {
+                    ReplyText(entry.request, rejection, true);
+                }
+                break;
+
+            case Pending::Reply::FileWrite:
+                if (!allow)
+                {
+                    ReplyText(entry.request, rejection, true);
+                    break;
+                }
+                else
+                {
+                    std::error_code error;
+                    std::filesystem::create_directories(entry.file.parent_path(), error);
+                    std::ofstream stream(entry.file, std::ios::binary | std::ios::trunc);
+                    stream.write(entry.content.data(), static_cast<std::streamsize>(entry.content.size()));
+                    stream.close();
+                    if (!stream)
+                    {
+                        ReplyText(entry.request, "Could not write " + entry.displayPath + ".", true);
+                        Notice("Failed: " + entry.view.title);
+                        return;
+                    }
+                    ReplyText(entry.request, "Done: " + entry.displayPath + " was written.", false);
+                }
+                break;
         }
-        else
-        {
-            ReplyPermission(entry.request, false, entry.input,
-                reason.empty() ? std::string(kUserRejectedText) : reason);
-            Notice("Rejected: " + entry.view.title);
-        }
+        Notice((allow ? "Applied: " : "Rejected: ") + entry.view.title);
     }
 
     void AssistantBridge::RejectAll(const std::string& reason)
@@ -456,6 +663,23 @@ namespace myengine::assistant
             }
             return list;
         }();
+        for (const auto id : ids)
+        {
+            Resolve(id, false, reason);
+        }
+        tickets_.clear();
+    }
+
+    void AssistantBridge::RejectTurnPrompts(const std::string& reason)
+    {
+        std::vector<std::uint64_t> ids;
+        for (const auto& entry : pending_)
+        {
+            if (entry.reply == Pending::Reply::Permission)
+            {
+                ids.push_back(entry.view.id);
+            }
+        }
         for (const auto id : ids)
         {
             Resolve(id, false, reason);

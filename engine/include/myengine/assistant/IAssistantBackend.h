@@ -26,6 +26,7 @@ namespace myengine::assistant
         std::string text;
         std::string detail;
         std::string sessionId;
+        std::string effort; // SessionStarted: the effort the CLI reports for the run (empty: it does not say)
         std::string toolId;
         std::string toolName;
         std::string filePath;
@@ -65,6 +66,8 @@ namespace myengine::assistant
         virtual ~IAssistantBackend() = default;
 
         virtual const char* GetName() const = 0;
+        // "claude", "codex": which CLI the conversations of this backend belong to. Empty: unknown (no check)
+        virtual const char* GetBackendId() const { return ""; }
         // Empty string - the backend can run; otherwise a message for the user
         virtual std::string CheckAvailability() = 0;
         // Starts a turn. sessionId is empty for a new conversation. On failure fills `error` and returns false

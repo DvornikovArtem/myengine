@@ -21,6 +21,9 @@
 #include <commdlg.h>
 #include <shellapi.h>
 
+// shellapi.h turns FindExecutable into FindExecutableW; the CLI backends have a function of that name
+#undef FindExecutable
+
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <imgui/misc/imgui_stdlib.h>
@@ -28,6 +31,9 @@
 #include <myengine/assistant/AssistantBridge.h>
 #include <myengine/assistant/AssistantTools.h>
 #include <myengine/assistant/ClaudeCliBackend.h>
+#include <myengine/assistant/CodexCliBackend.h>
+
+#include <nlohmann/json.hpp>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 
@@ -305,18 +311,35 @@ namespace myengine::ui
         }
     }
 
-    AssistantPanel::AssistantPanel(const AssistantPanelConfig& config) : config_(config)
+    AssistantPanel::AssistantPanel(const AssistantPanelConfig& config) : config_(config), settings_(config.settings)
     {
-        assistant::ClaudeCliConfig cli;
+        // Off by default: nothing is started, nothing listens, until the user picks a CLI
+        StartBackend(settings_.backend);
+    }
+
+    void AssistantPanel::StartBackend(const assistant::AssistantBackendKind kind)
+    {
+        StopBackend();
+        kind_ = kind;
+        // The bridge is for the built-in assistant and, when the user allowed it, for external MCP clients
+        const bool external = settings_.allowExternalMcp;
+        if (kind == assistant::AssistantBackendKind::None && !external)
+        {
+            return;
+        }
+
         std::error_code error;
-        cli.workingDirectory = std::filesystem::is_directory(config.repositoryRoot, error) ? config.repositoryRoot : std::filesystem::current_path(error);
-        cli.systemPromptFile = cli.workingDirectory / "assets" / "assistant" / "system_prompt.md";
-        cli.logger = config.logger;
+        const auto root = std::filesystem::is_directory(config_.repositoryRoot, error) ? config_.repositoryRoot : std::filesystem::current_path(error);
+        const bool codex = kind == assistant::AssistantBackendKind::Codex;
 
         // Engine tools and confirmations go through myengine_mcp.exe (a separate process the CLI starts)
-        if (config.tools != nullptr)
+        std::filesystem::path bridgeExecutable;
+        std::wstring pipeName;
+        std::string token;
+        std::vector<std::string> readOnlyTools;
+        if (config_.tools != nullptr)
         {
-            auto bridgeExecutable = config.bridgeExecutable;
+            bridgeExecutable = config_.bridgeExecutable;
             if (bridgeExecutable.empty())
             {
                 wchar_t module[32768]{};
@@ -329,41 +352,207 @@ namespace myengine::ui
             if (!bridgeExecutable.empty() && std::filesystem::is_regular_file(bridgeExecutable, error))
             {
                 assistant::AssistantBridgeConfig bridgeConfig;
-                bridgeConfig.repositoryRoot = cli.workingDirectory;
-                auto bridge = std::make_unique<assistant::AssistantBridge>(*config.tools, std::move(bridgeConfig));
+                bridgeConfig.repositoryRoot = root;
+                // Codex has no permission prompt tool: its changes are confirmed inside the call, and files are
+                // changed with the bridge's own tools
+                bridgeConfig.confirmInCall = codex || external;
+                bridgeConfig.fileTools = codex || external;
+                bridgeConfig.offerApproveTool = !codex;
+                auto bridge = std::make_unique<assistant::AssistantBridge>(*config_.tools, std::move(bridgeConfig));
                 std::string bridgeError;
                 if (bridge->Start(bridgeError))
                 {
-                    cli.bridge.executable = bridgeExecutable;
-                    cli.bridge.pipeName = bridge->GetPipeName();
-                    cli.bridge.token = bridge->GetToken();
-                    cli.bridge.allowedTools = bridge->ReadOnlyToolNames();
-                    cli.bridge.approveTool = assistant::AssistantBridge::ApproveToolFullName();
+                    pipeName = bridge->GetPipeName();
+                    token = bridge->GetToken();
+                    readOnlyTools = bridge->ReadOnlyToolNames();
                     bridge_ = std::move(bridge);
                 }
-                else if (config.logger != nullptr)
+                else
                 {
-                    config.logger->Warning("Assistant: the engine tool bridge is off: " + bridgeError);
+                    bridgeExecutable.clear();
+                    if (config_.logger != nullptr)
+                    {
+                        config_.logger->Warning("Assistant: the engine tool bridge is off: " + bridgeError);
+                    }
                 }
             }
-            else if (config.logger != nullptr)
+            else
             {
-                config.logger->Warning("Assistant: myengine_mcp.exe was not found next to the editor; the assistant works with files only");
+                bridgeExecutable.clear();
+                if (config_.logger != nullptr)
+                {
+                    config_.logger->Warning("Assistant: myengine_mcp.exe was not found next to the editor; the assistant works with files only");
+                }
             }
         }
 
-        const auto root = cli.workingDirectory;
-        auto backend = std::make_unique<assistant::ClaudeCliBackend>(std::move(cli));
-        cli_ = backend.get();
+        if (bridge_ != nullptr && external)
+        {
+            WriteEndpointFile();
+        }
+        if (kind == assistant::AssistantBackendKind::None)
+        {
+            chatsDirty_ = true;
+            return; // no CLI: the bridge alone waits for external clients
+        }
+
+        std::unique_ptr<assistant::IAssistantBackend> backend;
+        if (codex)
+        {
+            assistant::CodexCliConfig cli;
+            cli.executable = settings_.codexPath;
+            cli.workingDirectory = root;
+            cli.systemPromptFiles = {root / "assets" / "assistant" / "system_prompt.md", root / "assets" / "assistant" / "system_prompt_codex.md"};
+            cli.transcriptDirectory = root / "Saved" / "assistant" / "codex";
+            cli.model = settings_.codexModel;
+            cli.logger = config_.logger;
+            cli.bridge.executable = bridgeExecutable;
+            cli.bridge.pipeName = pipeName;
+            cli.bridge.token = token;
+            auto typed = std::make_unique<assistant::CodexCliBackend>(std::move(cli));
+            codex_ = typed.get();
+            backend = std::move(typed);
+        }
+        else
+        {
+            assistant::ClaudeCliConfig cli;
+            cli.executable = settings_.claudePath;
+            cli.workingDirectory = root;
+            cli.systemPromptFile = root / "assets" / "assistant" / "system_prompt.md";
+            cli.logger = config_.logger;
+            if (!bridgeExecutable.empty())
+            {
+                cli.bridge.executable = bridgeExecutable;
+                cli.bridge.pipeName = pipeName;
+                cli.bridge.token = token;
+                cli.bridge.allowedTools = readOnlyTools;
+                cli.bridge.approveTool = assistant::AssistantBridge::ApproveToolFullName();
+            }
+            auto typed = std::make_unique<assistant::ClaudeCliBackend>(std::move(cli));
+            cli_ = typed.get();
+            backend = std::move(typed);
+        }
+
         service_ = std::make_unique<assistant::AssistantService>(std::move(backend));
         service_->SetRootDirectory(root.u8string());
-        // History: the CLI's own session files of this folder plus the small index of ours under Saved/
+        // History: the CLI's own session files of this folder (Claude Code) and the events of our Codex threads, plus
+        // the small index of ours under Saved/
         service_->SetChatStore(std::make_unique<assistant::ChatStore>(
-            root / "Saved" / "assistant" / "chats.json", assistant::ChatStore::DefaultSessionsDirectory(root)));
+            root / "Saved" / "assistant" / "chats.json", assistant::ChatStore::DefaultSessionsDirectory(root),
+            root / "Saved" / "assistant" / "codex"));
         if (bridge_ != nullptr)
         {
-            bridge_->onNotice = [this](const std::string& text) { service_->AddNotice(text); };
+            bridge_->onNotice = [this](const std::string& text)
+            {
+                if (service_ != nullptr)
+                {
+                    service_->AddNotice(text);
+                }
+            };
         }
+        chatsDirty_ = true;
+        chatsRevision_ = ~0ull;
+    }
+
+    // The external client's own myengine_mcp.exe has no pipe name and no token: it reads them here
+    void AssistantPanel::WriteEndpointFile()
+    {
+        if (bridge_ == nullptr || config_.settingsFile.empty())
+        {
+            return;
+        }
+        endpointFile_ = config_.settingsFile.parent_path() / "mcp_endpoint.json";
+        std::string pipe;
+        for (const wchar_t c : bridge_->GetPipeName())
+        {
+            pipe += static_cast<char>(c); // the pipe name is ASCII
+        }
+        const nlohmann::json endpoint = {
+            {"pipe", pipe},
+            {"token", bridge_->GetToken()},
+            {"processId", static_cast<std::uint64_t>(GetCurrentProcessId())},
+            {"project", config_.repositoryRoot.u8string()},
+        };
+        std::error_code error;
+        std::filesystem::create_directories(endpointFile_.parent_path(), error);
+        std::ofstream file(endpointFile_, std::ios::binary | std::ios::trunc);
+        file << endpoint.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) << '\n';
+        if (!file && config_.logger != nullptr)
+        {
+            config_.logger->Warning("Assistant: could not write " + endpointFile_.u8string());
+        }
+    }
+
+    void AssistantPanel::StopBackend()
+    {
+        if (service_ != nullptr)
+        {
+            service_->Shutdown();
+        }
+        if (bridge_ != nullptr)
+        {
+            bridge_->Stop();
+        }
+        service_.reset();
+        bridge_.reset();
+        if (!endpointFile_.empty())
+        {
+            std::error_code error;
+            std::filesystem::remove(endpointFile_, error); // the token in it is void now
+            endpointFile_.clear();
+        }
+        cli_ = nullptr;
+        codex_ = nullptr;
+        input_.clear();
+        ClearAttachments();
+        chats_.clear();
+        markdown_.clear();
+        renameId_.clear();
+        titleRenameRequested_ = false;
+        drawnRevision_ = 0;
+    }
+
+    void AssistantPanel::SetBackend(const assistant::AssistantBackendKind kind)
+    {
+        // Applied at the start of the next frame: the popup that asked for it is still being drawn
+        requestedKind_ = kind;
+        backendChangeRequested_ = true;
+    }
+
+    void AssistantPanel::SetAllowExternalMcp(const bool allow)
+    {
+        if (allow == settings_.allowExternalMcp)
+        {
+            return;
+        }
+        settings_.allowExternalMcp = allow;
+        SaveSettings();
+        // The bridge is rebuilt with or without the external options; a running turn is stopped
+        requestedKind_ = kind_;
+        backendChangeRequested_ = true;
+    }
+
+    void AssistantPanel::SaveSettings()
+    {
+        settingsProblem_.clear();
+        if (config_.settingsFile.empty())
+        {
+            return;
+        }
+        std::string problem;
+        if (!settings_.Save(config_.settingsFile, problem))
+        {
+            settingsProblem_ = problem;
+            if (config_.logger != nullptr)
+            {
+                config_.logger->Warning("Assistant: " + problem);
+            }
+        }
+    }
+
+    bool AssistantPanel::IsCodex() const
+    {
+        return service_ != nullptr && std::string(service_->GetBackend().GetBackendId()) == "codex";
     }
 
     AssistantPanel::AssistantPanel(std::unique_ptr<assistant::IAssistantBackend> backend)
@@ -373,6 +562,11 @@ namespace myengine::ui
 
     AssistantPanel::~AssistantPanel()
     {
+        if (!endpointFile_.empty())
+        {
+            std::error_code error;
+            std::filesystem::remove(endpointFile_, error); // the bridge dies with the panel: the token is void
+        }
         ClearAttachments();
         for (const auto& [path, texture] : thumbnails_)
         {
@@ -386,15 +580,28 @@ namespace myengine::ui
 
     void AssistantPanel::Update()
     {
+        if (backendChangeRequested_)
+        {
+            backendChangeRequested_ = false;
+            settings_.backend = requestedKind_;
+            SaveSettings();
+            kind_ = requestedKind_;
+            StartBackend(requestedKind_);
+        }
+        cardsDrawn_ = false;
         if (bridge_ != nullptr)
         {
             bridge_->Update();
-            if (!service_->IsBusy() && !bridge_->GetPending().empty())
+            if (service_ != nullptr && !service_->IsBusy() && !bridge_->GetPending().empty())
             {
-                bridge_->RejectAll("The turn ended before the action was confirmed.");
+                // The permission prompts belong to the turn; the calls of external clients wait for their cards
+                bridge_->RejectTurnPrompts("The turn ended before the action was confirmed.");
             }
         }
-        service_->Update();
+        if (service_ != nullptr)
+        {
+            service_->Update();
+        }
 
         // A drop that no panel took within a few frames is stale; the next visible panel must not pick it up
         auto& drag = core::ServiceLocator::GetEditorRuntimeState().fileDrag;
@@ -414,10 +621,19 @@ namespace myengine::ui
 
     void AssistantPanel::Shutdown()
     {
-        service_->Shutdown();
+        if (service_ != nullptr)
+        {
+            service_->Shutdown();
+        }
         if (bridge_ != nullptr)
         {
             bridge_->Stop();
+        }
+        if (!endpointFile_.empty())
+        {
+            std::error_code error;
+            std::filesystem::remove(endpointFile_, error);
+            endpointFile_.clear();
         }
     }
 
@@ -632,6 +848,11 @@ namespace myengine::ui
     // ------------------------------------------------------------------ layout
     void AssistantPanel::Draw()
     {
+        if (service_ == nullptr)
+        {
+            DrawOffState();
+            return;
+        }
         RefreshChats(false);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         const ImVec2 region = ImGui::GetContentRegionAvail();
@@ -666,6 +887,168 @@ namespace myengine::ui
 
         TakeDroppedFiles(panelMin_, panelMax_);
         DrawDropOverlay(panelMin_, panelMax_);
+    }
+
+    // "Allow external MCP clients": a checkbox with its explanation
+    void AssistantPanel::DrawExternalOption()
+    {
+        bool allow = settings_.allowExternalMcp;
+        if (Checkbox("Allow external MCP clients", &allow))
+        {
+            SetAllowExternalMcp(allow);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            Tooltip("Claude Code, Codex or another MCP client that you start yourself can use the engine tools while the editor "
+                    "is open. Every change asks for your confirmation here.", nullptr,
+                    "Connect it to myengine_mcp.exe (see docs/assistant/as4-backends.md). Off by default.");
+        }
+    }
+
+    // ------------------------------------------------------------------ cards without a panel
+    // An external MCP client asks to change something while the assistant is off (or its window is closed): the card
+    // is shown in a modal window of the editor, so that a call never waits for a decision nobody can see
+    void AssistantPanel::DrawExternalApprovals()
+    {
+        constexpr char kPopup[] = "Assistant confirmation###assistant_external_card";
+        if (bridge_ == nullptr)
+        {
+            return;
+        }
+        const auto& pending = bridge_->GetPending();
+        const bool wanted = !pending.empty() && !cardsDrawn_;
+        if (wanted && !ImGui::IsPopupOpen(kPopup))
+        {
+            ImGui::OpenPopup(kPopup);
+        }
+        if (!ImGui::IsPopupOpen(kPopup))
+        {
+            return;
+        }
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, viewport->Size.x - 40.0f), 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
+        const bool open = ImGui::BeginPopupModal(kPopup, nullptr,
+                                                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::PopStyleVar();
+        if (!open)
+        {
+            return;
+        }
+        if (!wanted)
+        {
+            ImGui::CloseCurrentPopup();
+        }
+        else
+        {
+            PushFontRole(FontRole::Secondary);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
+            ImGui::TextUnformatted("An external MCP client asks to change the project. Nothing happens until you decide.");
+            ImGui::PopStyleColor();
+            PopFontRole();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            const std::vector<assistant::AssistantApproval> copy = pending; // Resolve changes the list
+            const ApprovalMetrics metrics = MeasureApproval(copy.front(), 520.0f);
+            DrawApprovals(copy, std::min(metrics.card + 16.0f + (copy.size() > 1 ? 20.0f : 0.0f), 400.0f));
+        }
+        ImGui::EndPopup();
+    }
+
+    // ------------------------------------------------------------------ off
+    // The assistant is off until the user connects a CLI: nothing runs, nothing listens
+    void AssistantPanel::DrawOffState()
+    {
+        const ImVec2 region = ImGui::GetContentRegionAvail();
+        const char* title = "Assistant is off";
+        const char* text = "Connect Claude Code or Codex to ask about the project, edit scripts and prefabs and work with "
+                           "the scene. Nothing is started until you enable it.";
+
+        // EmptyState draws the icon, the title and the text centred in the window; the button goes under them with the
+        // same geometry (EmptyState: 40 px for the icon, the title, 4 px, the wrapped text)
+        const float wrapWidth = std::min(280.0f, std::max(region.x - 24.0f, 60.0f));
+        PushFontRole(FontRole::Body);
+        const float titleHeight = ImGui::CalcTextSize(title).y;
+        PopFontRole();
+        PushFontRole(FontRole::Secondary);
+        const float textHeight = ImGui::CalcTextSize(text, nullptr, false, wrapWidth).y;
+        PopFontRole();
+        const float groupHeight = 40.0f + titleHeight + 4.0f + textHeight;
+        const float buttonHeight = style::kFrameHeight;
+        // the group with the button is centred, not the group without it
+        const float top = std::max((region.y - groupHeight - 14.0f - buttonHeight) * 0.5f, 8.0f);
+
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(0));
+        ImGui::BeginChild("##assistant_off", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleColor();
+        {
+            const ImVec2 inner = ImGui::GetCursorScreenPos();
+            const float middle = inner.x + region.x * 0.5f;
+            // EmptyState centres itself by the height of its window: a child of 2 * top + groupHeight puts it `top` down
+            ImGui::BeginChild("##assistant_off_text", ImVec2(0.0f, 2.0f * top + groupHeight), ImGuiChildFlags_None,
+                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground |
+                                  ImGuiWindowFlags_NoInputs); // it is taller than the text: it must not cover the button
+            EmptyState(ICON_SPARKLES, title, text);
+            ImGui::EndChild();
+
+            const float y = inner.y + top + groupHeight + 14.0f;
+            const float buttonWidth = 124.0f;
+            ImGui::SetCursorScreenPos(ImVec2(std::floor(middle - buttonWidth * 0.5f), y));
+            if (PrimaryButton("Enable...", ICON_SPARKLES, true, buttonWidth))
+            {
+                // Which CLIs are installed is checked when the menu opens, not every frame
+                std::string problem;
+                const auto claude = assistant::ClaudeCliBackend::FindExecutable(settings_.claudePath, problem);
+                enableClaudeFound_ = claude.u8string();
+                const auto codex = assistant::CodexCliBackend::FindExecutable(settings_.codexPath, problem);
+                enableCodexFound_ = codex.u8string();
+                ImGui::OpenPopup("##assistant_enable");
+            }
+            // Above the button: the tab sits at the bottom of the window and there is no room below it
+            const ImVec2 menuAnchor(middle - 140.0f, ImGui::GetItemRectMin().y - 4.0f);
+            ImGui::SetNextWindowPos(menuAnchor, ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+            if (BeginMenuPopup("##assistant_enable"))
+            {
+                MenuSection("CONNECT");
+                const auto entry = [&](const char* label, const std::string& found, const assistant::AssistantBackendKind kind)
+                {
+                    const char* status = found.empty() ? "not found" : "found";
+                    if (MenuItemIcon(ICON_SPARKLES, label, status, false, true, false, 280.0f))
+                    {
+                        SetBackend(kind);
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (ImGui::IsItemHovered())
+                    {
+                        Tooltip(found.empty() ? "The CLI was not found in PATH. You can still enable it and set its path in the settings."
+                                              : found.c_str());
+                    }
+                };
+                entry("Claude Code", enableClaudeFound_, assistant::AssistantBackendKind::Claude);
+                entry("Codex", enableCodexFound_, assistant::AssistantBackendKind::Codex);
+                ImGui::EndPopup();
+            }
+
+            // External clients: the bridge without any CLI of ours
+            {
+                ImGui::SetCursorScreenPos(ImVec2(std::floor(middle - 110.0f), y + style::kFrameHeight + 12.0f));
+                DrawExternalOption();
+            }
+
+            if (!settingsProblem_.empty())
+            {
+                PushFontRole(FontRole::Tiny);
+                ImGui::SetCursorScreenPos(ImVec2(inner.x, y + style::kFrameHeight + 40.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kErrorText));
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrapWidth);
+                ImGui::TextUnformatted(settingsProblem_.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::PopStyleColor();
+                PopFontRole();
+            }
+        }
+        ImGui::EndChild();
     }
 
     // ------------------------------------------------------------------ chat list
@@ -836,6 +1219,7 @@ namespace myengine::ui
         // second line: model, effort, time or date
         {
             std::string meta;
+            meta += chat.backend == "codex" ? "Codex \xC2\xB7 " : "Claude \xC2\xB7 ";
             const auto family = assistant::FriendlyModelName(!chat.model.empty() ? chat.model : chat.lastModel);
             meta += family.empty() ? std::string("Default") : family;
             for (const auto& effort : kEfforts)
@@ -973,6 +1357,7 @@ namespace myengine::ui
             const float cardsHeight = std::min(preferred, std::max(available.y - 44.0f, 110.0f));
             DrawTranscript(cardsHeight + ImGui::GetStyle().ItemSpacing.y);
             DrawApprovals(pending, cardsHeight);
+            cardsDrawn_ = true;
         }
         else
         {
@@ -1001,8 +1386,12 @@ namespace myengine::ui
         {
             const auto& model = service_->GetModel();
             const auto& actual = service_->GetActualModel();
-            const std::string selected = model.empty() ? std::string() : FriendlyAliasLabel(model);
-            if (!actual.empty() && (model.empty() || ModelFamily(actual) != ModelFamily(model)))
+            const std::string selected = model.empty() ? std::string() : (IsCodex() ? model : FriendlyAliasLabel(model));
+            if (IsCodex())
+            {
+                modelText = !model.empty() ? model : (!actual.empty() ? actual : std::string("Default model"));
+            }
+            else if (!actual.empty() && (model.empty() || ModelFamily(actual) != ModelFamily(model)))
             {
                 modelText = assistant::FriendlyModelName(actual);
             }
@@ -1011,12 +1400,17 @@ namespace myengine::ui
                 modelText = selected.empty() ? std::string("Default model") : selected;
             }
         }
-        std::string effortText = "Default effort";
+        // Not set: the CLI decides (its own setting or the model's default). The CLI may say which, then it is shown
+        std::string effortText = "Effort: CLI default";
         for (const auto& effort : kEfforts)
         {
             if (service_->GetEffort() == effort.value)
             {
-                effortText = effort.label;
+                effortText = std::string("Effort: ") + effort.label;
+            }
+            else if (service_->GetEffort().empty() && service_->GetActualEffort() == effort.value)
+            {
+                effortText = std::string("Effort: ") + effort.label + " (CLI)";
             }
         }
         std::string usage;
@@ -1024,9 +1418,13 @@ namespace myengine::ui
             const auto tokens = service_->GetTotalInputTokens() + service_->GetTotalOutputTokens();
             if (tokens > 0 || service_->GetTotalCostUsd() > 0.0)
             {
-                char cost[32];
-                std::snprintf(cost, sizeof(cost), "$%.3f", service_->GetTotalCostUsd());
-                usage = FormatTokens(tokens) + " tokens \xC2\xB7 " + cost;
+                usage = FormatTokens(tokens) + " tokens";
+                if (service_->GetTotalCostUsd() > 0.0) // Codex does not report a price
+                {
+                    char cost[32];
+                    std::snprintf(cost, sizeof(cost), "$%.3f", service_->GetTotalCostUsd());
+                    usage += std::string(" \xC2\xB7 ") + cost;
+                }
             }
         }
         const float modelWidth = PopupButtonWidth(modelText);
@@ -1115,15 +1513,35 @@ namespace myengine::ui
         if (ImGui::IsItemHovered())
         {
             char tip[160];
-            std::snprintf(tip, sizeof(tip), "%s tokens in / %s out \xC2\xB7 $%.3f",
-                          FormatTokens(service_->GetTotalInputTokens()).c_str(), FormatTokens(service_->GetTotalOutputTokens()).c_str(),
-                          service_->GetTotalCostUsd());
+            if (service_->GetTotalCostUsd() > 0.0)
+            {
+                std::snprintf(tip, sizeof(tip), "%s tokens in / %s out \xC2\xB7 $%.3f",
+                              FormatTokens(service_->GetTotalInputTokens()).c_str(), FormatTokens(service_->GetTotalOutputTokens()).c_str(),
+                              service_->GetTotalCostUsd());
+            }
+            else
+            {
+                std::snprintf(tip, sizeof(tip), "%s tokens in / %s out", FormatTokens(service_->GetTotalInputTokens()).c_str(),
+                              FormatTokens(service_->GetTotalOutputTokens()).c_str());
+            }
             Tooltip("Model", nullptr, tip);
         }
         ImGui::SameLine(0.0f, 6.0f);
         if (PopupButton("##effort_button", ICON_BRAIN, style::kTextDim, effortText, effortWidth))
         {
             ImGui::OpenPopup("##effort_menu");
+        }
+        if (ImGui::IsItemHovered())
+        {
+            if (service_->GetEffort().empty())
+            {
+                Tooltip(effortText.c_str(), nullptr,
+                        "The CLI's own setting is used (claude /effort, codex config) or the default of the model.");
+            }
+            else
+            {
+                Tooltip("Thinking effort", nullptr, "Passed to the CLI with every message of this chat.");
+            }
         }
         if (usageWidth > 0.0f)
         {
@@ -1162,7 +1580,7 @@ namespace myengine::ui
                 ImGui::SetClipboardText(service_->GetSessionId().c_str());
                 ImGui::CloseCurrentPopup();
             }
-            if (MenuItemIcon(ICON_SETTINGS, "Assistant Settings...", nullptr, false, cli_ != nullptr, false, 190.0f))
+            if (MenuItemIcon(ICON_SETTINGS, "Assistant Settings...", nullptr, false, true, false, 190.0f))
             {
                 openSettingsRequested_ = true;
                 ImGui::CloseCurrentPopup();
@@ -1193,9 +1611,46 @@ namespace myengine::ui
 
     void AssistantPanel::DrawModelMenus()
     {
+        const bool codex = IsCodex();
         if (BeginMenuPopup("##model_menu"))
         {
             MenuSection("MODEL");
+            if (codex)
+            {
+                // Codex model names change often: the name is typed, empty is the CLI's own default
+                PushFontRole(FontRole::Tiny);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f);
+                ImGui::TextUnformatted("Model name (as in `codex -m`)");
+                ImGui::PopStyleColor();
+                PopFontRole();
+                if (modelInput_.empty() && !service_->GetModel().empty())
+                {
+                    modelInput_ = service_->GetModel();
+                }
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f);
+                ImGui::SetNextItemWidth(220.0f);
+                const bool enter = ImGui::InputTextWithHint("##codex_model", "empty: CLI default", &modelInput_,
+                                                            ImGuiInputTextFlags_EnterReturnsTrue);
+                FocusOutline();
+                if (enter && (modelInput_.empty() || assistant::CodexCliBackend::IsSafeModelName(modelInput_)))
+                {
+                    service_->SetModel(modelInput_);
+                    chatsDirty_ = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::Separator();
+                if (MenuItemIcon(ICON_SETTINGS, "Default (CLI settings)", nullptr, service_->GetModel().empty(), true, true, 240.0f))
+                {
+                    modelInput_.clear();
+                    service_->SetModel({});
+                    chatsDirty_ = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+            else
+            {
             for (const auto& model : kModels)
             {
                 if (MenuItemIcon(ICON_SPARKLES, model.label, model.hint, service_->GetModel() == model.alias, true, true, 240.0f))
@@ -1213,12 +1668,17 @@ namespace myengine::ui
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
+            }
         }
         if (BeginMenuPopup("##effort_menu"))
         {
             MenuSection("THINKING EFFORT");
             for (const auto& effort : kEfforts)
             {
+                if (codex && (std::string(effort.value) == "xhigh" || std::string(effort.value) == "max"))
+                {
+                    continue; // Codex has low, medium and high
+                }
                 if (MenuItemIcon(ICON_BRAIN, effort.label, nullptr, service_->GetEffort() == effort.value, true, true, 220.0f))
                 {
                     service_->SetEffort(effort.value);
@@ -1227,7 +1687,7 @@ namespace myengine::ui
                 }
             }
             ImGui::Separator();
-            if (MenuItemIcon(ICON_SETTINGS, "Default", nullptr, service_->GetEffort().empty(), true, true, 220.0f))
+            if (MenuItemIcon(ICON_SETTINGS, "CLI default", nullptr, service_->GetEffort().empty(), true, true, 220.0f))
             {
                 service_->SetEffort({});
                 chatsDirty_ = true;
@@ -1237,18 +1697,18 @@ namespace myengine::ui
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 10.0f);
-            ImGui::TextUnformatted("Applies to the next message.");
+            ImGui::TextUnformatted("Applies to the next message. CLI default: its own setting or the model's.");
             ImGui::PopStyleColor();
             PopFontRole();
             ImGui::EndPopup();
         }
     }
 
-    // Assistant Settings popup: the CLI path (what used to be the blue CollapsingHeader)
+    // Assistant Settings popup: which CLI runs and where it is
     void AssistantPanel::DrawCliSettings()
     {
         constexpr char kPopup[] = "##assistant_settings_popup";
-        if (cli_ == nullptr)
+        if (service_ == nullptr)
         {
             openSettingsRequested_ = false;
             return;
@@ -1257,6 +1717,8 @@ namespace myengine::ui
         {
             ImGui::OpenPopup(kPopup);
             openSettingsRequested_ = false;
+            pathInput_.clear();
+            modelInput_.clear();
         }
 
         ImGui::SetNextWindowPos(ImVec2(settingsAnchor_[0], settingsAnchor_[1]), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
@@ -1269,24 +1731,48 @@ namespace myengine::ui
             return;
         }
 
+        const bool codex = IsCodex();
         PushFontRole(FontRole::Strong);
         ImGui::TextUnformatted("Assistant Settings");
         PopFontRole();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        PushFontRole(FontRole::Tiny);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
-        ImGui::TextUnformatted("CLAUDE CODE CLI PATH");
-        ImGui::PopStyleColor();
-        PopFontRole();
 
-        const auto& resolved = cli_->GetResolvedExecutable();
-        if (pathInput_.empty() && !cli_->GetExecutableOverride().empty())
+        const auto caption = [](const char* text)
         {
-            pathInput_ = cli_->GetExecutableOverride().u8string();
+            PushFontRole(FontRole::Tiny);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
+            ImGui::TextUnformatted(text);
+            ImGui::PopStyleColor();
+            PopFontRole();
+        };
+
+        caption("ASSISTANT");
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (BeginCombo("##assistant_backend", assistant::BackendKindLabel(kind_)))
+        {
+            for (const auto option : {assistant::AssistantBackendKind::None, assistant::AssistantBackendKind::Claude,
+                                      assistant::AssistantBackendKind::Codex})
+            {
+                if (ImGui::Selectable(assistant::BackendKindLabel(option), option == kind_) && option != kind_)
+                {
+                    SetBackend(option);
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            EndCombo();
+        }
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+        caption(codex ? "CODEX CLI PATH" : "CLAUDE CODE CLI PATH");
+        const std::filesystem::path resolved = codex ? codex_->GetResolvedExecutable() : cli_->GetResolvedExecutable();
+        const std::filesystem::path overridePath = codex ? codex_->GetExecutableOverride() : cli_->GetExecutableOverride();
+        if (pathInput_.empty() && !overridePath.empty())
+        {
+            pathInput_ = overridePath.u8string();
         }
         ImGui::SetNextItemWidth(-FLT_MIN);
-        const bool enter = ImGui::InputTextWithHint("##claude_path", "empty: PATH or MYENGINE_CLAUDE_PATH", &pathInput_,
-                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool enter = ImGui::InputTextWithHint("##cli_path", codex ? "empty: PATH or MYENGINE_CODEX_PATH" : "empty: PATH or MYENGINE_CLAUDE_PATH",
+                                                    &pathInput_, ImGuiInputTextFlags_EnterReturnsTrue);
         FocusOutline();
         if (!resolved.empty())
         {
@@ -1298,12 +1784,55 @@ namespace myengine::ui
             ImGui::PopStyleColor();
             PopFontRole();
         }
+
+        bool apply = enter;
+        if (codex)
+        {
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            caption("DEFAULT MODEL OF NEW CHATS");
+            if (modelInput_.empty())
+            {
+                modelInput_ = settings_.codexModel;
+            }
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            apply = ImGui::InputTextWithHint("##codex_default_model", "empty: the model from ~/.codex/config.toml", &modelInput_,
+                                             ImGuiInputTextFlags_EnterReturnsTrue) || apply;
+            FocusOutline();
+        }
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        DrawExternalOption();
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
-        const bool apply = PrimaryButton("Apply", ICON_CHECK) || enter;
+        apply = PrimaryButton("Apply", ICON_CHECK) || apply;
         if (apply)
         {
-            cli_->SetExecutableOverride(std::filesystem::u8path(pathInput_));
+            const auto path = std::filesystem::u8path(pathInput_);
+            if (codex)
+            {
+                codex_->SetExecutableOverride(path);
+                settings_.codexPath = path;
+                if (modelInput_.empty() || assistant::CodexCliBackend::IsSafeModelName(modelInput_))
+                {
+                    settings_.codexModel = modelInput_;
+                    codex_->SetDefaultModel(modelInput_);
+                }
+            }
+            else
+            {
+                cli_->SetExecutableOverride(path);
+                settings_.claudePath = path;
+            }
+            SaveSettings();
             service_->RefreshAvailability();
+        }
+        if (!settingsProblem_.empty())
+        {
+            PushFontRole(FontRole::Tiny);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kErrorText));
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextUnformatted(settingsProblem_.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+            PopFontRole();
         }
         ImGui::EndPopup();
     }

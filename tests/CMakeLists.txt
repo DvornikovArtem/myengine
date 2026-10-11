@@ -156,6 +156,24 @@ set_property(TARGET myengine_assistant_tests PROPERTY FOLDER "Tests")
 add_test(NAME assistant COMMAND myengine_assistant_tests)
 set_tests_properties(assistant PROPERTIES TIMEOUT 120)
 
+# AS4: stand-in for the codex CLI and the tests of the Codex backend, its event parser, chat history and settings
+add_executable(myengine_fake_codex
+  assistant/FakeCodex.cpp)
+
+target_link_libraries(myengine_fake_codex PRIVATE myengine_nlohmann_json)
+myengine_apply_compiler_options(myengine_fake_codex)
+set_property(TARGET myengine_fake_codex PROPERTY FOLDER "Tests")
+
+add_executable(myengine_assistant_codex_tests
+  assistant/CodexTests.cpp)
+
+target_link_libraries(myengine_assistant_codex_tests PRIVATE myengine_engine)
+add_dependencies(myengine_assistant_codex_tests myengine_fake_codex)
+myengine_apply_compiler_options(myengine_assistant_codex_tests)
+set_property(TARGET myengine_assistant_codex_tests PROPERTY FOLDER "Tests")
+add_test(NAME assistant_codex COMMAND myengine_assistant_codex_tests)
+set_tests_properties(assistant_codex PROPERTIES TIMEOUT 120)
+
 # Manual check against the real Claude Code CLI (needs a login, spends money): not part of CTest
 add_executable(myengine_assistant_live
   assistant/AssistantLive.cpp)

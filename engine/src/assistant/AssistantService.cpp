@@ -239,6 +239,26 @@ namespace myengine::assistant
             return false;
         }
 
+        // A chat belongs to the CLI that wrote it: Codex cannot resume a Claude session and the other way round
+        if (!sessionId_.empty() && chats_ != nullptr)
+        {
+            const std::string own = backend_->GetBackendId();
+            const auto* info = chats_->Find(sessionId_);
+            if (!own.empty() && info != nullptr)
+            {
+                const std::string chatBackend = info->backend.empty() ? std::string("claude") : info->backend;
+                if (chatBackend != own)
+                {
+                    AssistantMessage message;
+                    message.kind = AssistantMessage::Kind::Error;
+                    message.text = "This chat was made with " + std::string(chatBackend == "codex" ? "Codex" : "Claude Code") +
+                        ". Switch the assistant to it in the settings to continue, or start a new chat.";
+                    Append(std::move(message));
+                    return false;
+                }
+            }
+        }
+
         const auto unavailable = RefreshAvailability();
         if (!unavailable.empty())
         {
@@ -314,6 +334,7 @@ namespace myengine::assistant
         sessionId_.clear();
         firstPrompt_.clear();
         actualModel_.clear();
+        actualEffort_.clear();
         totalCostUsd_ = 0.0;
         totalInputTokens_ = 0;
         totalOutputTokens_ = 0;
@@ -374,6 +395,7 @@ namespace myengine::assistant
         totalInputTokens_ = 0;
         totalOutputTokens_ = 0;
         actualModel_.clear();
+        actualEffort_.clear();
         if (const auto* info = chats_->Find(id); info != nullptr)
         {
             model_ = info->model;
@@ -473,12 +495,16 @@ namespace myengine::assistant
                 if (chats_ != nullptr)
                 {
                     // The chat exists from its first answer on: the index keeps its title and settings
-                    chats_->Touch(sessionId_, MakeChatTitle(firstPrompt_), model_, effort_);
+                    chats_->Touch(sessionId_, MakeChatTitle(firstPrompt_), model_, effort_, backend_->GetBackendId());
                 }
             }
             if (!event.text.empty())
             {
                 actualModel_ = event.text;
+            }
+            if (!event.effort.empty())
+            {
+                actualEffort_ = event.effort;
             }
             ++revision_;
             break;
@@ -540,7 +566,7 @@ namespace myengine::assistant
             totalOutputTokens_ += event.outputTokens;
             if (chats_ != nullptr && !sessionId_.empty())
             {
-                chats_->Touch(sessionId_, MakeChatTitle(firstPrompt_), model_, effort_); // the time of the last answer
+                chats_->Touch(sessionId_, MakeChatTitle(firstPrompt_), model_, effort_, backend_->GetBackendId()); // the time of the last answer
             }
 
             bool hasAnswer = false; // an Assistant message since the user's prompt of this turn

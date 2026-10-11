@@ -32,6 +32,16 @@ namespace myengine::assistant
         std::filesystem::path repositoryRoot;
         std::vector<EditableArea> editable = {{"assets/scripts", ".py"}, {"assets/prefabs", ".prefab.json"}};
         std::wstring pipeName; // empty: \\.\pipe\myengine-assistant-<pid>
+
+        // A changing engine tool that was not confirmed beforehand waits for the user's card inside its own call.
+        // This is how a client without a permission prompt tool (Codex, any external MCP client) gets confirmations.
+        // Off: such a call is refused (Claude Code asks through `approve` first)
+        bool confirmInCall = false;
+        // The `approve` tool is listed (the permission prompt tool of Claude Code); a model must not see it otherwise
+        bool offerApproveTool = true;
+        // Offers edit_file / write_file: the only way for such a CLI to change a file. They go through the same
+        // card with a diff and the same editable areas as Edit / Write do for Claude Code
+        bool fileTools = false;
     };
 
     // One thing the assistant wants to do and the user has to confirm in the panel
@@ -71,11 +81,16 @@ namespace myengine::assistant
         // Full MCP names (mcp__myengine__<tool>) of the tools that never change anything
         std::vector<std::string> ReadOnlyToolNames() const;
         static std::string ApproveToolFullName();
+        static constexpr const char* kEditFileTool = "edit_file";
+        static constexpr const char* kWriteFileTool = "write_file";
 
         const std::vector<AssistantApproval>& GetPending() const { return pendingView_; }
         void Resolve(std::uint64_t id, bool allow, const std::string& reason = {});
         // The turn ended or was stopped: nobody is waiting for these any more
         void RejectAll(const std::string& reason);
+        // The turn of the built-in assistant ended: its permission prompts are void; calls of external clients that
+        // wait for their cards are not
+        void RejectTurnPrompts(const std::string& reason);
 
         // Lines for the transcript ("Applied: ...", "Rejected: ...")
         std::function<void(const std::string& text)> onNotice;
@@ -87,11 +102,26 @@ namespace myengine::assistant
             AssistantApproval view;
             nlohmann::json input;
             std::string mcpTool; // the myengine tool name when the prompt is about one of ours
+
+            // What the answer to `request` is: a verdict for the permission prompt tool, the result of the call that
+            // waited for the card, or the result of a file change that the card is about
+            enum class Reply : std::uint8_t
+            {
+                Permission,
+                Call,
+                FileWrite,
+            };
+            Reply reply = Reply::Permission;
+            std::filesystem::path file; // FileWrite: the file to write
+            std::string content;        // FileWrite: its new content
+            std::string displayPath;    // FileWrite: relative to the repository
         };
 
         void Handle(const BridgeRequest& request);
         void HandleCall(const BridgeRequest& request);
         void HandleApprove(const BridgeRequest& request);
+        void HandleFileTool(const BridgeRequest& request);
+        void FinishPending(Pending& entry, bool allow, const std::string& reason);
         bool IsInsideRepository(const std::string& path) const;
         bool IsEditable(const std::string& path, std::string& displayPath) const;
         void ReplyPermission(const BridgeRequest& request, bool allow, const nlohmann::json& input, const std::string& message);

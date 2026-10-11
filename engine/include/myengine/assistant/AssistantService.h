@@ -90,6 +90,8 @@ namespace myengine::assistant
         void SetEffort(const std::string& effort);
         // The model that really answered (system/init of the last turn), empty before the first answer
         const std::string& GetActualModel() const { return actualModel_; }
+        // The effort the CLI reported for the last turn (empty when it does not say, which is usual)
+        const std::string& GetActualEffort() const { return actualEffort_; }
         void Shutdown();
         // A service line in the transcript (confirmations, bridge events)
         void AddNotice(const std::string& text);
@@ -119,6 +121,7 @@ namespace myengine::assistant
         std::string model_;
         std::string effort_;
         std::string actualModel_;
+        std::string actualEffort_;
         std::string rootDirectory_;
         std::string firstPrompt_; // of the conversation that has no session yet: its title
         std::deque<AssistantMessage> messages_;
