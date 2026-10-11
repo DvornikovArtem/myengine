@@ -2,6 +2,7 @@
 
 #include <myengine/assistant/AssistantSettings.h>
 #include <myengine/assistant/AssistantTools.h>
+#include <myengine/editor/LoadingService.h>
 #include <myengine/scripting/PrefabLibrary.h>
 
 namespace myengine::ui
@@ -23,6 +24,7 @@ namespace myengine::ui
             RecordSceneMutationImmediate(label.c_str(), before);
         };
         context.saveScene = services_.saveScene;
+        context.mapLoading = [this]() { return services_.loading != nullptr && services_.loading->HasModal(); };
         context.describeScriptFields = services_.describeScriptFields;
         context.recentErrors = services_.scriptConsole.errors;
         context.scriptStatus = services_.scriptStatus;

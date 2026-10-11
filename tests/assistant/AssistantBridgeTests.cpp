@@ -105,6 +105,7 @@ namespace
                 undoSnapshots.push_back(before);
             };
             context.saveScene = [this]() { ++saves; return true; };
+            context.mapLoading = [this]() { return mapLoading; };
             context.describeScriptFields = [](const std::string& module, const std::string& className)
             {
                 std::vector<myengine::scripting::ScriptFieldInfo> fields;
@@ -155,6 +156,7 @@ namespace
         std::vector<std::string> undoLabels;
         std::vector<std::string> undoSnapshots;
         int saves = 0;
+        bool mapLoading = false;
     };
 
     void TestToolsDirectly(Fixture& fixture)
@@ -223,6 +225,18 @@ namespace
 
         const auto deleted = tools.Call("delete_entity", {{"name", "Marker"}});
         Check(deleted.ok && fixture.CountNamed("Marker") == 0, "delete_entity failed");
+
+        // A map is being loaded behind the loading window: nothing changes (it would be replaced), reading works
+        fixture.mapLoading = true;
+        const auto entitiesBefore = fixture.world.GetEntities().size();
+        for (const char* tool : {"spawn_prefab", "create_entity", "delete_entity", "set_script_props", "set_component", "play", "stop", "save_scene"})
+        {
+            const auto refusedWhileLoading = tools.Call(tool, {{"name", "coin"}, {"position", json::array({0, 0, 0})}});
+            Check(!refusedWhileLoading.ok && refusedWhileLoading.message.find("loaded") != std::string::npos, "A changing tool ran while a map was loading");
+        }
+        Check(fixture.world.GetEntities().size() == entitiesBefore && fixture.saves == 0, "A tool changed the scene while a map was loading");
+        Check(tools.Call("list_entities", json::object()).ok && tools.Call("get_mode", json::object()).ok, "A read tool was refused while a map was loading");
+        fixture.mapLoading = false;
 
         // Play: changes are refused, stop restores the scene
         Check(tools.Call("play", json::object()).ok, "play failed");

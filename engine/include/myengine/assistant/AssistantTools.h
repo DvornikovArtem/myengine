@@ -38,6 +38,9 @@ namespace myengine::assistant
         // Puts "before -> current scene" on the editor's undo stack
         std::function<void(const std::string& label, const std::string& before)> recordUndo;
         std::function<bool()> saveScene;
+        // A map is being read in the background behind the loading window and is about to replace the entities: a
+        // change made now would be lost (or land in the old map), so the changing tools are refused. Null: never
+        std::function<bool()> mapLoading;
         std::function<std::vector<scripting::ScriptFieldInfo>(const std::string& module, const std::string& className)> describeScriptFields;
         std::function<std::vector<scripting::ScriptError>()> recentErrors;
         std::function<std::string(ecs::EntityId entity, std::size_t scriptIndex)> scriptStatus;

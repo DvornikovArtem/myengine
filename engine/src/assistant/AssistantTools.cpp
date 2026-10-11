@@ -232,6 +232,10 @@ namespace myengine::assistant
             {
                 return Fail("The scene is not available.");
             }
+            if (entry.info.mutatesWorld && context_.mapLoading && context_.mapLoading())
+            {
+                return Fail("A map is being loaded (the loading window is open). Try again when it is gone.");
+            }
             const json args = arguments.is_object() ? arguments : json::object();
             try
             {
