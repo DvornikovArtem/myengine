@@ -19,6 +19,7 @@ namespace myengine::ui
         gizmo_ = std::make_unique<editor::TransformGizmo>();
         prefabInspector_ = std::make_unique<PrefabInspector>();
         prefabInspector_->SetThumbnails(services_.thumbnails);
+        prefabInspector_->SetOpenViewer([this](const std::string& assetPath) { OpenAssetViewer(assetPath, AssetViewerType::Prefab); });
         scriptConsole_ = std::make_unique<ScriptConsole>();
         contentBrowser_ = std::make_unique<ContentBrowser>();
         projectUi_ = std::make_unique<ProjectUiState>();
@@ -67,6 +68,7 @@ namespace myengine::ui
 
     void SceneEditor::Shutdown()
     {
+        CloseAssetViewers();
         if (history_ != nullptr)
         {
             history_->Clear();
@@ -125,6 +127,7 @@ namespace myengine::ui
         BuildInspectorPanel(windowContext);
         BuildPrefabsPanel(windowContext);
         BuildMaterialEditorPanel(windowContext);
+        BuildAssetViewers(windowContext);
         BuildAssetBrowserPanel(windowContext);
         BuildScriptConsolePanel(windowContext);
         BuildAssistantPanel(windowContext);

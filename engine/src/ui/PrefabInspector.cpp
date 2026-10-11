@@ -198,7 +198,8 @@ namespace myengine::ui
             // Keep unsaved values when changing templates: explicitly Save or Reload first.
             ImGui::SetCursorScreenPos(ImVec2(start.x + headerLeft, start.y + 4.0f));
             ImGui::BeginDisabled(IsDirty());
-            ImGui::SetNextItemWidth(std::max(available - headerLeft, 40.0f));
+            const bool hasViewerButton = openViewer_ != nullptr && !selectedName_.empty();
+            ImGui::SetNextItemWidth(std::max(available - headerLeft - (hasViewerButton ? style::kPanelIconButton + 4.0f : 0.0f), 40.0f));
             if (BeginCombo("##prefab", selectedName_.empty() ? "Select a template" : selectedName_.c_str()))
             {
                 for (const auto& name : names)
@@ -223,6 +224,16 @@ namespace myengine::ui
                 EndCombo();
             }
             ImGui::EndDisabled();
+
+            if (hasViewerButton)
+            {
+                ImGui::SetCursorScreenPos(ImVec2(start.x + available - style::kPanelIconButton, start.y + 3.0f));
+                if (IconButton("##open_prefab_viewer", ICON_EXTERNAL_LINK, "Open in Prefab Viewer", false, true, 0,
+                        style::kPanelIconButton, nullptr, IconSize::Row14))
+                {
+                    openViewer_(path);
+                }
+            }
 
             if (!selectedName_.empty())
             {

@@ -73,6 +73,7 @@ namespace myengine::ui
             hooks.scriptPayloadType = kScriptPayloadType;
             hooks.filePayloadType = kFilePayloadType;
             hooks.openScene = [this](const std::string& scenePath) { RequestOpenScene(scenePath); };
+            // The fallbacks of the kinds that the editor has always opened (used when no viewer takes the file)
             hooks.openPrefab = [this](const std::string& prefabName)
             {
                 if (services_.prefabLibrary == nullptr || prefabInspector_ == nullptr)
@@ -92,8 +93,8 @@ namespace myengine::ui
                 pinnedMaterialEntity_ = state.selectedEntity;
                 ImGui::SetWindowFocus(kMaterialEditorWindowName);
             };
-            // One entry point for "open this asset". Today it does what the kinds always did; the asset viewers
-            // (textures, meshes, prefabs) are added here. Anything it does not handle goes back to the browser.
+            // One entry point for "open this asset": double click and "Open" in the Content Browser. Textures, meshes,
+            // materials and prefabs open as viewer tabs next to the Viewport; anything else goes back to the browser.
             hooks.onOpenAsset = [this, &hooks](const std::string& assetPath, const ContentKind kind)
             {
                 switch (kind)
@@ -102,23 +103,19 @@ namespace myengine::ui
                         hooks.openScene(assetPath);
                         return true;
                     case ContentKind::Prefab:
-                    {
-                        std::string name = std::filesystem::path(assetPath).filename().string();
-                        const std::string suffix = ".prefab.json";
-                        if (name.size() > suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
-                        {
-                            name.resize(name.size() - suffix.size());
-                        }
-                        hooks.openPrefab(name);
+                        OpenAssetViewer(assetPath, AssetViewerType::Prefab);
                         return true;
-                    }
                     case ContentKind::Material:
-                        hooks.openMaterial(assetPath);
+                        OpenAssetViewer(assetPath, AssetViewerType::Material);
+                        return true;
+                    case ContentKind::Mesh:
+                        OpenAssetViewer(assetPath, AssetViewerType::Mesh);
+                        return true;
+                    case ContentKind::Texture:
+                        OpenAssetViewer(assetPath, AssetViewerType::Texture);
                         return true;
                     case ContentKind::Folder:
                     case ContentKind::Script:
-                    case ContentKind::Mesh:
-                    case ContentKind::Texture:
                     case ContentKind::Shader:
                     case ContentKind::Other:
                         break;
@@ -373,8 +370,133 @@ namespace myengine::ui
         EndDialog();
     }
 
-    // The live preview of the Material Editor: a sphere or a cube with the material, drawn by the preview
-    // service into a render target; the left button orbits, the wheel zooms (only while the cursor is over it).
+    // A live preview of a material: a sphere or a cube drawn by the preview service into a render target at the
+    // cursor; the left button orbits, the wheel zooms (only while the cursor is over it). Shared by the Material
+    // Editor panel and the Material Viewer.
+    void DrawMaterialPreviewView(
+        editor::ThumbnailService* thumbnails,
+        const char* viewId,
+        const std::string& materialPath,
+        const ImVec2& size,
+        const float rounding,
+        MaterialPreviewView& view,
+        bool* openViewer,
+        const bool drawOverlay)
+    {
+        const ImVec2 min = ImGui::GetCursorScreenPos();
+        const ImVec2 max(min.x + size.x, min.y + size.y);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        // The background: a dark gradient behind the (transparent) target
+        drawList->AddRectFilled(min, max, IM_COL32(0x17, 0x19, 0x1D, 255), rounding);
+        drawList->AddRectFilledMultiColor(
+            ImVec2(min.x + 1.0f, min.y + 1.0f),
+            ImVec2(max.x - 1.0f, min.y + size.y * 0.55f),
+            IM_COL32(0x2B, 0x2F, 0x36, 255), IM_COL32(0x2B, 0x2F, 0x36, 255), IM_COL32(0x17, 0x19, 0x1D, 255), IM_COL32(0x17, 0x19, 0x1D, 255));
+
+        ImGui::SetNextItemAllowOverlap(); // the shape switch and Reset camera sit on top of it
+        ImGui::InvisibleButton("##material_preview", size);
+        const bool hovered = ImGui::IsItemHovered();
+        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
+        {
+            const ImVec2 delta = ImGui::GetIO().MouseDelta;
+            view.yaw -= delta.x * 0.012f;
+            view.pitch = std::clamp(view.pitch + delta.y * 0.012f, -1.35f, 1.35f);
+        }
+        if (hovered && ImGui::GetIO().MouseWheel != 0.0f)
+        {
+            view.distance = std::clamp(view.distance * (1.0f - ImGui::GetIO().MouseWheel * 0.1f), 1.6f, 9.0f);
+        }
+
+        if (thumbnails != nullptr)
+        {
+            const std::string meshPath = view.cube ? kCubeMeshPath : kSphereMeshPath;
+
+            // The shape is scaled to a unit radius around the origin, whatever its own size is
+            render::DrawItem item;
+            editor::BoundsBox bounds;
+            auto status = thumbnails->BuildDrawItem(meshPath, materialPath, render::Matrix4::Identity(), item, &bounds);
+            if (status == editor::DrawItemStatus::Ready && bounds.IsValid())
+            {
+                const DirectX::XMFLOAT3 center{
+                    (bounds.min.x + bounds.max.x) * 0.5f, (bounds.min.y + bounds.max.y) * 0.5f, (bounds.min.z + bounds.max.z) * 0.5f};
+                const float extent = std::max({bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z, 0.001f});
+                const float scale = (view.cube ? 0.78f : 1.25f) / extent;
+                const DirectX::XMMATRIX model =
+                    DirectX::XMMatrixTranslation(-center.x, -center.y, -center.z) * DirectX::XMMatrixScaling(scale, scale, scale);
+                status = thumbnails->BuildDrawItem(meshPath, materialPath, scene::ToRenderMatrix(model), item, nullptr);
+            }
+
+            editor::LiveViewRequest request;
+            request.id = viewId;
+            request.width = static_cast<std::uint32_t>(std::max(size.x, 8.0f));
+            request.height = static_cast<std::uint32_t>(std::max(size.y, 8.0f));
+            request.wireframe = view.wireframe;
+            if (status == editor::DrawItemStatus::Ready)
+            {
+                request.items.push_back(item);
+            }
+
+            const float distance = view.distance;
+            const DirectX::XMVECTOR eye = DirectX::XMVectorSet(
+                distance * std::sin(view.yaw) * std::cos(view.pitch),
+                distance * std::sin(view.pitch),
+                -distance * std::cos(view.yaw) * std::cos(view.pitch),
+                1.0f);
+            request.view = scene::ToRenderMatrix(DirectX::XMMatrixLookAtLH(
+                eye, DirectX::XMVectorZero(), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)));
+            request.projection = scene::ToRenderMatrix(DirectX::XMMatrixPerspectiveFovLH(
+                DirectX::XMConvertToRadians(32.0f), size.x / std::max(size.y, 1.0f), 0.05f, 40.0f));
+
+            const render::TextureHandle texture = thumbnails->SubmitLiveView(std::move(request));
+            if (texture.IsValid())
+            {
+                drawList->AddImage(static_cast<ImTextureID>(texture.value), min, max);
+            }
+        }
+
+        // Overlay: the shape switch on the left, [open in viewer] and Reset camera on the right, a hint at the bottom
+        const ImVec2 afterPreview(min.x, max.y);
+        if (!drawOverlay)
+        {
+            ImGui::SetCursorScreenPos(afterPreview);
+            ImGui::Dummy(ImVec2(size.x, 0.0f));
+            return;
+        }
+        ImGui::SetCursorScreenPos(ImVec2(min.x + 8.0f, min.y + 8.0f));
+        static const char* const kShapes[] = {"Sphere", "Cube"};
+        const int current = view.cube ? 1 : 0;
+        const int next = Segmented("##preview_shape", kShapes, 2, current);
+        if (next != current)
+        {
+            view.cube = next == 1;
+        }
+        float buttonX = max.x - 8.0f - 26.0f;
+        ImGui::SetCursorScreenPos(ImVec2(buttonX, min.y + 8.0f));
+        if (IconButton("##preview_reset_camera", ICON_ROTATE_3D, "Reset camera", false, true, 0, 26.0f, nullptr, IconSize::Row14))
+        {
+            view.yaw = 0.61f;
+            view.pitch = 0.44f;
+            view.distance = 3.0f;
+        }
+        if (openViewer != nullptr)
+        {
+            buttonX -= 26.0f + 4.0f;
+            ImGui::SetCursorScreenPos(ImVec2(buttonX, min.y + 8.0f));
+            if (IconButton("##preview_open_viewer", ICON_EXTERNAL_LINK, "Open in Material Viewer", false, true, 0, 26.0f, nullptr, IconSize::Row14))
+            {
+                *openViewer = true;
+            }
+        }
+        PushFontRole(FontRole::Mono);
+        drawList->AddText(ImVec2(min.x + 10.0f, max.y - 8.0f - ImGui::GetFontSize()), style::kTextDim, "Drag: orbit \xC2\xB7 Wheel: zoom");
+        PopFontRole();
+
+        ImGui::SetCursorScreenPos(afterPreview);
+        ImGui::Dummy(ImVec2(size.x, 0.0f));
+    }
+
+    // The live preview of the Material Editor: a sphere or a cube with the material, 220 px high
     void SceneEditor::DrawMaterialPreview(const std::string& materialPath, editor::WindowEditorState& windowState)
     {
         constexpr float kHeight = 220.0f;
@@ -383,101 +505,24 @@ namespace myengine::ui
         const float width = std::max(available - 2.0f * kMargin, 60.0f);
         ImGui::Dummy(ImVec2(0.0f, kMargin * 0.5f));
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + kMargin);
-        const ImVec2 min = ImGui::GetCursorScreenPos();
-        const ImVec2 max(min.x + width, min.y + kHeight);
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-        // The background: a dark gradient behind the (transparent) target
-        drawList->AddRectFilled(min, max, IM_COL32(0x17, 0x19, 0x1D, 255), 4.0f);
-        drawList->AddRectFilledMultiColor(
-            ImVec2(min.x + 1.0f, min.y + 1.0f),
-            ImVec2(max.x - 1.0f, min.y + kHeight * 0.55f),
-            IM_COL32(0x2B, 0x2F, 0x36, 255), IM_COL32(0x2B, 0x2F, 0x36, 255), IM_COL32(0x17, 0x19, 0x1D, 255), IM_COL32(0x17, 0x19, 0x1D, 255));
-
-        ImGui::SetNextItemAllowOverlap(); // the shape switch and Reset camera sit on top of it
-        ImGui::InvisibleButton("##material_preview", ImVec2(width, kHeight));
-        const bool hovered = ImGui::IsItemHovered();
-        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
+        MaterialPreviewView view;
+        view.yaw = materialPreviewYaw_;
+        view.pitch = materialPreviewPitch_;
+        view.distance = materialPreviewDistance_;
+        view.cube = windowState.materialPreviewShape == editor::MaterialPreviewShape::Cube;
+        bool openViewer = false;
+        DrawMaterialPreviewView(
+            services_.thumbnails, "material-editor", materialPath, ImVec2(width, kHeight), 4.0f, view, &openViewer);
+        materialPreviewYaw_ = view.yaw;
+        materialPreviewPitch_ = view.pitch;
+        materialPreviewDistance_ = view.distance;
+        windowState.materialPreviewShape = view.cube ? editor::MaterialPreviewShape::Cube : editor::MaterialPreviewShape::Sphere;
+        if (openViewer)
         {
-            const ImVec2 delta = ImGui::GetIO().MouseDelta;
-            materialPreviewYaw_ -= delta.x * 0.012f;
-            materialPreviewPitch_ = std::clamp(materialPreviewPitch_ + delta.y * 0.012f, -1.35f, 1.35f);
-        }
-        if (hovered && ImGui::GetIO().MouseWheel != 0.0f)
-        {
-            materialPreviewDistance_ = std::clamp(materialPreviewDistance_ * (1.0f - ImGui::GetIO().MouseWheel * 0.1f), 1.6f, 9.0f);
+            OpenAssetViewer(materialPath, AssetViewerType::Material);
         }
 
-        if (services_.thumbnails != nullptr)
-        {
-            const bool cube = windowState.materialPreviewShape == editor::MaterialPreviewShape::Cube;
-            const std::string meshPath = cube ? kCubeMeshPath : "assets/models/sphere.obj";
-
-            // The shape is scaled to a unit radius around the origin, whatever its own size is
-            render::DrawItem item;
-            editor::BoundsBox bounds;
-            auto status = services_.thumbnails->BuildDrawItem(meshPath, materialPath, render::Matrix4::Identity(), item, &bounds);
-            if (status == editor::DrawItemStatus::Ready && bounds.IsValid())
-            {
-                const DirectX::XMFLOAT3 center{
-                    (bounds.min.x + bounds.max.x) * 0.5f, (bounds.min.y + bounds.max.y) * 0.5f, (bounds.min.z + bounds.max.z) * 0.5f};
-                const float extent = std::max({bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z, 0.001f});
-                const float scale = (cube ? 0.78f : 1.25f) / extent;
-                const DirectX::XMMATRIX model =
-                    DirectX::XMMatrixTranslation(-center.x, -center.y, -center.z) * DirectX::XMMatrixScaling(scale, scale, scale);
-                status = services_.thumbnails->BuildDrawItem(meshPath, materialPath, scene::ToRenderMatrix(model), item, nullptr);
-            }
-
-            editor::LiveViewRequest request;
-            request.id = "material-editor";
-            request.width = static_cast<std::uint32_t>(width);
-            request.height = static_cast<std::uint32_t>(kHeight);
-            if (status == editor::DrawItemStatus::Ready)
-            {
-                request.items.push_back(item);
-            }
-
-            const float distance = materialPreviewDistance_;
-            const DirectX::XMVECTOR eye = DirectX::XMVectorSet(
-                distance * std::sin(materialPreviewYaw_) * std::cos(materialPreviewPitch_),
-                distance * std::sin(materialPreviewPitch_),
-                -distance * std::cos(materialPreviewYaw_) * std::cos(materialPreviewPitch_),
-                1.0f);
-            request.view = scene::ToRenderMatrix(DirectX::XMMatrixLookAtLH(
-                eye, DirectX::XMVectorZero(), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)));
-            request.projection = scene::ToRenderMatrix(DirectX::XMMatrixPerspectiveFovLH(
-                DirectX::XMConvertToRadians(32.0f), width / kHeight, 0.05f, 40.0f));
-
-            const render::TextureHandle texture = services_.thumbnails->SubmitLiveView(std::move(request));
-            if (texture.IsValid())
-            {
-                drawList->AddImage(static_cast<ImTextureID>(texture.value), min, max);
-            }
-        }
-
-        // Overlay: the shape switch on the left, Reset camera on the right, a hint at the bottom
-        const ImVec2 afterPreview(min.x, max.y);
-        ImGui::SetCursorScreenPos(ImVec2(min.x + 8.0f, min.y + 8.0f));
-        static const char* const kShapes[] = {"Sphere", "Cube"};
-        const int current = windowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 1 : 0;
-        const int next = Segmented("##preview_shape", kShapes, 2, current);
-        if (next != current)
-        {
-            windowState.materialPreviewShape = next == 1 ? editor::MaterialPreviewShape::Cube : editor::MaterialPreviewShape::Sphere;
-        }
-        ImGui::SetCursorScreenPos(ImVec2(max.x - 8.0f - 26.0f, min.y + 8.0f));
-        if (IconButton("##preview_reset_camera", ICON_ROTATE_3D, "Reset camera", false, true, 0, 26.0f, nullptr, IconSize::Row14))
-        {
-            materialPreviewYaw_ = 0.61f;
-            materialPreviewPitch_ = 0.44f;
-            materialPreviewDistance_ = 3.0f;
-        }
-        PushFontRole(FontRole::Mono);
-        drawList->AddText(ImVec2(min.x + 10.0f, max.y - 8.0f - ImGui::GetFontSize()), style::kTextDim, "Drag: orbit \xC2\xB7 Wheel: zoom");
-        PopFontRole();
-
-        ImGui::SetCursorScreenPos(afterPreview);
-        ImGui::Dummy(ImVec2(width, 0.0f));
         ImGui::Dummy(ImVec2(0.0f, kMargin));
     }
 
@@ -594,106 +639,7 @@ namespace myengine::ui
             DrawMaterialPreview(materialPath, windowState);
 
             // ---- Material: shader, texture, tint
-            if (BeginCategory("Material"))
-            {
-                ImGui::BeginDisabled(!editEnabled);
-                if (BeginPropertyGrid("##material_asset"))
-                {
-                    resource::MaterialAsset beforeAsset = CloneMaterialAsset(materialResource->asset);
-                    const auto commitMaterialChange = [&](const char* label)
-                    {
-                        if ((ImGui::IsItemDeactivatedAfterEdit() || !ImGui::IsItemActive()) &&
-                            !MaterialEquals(beforeAsset, materialResource->asset))
-                        {
-                            PushMaterialAssetCommand(label, materialPath, beforeAsset, CloneMaterialAsset(materialResource->asset));
-                            beforeAsset = CloneMaterialAsset(materialResource->asset);
-                        }
-                    };
-
-                    PropertyLabel("Shader", false, style::kPickerRowHeight);
-                    {
-                        const auto shaderKeys = services_.resourceManager->GetKnownShaderKeys();
-                        std::string chosen;
-                        if (AssetPicker(
-                                "##shader",
-                                materialResource->asset.shaderPath,
-                                shaderKeys,
-                                MakePickerOptions(PickerKind::Shader, *services_.resourceManager, services_.thumbnails),
-                                chosen))
-                        {
-                            materialResource->asset.shaderPath = chosen;
-                            services_.resourceManager->Load<resource::ShaderAsset>(chosen);
-                        }
-                        commitMaterialChange("Change Material Shader");
-                    }
-
-                    PropertyLabel("Texture", false, style::kPickerRowHeight);
-                    {
-                        const auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
-                        std::string chosen;
-                        if (AssetPicker(
-                                "##texture",
-                                materialResource->asset.texturePath,
-                                textureKeys,
-                                MakePickerOptions(PickerKind::Texture, *services_.resourceManager, services_.thumbnails),
-                                chosen))
-                        {
-                            materialResource->asset.texturePath = chosen;
-                            services_.resourceManager->Load<resource::TextureAsset>(chosen);
-                        }
-                        commitMaterialChange("Change Material Texture");
-                    }
-
-                    PropertyLabel("Tint");
-                    {
-                        float tint[4]{
-                            materialResource->asset.tint.r,
-                            materialResource->asset.tint.g,
-                            materialResource->asset.tint.b,
-                            materialResource->asset.tint.a,
-                        };
-
-                        // A 40 x 24 swatch (the picker opens on click) and the four 0-255 values in one row
-                        if (ImGui::ColorButton("##tint_swatch", ImVec4(tint[0], tint[1], tint[2], tint[3]),
-                                ImGuiColorEditFlags_AlphaPreview, ImVec2(40.0f, style::kFrameHeight)))
-                        {
-                            ImGui::OpenPopup("##tint_picker");
-                        }
-                        if (ImGui::BeginPopup("##tint_picker"))
-                        {
-                            if (ImGui::ColorPicker4("##tint_picker_4", tint, ImGuiColorEditFlags_AlphaBar))
-                            {
-                                materialResource->asset.tint = {tint[0], tint[1], tint[2], tint[3]};
-                            }
-                            commitMaterialChange("Change Material Tint");
-                            ImGui::EndPopup();
-                        }
-
-                        ImGui::SameLine();
-                        ImGui::SetNextItemWidth(-FLT_MIN);
-                        int channels[4]{
-                            static_cast<int>(std::lround(tint[0] * 255.0f)),
-                            static_cast<int>(std::lround(tint[1] * 255.0f)),
-                            static_cast<int>(std::lround(tint[2] * 255.0f)),
-                            static_cast<int>(std::lround(tint[3] * 255.0f)),
-                        };
-                        if (ImGui::DragInt4("##tint_channels", channels, 0.5f, 0, 255))
-                        {
-                            materialResource->asset.tint = {
-                                static_cast<float>(std::clamp(channels[0], 0, 255)) / 255.0f,
-                                static_cast<float>(std::clamp(channels[1], 0, 255)) / 255.0f,
-                                static_cast<float>(std::clamp(channels[2], 0, 255)) / 255.0f,
-                                static_cast<float>(std::clamp(channels[3], 0, 255)) / 255.0f,
-                            };
-                        }
-                        FocusOutline();
-                        commitMaterialChange("Change Material Tint");
-                    }
-                    EndPropertyGrid();
-                }
-                ImGui::EndDisabled();
-                EndCategory();
-            }
+            DrawMaterialCategory(materialPath, editEnabled);
 
             if (backToSelection)
             {
@@ -701,6 +647,143 @@ namespace myengine::ui
             }
         }
         ImGui::End();
+    }
+
+    void SceneEditor::DrawMaterialCategory(const std::string& materialPath, const bool editEnabled)
+    {
+        auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(materialPath);
+        if (materialResource == nullptr)
+        {
+            return;
+        }
+
+        // ---- Material: shader, texture, tint
+        if (BeginCategory("Material"))
+        {
+            ImGui::BeginDisabled(!editEnabled);
+            if (BeginPropertyGrid("##material_asset"))
+            {
+                resource::MaterialAsset beforeAsset = CloneMaterialAsset(materialResource->asset);
+                const auto commitMaterialChange = [&](const char* label)
+                {
+                    CommitMaterialWidgetEdit(label, materialPath, beforeAsset, materialResource->asset);
+                };
+
+                PropertyLabel("Shader", false, style::kPickerRowHeight);
+                {
+                    const auto shaderKeys = services_.resourceManager->GetKnownShaderKeys();
+                    std::string chosen;
+                    if (AssetPicker(
+                            "##shader",
+                            materialResource->asset.shaderPath,
+                            shaderKeys,
+                            MakePickerOptions(PickerKind::Shader, *services_.resourceManager, services_.thumbnails),
+                            chosen))
+                    {
+                        materialResource->asset.shaderPath = chosen;
+                        services_.resourceManager->Load<resource::ShaderAsset>(chosen);
+                    }
+                    commitMaterialChange("Change Material Shader");
+                }
+
+                PropertyLabel("Texture", false, style::kPickerRowHeight);
+                {
+                    const auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
+                    std::string chosen;
+                    if (AssetPicker(
+                            "##texture",
+                            materialResource->asset.texturePath,
+                            textureKeys,
+                            MakePickerOptions(PickerKind::Texture, *services_.resourceManager, services_.thumbnails),
+                            chosen))
+                    {
+                        materialResource->asset.texturePath = chosen;
+                        services_.resourceManager->Load<resource::TextureAsset>(chosen);
+                    }
+                    commitMaterialChange("Change Material Texture");
+                }
+
+                PropertyLabel("Tint");
+                {
+                    float tint[4]{
+                        materialResource->asset.tint.r,
+                        materialResource->asset.tint.g,
+                        materialResource->asset.tint.b,
+                        materialResource->asset.tint.a,
+                    };
+
+                    // A 40 x 24 swatch (the picker opens on click) and the four 0-255 values in one row
+                    if (ImGui::ColorButton("##tint_swatch", ImVec4(tint[0], tint[1], tint[2], tint[3]),
+                            ImGuiColorEditFlags_AlphaPreview, ImVec2(40.0f, style::kFrameHeight)))
+                    {
+                        ImGui::OpenPopup("##tint_picker");
+                    }
+                    if (ImGui::BeginPopup("##tint_picker"))
+                    {
+                        if (ImGui::ColorPicker4("##tint_picker_4", tint, ImGuiColorEditFlags_AlphaBar))
+                        {
+                            materialResource->asset.tint = {tint[0], tint[1], tint[2], tint[3]};
+                        }
+                        commitMaterialChange("Change Material Tint");
+                        ImGui::EndPopup();
+                    }
+
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    int channels[4]{
+                        static_cast<int>(std::lround(tint[0] * 255.0f)),
+                        static_cast<int>(std::lround(tint[1] * 255.0f)),
+                        static_cast<int>(std::lround(tint[2] * 255.0f)),
+                        static_cast<int>(std::lround(tint[3] * 255.0f)),
+                    };
+                    if (ImGui::DragInt4("##tint_channels", channels, 0.5f, 0, 255))
+                    {
+                        materialResource->asset.tint = {
+                            static_cast<float>(std::clamp(channels[0], 0, 255)) / 255.0f,
+                            static_cast<float>(std::clamp(channels[1], 0, 255)) / 255.0f,
+                            static_cast<float>(std::clamp(channels[2], 0, 255)) / 255.0f,
+                            static_cast<float>(std::clamp(channels[3], 0, 255)) / 255.0f,
+                        };
+                    }
+                    FocusOutline();
+                    commitMaterialChange("Change Material Tint");
+                }
+                EndPropertyGrid();
+            }
+            ImGui::EndDisabled();
+            EndCategory();
+        }
+    }
+
+    void SceneEditor::CommitMaterialWidgetEdit(
+        const char* label,
+        const std::string& materialPath,
+        resource::MaterialAsset& frameStartAsset,
+        const resource::MaterialAsset& current)
+    {
+        // A drag or typing changes the material live; the entry is made when the interaction ends, from the state
+        // at its beginning. A pick (the widget is not active) is one change in one frame.
+        if (ImGui::IsItemActivated())
+        {
+            materialEditBefore_ = std::make_unique<resource::MaterialAsset>(CloneMaterialAsset(frameStartAsset));
+        }
+        const bool finished = ImGui::IsItemDeactivatedAfterEdit();
+        if (!finished && ImGui::IsItemActive())
+        {
+            return;
+        }
+
+        const resource::MaterialAsset& before =
+            finished && materialEditBefore_ != nullptr ? *materialEditBefore_ : frameStartAsset;
+        if (!MaterialEquals(before, current))
+        {
+            PushMaterialAssetCommand(label, materialPath, before, CloneMaterialAsset(current));
+        }
+        if (finished)
+        {
+            materialEditBefore_.reset();
+        }
+        frameStartAsset = CloneMaterialAsset(current);
     }
 
     void SceneEditor::SpawnRenderableEntity(const core::WindowId windowId, std::string meshPath, std::string materialPath)

@@ -168,6 +168,17 @@ namespace myengine::ui::detail
         return options;
     }
 
+    // "crate.obj" -> "crate", "default.material.json" -> "default"
+    inline std::string AssetNameWithoutExtensions(const std::string& fileName)
+    {
+        std::filesystem::path name = std::filesystem::path(fileName).filename();
+        while (name.has_extension())
+        {
+            name = name.stem();
+        }
+        return name.string();
+    }
+
     inline std::string FormatBytes(const std::uint64_t bytes)
     {
         static constexpr std::array<const char*, 4> units{"B", "KB", "MB", "GB"};
@@ -540,6 +551,88 @@ namespace myengine::ui::detail
 
 namespace myengine::ui
 {
+    // The orbit camera and the shape of a material preview (Material Editor and Material Viewer)
+    struct MaterialPreviewView
+    {
+        float yaw = 0.61f;
+        float pitch = 0.44f;
+        float distance = 3.0f;
+        bool cube = false;
+        bool wireframe = false;
+    };
+
+    // Draws a live preview of the material at the cursor, `size` big; orbit with the left button, wheel zooms.
+    // `openViewer` (optional) adds an "open in the viewer" button next to Reset camera and is set when it is pressed.
+    // `drawOverlay` false: the caller draws its own controls (the Material Viewer).
+    // Defined in SceneEditorAssets.cpp.
+    void DrawMaterialPreviewView(
+        editor::ThumbnailService* thumbnails,
+        const char* viewId,
+        const std::string& materialPath,
+        const ImVec2& size,
+        float rounding,
+        MaterialPreviewView& view,
+        bool* openViewer,
+        bool drawOverlay = true);
+
+    enum class AssetViewerType : std::uint8_t
+    {
+        Texture,
+        Mesh,
+        Material,
+        Prefab,
+    };
+
+    // One open viewer tab (SceneEditorViewers.cpp); state that survives a hot reload of the file lives here
+    struct AssetViewerTab
+    {
+        AssetViewerType type = AssetViewerType::Texture;
+        std::string path;  // asset key
+        std::string name;  // shown in the header
+        std::string title; // the window title with a stable ID
+        bool open = true;
+        bool docked = false;
+        bool focusRequested = false;
+
+        // 3D (mesh, prefab) camera
+        float yaw = 0.55f;
+        float pitch = 0.32f;
+        float distance = 3.0f;
+        float target[3]{0.0f, 0.0f, 0.0f};
+        bool needsFrame = true;
+        bool wireframe = false;
+        bool showGrid = true;
+        bool showBounds = false;
+        std::uint32_t infoHandle = 0; // the GPU handle that localBounds / hasAlpha were computed for
+        editor::BoundsBox localBounds;
+        std::string previewMaterial; // mesh viewer: chosen preview material; empty: the suggested one
+
+        // Texture
+        bool fit = true;
+        float zoom = 1.0f;
+        float pan[2]{0.0f, 0.0f};
+        bool channelR = true;
+        bool channelG = true;
+        bool channelB = true;
+        bool channelA = true;
+        bool checker = true; // a checkerboard under the transparent pixels
+        bool nearest = true;
+        bool nearestChosen = false; // the user picked the filter: do not choose it from the size any more
+        bool hasAlpha = false;
+        render::TextureHandle maskedTexture; // a copy with the masked channels, when not all are on
+        std::uint32_t maskedKey = ~0u;
+
+        // Material
+        MaterialPreviewView materialView;
+
+        // Prefab
+        std::vector<editor::PrefabEntityInfo> prefabEntities;
+        bool prefabRead = false;
+        double prefabCheckTime = 0.0;
+        std::filesystem::file_time_type prefabWriteTime{};
+        int selectedEntity = -1;
+    };
+
     // State of the Project Browser and the map dialogs (SceneEditorProject.cpp)
     struct ProjectUiState
     {
