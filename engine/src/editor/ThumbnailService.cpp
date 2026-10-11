@@ -633,7 +633,7 @@ namespace myengine::editor
                     const std::string name = descriptor.value(key, std::string());
                     if (!name.empty())
                     {
-                        out.push_back(Resolve(materialFile.parent_path() / fs::u8path(name)));
+                        out.push_back(Resolve(materialFile.parent_path() / PathFromText(name)));
                     }
                 }
             };
@@ -654,7 +654,7 @@ namespace myengine::editor
                     {
                         for (const auto& mesh : meshes)
                         {
-                            out.push_back(Resolve(fs::u8path(mesh.meshPath)));
+                            out.push_back(Resolve(PathFromText(mesh.meshPath)));
                             addMaterial(mesh.materialPath);
                         }
                     }
