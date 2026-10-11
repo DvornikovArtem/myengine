@@ -200,7 +200,9 @@ namespace myengine::ui
     // Modal dialog frame: header with icon and title, body, footer band with buttons.
     // The caller does ImGui::OpenPopup(popupName) and:
     //   if (BeginDialog(name, "Title", ICON_FOLDER, 460)) { ...body...; DialogFooter(); buttons; EndDialog(); }
-    bool BeginDialog(const char* popupName, const char* title, const char* icon = nullptr, float width = 460.0f, bool* open = nullptr);
+    // iconColor: the colour of the header icon (0: dim, like every dialog; style::kWarning for a confirmation)
+    bool BeginDialog(const char* popupName, const char* title, const char* icon = nullptr, float width = 460.0f, bool* open = nullptr,
+                     ImU32 iconColor = 0);
     // Ends the body and starts the footer band; the cursor is inside it afterwards
     void DialogFooter();
     // Moves the cursor so that `buttonsWidth` of buttons ends at the right edge of the footer

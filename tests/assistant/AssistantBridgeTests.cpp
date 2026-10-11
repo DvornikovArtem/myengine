@@ -747,7 +747,8 @@ namespace
 
             McpClient client(executable, L"", "", endpoint);
             int id = 700;
-            const auto initialize = Request(client, *bridge, ++id, "initialize", {{"protocolVersion", "2025-03-26"}, {"capabilities", json::object()}});
+            const auto initialize = Request(client, *bridge, ++id, "initialize",
+                {{"protocolVersion", "2025-03-26"}, {"capabilities", json::object()}, {"clientInfo", {{"name", "test-agent"}, {"version", "1"}}}});
             Check(initialize["result"]["serverInfo"]["name"] == "myengine", "initialize through the endpoint file failed");
             const auto mode = CallTool(client, *bridge, ++id, "get_mode", json::object());
             Check(!IsError(mode) && json::parse(ResultText(mode))["mode"] == "Edit", "A read tool failed for an external client");
@@ -767,6 +768,7 @@ namespace
                 imgui.Frame(panel); // no turn is running: the card of an external client must not be rejected
             }
             Check(bridge->GetPending().size() == 1 && fixture.CountNamed("Coin") == 0, "The card of an external call was dropped or ran early");
+            Check(bridge->GetPending()[0].client == "test-agent", "The card does not name the client from initialize");
             bridge->Resolve(bridge->GetPending()[0].id, true);
             const auto spawned = Await(client, *bridge);
             Check(!IsError(spawned) && fixture.CountNamed("Coin") == 1, "The confirmed external call did not run");

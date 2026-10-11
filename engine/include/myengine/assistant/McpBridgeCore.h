@@ -47,6 +47,12 @@ namespace myengine::assistant
 
             if (method == "initialize")
             {
+                // The name of the client ("claude-code", "codex-mcp-client") goes with every call: the card names it
+                if (const auto info = params.find("clientInfo"); info != params.end() && info->is_object() &&
+                    info->contains("name") && (*info)["name"].is_string())
+                {
+                    clientName_ = (*info)["name"].get<std::string>().substr(0, 64);
+                }
                 std::string version = "2024-11-05";
                 if (params.contains("protocolVersion") && params["protocolVersion"].is_string())
                 {
@@ -91,6 +97,7 @@ namespace myengine::assistant
                     {"op", "call"},
                     {"tool", params["name"]},
                     {"arguments", params.contains("arguments") && params["arguments"].is_object() ? params["arguments"] : Json::object()},
+                    {"client", clientName_},
                 });
                 if (response.is_object() && response.contains("content") && response["content"].is_array())
                 {
@@ -126,5 +133,6 @@ namespace myengine::assistant
         }
 
         Upstream upstream_;
+        mutable std::string clientName_; // from `initialize`; Handle is logically const
     };
 }

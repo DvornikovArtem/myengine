@@ -899,9 +899,10 @@ namespace myengine::ui
         }
         if (ImGui::IsItemHovered())
         {
-            Tooltip("Claude Code, Codex or another MCP client that you start yourself can use the engine tools while the editor "
-                    "is open. Every change asks for your confirmation here.", nullptr,
-                    "Connect it to myengine_mcp.exe (see docs/assistant/as4-backends.md). Off by default.");
+            Tooltip("Allow external MCP clients", nullptr,
+                    "Claude Code, Codex or another MCP client that you start yourself can use the engine tools while the editor "
+                    "is open. Every change asks for your confirmation here. Connect it to myengine_mcp.exe "
+                    "(docs/assistant/as4-backends.md). Off by default.");
         }
     }
 
@@ -910,7 +911,7 @@ namespace myengine::ui
     // is shown in a modal window of the editor, so that a call never waits for a decision nobody can see
     void AssistantPanel::DrawExternalApprovals()
     {
-        constexpr char kPopup[] = "Assistant confirmation###assistant_external_card";
+        constexpr char kPopup[] = "AssistantExternalCard";
         if (bridge_ == nullptr)
         {
             return;
@@ -925,34 +926,87 @@ namespace myengine::ui
         {
             return;
         }
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(std::min(560.0f, viewport->Size.x - 40.0f), 0.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
-        const bool open = ImGui::BeginPopupModal(kPopup, nullptr,
-                                                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
-        ImGui::PopStyleVar();
-        if (!open)
+        const float width = std::min(560.0f, ImGui::GetMainViewport()->Size.x - 40.0f);
+        if (!BeginDialog(kPopup, "Confirm change from an external client", ICON_TRIANGLE_ALERT, width, nullptr, style::kWarning))
         {
             return;
         }
         if (!wanted)
         {
             ImGui::CloseCurrentPopup();
+            EndDialog();
+            return;
         }
-        else
+
+        const std::vector<assistant::AssistantApproval> copy = pending; // Resolve changes the list
+        const auto& approval = copy.front();
+        const float inner = width - 32.0f;
+
+        PushFontRole(FontRole::Secondary);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner);
+        const std::string who = approval.client.empty() ? std::string("An external MCP client") : "The MCP client \"" + approval.client + "\"";
+        ImGui::TextUnformatted((who + " asks to change the project. Nothing happens until you decide.").c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        PopFontRole();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+        PushFontRole(FontRole::Strong);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner);
+        ImGui::TextUnformatted(approval.title.c_str());
+        ImGui::PopTextWrapPos();
+        PopFontRole();
+
+        if (!approval.detail.empty())
+        {
+            ImGui::Dummy(ImVec2(0.0f, 2.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 5.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, style::kRounding);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(style::kInput));
+            const ApprovalMetrics metrics = MeasureApproval(approval, inner);
+            if (ImGui::BeginChild("##external_detail", ImVec2(inner, std::clamp(metrics.detail, 40.0f, 220.0f)),
+                                  ImGuiChildFlags_AlwaysUseWindowPadding))
+            {
+                PushFontRole(FontRole::Mono);
+                if (approval.detail.front() == '+' || approval.detail.front() == '-')
+                {
+                    DrawDiff(approval.detail);
+                }
+                else
+                {
+                    WrappedText(approval.detail);
+                }
+                PopFontRole();
+            }
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar(2);
+        }
+        if (copy.size() > 1)
         {
             PushFontRole(FontRole::Secondary);
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
-            ImGui::TextUnformatted("An external MCP client asks to change the project. Nothing happens until you decide.");
+            ImGui::Text("+%zu more waiting for your decision", copy.size() - 1);
             ImGui::PopStyleColor();
             PopFontRole();
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            const std::vector<assistant::AssistantApproval> copy = pending; // Resolve changes the list
-            const ApprovalMetrics metrics = MeasureApproval(copy.front(), 520.0f);
-            DrawApprovals(copy, std::min(metrics.card + 16.0f + (copy.size() > 1 ? 20.0f : 0.0f), 400.0f));
         }
-        ImGui::EndPopup();
+
+        DialogFooter();
+        DialogAlignRight(2.0f * 96.0f + 8.0f);
+        const bool reject = Button("Reject", ICON_X, true, 96.0f);
+        ImGui::SameLine();
+        const bool apply = PrimaryButton("Apply", ICON_CHECK, true, 96.0f);
+        EndDialog();
+
+        if (apply)
+        {
+            bridge_->Resolve(approval.id, true);
+        }
+        else if (reject)
+        {
+            bridge_->Resolve(approval.id, false);
+        }
     }
 
     // ------------------------------------------------------------------ off
@@ -1005,9 +1059,9 @@ namespace myengine::ui
                 enableCodexFound_ = codex.u8string();
                 ImGui::OpenPopup("##assistant_enable");
             }
-            // Above the button: the tab sits at the bottom of the window and there is no room below it
-            const ImVec2 menuAnchor(middle - 140.0f, ImGui::GetItemRectMin().y - 4.0f);
-            ImGui::SetNextWindowPos(menuAnchor, ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+            // Beside the button, right of the text: the tab is short and the menu must not cover "Assistant is off"
+            const float menuLeft = std::max(ImGui::GetItemRectMax().x + 8.0f, middle + wrapWidth * 0.5f + 12.0f);
+            ImGui::SetNextWindowPos(ImVec2(menuLeft, ImGui::GetItemRectMin().y), ImGuiCond_Always, ImVec2(0.0f, 0.0f));
             if (BeginMenuPopup("##assistant_enable"))
             {
                 MenuSection("CONNECT");
@@ -1021,7 +1075,8 @@ namespace myengine::ui
                     }
                     if (ImGui::IsItemHovered())
                     {
-                        Tooltip(found.empty() ? "The CLI was not found in PATH. You can still enable it and set its path in the settings."
+                        Tooltip(label, nullptr,
+                                found.empty() ? "The CLI was not found in PATH. You can still enable it and set its path in the settings."
                                               : found.c_str());
                     }
                 };
@@ -1387,9 +1442,10 @@ namespace myengine::ui
             const auto& model = service_->GetModel();
             const auto& actual = service_->GetActualModel();
             const std::string selected = model.empty() ? std::string() : (IsCodex() ? model : FriendlyAliasLabel(model));
+            // Not set: the CLI decides; the model that really answered is shown when it is known
             if (IsCodex())
             {
-                modelText = !model.empty() ? model : (!actual.empty() ? actual : std::string("Default model"));
+                modelText = !model.empty() ? model : (!actual.empty() ? actual : std::string("CLI default"));
             }
             else if (!actual.empty() && (model.empty() || ModelFamily(actual) != ModelFamily(model)))
             {
@@ -1397,8 +1453,9 @@ namespace myengine::ui
             }
             else
             {
-                modelText = selected.empty() ? std::string("Default model") : selected;
+                modelText = selected.empty() ? std::string("CLI default") : selected;
             }
+            modelText = "Model: " + modelText;
         }
         // Not set: the CLI decides (its own setting or the model's default). The CLI may say which, then it is shown
         std::string effortText = "Effort: CLI default";

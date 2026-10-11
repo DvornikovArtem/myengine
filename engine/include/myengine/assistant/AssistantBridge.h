@@ -51,6 +51,7 @@ namespace myengine::assistant
         std::string tool;   // as the CLI names it: Edit, Write, mcp__myengine__spawn_prefab
         std::string title;  // one line: what will happen
         std::string detail; // diff or JSON of the arguments
+        std::string client; // the external MCP client that asks (empty: the built-in assistant or unknown)
     };
 
     // Editor side of the MCP bridge: owns the pipe, answers tool calls, and holds permission prompts

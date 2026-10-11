@@ -322,6 +322,7 @@ namespace myengine::assistant
                     entry.view.tool = kMcpPrefix + request.tool;
                     entry.view.title = tools_.Describe(request.tool, request.arguments);
                     entry.view.detail = request.arguments.empty() ? std::string() : CardJson(request.arguments);
+                    entry.view.client = request.client;
                     pending_.push_back(std::move(entry));
                     RebuildView();
                     return;
@@ -496,6 +497,7 @@ namespace myengine::assistant
         entry.view.tool = toolName;
         entry.view.title = (toolName == "Write" ? (exists ? "Overwrite " : "Create ") : "Edit ") + displayPath;
         entry.view.detail = ClaudeStreamParser::BuildToolDetail(toolName, shown);
+        entry.view.client = request.client;
         pending_.push_back(std::move(entry));
         RebuildView();
     }
