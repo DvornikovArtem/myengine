@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <deque>
 #include <array>
 #include <cfloat>
 #include <cstdint>
@@ -355,6 +356,11 @@ namespace myengine::ui
         std::vector<std::uint32_t> scratchCommandIndices;
         bool wantMouseCapture = false;
         bool wantKeyboardCapture = false;
+        // ImGui counts a double click from the time of its own frames, one button event per frame: on slow frames
+        // (a map is loading) two quick clicks end up too far apart. Windows has already decided (WM_*BUTTONDBLCLK),
+        // so every press that ImGui will process carries that answer, in the order ImGui processes them.
+        std::deque<bool> pressIsDoubleClick[3];
+        bool pressQueued[3] = {false, false, false}; // the latest queued state of the button, as ImGui sees it
         std::string layoutIniPath; // ImGui keeps the pointer, so it lives as long as the context
     };
 
@@ -514,6 +520,35 @@ namespace myengine::ui
         ImGuiIO& io = ImGui::GetIO();
         UpdateKeyModifiers(io);
 
+        // A mouse button message: the position of the click, then the button. A press remembers whether Windows
+        // reported it as the second click of a double click.
+        const auto queueMouseButton = [&](const int button, const bool down, const bool osDoubleClick)
+        {
+            io.AddMousePosEvent(
+                static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                static_cast<float>(static_cast<short>(HIWORD(lparam))));
+            io.AddMouseButtonEvent(button, down);
+
+            // ImGui drops a press of a button that is already down; keep the same filter so the flags stay in step
+            if (down)
+            {
+                if (!windowContext.pressQueued[button])
+                {
+                    windowContext.pressQueued[button] = true;
+                    auto& flags = windowContext.pressIsDoubleClick[button];
+                    flags.push_back(osDoubleClick);
+                    while (flags.size() > 16)
+                    {
+                        flags.pop_front();
+                    }
+                }
+            }
+            else
+            {
+                windowContext.pressQueued[button] = false;
+            }
+        };
+
         switch (message)
         {
             case WM_SIZE:
@@ -542,47 +577,29 @@ namespace myengine::ui
             // the last WM_MOUSEMOVE is old (a fast click, a posted message, the cursor moved by the system)
             case WM_LBUTTONDOWN:
             case WM_LBUTTONDBLCLK:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
-                io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+                queueMouseButton(ImGuiMouseButton_Left, true, message == WM_LBUTTONDBLCLK);
                 break;
 
             case WM_LBUTTONUP:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
-                io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+                queueMouseButton(ImGuiMouseButton_Left, false, false);
                 break;
 
             case WM_RBUTTONDOWN:
             case WM_RBUTTONDBLCLK:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
-                io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+                queueMouseButton(ImGuiMouseButton_Right, true, message == WM_RBUTTONDBLCLK);
                 break;
 
             case WM_RBUTTONUP:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
-                io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+                queueMouseButton(ImGuiMouseButton_Right, false, false);
                 break;
 
             case WM_MBUTTONDOWN:
             case WM_MBUTTONDBLCLK:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
-                io.AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
+                queueMouseButton(ImGuiMouseButton_Middle, true, message == WM_MBUTTONDBLCLK);
                 break;
 
             case WM_MBUTTONUP:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
-                io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+                queueMouseButton(ImGuiMouseButton_Middle, false, false);
                 break;
 
             case WM_MOUSEWHEEL:
@@ -645,6 +662,10 @@ namespace myengine::ui
         io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
         io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
         io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
+        for (bool& queued : it->second->pressQueued)
+        {
+            queued = false;
+        }
     }
 
     void UiManager::Update(const float deltaTime)
@@ -668,9 +689,32 @@ namespace myengine::ui
                 static_cast<float>(std::max<std::uint32_t>(windowContext.width, 1u)),
                 static_cast<float>(std::max<std::uint32_t>(windowContext.height, 1u)));
             io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
-            io.DeltaTime = std::max(deltaTime, 1.0f / 600.0f);
+            // The real frame time: a floor of 1/600 s made ImGui's clock run up to several times faster than the
+            // wall clock above 600 FPS, which shrank the double click window to a fraction of the system one
+            io.DeltaTime = std::max(deltaTime, 1.0f / 100000.0f);
             ImGui::NewFrame();
             ImGuizmo::BeginFrame();
+
+            // A press that Windows reported as a double click is one, however slow the frames were
+            for (int button = 0; button < 3; ++button)
+            {
+                if (!io.MouseClicked[button])
+                {
+                    continue;
+                }
+                auto& flags = windowContext.pressIsDoubleClick[button];
+                if (flags.empty())
+                {
+                    continue;
+                }
+                const bool osDoubleClick = flags.front();
+                flags.pop_front();
+                if (osDoubleClick)
+                {
+                    io.MouseClickedCount[button] = 2;
+                    io.MouseClickedLastCount[button] = 2;
+                }
+            }
 
             BuildWindowUi(windowContext);
 
