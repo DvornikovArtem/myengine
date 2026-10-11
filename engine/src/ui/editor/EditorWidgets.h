@@ -227,6 +227,12 @@ namespace myengine::ui
     bool BeginCombo(const char* label, const char* preview, ImGuiComboFlags flags = 0);
     void EndCombo();
 
+    // ---- loading ----
+    // A rotating arc around `center`: something is being loaded (status bar, a viewer canvas that waits for a file)
+    void DrawSpinner(ImDrawList* drawList, ImVec2 center, float radius, ImU32 color, float thickness = 2.0f);
+    // A bar `width` x `height` at the cursor. progress 0..1, or a negative value: a segment slides along the track.
+    void LoadingBar(float width, float progress, float height = 4.0f);
+
     // ---- developer ----
     // Help > Developer > Widgets gallery: every helper in every state (acceptance tool, off by default)
     void DrawWidgetsGallery(bool* open);

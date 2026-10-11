@@ -15,8 +15,9 @@ namespace myengine::appstate
     void LoadingState::OnEnter(core::Application& app)
     {
         elapsed_ = 0.0f;
+        frames_ = 0;
         app.SetStateLabel("Loading");
-        app.GetLogger().Info("Loading state: simulating short bootstrap step");
+        app.GetLogger().Info("Loading state: waiting for the start map and its assets");
     }
 
     void LoadingState::OnExit(core::Application& app)
@@ -27,9 +28,13 @@ namespace myengine::appstate
     void LoadingState::Update(core::Application& app, const float deltaTime)
     {
         elapsed_ += deltaTime;
-        if (elapsed_ > 0.5f)
+        ++frames_;
+
+        // Gameplay starts when the start map is applied and the assets it asked for have streamed in (the editor
+        // shows the progress meanwhile); a file that never loads must not hold it forever
+        const bool ready = app.IsSceneLoaded() && app.GetResourceManager().PendingLoadCount() == 0 && frames_ >= 2;
+        if (ready || elapsed_ > 20.0f)
         {
-            //app.GetStateMachine().ChangeState(std::make_unique<MenuState>(), app);
             app.GetStateMachine().ChangeState(std::make_unique<GameplayState>(), app);
         }
     }

@@ -96,6 +96,12 @@ namespace myengine::ui
             return;
         }
 
+        // The project is starting up: the whole window is the splash, no panels and no menus
+        if (DrawStartupSplash())
+        {
+            return;
+        }
+
         ValidateSelection();
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
         auto& windowState = editorState.GetOrCreateWindowState(windowContext.windowId);
@@ -133,6 +139,7 @@ namespace myengine::ui
         BuildAssistantPanel(windowContext);
         BuildStatisticsPanel(windowContext);
         BuildProjectDialogs();
+        DrawLoadingUi();
 
         // The viewport shows no tab strip while it is alone in its node (spec 3.1)
         if (ImGuiWindow* viewportWindow = ImGui::FindWindowByName(kViewportWindowName);
@@ -474,6 +481,12 @@ namespace myengine::ui
         (void)windowContext;
 
         if (!initialized_)
+        {
+            return;
+        }
+
+        // A map or a project is loading: the editor ignores the keyboard until it is there
+        if (services_.loading != nullptr && services_.loading->HasModal())
         {
             return;
         }

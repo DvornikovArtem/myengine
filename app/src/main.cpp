@@ -162,6 +162,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     myengine::core::Application app(hInstance);
     app.SetProjectFile(options.projectFile);
     app.SetShowProjectBrowser(options.showProjectBrowser);
+    // The editor window is up while the start map is read: it shows the splash instead of waiting in the dark
+    app.SetDeferredSceneLoad(true);
 
     const auto configPath = ResolveConfigPath();
     const auto config = myengine::config::AppConfig::LoadFromFile(configPath);

@@ -59,6 +59,7 @@ namespace myengine::scripting
         void Update(ecs::World& world, float deltaTime) override;
 
         void RequestReloadAll(); // explicit command (F5 / editor button)
+        bool IsReloadPending() const; // a "reload all" was asked for and its batch has not been applied yet
         void ResetInstances(); // on SceneLoadedEvent and on Stop: drop every instance
         void Shutdown(); // release every py::object, called before ScriptRuntime::Shutdown
 

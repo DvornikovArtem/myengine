@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include <myengine/core/Logger.h>
+#include <myengine/editor/LoadingService.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scene/TransformUtils.h>
@@ -983,6 +984,7 @@ namespace myengine::editor
         std::unordered_map<std::string, Entry> entries;
         std::unordered_map<std::string, LiveView> liveViews;
         std::deque<std::string> queue;
+        std::chrono::steady_clock::time_point lastRenderTime{};
         std::uint64_t frame = 0;
         std::uint64_t renderedTotal = 0;
         std::uint64_t diskHitsTotal = 0;
@@ -1347,6 +1349,18 @@ namespace myengine::editor
             return;
         }
 
+        // MYENGINE_LOADING_DEBUG_DELAY: one thumbnail per that many milliseconds (the frame does not wait)
+        const int debugDelayMs = LoadingService::DebugDelayMs();
+        const auto now = std::chrono::steady_clock::now();
+        if (debugDelayMs > 0)
+        {
+            if (now - impl.lastRenderTime < std::chrono::milliseconds(debugDelayMs))
+            {
+                return;
+            }
+            budget = 1;
+        }
+
         // Newest requests last: the queue is first-come, first-served
         for (const std::string& key : impl.queue)
         {
@@ -1372,6 +1386,7 @@ namespace myengine::editor
             if (impl.RenderEntry(key, entry, surface))
             {
                 --budget;
+                impl.lastRenderTime = now;
             }
         }
     }

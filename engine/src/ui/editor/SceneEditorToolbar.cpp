@@ -320,6 +320,8 @@ namespace myengine::ui
             total -= gap;
             float x = windowPosition.x + windowWidth - 12.0f - total;
             const float centerY = windowPosition.y + style::kStatusBarHeight * 0.5f;
+            // The background tasks sit in front of the mode indicator
+            DrawBackgroundTasks(drawList, x - 12.0f, centerY);
             for (const StatusSegment& segment : segments)
             {
                 DrawSegment(drawList, segment, x, centerY);

@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -15,6 +17,7 @@
 #include <myengine/core/Types.h>
 #include <myengine/core/Window.h>
 #include <myengine/ecs/World.h>
+#include <myengine/editor/LoadingService.h>
 #include <myengine/input/InputManager.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
@@ -52,6 +55,9 @@ namespace myengine::core
         void SetProjectFile(const std::filesystem::path& projectFile);
         /// Before Initialize: open the Project Browser over the editor at start.
         void SetShowProjectBrowser(bool show);
+        /// Before Initialize: read the start map in the background (the window shows the splash meanwhile) instead of
+        /// before Initialize returns. The map is in the world once Run has drawn a few frames.
+        void SetDeferredSceneLoad(bool deferred);
         int Run();
         void Shutdown();
 
@@ -78,6 +84,17 @@ namespace myengine::core
         std::string CaptureSceneSnapshot() const;
         bool RestoreSceneSnapshot(std::string_view snapshotJson);
 
+        /// The start map is in the world (with SetDeferredSceneLoad it takes a few frames after Run starts).
+        bool IsSceneLoaded() const;
+        /// The long operations that the editor shows (a window for a map, an indicator in the status bar).
+        editor::LoadingService& GetLoadingService();
+        /// Opens a map without freezing the window: the file is read and built on a worker thread behind a modal
+        /// loading window and applied on the main thread when ready. `done(success)` runs there, once. Only one map
+        /// loads at a time: a second call fails at once.
+        void BeginOpenScene(const std::string& scenePath, std::function<void(bool)> done);
+        /// The same for re-reading the current map from disk (Revert Map).
+        void BeginRevertScene(std::function<void(bool)> done);
+
     private:
         struct WindowRuntime
         {
@@ -92,6 +109,19 @@ namespace myengine::core
         // Search for a WindowRuntime (window) by ID
         WindowRuntime* FindWindow(WindowId id);
         const WindowRuntime* FindWindow(WindowId id) const;
+
+        struct PendingSceneLoad;
+        void StartSceneLoad(
+            const std::filesystem::path& path,
+            bool makeCurrent,
+            std::string label,
+            std::string subtitle,
+            editor::LoadingMode mode,
+            std::function<void(bool)> done);
+        void PumpPendingSceneLoad();
+        void WaitPendingSceneLoad();
+        // Polled sources of the background indicators: thumbnails and assets still loading
+        void SyncBackgroundOperations();
 
         bool AllWindowsClosed() const;
         void SetInputOwnerWindow(WindowId id);
@@ -142,12 +172,18 @@ namespace myengine::core
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;
         std::unique_ptr<editor::ThumbnailService> thumbnailService_; // after the adapter and the resources it uses
+        editor::LoadingService loadingService_;
+        std::unique_ptr<PendingSceneLoad> pendingSceneLoad_;
         ui::UiManager uiManager_;
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
         std::filesystem::path projectFile_; // from --project, empty: the project of the engine folder
         bool showProjectBrowser_ = false;
+        bool deferredSceneLoad_ = false;
+        // Another project was asked for: the window stays (with its loading window) until the new process is up
+        std::chrono::steady_clock::time_point restartQuitTime_{};
+        bool restartPending_ = false;
         bool discardSceneOnExit_ = false; // set when the process restarts for another project without saving
         std::string stateLabel_;
         bool titleShowsPlay_ = false;

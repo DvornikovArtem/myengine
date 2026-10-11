@@ -1449,6 +1449,46 @@ namespace myengine::ui
         ImGui::EndPopup();
     }
 
+    // ---- loading ----
+
+    void DrawSpinner(ImDrawList* drawList, const ImVec2 center, const float radius, const ImU32 color, const float thickness)
+    {
+        constexpr float kTau = 6.2831853f;
+        const float time = static_cast<float>(ImGui::GetTime());
+        const float start = std::fmod(time * kTau, kTau); // one turn a second
+        drawList->PathClear();
+        drawList->PathArcTo(center, radius, start, start + kTau * 0.72f, 24);
+        drawList->PathStroke(color, ImDrawFlags_None, thickness);
+    }
+
+    void LoadingBar(const float width, const float progress, const float height)
+    {
+        const float kHeight = height;
+        const ImVec2 min = ImGui::GetCursorScreenPos();
+        const ImVec2 max(min.x + width, min.y + kHeight);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        drawList->AddRectFilled(min, max, style::kHeader, kHeight * 0.5f);
+        if (progress >= 0.0f)
+        {
+            const float filled = std::clamp(progress, 0.0f, 1.0f) * width;
+            if (filled > 0.5f)
+            {
+                drawList->AddRectFilled(min, ImVec2(min.x + std::max(filled, kHeight), max.y), style::kPrimary, kHeight * 0.5f);
+            }
+        }
+        else
+        {
+            // The length is not known: a segment of 30% of the track slides from the left to the right (1.2 s a cycle)
+            const float segment = width * 0.3f;
+            const float phase = std::fmod(static_cast<float>(ImGui::GetTime()) / 1.2f, 1.0f);
+            const float x = min.x + (width + segment) * phase - segment;
+            drawList->PushClipRect(min, max, true);
+            drawList->AddRectFilled(ImVec2(x, min.y), ImVec2(x + segment, max.y), style::kPrimary, kHeight * 0.5f);
+            drawList->PopClipRect();
+        }
+        ImGui::Dummy(ImVec2(width, kHeight));
+    }
+
     // ---- tooltips ----
 
     void Tooltip(const char* text, const char* shortcut, const char* detail)

@@ -1,5 +1,7 @@
 // SceneSerializer.cpp
 
+#include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -83,7 +85,9 @@ namespace myengine::scene
             return root;
         }
 
-        bool DeserializeWorld(ecs::World& world, const json& root, core::Logger* logger)
+        // Builds the entities of `root` into `loadedWorld` (which must be empty). `progress` is called every few
+        // entities with the share of the work done.
+        bool BuildWorld(ecs::World& loadedWorld, const json& root, core::Logger* logger, const SceneLoadProgress& progress)
         {
             if (!root.contains("entities") || !root["entities"].is_array())
             {
@@ -91,13 +95,22 @@ namespace myengine::scene
                 return false;
             }
 
-            // Invalid component data must not leave the live world half-loaded (or save it on exit).
-            ecs::World loadedWorld;
-
             std::vector<std::pair<ecs::EntityId, ecs::EntityId>> hierarchyLinks;
 
+            const std::size_t entityCount = root["entities"].size();
+            const auto reportProgress = [&](const std::size_t done, const float from, const float to, const char* stage)
+            {
+                if (progress && (done % 32 == 0 || done == entityCount))
+                {
+                    progress(from + (to - from) * static_cast<float>(done) / static_cast<float>(std::max<std::size_t>(entityCount, 1)),
+                        stage);
+                }
+            };
+
+            std::size_t created = 0;
             for (const auto& entityJson : root["entities"])
             {
+                reportProgress(created++, 0.35f, 0.5f, "Creating entities");
                 if (!entityJson.contains("id"))
                 {
                     LogWarning(logger, "SceneSerializer: entity id is missing");
@@ -125,8 +138,10 @@ namespace myengine::scene
                 loadedWorld.CreateEntityWithId(entity);
             }
 
+            std::size_t filled = 0;
             for (const auto& entityJson : root["entities"])
             {
+                reportProgress(filled++, 0.5f, 0.95f, "Adding components");
                 const auto entity = static_cast<ecs::EntityId>(entityJson["id"].get<std::uint32_t>());
 
                 DeserializeEntity(loadedWorld, entity, entityJson);
@@ -146,7 +161,6 @@ namespace myengine::scene
                 loadedWorld.SetParent(child, parent);
             }
 
-            world.SwapEntities(loadedWorld);
             return true;
         }
     }
@@ -456,26 +470,58 @@ namespace myengine::scene
         }
     }
 
-    bool LoadWorldFromJson(ecs::World& world, const std::filesystem::path& path, core::Logger* logger)
+    bool ReadWorldFromFile(
+        ecs::World& loaded,
+        const std::filesystem::path& path,
+        core::Logger* logger,
+        const SceneLoadProgress& progress)
     {
-        std::ifstream file(path);
-        if (!file.is_open())
+        const auto millisecondsSince = [](const std::chrono::steady_clock::time_point start)
         {
-            LogWarning(logger, "SceneSerializer: failed to open file for load: " + path.u8string());
-            return false;
-        }
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        };
 
         try
         {
+            const auto start = std::chrono::steady_clock::now();
+            if (progress)
+            {
+                progress(0.0f, "Reading the file");
+            }
+            std::ifstream file(path);
+            if (!file.is_open())
+            {
+                LogWarning(logger, "SceneSerializer: failed to open file for load: " + path.u8string());
+                return false;
+            }
+            const double readMs = millisecondsSince(start);
+
+            if (progress)
+            {
+                progress(0.1f, "Parsing");
+            }
+            const auto parseStart = std::chrono::steady_clock::now();
             json root;
             file >> root;
-            if (!DeserializeWorld(world, root, logger))
+            const double parseMs = millisecondsSince(parseStart);
+
+            if (progress)
+            {
+                progress(0.35f, "Creating entities");
+            }
+            const auto buildStart = std::chrono::steady_clock::now();
+            if (!BuildWorld(loaded, root, logger, progress))
             {
                 return false;
             }
+            if (progress)
+            {
+                progress(1.0f, ""); // the last real stage stays on the screen
+            }
 
-            Log(logger, "SceneSerializer: scene loaded from " + path.u8string());
-            core::ServiceLocator::GetEventBus().Publish(SceneLoadedEvent{&world});
+            Log(logger, "SceneSerializer: scene read from " + path.u8string() + " (read " + std::to_string(static_cast<int>(readMs)) +
+                " ms, parse " + std::to_string(static_cast<int>(parseMs)) + " ms, build " +
+                std::to_string(static_cast<int>(millisecondsSince(buildStart))) + " ms)");
             return true;
         }
         catch (const std::exception& ex)
@@ -483,6 +529,26 @@ namespace myengine::scene
             LogWarning(logger, "SceneSerializer: load failed: " + std::string(ex.what()));
             return false;
         }
+    }
+
+    void CommitLoadedWorld(ecs::World& world, ecs::World& loaded)
+    {
+        world.SwapEntities(loaded);
+        core::ServiceLocator::GetEventBus().Publish(SceneLoadedEvent{&world});
+    }
+
+    bool LoadWorldFromJson(ecs::World& world, const std::filesystem::path& path, core::Logger* logger)
+    {
+        // Invalid component data must not leave the live world half-loaded (or save it on exit).
+        ecs::World loaded;
+        if (!ReadWorldFromFile(loaded, path, logger))
+        {
+            return false;
+        }
+
+        CommitLoadedWorld(world, loaded);
+        Log(logger, "SceneSerializer: scene loaded from " + path.u8string());
+        return true;
     }
 
     std::string SerializeWorldToString(const ecs::World& world)
@@ -494,14 +560,14 @@ namespace myengine::scene
     {
         try
         {
-            std::istringstream stream{std::string(jsonText)};
-            json root;
-            stream >> root;
+            const json root = json::parse(jsonText);
 
-            if (!DeserializeWorld(world, root, logger))
+            ecs::World loaded;
+            if (!BuildWorld(loaded, root, logger, {}))
             {
                 return false;
             }
+            world.SwapEntities(loaded);
 
             Log(logger, "SceneSerializer: scene restored from in-memory snapshot");
             core::ServiceLocator::GetEventBus().Publish(SceneLoadedEvent{&world});

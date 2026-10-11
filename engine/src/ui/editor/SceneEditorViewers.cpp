@@ -669,6 +669,29 @@ namespace myengine::ui
             return TextureState::Ready;
         }
 
+        // The file is still streaming: after 200 ms a spinner and its name at the centre of the canvas
+        void DrawLoadingCanvas(AssetViewerTab& tab, const ImVec2 min, const ImVec2 size)
+        {
+            const double now = ImGui::GetTime();
+            if (tab.loadingSince < 0.0)
+            {
+                tab.loadingSince = now;
+            }
+            if (now - tab.loadingSince < 0.2)
+            {
+                return;
+            }
+
+            const ImVec2 center(min.x + size.x * 0.5f, min.y + size.y * 0.5f);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            DrawSpinner(drawList, ImVec2(center.x, center.y - 10.0f), 14.0f, style::kTextDim, 2.5f);
+            const std::string text = "Loading " + std::filesystem::path(tab.path).filename().string() + "...";
+            PushFontRole(FontRole::Secondary);
+            const ImVec2 textSize = ImGui::CalcTextSize(text.c_str());
+            drawList->AddText(ImVec2(std::floor(center.x - textSize.x * 0.5f), center.y + 14.0f), style::kTextDim, text.c_str());
+            PopFontRole();
+        }
+
         void DrawCannotOpen(const ImVec2 min, const ImVec2 size, const std::string& path)
         {
             ImGui::SetCursorScreenPos(min);
@@ -713,13 +736,11 @@ namespace myengine::ui
             }
             else
             {
-                PushFontRole(FontRole::Secondary);
-                ImGui::SetCursorScreenPos(ImVec2(canvasMin.x + 16.0f, canvasMin.y + 16.0f));
-                ImGui::TextDisabled("Loading...");
-                PopFontRole();
+                DrawLoadingCanvas(tab, canvasMin, canvasSize);
             }
             return;
         }
+        tab.loadingSince = -1.0;
 
         const render::TextureData& data = texture->asset.data;
         const float textureWidth = static_cast<float>(data.width);
@@ -977,12 +998,10 @@ namespace myengine::ui
         }
         if (resources.IsLoadPending(tab.path))
         {
-            PushFontRole(FontRole::Secondary);
-            ImGui::SetCursorScreenPos(ImVec2(canvasMin.x + 16.0f, canvasMin.y + 16.0f));
-            ImGui::TextDisabled("Loading...");
-            PopFontRole();
+            DrawLoadingCanvas(tab, canvasMin, canvasSize);
             return;
         }
+        tab.loadingSince = -1.0;
 
         const ImVec2 canvasMax(canvasMin.x + canvasSize.x, canvasMin.y + canvasSize.y);
         ImDrawList* drawList = ImGui::GetWindowDrawList();
