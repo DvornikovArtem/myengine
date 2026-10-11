@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <myengine/assistant/AssistantService.h>
 
@@ -16,6 +17,7 @@ namespace myengine::core
 namespace myengine::assistant
 {
     class AssistantBridge;
+    struct AssistantApproval;
     class AssistantTools;
     class ClaudeCliBackend;
 }
@@ -52,9 +54,9 @@ namespace myengine::ui
         void DrawHeader();
         void DrawCliSettings();
         void DrawTranscript(float footerHeight);
-        void DrawMessage(const assistant::AssistantMessage& message);
-        void DrawInput();
-        void DrawApprovals();
+        void DrawMessage(const assistant::AssistantMessage& message, assistant::AssistantMessage::Kind previousKind);
+        void DrawInput(float inputHeight);
+        void DrawApprovals(const std::vector<assistant::AssistantApproval>& pending, float height);
         void Submit();
 
         std::unique_ptr<assistant::AssistantBridge> bridge_; // before service_: the backend refers to its pipe
@@ -65,6 +67,8 @@ namespace myengine::ui
         std::uint64_t drawnRevision_ = 0;
         bool scrollToBottom_ = false;
         bool reclaimFocus_ = false;
+        bool openSettingsRequested_ = false;
+        float settingsAnchor_[2]{};
         std::size_t drawnPending_ = 0;
     };
 }

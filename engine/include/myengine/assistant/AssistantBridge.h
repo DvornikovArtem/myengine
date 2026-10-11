@@ -17,6 +17,10 @@ namespace myengine::assistant
 {
     class AssistantTools;
 
+    // What the model is told when the user rejects a confirmation card; the panel recognises it to show a
+    // rejection as a neutral status, not as a tool failure
+    inline constexpr const char* kUserRejectedText = "The user rejected this action. Do not repeat it; ask what they want instead.";
+
     struct AssistantBridgeConfig
     {
         struct EditableArea

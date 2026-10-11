@@ -440,7 +440,8 @@ namespace
             {"params", {{"name", "approve"}, {"arguments", {{"tool_name", "mcp__myengine__spawn_prefab"}, {"input", spawnArguments}, {"tool_use_id", "toolu_1"}}}}}});
         PumpUntilPending(bridge, 1);
         Check(bridge.GetPending()[0].title.find("Spawn prefab 'coin' x3") != std::string::npos &&
-            bridge.GetPending()[0].detail.find("\"positions\"") != std::string::npos, "The confirmation card is wrong");
+            bridge.GetPending()[0].detail.find("\"positions\"") != std::string::npos &&
+            bridge.GetPending()[0].detail.find("[1, 0, 0]") != std::string::npos, "The confirmation card is wrong");
         json premature;
         Check(!client.TryRead(premature), "The permission answer arrived before the user decided");
         bridge.Resolve(bridge.GetPending()[0].id, true);
