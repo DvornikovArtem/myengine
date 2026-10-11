@@ -421,7 +421,7 @@ namespace myengine::ui
                 const DirectX::XMFLOAT3 center{
                     (bounds.min.x + bounds.max.x) * 0.5f, (bounds.min.y + bounds.max.y) * 0.5f, (bounds.min.z + bounds.max.z) * 0.5f};
                 const float extent = std::max({bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z, 0.001f});
-                const float scale = (view.cube ? 0.95f : 1.25f) / extent;
+                const float scale = (view.cube ? 0.78f : 1.25f) / extent;
                 const DirectX::XMMATRIX model =
                     DirectX::XMMatrixTranslation(-center.x, -center.y, -center.z) * DirectX::XMMatrixScaling(scale, scale, scale);
                 status = thumbnails->BuildDrawItem(meshPath, materialPath, scene::ToRenderMatrix(model), item, nullptr);
@@ -475,8 +475,8 @@ namespace myengine::ui
         ImGui::SetCursorScreenPos(ImVec2(buttonX, min.y + 8.0f));
         if (IconButton("##preview_reset_camera", ICON_ROTATE_3D, "Reset camera", false, true, 0, 26.0f, nullptr, IconSize::Row14))
         {
-            view.yaw = 0.55f;
-            view.pitch = 0.32f;
+            view.yaw = 0.61f;
+            view.pitch = 0.44f;
             view.distance = 3.0f;
         }
         if (openViewer != nullptr)

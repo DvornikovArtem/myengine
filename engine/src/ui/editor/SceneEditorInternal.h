@@ -554,8 +554,8 @@ namespace myengine::ui
     // The orbit camera and the shape of a material preview (Material Editor and Material Viewer)
     struct MaterialPreviewView
     {
-        float yaw = 0.55f;
-        float pitch = 0.32f;
+        float yaw = 0.61f;
+        float pitch = 0.44f;
         float distance = 3.0f;
         bool cube = false;
         bool wireframe = false;

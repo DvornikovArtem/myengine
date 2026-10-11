@@ -49,6 +49,12 @@ namespace
         }
         void DestroyTexture(render::TextureHandle) override { ++destroyedTextures; }
         void SetWireframe(bool enabled) override { wireframe = enabled; }
+        void SetTargetLighting(const render::Float3& direction, float ambient) override
+        {
+            ++lightingCalls;
+            lastAmbient = ambient;
+            lastLightY = direction.y;
+        }
         render::ShaderHandle CreateShaderProgram(const render::ShaderProgramData&) override { return {nextShader_++}; }
         render::RenderSurfaceHandle CreateSurface(HWND, std::uint32_t, std::uint32_t) override { return {1}; }
         void ResizeSurface(render::RenderSurfaceHandle, std::uint32_t, std::uint32_t) override {}
@@ -146,6 +152,9 @@ namespace
         int readbacks = 0;
         int wireframeDraws = 0;
         bool wireframe = false;
+        int lightingCalls = 0;
+        float lastAmbient = 0.0f;
+        float lastLightY = 0.0f;
         std::uint32_t lastTextureWidth = 0;
 
     private:
@@ -253,6 +262,8 @@ namespace
         Check(harness.adapter.passes == 1 && harness.adapter.drawsInTarget == 1 && harness.adapter.drawsOutsideTarget == 0,
             "A material is one sphere drawn inside one pass");
         Check(harness.adapter.viewProjections >= 1, "The thumbnail camera was not set");
+        Check(harness.adapter.lightingCalls >= 1 && harness.adapter.lastAmbient >= 0.3f && harness.adapter.lastLightY < 0.0f,
+            "A preview must have a fill light (the dark side keeps at least 30 % of the colour) from above");
         Check(!harness.adapter.inTarget, "The pass was left open");
 
         uint32_t width = 0;

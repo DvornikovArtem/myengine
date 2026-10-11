@@ -1176,8 +1176,8 @@ namespace myengine::ui
             OverlayGroup group = BeginOverlay(ImVec2(canvasMax.x - 8.0f - kOverlayButton - 4.0f, canvasMin.y + 8.0f));
             if (IconButton("##material_reset", ICON_ROTATE_3D, "Reset camera", false, true, 0, kOverlayButton, nullptr, IconSize::Row14))
             {
-                tab.materialView.yaw = 0.55f;
-                tab.materialView.pitch = 0.32f;
+                tab.materialView.yaw = 0.61f;
+                tab.materialView.pitch = 0.44f;
                 tab.materialView.distance = 3.0f;
             }
             EndOverlay(group);
