@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <functional>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -480,6 +481,20 @@ namespace myengine::ui
         return added;
     }
 
+    void AssistantPanel::PasteFromClipboard()
+    {
+        std::string pasteError;
+        const auto files = assistant_images::PasteFromClipboard(AttachmentsDirectory(), pasteError);
+        if (!files.empty())
+        {
+            AttachFiles(files);
+        }
+        else if (!pasteError.empty())
+        {
+            service_->AddNotice(pasteError);
+        }
+    }
+
     void AssistantPanel::ChooseFiles(const bool imagesOnly)
     {
         // The standard Open dialog, several files at once. It blocks the editor for as long as it is open.
@@ -522,10 +537,12 @@ namespace myengine::ui
     {
         // Parsed once per message and again only when the text grew (a streamed answer)
         auto& entry = markdown_[static_cast<std::uint64_t>(index)];
-        if (entry.size != text.size() || entry.blocks.empty())
+        const std::size_t hash = std::hash<std::string_view>{}(text);
+        if (entry.size != text.size() || entry.hash != hash || entry.blocks.empty())
         {
             entry.blocks = assistant::ParseMarkdown(text);
             entry.size = text.size();
+            entry.hash = hash;
         }
         return entry.blocks;
     }
@@ -586,6 +603,7 @@ namespace myengine::ui
         panelMax_[1] = origin.y + region.y;
 
         const bool wide = region.x >= kWideWidth;
+        wideLayout_ = wide;
         if (wide)
         {
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
@@ -621,6 +639,7 @@ namespace myengine::ui
             service_->NewConversation();
             input_.clear();
             ClearAttachments();
+            markdown_.clear();
             drawnRevision_ = 0;
             reclaimFocus_ = true;
             if (popup)
@@ -712,9 +731,12 @@ namespace myengine::ui
         const ImVec2 max(min.x + width, min.y + kRowHeight);
         auto* drawList = ImGui::GetWindowDrawList();
 
-        ImGui::SetNextItemAllowOverlap();
-        const bool pressed = ImGui::InvisibleButton("##row", ImVec2(width, kRowHeight));
-        const bool hovered = ImGui::IsItemHovered();
+        // the right 30 px belong to the menu button: the row's own button stops before it, nothing overlaps
+        const bool pressed = ImGui::InvisibleButton("##row", ImVec2(known ? width - 30.0f : width, kRowHeight));
+        // AllowWhenBlockedByActiveItem: while the button of the row is held the window is "blocked" by it,
+        // and the button must stay submitted to be released
+        const bool hovered = ImGui::IsMouseHoveringRect(min, max) &&
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
         if (selected || hovered)
         {
             drawList->AddRectFilled(min, max, selected ? style::kControl : style::kHeader, 4.0f);
@@ -1071,9 +1093,9 @@ namespace myengine::ui
         }
         settingsAnchor_[0] = menuAnchor.x + style::kPanelIconButton;
         settingsAnchor_[1] = menuAnchor.y + style::kPanelIconButton + 2.0f;
-        ImGui::EndChild();
 
-        // popups are opened from inside the header child, but live at the panel level
+        // The popups are drawn here, inside the child: OpenPopup above used its ID scope, a popup of the parent window
+        // would not be found
         DrawModelMenus();
         if (BeginMenuPopup("##header_menu"))
         {
@@ -1116,6 +1138,7 @@ namespace myengine::ui
             }
             ImGui::PopStyleVar();
         }
+        ImGui::EndChild();
     }
 
     void AssistantPanel::DrawModelMenus()
@@ -1652,7 +1675,7 @@ namespace myengine::ui
         const bool busy = service_->IsBusy();
         const bool available = service_->GetAvailabilityMessage().empty();
         const float width = ImGui::GetContentRegionAvail().x;
-        const bool narrow = width < 520.0f;
+        const bool narrow = !wideLayout_ || width < 420.0f; // the hint is for the wide layout (spec 2.5)
         auto* drawList = ImGui::GetWindowDrawList();
 
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -1761,20 +1784,11 @@ namespace myengine::ui
         PopFontRole();
         (void)inputHovered;
 
-        // Ctrl+V with a picture or files on the clipboard
+        // Ctrl+V with a picture or files on the clipboard (text is pasted by the field itself)
         if (composerFocused_ && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false) &&
             assistant_images::ClipboardHasContent() && !IsClipboardFormatAvailable(CF_UNICODETEXT))
         {
-            std::string pasteError;
-            const auto files = assistant_images::PasteFromClipboard(AttachmentsDirectory(), pasteError);
-            if (!files.empty())
-            {
-                AttachFiles(files);
-            }
-            else if (!pasteError.empty())
-            {
-                service_->AddNotice(pasteError);
-            }
+            PasteFromClipboard();
         }
 
         // bottom row: paperclip, @, hint, Send / Stop
@@ -1782,7 +1796,21 @@ namespace myengine::ui
         ImGui::SetCursorScreenPos(ImVec2(boxMin.x + 6.0f, rowY));
         if (IconButton("##attach", ICON_PAPERCLIP, "Attach pictures or files", false, available, 0, 28.0f, nullptr, IconSize::Row14))
         {
-            ChooseFiles(false);
+            ImGui::OpenPopup("##attach_menu");
+        }
+        if (BeginMenuPopup("##attach_menu"))
+        {
+            if (MenuItemIcon(ICON_FILE, "Pictures and files...", nullptr, false, true, false, 230.0f))
+            {
+                ImGui::CloseCurrentPopup();
+                ChooseFiles(false);
+            }
+            if (MenuItemIcon(ICON_COPY, "Paste from clipboard", "Ctrl+V", false, assistant_images::ClipboardHasContent(), false, 230.0f))
+            {
+                ImGui::CloseCurrentPopup();
+                PasteFromClipboard();
+            }
+            ImGui::EndPopup();
         }
         ImGui::SameLine(0.0f, 2.0f);
         if (IconButton("##mention", ICON_AT_SIGN, "Mention a project file", false, available, 0, 28.0f, nullptr, IconSize::Row14))

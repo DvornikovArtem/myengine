@@ -11,6 +11,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -130,6 +131,14 @@ namespace myengine::assistant
                 text.resize(marker);
             }
             return text;
+        }
+
+        // Does the line have `"type":"<value>"` (the CLI writes compact JSON, a tool that rewrote the file may not)
+        bool HasType(const std::string_view line, const char* value)
+        {
+            const std::string compact = std::string("\"type\":\"") + value + "\"";
+            const std::string spaced = std::string("\"type\": \"") + value + "\"";
+            return line.find(compact) != std::string_view::npos || line.find(spaced) != std::string_view::npos;
         }
 
         template <typename Callback>
@@ -452,7 +461,7 @@ namespace myengine::assistant
         ForEachLine(stream, false, [&](const std::string& line)
         {
             consumed += line.size() + 1;
-            if (line.find("\"type\":\"user\"") == std::string::npos)
+            if (!HasType(line, "user"))
             {
                 return consumed < kHeadBytes;
             }
@@ -479,7 +488,7 @@ namespace myengine::assistant
         stream.seekg(static_cast<std::streamoff>(tailStart));
         ForEachLine(stream, tailStart > 0, [&](const std::string& line)
         {
-            if (line.find("\"type\":\"custom-title\"") != std::string::npos || line.find("\"type\":\"agent-name\"") != std::string::npos)
+            if (HasType(line, "custom-title") || HasType(line, "agent-name"))
             {
                 const json record = json::parse(line, nullptr, false);
                 if (!record.is_discarded())
@@ -495,7 +504,7 @@ namespace myengine::assistant
                     }
                 }
             }
-            else if (line.find("\"type\":\"cost-state\"") != std::string::npos)
+            else if (HasType(line, "cost-state"))
             {
                 const json record = json::parse(line, nullptr, false);
                 if (!record.is_discarded() && record.contains("totalCostUSD") && record["totalCostUSD"].is_number())
@@ -520,7 +529,7 @@ namespace myengine::assistant
                     }
                 }
             }
-            else if (line.find("\"type\":\"assistant\"") != std::string::npos)
+            else if (HasType(line, "assistant"))
             {
                 const json record = json::parse(line, nullptr, false);
                 if (!record.is_discarded())
@@ -815,8 +824,8 @@ namespace myengine::assistant
             {
                 continue;
             }
-            const bool isUser = line.find("\"type\":\"user\"") != std::string_view::npos;
-            const bool isAssistant = !isUser && line.find("\"type\":\"assistant\"") != std::string_view::npos;
+            const bool isUser = HasType(line, "user");
+            const bool isAssistant = !isUser && HasType(line, "assistant");
             if (!isUser && !isAssistant)
             {
                 continue;

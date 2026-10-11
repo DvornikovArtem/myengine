@@ -73,6 +73,7 @@ namespace myengine::ui
         struct CachedMarkdown
         {
             std::size_t size = 0;
+            std::size_t hash = 0;
             std::vector<assistant::MarkdownBlock> blocks;
         };
 
@@ -92,6 +93,7 @@ namespace myengine::ui
         void Submit();
         void RefreshChats(bool force);
         void ChooseFiles(bool imagesOnly);
+        void PasteFromClipboard();
         void RemoveAttachment(std::size_t index);
         void ClearAttachments();
         const std::vector<assistant::MarkdownBlock>& Markdown(std::size_t index, const std::string& text);
@@ -126,6 +128,7 @@ namespace myengine::ui
         bool openSettingsRequested_ = false;
         bool openMentionRequested_ = false;
         bool composerFocused_ = false;
+        bool wideLayout_ = true;
         int dropAgeFrames_ = 0;
         std::unordered_map<std::string, float> thumbnailAspect_;
         float settingsAnchor_[2]{};
