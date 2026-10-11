@@ -82,6 +82,23 @@ namespace myengine::editor
         Failed,
     };
 
+    // One entity of a .prefab.json as the prefab viewer shows it
+    struct PrefabEntityInfo
+    {
+        long long id = 0;
+        long long parent = -1; // -1: a root
+        std::string name;
+        bool visible = true;
+        bool hasMesh = false;
+        std::string meshPath;
+        std::string materialPath;
+        render::Matrix4 world = render::Matrix4::Identity(); // in the space of the prefab
+        bool hasRigidbody = false;
+        std::string rigidbody; // "Gravity on \xC2\xB7 mass 3"; empty: no rigidbody
+        std::string collider;  // "Box \xC2\xB7 0.5 0.5 0.5", "Sphere \xC2\xB7 0.5"; empty: none
+        std::string script;   // "module.Class" of the first script; empty: none
+    };
+
     // A viewport that a panel draws every frame (the material preview, the viewers). The panel describes what to
     // draw, the service draws it into a render target before the scene, so the image is one frame behind.
     struct LiveViewRequest
@@ -92,6 +109,7 @@ namespace myengine::editor
         render::Matrix4 view = render::Matrix4::Identity();
         render::Matrix4 projection = render::Matrix4::Identity();
         core::Color clearColor{0.0f, 0.0f, 0.0f, 0.0f}; // transparent: the panel paints the background
+        bool wireframe = false;                         // the meshes are drawn as wireframe
         std::vector<render::DrawItem> items;
         std::vector<render::DebugLine> lines;           // grid, bounds
     };
@@ -140,6 +158,13 @@ namespace myengine::editor
             const render::Matrix4& model,
             render::DrawItem& item,
             BoundsBox* worldBounds = nullptr);
+
+        // The entities of a prefab file (by asset path), roots first in file order; false when it cannot be read
+        bool ReadPrefab(const std::string& assetPath, std::vector<PrefabEntityInfo>& out);
+
+        // Textures that a viewer builds itself (a texture with some channels masked): created between frames
+        render::TextureHandle CreateViewTexture(const render::TextureData& data);
+        void DestroyViewTexture(render::TextureHandle texture);
 
         // Describes a live view for this frame; returns the texture it was last drawn into (invalid until the first
         // render, the handle is stable while the size does not change). A view that is not submitted for a while

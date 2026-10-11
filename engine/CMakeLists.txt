@@ -147,6 +147,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
   src/ui/editor/SceneEditorProject.cpp
+  src/ui/editor/SceneEditorViewers.cpp
   src/ui/editor/SceneEditorToolbar.cpp
   src/ui/editor/SceneEditorViewport.cpp
   src/ui/ContentBrowser.cpp

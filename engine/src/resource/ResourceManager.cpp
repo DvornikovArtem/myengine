@@ -1377,6 +1377,11 @@ namespace myengine::resource
             pendingTextureLoads_.find(key) != pendingTextureLoads_.end();
     }
 
+    bool ResourceManager::LoadFailed(const std::filesystem::path& path) const
+    {
+        return failedKeys_.find(NormalizeKey(ResolvePath(path))) != failedKeys_.end();
+    }
+
     void ResourceManager::UpdateHotReload()
     {
         PumpAsyncLoads();
@@ -1587,6 +1592,7 @@ namespace myengine::resource
         auto resource = LoadShaderInternal(request.key, request.path);
         if (resource == nullptr)
         {
+            failedKeys_.insert(request.key);
             resource = BuildShaderFallback(request.key, request.path);
         }
 
@@ -1605,6 +1611,7 @@ namespace myengine::resource
         auto resource = LoadMaterialInternal(request.key, request.path);
         if (resource == nullptr)
         {
+            failedKeys_.insert(request.key);
             resource = BuildMaterialFallback(request.key, request.path);
         }
 
@@ -1617,6 +1624,7 @@ namespace myengine::resource
         const std::filesystem::path resolvedPath = ResolvePath(path);
         const std::string key = NormalizeKey(resolvedPath);
         meshCache_.erase(key);
+        failedKeys_.erase(key);
         ScheduleMeshLoad(key, resolvedPath);
 
         auto placeholder = BuildMeshPlaceholder(key, resolvedPath);
@@ -1629,6 +1637,7 @@ namespace myengine::resource
         const std::filesystem::path resolvedPath = ResolvePath(path);
         const std::string key = NormalizeKey(resolvedPath);
         textureCache_.erase(key);
+        failedKeys_.erase(key);
         ScheduleTextureLoad(key, resolvedPath);
 
         auto placeholder = BuildTexturePlaceholder(key, resolvedPath);
@@ -1640,6 +1649,7 @@ namespace myengine::resource
     {
         const std::filesystem::path resolvedPath = ResolvePath(path);
         shaderCache_.erase(NormalizeKey(resolvedPath));
+        failedKeys_.erase(NormalizeKey(resolvedPath));
         return LoadShader(resolvedPath);
     }
 
@@ -1647,6 +1657,7 @@ namespace myengine::resource
     {
         const std::filesystem::path resolvedPath = ResolvePath(path);
         materialCache_.erase(NormalizeKey(resolvedPath));
+        failedKeys_.erase(NormalizeKey(resolvedPath));
         return LoadMaterial(resolvedPath);
     }
 
@@ -1895,6 +1906,14 @@ namespace myengine::resource
             }
 
             auto resource = BuildMeshResource(request.key, request.path, std::move(*result.cpuAsset));
+            if (resource != nullptr)
+            {
+                failedKeys_.erase(request.key);
+            }
+            else
+            {
+                failedKeys_.insert(request.key);
+            }
             meshCache_.insert_or_assign(
                 request.key,
                 resource != nullptr ? resource : BuildMeshPlaceholder(request.key, request.path));
@@ -1905,6 +1924,7 @@ namespace myengine::resource
                 "ResourceManager: streaming mesh load failed " +
                 request.path.string() +
                 " error=" + ex.what());
+            failedKeys_.insert(request.key);
             meshCache_.insert_or_assign(request.key, BuildMeshPlaceholder(request.key, request.path));
         }
 
@@ -1931,6 +1951,14 @@ namespace myengine::resource
             }
 
             auto resource = BuildTextureResource(request.key, request.path, std::move(*result.cpuAsset));
+            if (resource != nullptr)
+            {
+                failedKeys_.erase(request.key);
+            }
+            else
+            {
+                failedKeys_.insert(request.key);
+            }
             textureCache_.insert_or_assign(
                 request.key,
                 resource != nullptr ? resource : BuildTexturePlaceholder(request.key, request.path));
@@ -1941,6 +1969,7 @@ namespace myengine::resource
                 "ResourceManager: streaming texture load failed " +
                 request.path.string() +
                 " error=" + ex.what());
+            failedKeys_.insert(request.key);
             textureCache_.insert_or_assign(request.key, BuildTexturePlaceholder(request.key, request.path));
         }
 

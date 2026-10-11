@@ -32,6 +32,9 @@ namespace myengine::ui
         // The preview service for the template thumbnails (null: the package icon only)
         void SetThumbnails(editor::ThumbnailService* thumbnails) { thumbnails_ = thumbnails; }
 
+        // Opens the template in the prefab viewer tab (asset path "assets/prefabs/<name>.prefab.json"); null: no button
+        void SetOpenViewer(std::function<void(const std::string& assetPath)> openViewer) { openViewer_ = std::move(openViewer); }
+
         void Clear();
         bool Select(scene::PrefabLibrary& library, const std::string& name);
         bool Reload(scene::PrefabLibrary& library); // discard the draft and load the current template
@@ -52,5 +55,6 @@ namespace myengine::ui
         std::string lastError_;
         bool conflict_ = false;
         editor::ThumbnailService* thumbnails_ = nullptr;
+        std::function<void(const std::string& assetPath)> openViewer_;
     };
 }

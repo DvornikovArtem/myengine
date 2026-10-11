@@ -40,7 +40,7 @@ else
 
 | Тип | Что рисуется |
 | --- | --- |
-| Текстура (`.png`, `.jpg`, `.bmp`, `.tga`) | сама текстура, без цели; `sourceWidth/Height` для пропорций |
+| Текстура (`.png`, `.jpg`, `.bmp`, `.tga`, `.dds`) | сама текстура, без цели; `sourceWidth/Height` для пропорций |
 | Материал (`*.material.json`) | сфера `assets/models/sphere.obj` с материалом |
 | Меш (`.obj`) | меш с предложенным материалом (`SetMaterialSuggestion`, по умолчанию `default.material.json`), кадрирование по границам, вид 3/4 сверху |
 | Префаб (`*.prefab.json`) | все меши шаблона с учётом иерархии, кадрирование по общим границам |
@@ -78,3 +78,7 @@ else
 
 - Material Editor: превью 220 px под шапкой — сфера или куб на живом виде; ЛКМ — орбита, колесо — зум (пока курсор над превью), Reset camera; переключатель Sphere | Cube на превью, категория Preview удалена. Превью-меш во вьюпорте сцены убран (`RenderSystem`, поля `materialPreviewEnabled` и `materialPreviewMaterialPath` удалены).
 - Prefabs: слева от комбо миниатюра шаблона 64 px (по наведению 256), под комбо путь и чип Saved / Unsaved, в выпадашке у строк миниатюры 20 px.
+
+## Просмотрщики (AV)
+
+Просмотрщики ассетов используют тот же сервис: `SubmitLiveView` для 3D-вида (с `wireframe`), `ReadPrefab` для дерева сущностей шаблона, `CreateViewTexture` для текстур с маской каналов. Подробности — в [asset-viewers.md](asset-viewers.md).

@@ -12,6 +12,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -158,6 +159,9 @@ namespace myengine::resource
         bool IsLoadPending(const std::filesystem::path& path) const;
         // The placeholder texture itself: a loaded texture that has this handle is a file that could not be read
         render::TextureHandle GetFallbackTextureHandle() const;
+        // True when the asset of this path could not be loaded and Load() answers with the fallback asset instead
+        // (the reason is in the log). Reset when the file is loaded again.
+        bool LoadFailed(const std::filesystem::path& path) const;
         std::vector<std::string> GetKnownMeshKeys() const;
         std::vector<std::string> GetKnownTextureKeys() const;
         std::vector<std::string> GetKnownShaderKeys() const;
@@ -257,6 +261,7 @@ namespace myengine::resource
 
         std::unordered_map<std::string, ResolvedRequest> resolvedRequests_;
 
+        std::unordered_set<std::string> failedKeys_; // assets whose load failed and that are served by a fallback
         ResourceHandle<MeshAsset> fallbackMesh_;
         ResourceHandle<TextureAsset> fallbackTexture_;
         ResourceHandle<ShaderAsset> fallbackShader_;
