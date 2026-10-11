@@ -41,6 +41,54 @@ namespace myengine::editor
         constexpr float kFovYRadians = 0.5235988f;         // 30 degrees
         constexpr auto kDiskCacheMaxAge = std::chrono::hours(24 * 30);
 
+        // Asset paths come as UTF-8 (the Content Browser, JSON) or as the narrow strings of the ResourceManager keys
+        // (the system code page): text that is valid UTF-8 is UTF-8, anything else is read as the code page
+        bool IsValidUtf8(const std::string& text)
+        {
+            std::size_t index = 0;
+            while (index < text.size())
+            {
+                const auto byte = static_cast<unsigned char>(text[index]);
+                std::size_t extra = 0;
+                if (byte < 0x80)
+                {
+                    extra = 0;
+                }
+                else if ((byte & 0xE0) == 0xC0 && byte >= 0xC2)
+                {
+                    extra = 1;
+                }
+                else if ((byte & 0xF0) == 0xE0)
+                {
+                    extra = 2;
+                }
+                else if ((byte & 0xF8) == 0xF0 && byte <= 0xF4)
+                {
+                    extra = 3;
+                }
+                else
+                {
+                    return false;
+                }
+                for (std::size_t offset = 1; offset <= extra; ++offset)
+                {
+                    if (index + offset >= text.size() || (static_cast<unsigned char>(text[index + offset]) & 0xC0) != 0x80)
+                    {
+                        return false;
+                    }
+                }
+                index += extra + 1;
+            }
+            return true;
+        }
+
+        // fs::u8path throws a system_error ("No mapping for the Unicode character exists in the target multi-byte
+        // code page") on text that is not UTF-8; nothing above the service catches it
+        fs::path PathFromText(const std::string& text)
+        {
+            return IsValidUtf8(text) ? fs::u8path(text) : fs::path(text);
+        }
+
         void HashBytes(std::uint64_t& hash, const void* data, const std::size_t size)
         {
             const auto* bytes = static_cast<const std::uint8_t*>(data);
@@ -391,7 +439,7 @@ namespace myengine::editor
 
         static std::string MakeKey(const std::string& assetPath, const std::uint32_t size)
         {
-            std::string key = ToLower(fs::u8path(assetPath).lexically_normal().generic_u8string());
+            std::string key = ToLower(PathFromText(assetPath).lexically_normal().generic_u8string());
             key += '@';
             key += std::to_string(size);
             return key;
@@ -447,12 +495,12 @@ namespace myengine::editor
         void CollectDependencies(const Entry& entry, std::vector<fs::path>& out)
         {
             out.clear();
-            const fs::path source = Resolve(fs::u8path(entry.assetPath));
+            const fs::path source = Resolve(PathFromText(entry.assetPath));
             out.push_back(source);
 
             const auto addMaterial = [&](const std::string& materialPath)
             {
-                const fs::path materialFile = Resolve(fs::u8path(materialPath));
+                const fs::path materialFile = Resolve(PathFromText(materialPath));
                 out.push_back(materialFile);
                 std::ifstream stream(materialFile, std::ios::binary);
                 if (!stream.is_open())
@@ -473,7 +521,7 @@ namespace myengine::editor
                     const std::string name = descriptor.value(key, std::string());
                     if (!name.empty())
                     {
-                        out.push_back(Resolve(materialFile.parent_path() / fs::u8path(name)));
+                        out.push_back(Resolve(materialFile.parent_path() / PathFromText(name)));
                     }
                 }
             };
@@ -494,7 +542,7 @@ namespace myengine::editor
                     {
                         for (const auto& mesh : meshes)
                         {
-                            out.push_back(Resolve(fs::u8path(mesh.meshPath)));
+                            out.push_back(Resolve(PathFromText(mesh.meshPath)));
                             addMaterial(mesh.materialPath);
                         }
                     }
@@ -590,19 +638,19 @@ namespace myengine::editor
             std::vector<render::DrawItem>& items,
             Bounds& bounds)
         {
-            auto mesh = resources.Load<resource::MeshAsset>(meshPath);
-            auto material = resources.Load<resource::MaterialAsset>(materialPath);
+            auto mesh = resources.Load<resource::MeshAsset>(PathFromText(meshPath));
+            auto material = resources.Load<resource::MaterialAsset>(PathFromText(materialPath));
             if (mesh == nullptr || material == nullptr)
             {
                 return Build::Failed;
             }
-            auto shader = resources.Load<resource::ShaderAsset>(material->asset.shaderPath);
-            auto texture = resources.Load<resource::TextureAsset>(material->asset.texturePath);
+            auto shader = resources.Load<resource::ShaderAsset>(PathFromText(material->asset.shaderPath));
+            auto texture = resources.Load<resource::TextureAsset>(PathFromText(material->asset.texturePath));
             if (shader == nullptr || texture == nullptr)
             {
                 return Build::Failed;
             }
-            if (resources.IsLoadPending(meshPath) || resources.IsLoadPending(material->asset.texturePath))
+            if (resources.IsLoadPending(PathFromText(meshPath)) || resources.IsLoadPending(PathFromText(material->asset.texturePath)))
             {
                 return Build::Pending;
             }
@@ -655,7 +703,7 @@ namespace myengine::editor
                 case ThumbnailKind::Prefab:
                 {
                     std::vector<PrefabMesh> meshes;
-                    if (!ParsePrefab(Resolve(fs::u8path(entry.assetPath)), meshes) || meshes.empty())
+                    if (!ParsePrefab(Resolve(PathFromText(entry.assetPath)), meshes) || meshes.empty())
                     {
                         return Build::Failed;
                     }
@@ -834,7 +882,7 @@ namespace myengine::editor
     Thumbnail ThumbnailService::Request(const std::string& assetPath, const std::uint32_t size)
     {
         Thumbnail result;
-        result.kind = KindOf(fs::u8path(assetPath));
+        result.kind = KindOf(PathFromText(assetPath));
         if (assetPath.empty() || result.kind == ThumbnailKind::Other)
         {
             return result;
@@ -843,8 +891,8 @@ namespace myengine::editor
         if (result.kind == ThumbnailKind::Texture)
         {
             // The texture is its own thumbnail (ImGui scales it); the handle is read each time, hot reload replaces it
-            auto texture = impl_->resources.Load<resource::TextureAsset>(assetPath);
-            if (texture != nullptr && !impl_->resources.IsLoadPending(assetPath) && texture->asset.gpuHandle.IsValid())
+            auto texture = impl_->resources.Load<resource::TextureAsset>(PathFromText(assetPath));
+            if (texture != nullptr && !impl_->resources.IsLoadPending(PathFromText(assetPath)) && texture->asset.gpuHandle.IsValid())
             {
                 result.texture = texture->asset.gpuHandle;
                 result.ready = true;
@@ -1074,10 +1122,10 @@ namespace myengine::editor
     void ThumbnailService::Invalidate(const std::string& assetPath)
     {
         Impl& impl = *impl_;
-        const std::string wanted = ToLower(fs::u8path(assetPath).lexically_normal().generic_u8string());
+        const std::string wanted = ToLower(PathFromText(assetPath).lexically_normal().generic_u8string());
         for (auto& [key, entry] : impl.entries)
         {
-            if (ToLower(fs::u8path(entry.assetPath).lexically_normal().generic_u8string()) == wanted)
+            if (ToLower(PathFromText(entry.assetPath).lexically_normal().generic_u8string()) == wanted)
             {
                 impl.Requeue(key, entry);
             }

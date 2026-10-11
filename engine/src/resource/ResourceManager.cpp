@@ -141,9 +141,37 @@ namespace myengine::resource
             return value;
         }
 
+        // The narrow text of a path (cache keys, logs). path::string() converts to the system code page and throws
+        // a system_error ("No mapping for the Unicode character exists in the target multi-byte code page") for a
+        // character that the page does not have (an emoji, "é" on windows-1251); nothing above catches it, so the
+        // editor aborted. Such a name is written as UTF-8 instead: a key only has to be the same for the same path.
+        std::string NarrowText(const std::filesystem::path& path)
+        {
+            try
+            {
+                return path.string();
+            }
+            catch (const std::system_error&)
+            {
+                return path.u8string();
+            }
+        }
+
+        std::string GenericNarrowText(const std::filesystem::path& path)
+        {
+            try
+            {
+                return path.generic_string();
+            }
+            catch (const std::system_error&)
+            {
+                return path.generic_u8string();
+            }
+        }
+
         bool IsMeshBinaryPath(const std::filesystem::path& path)
         {
-            return ToLower(path.extension().string()) == ".myemesh";
+            return ToLower(NarrowText(path.extension())) == ".myemesh";
         }
 
         bool IsBuiltinSpherePath(const std::filesystem::path& path)
@@ -151,14 +179,14 @@ namespace myengine::resource
             constexpr char kSphereSuffix[] = "assets/models/sphere.obj";
             constexpr std::size_t kSphereSuffixLength = sizeof(kSphereSuffix) - 1;
 
-            const std::string normalizedPath = ToLower(path.generic_string());
+            const std::string normalizedPath = ToLower(GenericNarrowText(path));
             return normalizedPath.size() >= kSphereSuffixLength &&
                 normalizedPath.compare(normalizedPath.size() - kSphereSuffixLength, kSphereSuffixLength, kSphereSuffix) == 0;
         }
 
         bool IsTextureBinaryPath(const std::filesystem::path& path)
         {
-            return ToLower(path.extension().string()) == ".myetex";
+            return ToLower(NarrowText(path.extension())) == ".myetex";
         }
 
         std::filesystem::path BuildMeshBinaryPath(const std::filesystem::path& sourcePath)
@@ -414,7 +442,7 @@ namespace myengine::resource
             DirectX::ScratchImage loaded;
             DirectX::TexMetadata metadata{};
 
-            const std::string extension = ToLower(path.extension().string());
+            const std::string extension = ToLower(NarrowText(path.extension()));
             HRESULT hr = E_FAIL;
 
             if (extension == ".dds")
@@ -436,7 +464,7 @@ namespace myengine::resource
 
             if (FAILED(hr))
             {
-                logger.Warning("ResourceManager: DirectXTex load failed for " + path.string());
+                logger.Warning("ResourceManager: DirectXTex load failed for " + NarrowText(path));
                 return false;
             }
 
@@ -475,7 +503,7 @@ namespace myengine::resource
 
                 if (FAILED(convertResult))
                 {
-                    logger.Warning("ResourceManager: DirectXTex RGBA8 conversion failed for " + path.string());
+                    logger.Warning("ResourceManager: DirectXTex RGBA8 conversion failed for " + NarrowText(path));
                     return false;
                 }
 
@@ -484,7 +512,7 @@ namespace myengine::resource
 
             if (finalImage == nullptr || !CopyRgba8Image(*finalImage, outTexture))
             {
-                logger.Warning("ResourceManager: DirectXTex image copy failed for " + path.string());
+                logger.Warning("ResourceManager: DirectXTex image copy failed for " + NarrowText(path));
                 return false;
             }
 
@@ -654,15 +682,15 @@ namespace myengine::resource
                 return asset;
             }
 
-            if (ToLower(path.extension().string()) != ".obj")
+            if (ToLower(NarrowText(path.extension())) != ".obj")
             {
-                throw std::runtime_error("Unsupported mesh format without Assimp runtime: " + path.string());
+                throw std::runtime_error("Unsupported mesh format without Assimp runtime: " + NarrowText(path));
             }
 
             std::ifstream stream(path);
             if (!stream.is_open())
             {
-                throw std::runtime_error("Failed to open OBJ mesh: " + path.string());
+                throw std::runtime_error("Failed to open OBJ mesh: " + NarrowText(path));
             }
 
             MeshCpuAsset asset;
@@ -829,7 +857,7 @@ namespace myengine::resource
 
             if (asset.data.vertices.empty() || asset.data.indices.empty())
             {
-                throw std::runtime_error("OBJ contains no renderable triangles: " + path.string());
+                throw std::runtime_error("OBJ contains no renderable triangles: " + NarrowText(path));
             }
 
             return asset;
@@ -849,7 +877,7 @@ namespace myengine::resource
             int height = 0;
             int channels = 0;
 
-            stbi_uc* pixels = stbi_load(path.string().c_str(), &width, &height, &channels, kTextureRequestedChannels);
+            stbi_uc* pixels = stbi_load(NarrowText(path).c_str(), &width, &height, &channels, kTextureRequestedChannels);
             if (pixels == nullptr)
             {
                 throw std::runtime_error("stb_image failed to load texture");
@@ -1147,7 +1175,7 @@ namespace myengine::resource
         {
             ZoneScoped;
 #ifdef TRACY_ENABLE
-            const std::string zonePath = resolvedPath.filename().string();
+            const std::string zonePath = NarrowText(resolvedPath.filename());
             ZoneText(zonePath.c_str(), zonePath.size());
 #endif
 
@@ -1177,7 +1205,7 @@ namespace myengine::resource
         {
             ZoneScoped;
 #ifdef TRACY_ENABLE
-            const std::string zonePath = resolvedPath.filename().string();
+            const std::string zonePath = NarrowText(resolvedPath.filename());
             ZoneText(zonePath.c_str(), zonePath.size());
 #endif
 
@@ -1257,7 +1285,7 @@ namespace myengine::resource
                         continue;
                     }
 
-                    const std::string relativeText = relativePath.generic_string();
+                    const std::string relativeText = GenericNarrowText(relativePath);
                     if (relativeText == ".." || relativeText.rfind("../", 0) == 0)
                     {
                         continue;
@@ -1267,7 +1295,7 @@ namespace myengine::resource
                     break;
                 }
 
-                keys.push_back(ToLower(stableKey.empty() ? assetPath.lexically_normal().generic_string() : stableKey));
+                keys.push_back(ToLower(stableKey.empty() ? GenericNarrowText(assetPath.lexically_normal()) : stableKey));
             }
 
             std::sort(keys.begin(), keys.end());
@@ -1312,7 +1340,7 @@ namespace myengine::resource
         std::ifstream stream(resolvedPath);
         if (!stream.is_open())
         {
-            logger_.Warning("ResourceManager: manifest open failed: " + resolvedPath.string());
+            logger_.Warning("ResourceManager: manifest open failed: " + NarrowText(resolvedPath));
             return false;
         }
 
@@ -1353,7 +1381,7 @@ namespace myengine::resource
 
             logger_.Info(
                 "ResourceManager: manifest loaded " +
-                resolvedPath.string() +
+                NarrowText(resolvedPath) +
                 " meshes=" + std::to_string(meshCount) +
                 " textures=" + std::to_string(textureCount) +
                 " shaders=" + std::to_string(shaderCount) +
@@ -1364,7 +1392,7 @@ namespace myengine::resource
         {
             logger_.Error(
                 "ResourceManager: manifest parse failed " +
-                resolvedPath.string() +
+                NarrowText(resolvedPath) +
                 " error=" + ex.what());
             return false;
         }
@@ -1410,7 +1438,7 @@ namespace myengine::resource
                     relativePath = assetPath;
                 }
 
-                return relativePath.generic_string();
+                return GenericNarrowText(relativePath);
             };
 
         json descriptor;
@@ -1424,18 +1452,18 @@ namespace myengine::resource
             std::ofstream stream(resolvedPath);
             if (!stream.is_open())
             {
-                logger_.Warning("ResourceManager: material save open failed: " + resolvedPath.string());
+                logger_.Warning("ResourceManager: material save open failed: " + NarrowText(resolvedPath));
                 return false;
             }
 
             stream << descriptor.dump(2);
             if (!stream.good())
             {
-                logger_.Warning("ResourceManager: material save write failed: " + resolvedPath.string());
+                logger_.Warning("ResourceManager: material save write failed: " + NarrowText(resolvedPath));
                 return false;
             }
 
-            logger_.Info("ResourceManager: material saved " + resolvedPath.string());
+            logger_.Info("ResourceManager: material saved " + NarrowText(resolvedPath));
             Reload<MaterialAsset>(resolvedPath);
             return true;
         }
@@ -1443,7 +1471,7 @@ namespace myengine::resource
         {
             logger_.Warning(
                 "ResourceManager: material save failed: " +
-                resolvedPath.string() +
+                NarrowText(resolvedPath) +
                 " error=" + ex.what());
             return false;
         }
@@ -1712,7 +1740,7 @@ namespace myengine::resource
 
         for (const auto& path : changed)
         {
-            logger_.Info("ResourceManager: hot reload mesh " + path.string());
+            logger_.Info("ResourceManager: hot reload mesh " + NarrowText(path));
             Reload<MeshAsset>(path);
         }
     }
@@ -1732,7 +1760,7 @@ namespace myengine::resource
 
         for (const auto& path : changed)
         {
-            logger_.Info("ResourceManager: hot reload texture " + path.string());
+            logger_.Info("ResourceManager: hot reload texture " + NarrowText(path));
             Reload<TextureAsset>(path);
         }
     }
@@ -1752,7 +1780,7 @@ namespace myengine::resource
 
         for (const auto& path : changed)
         {
-            logger_.Info("ResourceManager: hot reload shader " + path.string());
+            logger_.Info("ResourceManager: hot reload shader " + NarrowText(path));
             Reload<ShaderAsset>(path);
         }
     }
@@ -1772,7 +1800,7 @@ namespace myengine::resource
 
         for (const auto& path : changed)
         {
-            logger_.Info("ResourceManager: hot reload material " + path.string());
+            logger_.Info("ResourceManager: hot reload material " + NarrowText(path));
             Reload<MaterialAsset>(path);
         }
     }
@@ -1790,7 +1818,7 @@ namespace myengine::resource
         request->generation = ++meshLoadGenerations_[key];
         pendingMeshLoads_.insert_or_assign(key, request->generation);
 
-        logger_.Info("ResourceManager: scheduled streaming mesh load " + path.string());
+        logger_.Info("ResourceManager: scheduled streaming mesh load " + NarrowText(path));
         jobs::Execute(streamingContext_, [this, request](jobs::JobArgs)
         {
             if (shuttingDown_)
@@ -1839,7 +1867,7 @@ namespace myengine::resource
         request->generation = ++textureLoadGenerations_[key];
         pendingTextureLoads_.insert_or_assign(key, request->generation);
 
-        logger_.Info("ResourceManager: scheduled streaming texture load " + path.string());
+        logger_.Info("ResourceManager: scheduled streaming texture load " + NarrowText(path));
         jobs::Execute(streamingContext_, [this, request](jobs::JobArgs)
         {
             if (shuttingDown_)
@@ -1903,7 +1931,7 @@ namespace myengine::resource
         {
             logger_.Warning(
                 "ResourceManager: streaming mesh load failed " +
-                request.path.string() +
+                NarrowText(request.path) +
                 " error=" + ex.what());
             meshCache_.insert_or_assign(request.key, BuildMeshPlaceholder(request.key, request.path));
         }
@@ -1939,7 +1967,7 @@ namespace myengine::resource
         {
             logger_.Warning(
                 "ResourceManager: streaming texture load failed " +
-                request.path.string() +
+                NarrowText(request.path) +
                 " error=" + ex.what());
             textureCache_.insert_or_assign(request.key, BuildTexturePlaceholder(request.key, request.path));
         }
@@ -1954,7 +1982,7 @@ namespace myengine::resource
     {
         if (!IsValidMeshData(cpuAsset.data))
         {
-            logger_.Warning("ResourceManager: invalid mesh data for " + path.string());
+            logger_.Warning("ResourceManager: invalid mesh data for " + NarrowText(path));
             return nullptr;
         }
 
@@ -1963,13 +1991,13 @@ namespace myengine::resource
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
         if (!asset.gpuHandle.IsValid())
         {
-            logger_.Warning("ResourceManager: UploadMesh failed for " + path.string());
+            logger_.Warning("ResourceManager: UploadMesh failed for " + NarrowText(path));
             return nullptr;
         }
 
         logger_.Info(
             "ResourceManager: mesh ready " +
-            path.string() +
+            NarrowText(path) +
             " vertices=" + std::to_string(asset.data.vertices.size()) +
             " indices=" + std::to_string(asset.data.indices.size()) +
             " source=" + std::string(cpuAsset.loadedFromBinaryCache ? "binary" : "source"));
@@ -1987,13 +2015,13 @@ namespace myengine::resource
         asset.gpuHandle = renderAdapter_.CreateTexture(asset.data);
         if (!asset.gpuHandle.IsValid())
         {
-            logger_.Warning("ResourceManager: CreateTexture failed for " + path.string());
+            logger_.Warning("ResourceManager: CreateTexture failed for " + NarrowText(path));
             return nullptr;
         }
 
         logger_.Info(
             "ResourceManager: texture ready " +
-            path.string() +
+            NarrowText(path) +
             " size=" + std::to_string(asset.data.width) +
             "x" + std::to_string(asset.data.height) +
             " source=" + std::string(cpuAsset.loadedFromBinaryCache ? "binary" : "source"));
@@ -2026,13 +2054,13 @@ namespace myengine::resource
 
         try
         {
-            const std::string extension = ToLower(path.extension().string());
+            const std::string extension = ToLower(NarrowText(path.extension()));
             if (extension == ".json")
             {
                 std::ifstream stream(path);
                 if (!stream.is_open())
                 {
-                    logger_.Warning("ResourceManager: shader descriptor open failed: " + path.string());
+                    logger_.Warning("ResourceManager: shader descriptor open failed: " + NarrowText(path));
                     return nullptr;
                 }
 
@@ -2042,7 +2070,7 @@ namespace myengine::resource
                 const std::string sourceValue = descriptor.value("source", std::string());
                 if (sourceValue.empty())
                 {
-                    logger_.Warning("ResourceManager: shader descriptor has empty source: " + path.string());
+                    logger_.Warning("ResourceManager: shader descriptor has empty source: " + NarrowText(path));
                     return nullptr;
                 }
 
@@ -2063,7 +2091,7 @@ namespace myengine::resource
         {
             logger_.Warning(
                 "ResourceManager: shader descriptor parse failed: " +
-                path.string() +
+                NarrowText(path) +
                 " error=" + ex.what());
             return nullptr;
         }
@@ -2073,11 +2101,11 @@ namespace myengine::resource
         asset.gpuHandle = renderAdapter_.CreateShaderProgram(asset.program);
         if (!asset.gpuHandle.IsValid())
         {
-            logger_.Warning("ResourceManager: shader compile failed: " + path.string());
+            logger_.Warning("ResourceManager: shader compile failed: " + NarrowText(path));
             return BuildShaderFallback(key, path, dependencies);
         }
 
-        logger_.Info("ResourceManager: shader loaded " + path.string());
+        logger_.Info("ResourceManager: shader loaded " + NarrowText(path));
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
     }
 
@@ -2088,7 +2116,7 @@ namespace myengine::resource
         std::ifstream stream(path);
         if (!stream.is_open())
         {
-            logger_.Warning("ResourceManager: material open failed: " + path.string());
+            logger_.Warning("ResourceManager: material open failed: " + NarrowText(path));
             return nullptr;
         }
 
@@ -2101,7 +2129,7 @@ namespace myengine::resource
         {
             logger_.Warning(
                 "ResourceManager: material parse failed: " +
-                path.string() +
+                NarrowText(path) +
                 " error=" + ex.what());
             return nullptr;
         }
@@ -2113,14 +2141,14 @@ namespace myengine::resource
 
         if (asset.shaderPath.empty() || asset.texturePath.empty())
         {
-            logger_.Warning("ResourceManager: material descriptor incomplete: " + path.string());
+            logger_.Warning("ResourceManager: material descriptor incomplete: " + NarrowText(path));
             return nullptr;
         }
 
         Load<ShaderAsset>(asset.shaderPath);
         Load<TextureAsset>(asset.texturePath);
 
-        logger_.Info("ResourceManager: material loaded " + path.string());
+        logger_.Info("ResourceManager: material loaded " + NarrowText(path));
         return CreateResource(key, path, std::move(asset), BuildDependencies({path}));
     }
 
@@ -2148,7 +2176,7 @@ namespace myengine::resource
 
     std::string ResourceManager::NormalizeKey(const std::filesystem::path& path) const
     {
-        return ToLower(path.lexically_normal().generic_string());
+        return ToLower(GenericNarrowText(path.lexically_normal()));
     }
 
     std::vector<ResourceDependency> ResourceManager::BuildDependencies(
@@ -2286,7 +2314,7 @@ namespace myengine::resource
 
     const ResourceManager::ResolvedRequest& ResourceManager::ResolveRequest(const std::filesystem::path& path)
     {
-        const std::string requested = path.generic_string();
+        const std::string requested = GenericNarrowText(path);
         if (const auto it = resolvedRequests_.find(requested); it != resolvedRequests_.end())
         {
             return it->second;

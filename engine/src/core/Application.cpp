@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <filesystem>
 #include <sstream>
 #include <string>
@@ -64,6 +65,26 @@ namespace myengine::core
             std::wstring result(sizeNeeded - 1, L'\0');
             MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, result.data(), sizeNeeded);
             return result;
+        }
+
+        // A thumbnail is never worth the editor: an exception from the preview service is logged (once) and the
+        // frame goes on, otherwise it leaves the main loop and std::terminate aborts the process
+        template <typename Step>
+        void RunThumbnailStep(Logger& logger, const char* name, Step&& step)
+        {
+            static bool reported = false;
+            try
+            {
+                step();
+            }
+            catch (const std::exception& error)
+            {
+                if (!reported)
+                {
+                    reported = true;
+                    logger.Error(std::string("ThumbnailService::") + name + " failed: " + error.what());
+                }
+            }
         }
 
         std::filesystem::path GetExecutableDirectory()
@@ -511,7 +532,7 @@ namespace myengine::core
                 }
                 if (thumbnailService_ != nullptr)
                 {
-                    thumbnailService_->Update();
+                    RunThumbnailStep(logger_, "Update", [&] { thumbnailService_->Update(); });
                 }
             }
             const auto hotReloadEndTime = std::chrono::steady_clock::now();
@@ -1739,7 +1760,7 @@ namespace myengine::core
             // Asset thumbnails are drawn into their own targets before the scene and the UI use the back buffer
             if (thumbnailService_ != nullptr)
             {
-                thumbnailService_->Render(runtime.surface);
+                RunThumbnailStep(logger_, "Render", [&] { thumbnailService_->Render(runtime.surface); });
             }
 
             render::IntRect renderRegion{};

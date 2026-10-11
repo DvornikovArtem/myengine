@@ -352,6 +352,53 @@ namespace
         Check(harness.service->GetStats().diskHits == 1 && harness.adapter.createdTextures >= 1, "The image must come from the disk cache");
     }
 
+    // Names that the system code page cannot hold (an emoji, "é" on windows-1251) and names that are in the code
+    // page already (not valid UTF-8, as the narrow keys of the ResourceManager are): path::string() and
+    // fs::u8path() used to throw "No mapping for the Unicode character exists in the target multi-byte code page"
+    // out of the service and the ResourceManager. Nothing up the stack catches it: the editor aborted.
+    void TestNonAsciiPaths(const fs::path& cache)
+    {
+        Harness harness(cache);
+        const std::string meshText = u8"assets/models/Игрок/И.obj";
+        const std::string emojiText = u8"assets/models/\U0001F600.obj";
+        const std::string materialText = u8"assets/materials/Имя.material.json";
+        const std::string prefabText = u8"assets/prefabs/Игрок.prefab.json";
+
+        for (const std::string* text : {&meshText, &emojiText})
+        {
+            const auto mesh = harness.service->Request(*text, 128);
+            Check(!mesh.ready && mesh.kind == editor::ThumbnailKind::Mesh, "A non-ASCII mesh path must be a placeholder of its kind");
+        }
+        Check(harness.service->Request(materialText, 64).kind == editor::ThumbnailKind::Material, "A non-ASCII material path must not throw");
+        Check(harness.service->Request(prefabText, 64).kind == editor::ThumbnailKind::Prefab, "A non-ASCII prefab path must not throw");
+        Check(harness.service->Request(u8"assets/textures/\U0001F600.png", 64).kind == editor::ThumbnailKind::Texture,
+            "A non-ASCII texture path must not throw");
+
+        // Update and Render walk the queue: the signature, the disk cache name, the draw list, the loads
+        for (int frame = 0; frame < 40; ++frame)
+        {
+            for (const std::string* text : {&meshText, &emojiText, &materialText, &prefabText})
+            {
+                harness.service->Request(*text, 128);
+            }
+            harness.Frame();
+        }
+        harness.service->Invalidate(meshText);
+        harness.service->InvalidateAll();
+        Check(harness.service->GetStats().entries >= 4, "The non-ASCII entries must stay tracked (failed or queued)");
+
+        // The same names in the system code page, as the narrow keys of the ResourceManager come (windows-1251
+        // here): not valid UTF-8, must not reach a strict conversion
+        const std::string codePageText = "assets/models/\xEF\xEA/\xF1\xE5\xF2\xEA\xE0.obj";
+        Check(harness.service->Request(codePageText, 128).kind == editor::ThumbnailKind::Mesh, "A code page mesh path must not throw");
+        for (int frame = 0; frame < 10; ++frame)
+        {
+            harness.service->Request(codePageText, 128);
+            harness.Frame();
+        }
+        harness.service->Invalidate(codePageText);
+    }
+
     // Changing the file changes the signature: the image is dropped and drawn again (no stale image from disk)
     void TestInvalidationByFileTime(const fs::path& workDirectory)
     {
@@ -402,6 +449,7 @@ int main()
         TestEviction();
         TestDiskCacheReuse(cache);
         TestInvalidationByFileTime(directory);
+        TestNonAsciiPaths(directory / "nonascii");
 
         std::cout << "OK: thumbnail service: placeholder and image, kinds, budget, pool eviction, disk cache, invalidation\n";
     }
