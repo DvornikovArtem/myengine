@@ -1013,7 +1013,7 @@ namespace myengine::editor
         {
             return ThumbnailKind::Mesh;
         }
-        if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp" || extension == ".tga")
+        if (extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp" || extension == ".tga" || extension == ".dds")
         {
             return ThumbnailKind::Texture;
         }
@@ -1127,7 +1127,8 @@ namespace myengine::editor
         {
             // The texture is its own thumbnail (ImGui scales it); the handle is read each time, hot reload replaces it
             auto texture = impl_->resources.Load<resource::TextureAsset>(PathFromText(assetPath));
-            if (texture != nullptr && !impl_->resources.IsLoadPending(PathFromText(assetPath)) && texture->asset.gpuHandle.IsValid())
+            if (texture != nullptr && !impl_->resources.IsLoadPending(PathFromText(assetPath)) && texture->asset.gpuHandle.IsValid() &&
+                texture->asset.gpuHandle.value != impl_->resources.GetFallbackTextureHandle().value)
             {
                 result.texture = texture->asset.gpuHandle;
                 result.ready = true;

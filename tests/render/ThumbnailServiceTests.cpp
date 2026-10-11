@@ -245,6 +245,7 @@ namespace
         Check(ThumbnailService::KindOf("assets/materials/gold.material.json") == ThumbnailKind::Material, "material kind");
         Check(ThumbnailService::KindOf("assets/prefabs/coin.prefab.json") == ThumbnailKind::Prefab, "prefab kind");
         Check(ThumbnailService::KindOf("assets/textures/Debug.BMP") == ThumbnailKind::Texture, "texture kind ignores case");
+        Check(ThumbnailService::KindOf("assets/textures/african_head_diffuse.dds") == ThumbnailKind::Texture, "dds is a texture");
         Check(ThumbnailService::KindOf("assets/scripts/coin.py") == ThumbnailKind::Other, "script has no preview");
         Check(ThumbnailService::BucketSize(10) == 64 && ThumbnailService::BucketSize(100) == 128 && ThumbnailService::BucketSize(200) == 256 &&
               ThumbnailService::BucketSize(900) == 256, "sizes are rounded to 64 / 128 / 256");

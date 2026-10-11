@@ -242,9 +242,9 @@ namespace myengine::ui
                                 RecordSceneMutationImmediate("Change Material", beforeMaterialSnapshot);
                             }
 
-                            // Third column: the same action as the old "Open Material Editor" button
+                            // Third column: opens the Material Editor (like the buttons of Mesh and Texture, it leaves the entity)
                             ImGui::TableSetColumnIndex(2);
-                            if (IconButton("##open_material_editor", ICON_SQUARE_PEN, "Open in Material Editor", false, true, 0, 22.0f, nullptr, IconSize::Row14))
+                            if (IconButton("##open_material_editor", ICON_EXTERNAL_LINK, "Open in Material Editor", false, true, 0, 22.0f, nullptr, IconSize::Row14))
                             {
                                 editorState.showMaterialEditor = true;
                                 ImGui::SetWindowFocus(kMaterialEditorWindowName);

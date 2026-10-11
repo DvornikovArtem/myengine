@@ -24,6 +24,7 @@ namespace myengine::ui
     namespace
     {
         constexpr float kPanelWidth = 344.0f;
+        constexpr float kMaterialPanelWidth = 380.0f; // pickers and the tint need room (spec: 360-380)
         constexpr float kSeparatorWidth = 2.0f;
         constexpr float kOverlayButton = 26.0f;
         constexpr float kFovYRadians = 0.5585f; // 32 degrees
@@ -548,7 +549,8 @@ namespace myengine::ui
             if (visible)
             {
                 const ImVec2 available = ImGui::GetContentRegionAvail();
-                const float panelWidth = std::clamp(kPanelWidth, 220.0f, std::max(available.x * 0.5f, 220.0f));
+                const float wantedPanelWidth = tab.type == AssetViewerType::Material ? kMaterialPanelWidth : kPanelWidth;
+                const float panelWidth = std::clamp(wantedPanelWidth, 220.0f, std::max(available.x * 0.5f, 220.0f));
                 const float canvasWidth = std::max(available.x - panelWidth - kSeparatorWidth, 40.0f);
 
                 ImGui::PushStyleColor(ImGuiCol_ChildBg, style::ToVec4(kCanvasColor));
@@ -1400,7 +1402,17 @@ namespace myengine::ui
 
         // The tree: roots first, children below their parent
         const float treeHeight = std::max(ImGui::GetContentRegionAvail().y * 0.5f - 40.0f, 80.0f);
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, style::ToVec4(style::kRecessed));
+        // The well (kRecessed) of the tree, as in the Outliner: drawn under the child so that it shows whatever the
+        // style colours are
+        {
+            const ImVec2 wellMin = ImGui::GetCursorScreenPos();
+            const ImVec2 wellMax(wellMin.x + ImGui::GetContentRegionAvail().x, wellMin.y + treeHeight);
+            ImDrawList* panelDraw = ImGui::GetWindowDrawList();
+            panelDraw->AddRectFilled(wellMin, wellMax, style::kRecessed);
+            panelDraw->AddLine(wellMin, ImVec2(wellMax.x, wellMin.y), style::kInput);
+            panelDraw->AddLine(ImVec2(wellMin.x, wellMax.y - 1.0f), ImVec2(wellMax.x, wellMax.y - 1.0f), style::kInput);
+        }
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 4.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         ImGui::BeginChild("##prefab_tree", ImVec2(0.0f, treeHeight), ImGuiChildFlags_None);
