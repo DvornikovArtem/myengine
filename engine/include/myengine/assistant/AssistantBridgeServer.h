@@ -17,6 +17,7 @@ namespace myengine::assistant
         std::uint64_t connection = 0; // which connection it came from
         std::string op;               // "tools" or "call"
         std::string tool;
+        std::string client; // the MCP client's own name (initialize.clientInfo.name), empty when it did not give one
         nlohmann::json arguments = nlohmann::json::object();
     };
 

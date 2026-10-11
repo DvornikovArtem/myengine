@@ -19,6 +19,7 @@ namespace myengine::assistant
     struct ChatInfo
     {
         std::string id;        // CLI session id (a uuid)
+        std::string backend;   // "claude" or "codex": the CLI the chat belongs to (empty: an old entry, Claude)
         std::string title;
         std::string model;     // setting of the chat: alias or full name, empty = CLI default
         std::string effort;    // setting of the chat: low / medium / high / xhigh / max, empty = CLI default
@@ -38,7 +39,8 @@ namespace myengine::assistant
     {
     public:
         // indexFile: <project>/Saved/assistant/chats.json. sessionsDirectory: where the CLI writes this project's sessions
-        ChatStore(std::filesystem::path indexFile, std::filesystem::path sessionsDirectory);
+        // codexDirectory: where CodexCliBackend keeps the events of its threads (<project>/Saved/assistant/codex); empty: none
+        ChatStore(std::filesystem::path indexFile, std::filesystem::path sessionsDirectory, std::filesystem::path codexDirectory = {});
 
         // "C:\\Users\\me\\Game Dev\\proj" -> "C--Users-me-Game-Dev-proj": the folder name the CLI uses for a working directory
         static std::string EncodeProjectDirectory(const std::filesystem::path& workingDirectory);
@@ -54,10 +56,12 @@ namespace myengine::assistant
         const ChatInfo* Find(const std::string& id) const;
         const std::filesystem::path& GetSessionsDirectory() const { return sessionsDirectory_; }
         const std::filesystem::path& GetIndexFile() const { return indexFile_; }
+        const std::filesystem::path& GetCodexDirectory() const { return codexDirectory_; }
 
         // A chat that the assistant has just talked in: creates the index entry when it is missing, never overwrites
         // a title the user set. Saves the index.
-        void Touch(const std::string& id, const std::string& title, const std::string& model, const std::string& effort);
+        void Touch(const std::string& id, const std::string& title, const std::string& model, const std::string& effort,
+                   const std::string& backend = {});
         void SetModel(const std::string& id, const std::string& model);
         void SetEffort(const std::string& id, const std::string& effort);
         void Rename(const std::string& id, const std::string& title);
@@ -72,6 +76,9 @@ namespace myengine::assistant
         // Pure: the same parsing for a prepared text (tests)
         static void ParseTranscript(const std::string& jsonl, std::deque<AssistantMessage>& messages, const std::string& displayRoot,
                                     std::size_t maxMessages);
+        // The same for the file of a Codex thread: the user's messages (myengine.user) and the raw `codex exec --json` events
+        static void ParseCodexTranscript(const std::string& jsonl, std::deque<AssistantMessage>& messages, const std::string& displayRoot,
+                                         std::size_t maxMessages);
 
     private:
         struct Scan
@@ -93,11 +100,15 @@ namespace myengine::assistant
         bool SaveIndex() const;
         ChatInfo& Entry(const std::string& id);
         bool ScanFile(const std::filesystem::path& file, Scan& scan) const;
+        bool ScanCodexFile(const std::filesystem::path& file, Scan& scan) const;
+        void MergeScan(const std::string& id, const Scan& scan, const char* backend, bool ours);
 
         std::filesystem::path indexFile_;
         std::filesystem::path sessionsDirectory_;
+        std::filesystem::path codexDirectory_;
         std::vector<ChatInfo> chats_;
         std::unordered_map<std::string, Scan> scans_; // by session id
+        std::unordered_map<std::string, Scan> codexScans_;
     };
 
     // The title of a new chat from its first message: one line, at most `limit` characters

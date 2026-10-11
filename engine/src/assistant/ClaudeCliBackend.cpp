@@ -18,6 +18,8 @@
 
 #include <myengine/core/Logger.h>
 
+#include "CliProcess.h"
+
 namespace myengine::assistant
 {
     namespace
@@ -29,44 +31,10 @@ namespace myengine::assistant
         constexpr std::size_t kBytesPerFrame = 256 * 1024;     // limit of stdout read in one Poll while the process runs
         constexpr std::size_t kBytesAtExit = 64 * 1024 * 1024; // what is left in the pipe after the process ended
         constexpr std::size_t kErrorTailBytes = 2048;
-        constexpr DWORD kPipeBufferBytes = 1024 * 1024;
-
-        bool HasExtension(const std::filesystem::path& path, const wchar_t* extension)
-        {
-            std::wstring value = path.extension().wstring();
-            std::transform(value.begin(), value.end(), value.begin(), [](const wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-            return value == extension;
-        }
-
+        
         std::wstring Quote(const std::wstring& text)
         {
             return L"\"" + text + L"\"";
-        }
-
-        std::wstring GetEnvironmentValue(const wchar_t* name)
-        {
-            std::wstring value(1024, L'\0');
-            for (int attempt = 0; attempt < 2; ++attempt)
-            {
-                const DWORD length = GetEnvironmentVariableW(name, value.data(), static_cast<DWORD>(value.size()));
-                if (length == 0)
-                {
-                    return {};
-                }
-                if (length < value.size())
-                {
-                    value.resize(length);
-                    return value;
-                }
-                value.assign(static_cast<std::size_t>(length) + 1, L'\0');
-            }
-            return {};
-        }
-
-        bool IsRegularFile(const std::filesystem::path& path)
-        {
-            std::error_code error;
-            return std::filesystem::is_regular_file(path, error);
         }
 
         std::string Base64(const std::string& bytes)
@@ -134,56 +102,10 @@ namespace myengine::assistant
             }
             return file.generic_u8string();
         }
-
-        // Moves what is available in a pipe to `buffer`, at most `budget` bytes. Never blocks
-        std::size_t DrainPipe(void* pipe, std::string& buffer, const std::size_t budget)
-        {
-            std::size_t total = 0;
-            char chunk[16384];
-            while (total < budget)
-            {
-                DWORD available = 0;
-                if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) || available == 0)
-                {
-                    break;
-                }
-                const auto wanted = std::min<std::size_t>({static_cast<std::size_t>(available), sizeof(chunk), budget - total});
-                DWORD read = 0;
-                if (!ReadFile(pipe, chunk, static_cast<DWORD>(wanted), &read, nullptr) || read == 0)
-                {
-                    break;
-                }
-                buffer.append(chunk, read);
-                total += read;
-            }
-            return total;
-        }
-
-        std::string SanitizeTail(std::string text)
-        {
-            for (auto& c : text)
-            {
-                if (static_cast<unsigned char>(c) < 0x20 && c != '\n' && c != '\t')
-                {
-                    c = ' ';
-                }
-            }
-            const auto first = text.find_first_not_of(" \r\n\t");
-            if (first == std::string::npos)
-            {
-                return {};
-            }
-            return text.substr(first);
-        }
     }
 
-    struct ClaudeCliBackend::Process
+    struct ClaudeCliBackend::Process : detail::CliProcess
     {
-        void* process = nullptr;
-        void* thread = nullptr;
-        void* job = nullptr;
-        void* stdoutRead = nullptr;
-        void* stderrRead = nullptr;
     };
 
     ClaudeCliBackend::ClaudeCliBackend(ClaudeCliConfig config) : config_(std::move(config))
@@ -211,7 +133,7 @@ namespace myengine::assistant
         problem.clear();
         if (!override.empty())
         {
-            if (IsRegularFile(override))
+            if (detail::IsRegularFile(override))
             {
                 return override;
             }
@@ -219,11 +141,11 @@ namespace myengine::assistant
             return {};
         }
 
-        const auto fromEnvironment = GetEnvironmentValue(L"MYENGINE_CLAUDE_PATH");
+        const auto fromEnvironment = detail::GetEnvironmentText(L"MYENGINE_CLAUDE_PATH");
         if (!fromEnvironment.empty())
         {
             const std::filesystem::path path(fromEnvironment);
-            if (IsRegularFile(path))
+            if (detail::IsRegularFile(path))
             {
                 return path;
             }
@@ -243,20 +165,20 @@ namespace myengine::assistant
         }
 
         // The native installer and npm do not always put their folder into PATH of a GUI process
-        const auto home = GetEnvironmentValue(L"USERPROFILE");
+        const auto home = detail::GetEnvironmentText(L"USERPROFILE");
         if (!home.empty())
         {
             const auto candidate = std::filesystem::path(home) / L".local" / L"bin" / L"claude.exe";
-            if (IsRegularFile(candidate))
+            if (detail::IsRegularFile(candidate))
             {
                 return candidate;
             }
         }
-        const auto appData = GetEnvironmentValue(L"APPDATA");
+        const auto appData = detail::GetEnvironmentText(L"APPDATA");
         if (!appData.empty())
         {
             const auto candidate = std::filesystem::path(appData) / L"npm" / L"claude.cmd";
-            if (IsRegularFile(candidate))
+            if (detail::IsRegularFile(candidate))
             {
                 return candidate;
             }
@@ -388,7 +310,7 @@ namespace myengine::assistant
         // --tools limits the built-in tools only; connectors of the user's account (claude.ai MCP tools) stay in the context otherwise
         line += bridge ? L" --disallowedTools \"mcp__claude_ai_*\"" : L" --disallowedTools \"mcp__*\"";
         line += L" --settings " + Quote(settingsFile.wstring());
-        if (!config.systemPromptFile.empty() && IsRegularFile(config.systemPromptFile))
+        if (!config.systemPromptFile.empty() && detail::IsRegularFile(config.systemPromptFile))
         {
             line += L" --append-system-prompt-file " + Quote(config.systemPromptFile.wstring());
         }
@@ -555,114 +477,14 @@ namespace myengine::assistant
             }
         }
 
-        std::wstring commandLine = BuildCommandLine(resolved_, config_, settingsFile_, sessionId, mcpConfigFile_,
-                                                    request.model, request.effort, ExtraDirectoriesFor(request, config_.workingDirectory));
-        const bool viaShell = HasExtension(resolved_, L".cmd") || HasExtension(resolved_, L".bat");
-        if (viaShell)
-        {
-            // npm installs a .cmd shim, which only cmd.exe can run
-            auto shell = GetEnvironmentValue(L"ComSpec");
-            if (shell.empty())
-            {
-                shell = L"cmd.exe";
-            }
-            commandLine = Quote(shell) + L" /d /s /c " + Quote(commandLine);
-        }
-
-        SECURITY_ATTRIBUTES inheritable{};
-        inheritable.nLength = sizeof(inheritable);
-        inheritable.bInheritHandle = TRUE;
-
-        HANDLE stdinRead = nullptr;
-        HANDLE stdinWrite = nullptr;
-        HANDLE stdoutRead = nullptr;
-        HANDLE stdoutWrite = nullptr;
-        HANDLE stderrRead = nullptr;
-        HANDLE stderrWrite = nullptr;
-        const auto closeAll = [&]()
-        {
-            for (HANDLE* handle : {&stdinRead, &stdinWrite, &stdoutRead, &stdoutWrite, &stderrRead, &stderrWrite})
-            {
-                if (*handle != nullptr)
-                {
-                    CloseHandle(*handle);
-                    *handle = nullptr;
-                }
-            }
-        };
-
-        if (!CreatePipe(&stdinRead, &stdinWrite, &inheritable, kPipeBufferBytes) ||
-            !CreatePipe(&stdoutRead, &stdoutWrite, &inheritable, kPipeBufferBytes) ||
-            !CreatePipe(&stderrRead, &stderrWrite, &inheritable, 64 * 1024))
-        {
-            error = "Could not create pipes for the Claude Code process.";
-            closeAll();
-            return false;
-        }
-        // The parent's ends must not leak into the child
-        SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT, 0);
-        SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0);
-        SetHandleInformation(stderrRead, HANDLE_FLAG_INHERIT, 0);
-
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        startup.dwFlags = STARTF_USESTDHANDLES;
-        startup.hStdInput = stdinRead;
-        startup.hStdOutput = stdoutWrite;
-        startup.hStdError = stderrWrite;
-
-        PROCESS_INFORMATION information{};
-        const std::wstring directory = config_.workingDirectory.wstring();
-        const std::wstring application = resolved_.wstring();
-        const BOOL created = CreateProcessW(
-            viaShell ? nullptr : application.c_str(),
-            commandLine.data(),
-            nullptr,
-            nullptr,
-            TRUE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED,
-            nullptr,
-            directory.empty() ? nullptr : directory.c_str(),
-            &startup,
-            &information);
-        if (!created)
-        {
-            error = "Could not start Claude Code (error " + std::to_string(GetLastError()) + "): " + resolved_.u8string();
-            closeAll();
-            return false;
-        }
-
+        const std::wstring commandLine = BuildCommandLine(resolved_, config_, settingsFile_, sessionId, mcpConfigFile_,
+                                                          request.model, request.effort, ExtraDirectoriesFor(request, config_.workingDirectory));
         auto process = std::make_unique<Process>();
-        process->process = information.hProcess;
-        process->thread = information.hThread;
-        // The job lets Stop kill the whole tree (claude starts helpers) and ends the child if the editor dies
-        process->job = CreateJobObjectW(nullptr, nullptr);
-        if (process->job != nullptr)
+        if (!process->Start(resolved_, commandLine, config_.workingDirectory, error))
         {
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(process->job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
-            if (!AssignProcessToJobObject(process->job, information.hProcess))
-            {
-                CloseHandle(process->job);
-                process->job = nullptr;
-            }
+            error = "Could not start Claude Code: " + error;
+            return false;
         }
-        ResumeThread(information.hThread);
-        CloseHandle(information.hThread);
-        process->thread = nullptr;
-
-        CloseHandle(stdinRead);
-        stdinRead = nullptr;
-        CloseHandle(stdoutWrite);
-        stdoutWrite = nullptr;
-        CloseHandle(stderrWrite);
-        stderrWrite = nullptr;
-        process->stdoutRead = stdoutRead;
-        process->stderrRead = stderrRead;
-        stdoutRead = nullptr;
-        stderrRead = nullptr;
-
         process_ = std::move(process);
         outputBuffer_.clear();
         errorTail_.clear();
@@ -671,22 +493,7 @@ namespace myengine::assistant
         parser_.SetRootDirectory(config_.workingDirectory.u8string());
 
         // The whole prompt fits into the 1 MB pipe buffer, so this does not wait for the child
-        const std::string line = BuildUserMessageLine(request, config_.workingDirectory);
-        std::size_t written = 0;
-        bool writeFailed = false;
-        while (written < line.size())
-        {
-            DWORD count = 0;
-            if (!WriteFile(stdinWrite, line.data() + written, static_cast<DWORD>(line.size() - written), &count, nullptr) || count == 0)
-            {
-                writeFailed = true;
-                break;
-            }
-            written += count;
-        }
-        CloseHandle(stdinWrite); // end of input: the CLI answers this one message and exits
-        stdinWrite = nullptr;
-        if (writeFailed)
+        if (!process_->WriteInputAndClose(BuildUserMessageLine(request, config_.workingDirectory)))
         {
             ReleaseProcess(true);
             error = "Could not send the message to Claude Code.";
@@ -709,24 +516,7 @@ namespace myengine::assistant
         {
             return;
         }
-        if (terminate)
-        {
-            if (process_->job != nullptr)
-            {
-                TerminateJobObject(process_->job, 1);
-            }
-            else if (process_->process != nullptr)
-            {
-                TerminateProcess(process_->process, 1);
-            }
-        }
-        for (void* handle : {process_->process, process_->thread, process_->job, process_->stdoutRead, process_->stderrRead})
-        {
-            if (handle != nullptr)
-            {
-                CloseHandle(handle);
-            }
-        }
+        process_->Close(terminate);
         process_.reset();
         outputBuffer_.clear();
         discardingLine_ = false;
@@ -802,11 +592,11 @@ namespace myengine::assistant
             return;
         }
 
-        DrainPipe(process_->stdoutRead, outputBuffer_, kBytesPerFrame);
+        process_->ReadOutput(outputBuffer_, kBytesPerFrame);
         ExtractLines(events);
 
         std::string errorChunk;
-        DrainPipe(process_->stderrRead, errorChunk, kBytesPerFrame);
+        process_->ReadError(errorChunk, kBytesPerFrame);
         if (!errorChunk.empty())
         {
             errorTail_ += errorChunk;
@@ -816,30 +606,29 @@ namespace myengine::assistant
             }
         }
 
-        if (WaitForSingleObject(process_->process, 0) != WAIT_OBJECT_0)
+        if (process_->IsRunning())
         {
             return;
         }
 
         // The process is gone: take everything it wrote before the pipe closed
-        DrainPipe(process_->stdoutRead, outputBuffer_, kBytesAtExit);
+        process_->ReadOutput(outputBuffer_, kBytesAtExit);
         if (!outputBuffer_.empty() && outputBuffer_.back() != '\n')
         {
             outputBuffer_ += '\n';
         }
         ExtractLines(events);
         errorChunk.clear();
-        DrainPipe(process_->stderrRead, errorChunk, kBytesPerFrame);
+        process_->ReadError(errorChunk, kBytesPerFrame);
         errorTail_ += errorChunk;
         if (errorTail_.size() > kErrorTailBytes)
         {
             errorTail_.erase(0, errorTail_.size() - kErrorTailBytes);
         }
 
-        DWORD exitCode = 0;
-        GetExitCodeProcess(process_->process, &exitCode);
+        const unsigned long exitCode = process_->ExitCode();
         const bool finished = parser_.IsFinished();
-        const auto tail = SanitizeTail(errorTail_);
+        const auto tail = detail::SanitizeTail(errorTail_);
         ReleaseProcess(false);
 
         if (config_.logger != nullptr)

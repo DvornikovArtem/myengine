@@ -57,6 +57,7 @@ namespace myengine::assistant
         ~ClaudeCliBackend() override;
 
         const char* GetName() const override { return "Claude Code CLI"; }
+        const char* GetBackendId() const override { return "claude"; }
         std::string CheckAvailability() override;
         bool BeginTurn(const std::string& prompt, const std::string& sessionId, std::string& error) override;
         bool BeginTurn(const AssistantTurnRequest& request, std::string& error) override;

@@ -2,13 +2,19 @@
 // It owns no tools: every request goes through the named pipe to the editor, which runs them on its main thread.
 //
 //   myengine_mcp --pipe \.\pipe\myengine-assistant-<pid>      (token in MYENGINE_BRIDGE_TOKEN)
+//   myengine_mcp [--endpoint <file>]                          (an external client: pipe and token from the endpoint file
+//                                                              that the editor writes: %APPDATA%\myengine\mcp_endpoint.json,
+//                                                              or MYENGINE_MCP_ENDPOINT)
 
 #include <fcntl.h>
 #include <io.h>
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <thread>
 
@@ -23,10 +29,63 @@ namespace
 {
     using json = nlohmann::json;
 
+    std::string Narrow(const std::wstring& text)
+    {
+        std::string result;
+        for (const wchar_t c : text)
+        {
+            result += static_cast<char>(c); // pipe names and tokens are ASCII
+        }
+        return result;
+    }
+
+    std::wstring EnvironmentText(const wchar_t* name)
+    {
+        wchar_t buffer[2048]{};
+        const DWORD length = GetEnvironmentVariableW(name, buffer, static_cast<DWORD>(std::size(buffer)));
+        return length > 0 && length < std::size(buffer) ? std::wstring(buffer, length) : std::wstring();
+    }
+
+    // The editor writes the pipe name and the token of its running bridge here when external clients are allowed
+    std::wstring DefaultEndpointFile()
+    {
+        if (const auto fromEnvironment = EnvironmentText(L"MYENGINE_MCP_ENDPOINT"); !fromEnvironment.empty())
+        {
+            return fromEnvironment;
+        }
+        const auto appData = EnvironmentText(L"APPDATA");
+        return appData.empty() ? std::wstring() : appData + L"\\myengine\\mcp_endpoint.json";
+    }
+
+    bool ReadEndpoint(const std::wstring& file, std::wstring& pipe, std::string& token, std::string& error)
+    {
+        std::ifstream stream(std::filesystem::path(file), std::ios::binary);
+        if (file.empty() || !stream)
+        {
+            error = "The myengine editor does not accept external MCP clients: turn on \"Allow external MCP clients\" in its "
+                    "Assistant tab and keep the editor open.";
+            return false;
+        }
+        const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        const json endpoint = json::parse(text, nullptr, false);
+        if (!endpoint.is_object() || !endpoint.contains("pipe") || !endpoint["pipe"].is_string() || !endpoint.contains("token") ||
+            !endpoint["token"].is_string())
+        {
+            error = "The endpoint file of the myengine editor is not valid.";
+            return false;
+        }
+        const std::string name = endpoint["pipe"].get<std::string>();
+        pipe.assign(name.begin(), name.end());
+        token = endpoint["token"].get<std::string>();
+        return true;
+    }
+
     class EditorPipe
     {
     public:
-        explicit EditorPipe(std::wstring name) : name_(std::move(name)) {}
+        // `name` empty: the pipe and the token are read from `endpointFile` at every connection, so that a restart of the
+        // editor (a new pipe, a new token) does not need a restart of the client
+        EditorPipe(std::wstring name, std::wstring endpointFile) : name_(std::move(name)), endpointFile_(std::move(endpointFile)) {}
 
         ~EditorPipe()
         {
@@ -69,17 +128,26 @@ namespace
             {
                 return true;
             }
+            std::wstring pipe = name_;
+            std::string token;
+            if (pipe.empty())
+            {
+                if (!ReadEndpoint(endpointFile_, pipe, token, error))
+                {
+                    return false;
+                }
+            }
             // The editor created the pipe before it started the CLI; a short retry covers slow starts
             for (int attempt = 0; attempt < 30; ++attempt)
             {
-                handle_ = CreateFileW(name_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+                handle_ = CreateFileW(pipe.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
                 if (handle_ != INVALID_HANDLE_VALUE)
                 {
                     break;
                 }
                 if (GetLastError() == ERROR_PIPE_BUSY)
                 {
-                    WaitNamedPipeW(name_.c_str(), 200);
+                    WaitNamedPipeW(pipe.c_str(), 200);
                 }
                 else
                 {
@@ -91,15 +159,12 @@ namespace
                 error = "The myengine editor is not reachable (the assistant pipe is closed). Is the editor still running?";
                 return false;
             }
-            wchar_t token[256]{};
-            const DWORD length = GetEnvironmentVariableW(L"MYENGINE_BRIDGE_TOKEN", token, 256);
-            std::string tokenUtf8;
-            for (DWORD index = 0; index < length && index < 256; ++index)
+            if (token.empty())
             {
-                tokenUtf8 += static_cast<char>(token[index]); // hex digits only
+                token = Narrow(EnvironmentText(L"MYENGINE_BRIDGE_TOKEN")); // hex digits only
             }
             std::string line;
-            if (!WriteLine(json{{"op", "hello"}, {"token", tokenUtf8}}.dump()) || !ReadLine(line) || !json::parse(line, nullptr, false).is_object())
+            if (!WriteLine(json{{"op", "hello"}, {"token", token}}.dump()) || !ReadLine(line) || !json::parse(line, nullptr, false).is_object())
             {
                 Close();
                 error = "The editor refused the connection.";
@@ -156,6 +221,7 @@ namespace
         }
 
         std::wstring name_;
+        std::wstring endpointFile_;
         HANDLE handle_ = INVALID_HANDLE_VALUE;
         std::string buffer_;
         std::uint64_t nextId_ = 0;
@@ -168,6 +234,7 @@ int main()
     _setmode(_fileno(stdout), _O_BINARY);
 
     std::wstring pipeName;
+    std::wstring endpointFile;
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     for (int index = 1; argv != nullptr && index + 1 < argc; ++index)
@@ -176,18 +243,21 @@ int main()
         {
             pipeName = argv[index + 1];
         }
+        else if (std::wstring(argv[index]) == L"--endpoint")
+        {
+            endpointFile = argv[index + 1];
+        }
     }
     if (argv != nullptr)
     {
         LocalFree(argv);
     }
-    if (pipeName.empty())
+    if (pipeName.empty() && endpointFile.empty())
     {
-        std::fputs("usage: myengine_mcp --pipe <pipe name>\n", stderr);
-        return 2;
+        endpointFile = DefaultEndpointFile();
     }
 
-    EditorPipe editor(pipeName);
+    EditorPipe editor(pipeName, endpointFile);
     const myengine::assistant::McpBridgeCore core([&editor](const json& request) { return editor.Request(request); });
 
     std::string line;

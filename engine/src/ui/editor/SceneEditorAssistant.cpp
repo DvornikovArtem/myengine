@@ -1,6 +1,8 @@
 #include "SceneEditorInternal.h"
 
+#include <myengine/assistant/AssistantSettings.h>
 #include <myengine/assistant/AssistantTools.h>
+#include <myengine/editor/LoadingService.h>
 #include <myengine/scripting/PrefabLibrary.h>
 
 namespace myengine::ui
@@ -22,6 +24,7 @@ namespace myengine::ui
             RecordSceneMutationImmediate(label.c_str(), before);
         };
         context.saveScene = services_.saveScene;
+        context.mapLoading = [this]() { return services_.loading != nullptr && services_.loading->HasModal(); };
         context.describeScriptFields = services_.describeScriptFields;
         context.recentErrors = services_.scriptConsole.errors;
         context.scriptStatus = services_.scriptStatus;
@@ -34,6 +37,20 @@ namespace myengine::ui
         config.tools = assistantTools_.get();
         config.createTexture = services_.createUiTexture;
         config.destroyTexture = services_.destroyUiTexture;
+
+        // The choice of the CLI is the user's, per machine: %APPDATA%\myengine\editor_settings.json. A clean
+        // installation has no file and the assistant is off (MYENGINE_ASSISTANT_SETTINGS points to another file)
+        config.settingsFile = assistant::AssistantSettings::DefaultFile();
+        if (wchar_t override[1024]{}; GetEnvironmentVariableW(L"MYENGINE_ASSISTANT_SETTINGS", override, static_cast<DWORD>(std::size(override))) > 0)
+        {
+            config.settingsFile = std::filesystem::path(override);
+        }
+        std::string settingsProblem;
+        config.settings = assistant::AssistantSettings::Load(config.settingsFile, &settingsProblem);
+        if (!settingsProblem.empty() && services_.logger != nullptr)
+        {
+            services_.logger->Warning("Assistant: " + settingsProblem);
+        }
         assistantPanel_ = std::make_unique<AssistantPanel>(config);
     }
 }

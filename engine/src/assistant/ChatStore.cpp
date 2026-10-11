@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include <myengine/assistant/ClaudeStreamParser.h>
+#include <myengine/assistant/CodexStreamParser.h>
 
 namespace myengine::assistant
 {
@@ -263,8 +264,8 @@ namespace myengine::assistant
         return name;
     }
 
-    ChatStore::ChatStore(std::filesystem::path indexFile, std::filesystem::path sessionsDirectory)
-        : indexFile_(std::move(indexFile)), sessionsDirectory_(std::move(sessionsDirectory))
+    ChatStore::ChatStore(std::filesystem::path indexFile, std::filesystem::path sessionsDirectory, std::filesystem::path codexDirectory)
+        : indexFile_(std::move(indexFile)), sessionsDirectory_(std::move(sessionsDirectory)), codexDirectory_(std::move(codexDirectory))
     {
         LoadIndex();
     }
@@ -371,6 +372,7 @@ namespace myengine::assistant
                 continue;
             }
             info.title = GetString(item, "title");
+            info.backend = GetString(item, "backend");
             info.model = GetString(item, "model");
             info.effort = GetString(item, "effort");
             info.createdUnix = item.value("created", static_cast<std::int64_t>(0));
@@ -395,6 +397,10 @@ namespace myengine::assistant
             }
             json item = {{"id", chat.id}, {"title", chat.title}, {"model", chat.model}, {"effort", chat.effort},
                          {"created", chat.createdUnix}, {"hidden", chat.hidden}};
+            if (!chat.backend.empty())
+            {
+                item["backend"] = chat.backend;
+            }
             list.push_back(std::move(item));
         }
         const json document = {{"version", 1}, {"chats", std::move(list)}};
@@ -555,6 +561,121 @@ namespace myengine::assistant
         return true;
     }
 
+    bool ChatStore::ScanCodexFile(const std::filesystem::path& file, Scan& scan) const
+    {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(file, error);
+        if (error || size > kMaxTranscriptBytes)
+        {
+            return false;
+        }
+        scan.size = size;
+        const auto time = std::filesystem::last_write_time(file, error);
+        scan.mtime = error ? 0 : FileTimeToUnix(time);
+
+        std::ifstream stream(file, std::ios::binary);
+        if (!stream)
+        {
+            return false;
+        }
+        scan.inputTokens = 0;
+        scan.outputTokens = 0;
+        std::string line;
+        while (std::getline(stream, line))
+        {
+            if (line.size() < 2 || line.size() > kMaxLineBytes)
+            {
+                continue;
+            }
+            if (HasType(line, "myengine.user"))
+            {
+                const json record = json::parse(line, nullptr, false);
+                if (record.is_discarded() || !record.is_object())
+                {
+                    continue;
+                }
+                if (scan.firstUserText.empty())
+                {
+                    scan.firstUserText = GetString(record, "text");
+                    scan.firstTime = record.value("time", static_cast<std::int64_t>(0));
+                }
+                scan.lastTime = std::max(scan.lastTime, record.value("time", static_cast<std::int64_t>(0)));
+                const auto model = GetString(record, "model");
+                if (!model.empty())
+                {
+                    scan.lastModel = model;
+                }
+            }
+            else if (HasType(line, "myengine.turn_end"))
+            {
+                const json record = json::parse(line, nullptr, false);
+                if (!record.is_discarded() && record.is_object())
+                {
+                    scan.lastTime = std::max(scan.lastTime, record.value("time", static_cast<std::int64_t>(0)));
+                }
+            }
+            else if (HasType(line, "turn.completed"))
+            {
+                const json record = json::parse(line, nullptr, false);
+                const auto usage = record.is_object() ? record.find("usage") : record.end();
+                if (!record.is_discarded() && record.is_object() && usage != record.end() && usage->is_object())
+                {
+                    const auto number = [&](const char* key) -> std::uint64_t
+                    {
+                        const auto it = usage->find(key);
+                        return it != usage->end() && it->is_number() ? static_cast<std::uint64_t>(it->get<double>()) : 0;
+                    };
+                    scan.inputTokens += number("input_tokens");
+                    scan.outputTokens += number("output_tokens") + number("reasoning_output_tokens");
+                }
+            }
+        }
+        return true;
+    }
+
+    // Puts what a scan of a session file found into the entry of that session (created for a chat that is ours)
+    void ChatStore::MergeScan(const std::string& id, const Scan& scan, const char* backend, const bool ours)
+    {
+        ChatInfo* known = nullptr;
+        for (auto& chat : chats_)
+        {
+            if (chat.id == id)
+            {
+                known = &chat;
+                break;
+            }
+        }
+        if (known == nullptr && !ours)
+        {
+            return;
+        }
+        if (known == nullptr)
+        {
+            chats_.push_back(ChatInfo{});
+            known = &chats_.back();
+            known->id = id;
+        }
+        if (known->backend.empty())
+        {
+            known->backend = backend;
+        }
+        known->hasTranscript = true;
+        known->sizeBytes = scan.size;
+        known->costUsd = scan.costUsd;
+        known->inputTokens = scan.inputTokens;
+        known->outputTokens = scan.outputTokens;
+        known->lastModel = scan.lastModel;
+        known->updatedUnix = std::max(scan.lastTime, scan.mtime);
+        if (known->createdUnix == 0)
+        {
+            known->createdUnix = scan.firstTime != 0 ? scan.firstTime : known->updatedUnix;
+        }
+        if (known->title.empty())
+        {
+            known->title = !scan.customTitle.empty() ? scan.customTitle : MakeChatTitle(scan.firstUserText);
+        }
+    }
+
     void ChatStore::Refresh()
     {
         LoadIndex();
@@ -586,49 +707,39 @@ namespace myengine::assistant
                     scans_[id] = std::move(scan);
                     cached = scans_.find(id);
                 }
-                const Scan& scan = cached->second;
-
                 // Our own chats are the ones the CLI wrote on behalf of an SDK client; sessions of the user's own
                 // terminal or desktop app in the same folder are not offered unless the index knows them
-                const bool ours = scan.entrypoint == "sdk-cli";
-                ChatInfo* known = nullptr;
-                for (auto& chat : chats_)
-                {
-                    if (chat.id == id)
-                    {
-                        known = &chat;
-                        break;
-                    }
-                }
-                if (known == nullptr && !ours)
-                {
-                    continue;
-                }
-                if (known == nullptr)
-                {
-                    chats_.push_back(ChatInfo{});
-                    known = &chats_.back();
-                    known->id = id;
-                }
-                known->hasTranscript = true;
-                known->sizeBytes = scan.size;
-                known->costUsd = scan.costUsd;
-                known->inputTokens = scan.inputTokens;
-                known->outputTokens = scan.outputTokens;
-                known->lastModel = scan.lastModel;
-                known->updatedUnix = std::max(scan.lastTime, scan.mtime);
-                if (known->createdUnix == 0)
-                {
-                    known->createdUnix = scan.firstTime != 0 ? scan.firstTime : known->updatedUnix;
-                }
-                if (known->title.empty())
-                {
-                    known->title = !scan.customTitle.empty() ? scan.customTitle : MakeChatTitle(scan.firstUserText);
-                }
+                MergeScan(id, cached->second, "claude", cached->second.entrypoint == "sdk-cli");
             }
             for (auto it = scans_.begin(); it != scans_.end();)
             {
                 it = seen.count(it->first) != 0 ? std::next(it) : scans_.erase(it);
+            }
+        }
+        if (!codexDirectory_.empty() && std::filesystem::is_directory(codexDirectory_, error))
+        {
+            for (const auto& entry : std::filesystem::directory_iterator(codexDirectory_, error))
+            {
+                if (error || !entry.is_regular_file() || entry.path().extension() != ".jsonl")
+                {
+                    continue;
+                }
+                const auto id = entry.path().stem().string();
+                std::error_code statError;
+                const auto size = entry.file_size(statError);
+                const auto mtime = statError ? 0 : FileTimeToUnix(entry.last_write_time(statError));
+                auto cached = codexScans_.find(id);
+                if (cached == codexScans_.end() || cached->second.size != size || cached->second.mtime != mtime)
+                {
+                    Scan scan;
+                    if (!ScanCodexFile(entry.path(), scan))
+                    {
+                        continue;
+                    }
+                    codexScans_[id] = std::move(scan);
+                    cached = codexScans_.find(id);
+                }
+                MergeScan(id, cached->second, "codex", true); // every file of this folder was written by our backend
             }
         }
         // Entries of the index whose file is gone and that were never talked in are not worth a row
@@ -667,7 +778,8 @@ namespace myengine::assistant
         return nullptr;
     }
 
-    void ChatStore::Touch(const std::string& id, const std::string& title, const std::string& model, const std::string& effort)
+    void ChatStore::Touch(const std::string& id, const std::string& title, const std::string& model, const std::string& effort,
+                          const std::string& backend)
     {
         if (id.empty())
         {
@@ -675,6 +787,10 @@ namespace myengine::assistant
         }
         auto& chat = Entry(id);
         chat.inIndex = true;
+        if (chat.backend.empty())
+        {
+            chat.backend = backend;
+        }
         if (chat.title.empty())
         {
             chat.title = title;
@@ -731,7 +847,20 @@ namespace myengine::assistant
             error = "The chat id is not valid.";
             return false;
         }
-        const auto file = sessionsDirectory_ / (id + ".jsonl");
+        auto file = sessionsDirectory_ / (id + ".jsonl");
+        const auto* known = Find(id);
+        bool codex = false;
+        {
+            std::error_code existsError;
+            const bool claudeFile = !sessionsDirectory_.empty() && std::filesystem::is_regular_file(file, existsError);
+            const auto codexFile = codexDirectory_ / (id + ".jsonl");
+            const bool codexExists = !codexDirectory_.empty() && std::filesystem::is_regular_file(codexFile, existsError);
+            if (codexExists && (!claudeFile || (known != nullptr && known->backend == "codex")))
+            {
+                file = codexFile;
+                codex = true;
+            }
+        }
         std::error_code fileError;
         const auto size = std::filesystem::file_size(file, fileError);
         if (fileError)
@@ -752,7 +881,14 @@ namespace myengine::assistant
         }
         std::ostringstream buffer;
         buffer << stream.rdbuf();
-        ParseTranscript(buffer.str(), messages, displayRoot, maxMessages);
+        if (codex)
+        {
+            ParseCodexTranscript(buffer.str(), messages, displayRoot, maxMessages);
+        }
+        else
+        {
+            ParseTranscript(buffer.str(), messages, displayRoot, maxMessages);
+        }
         return true;
     }
 
@@ -944,6 +1080,162 @@ namespace myengine::assistant
             }
         }
         closeTurn();
+
+        while (maxMessages > 0 && messages.size() > maxMessages)
+        {
+            messages.pop_front();
+        }
+    }
+
+    void ChatStore::ParseCodexTranscript(const std::string& jsonl, std::deque<AssistantMessage>& messages, const std::string& displayRoot,
+                                         const std::size_t maxMessages)
+    {
+        CodexStreamParser parser;
+        parser.SetRootDirectory(displayRoot);
+        std::vector<AssistantEvent> events;
+        std::vector<std::string> changed;
+        std::string model;
+        std::int64_t turnStart = 0;
+        std::int64_t lastTime = 0;
+        bool turnOpen = false;
+
+        // The end of a turn: the files that it changed and the footer with the tokens and the time
+        const auto closeTurn = [&](const AssistantEvent* finished, const std::int64_t durationMs)
+        {
+            if (!turnOpen)
+            {
+                return;
+            }
+            if (!changed.empty())
+            {
+                AssistantMessage files;
+                files.kind = AssistantMessage::Kind::Files;
+                for (const auto& path : changed)
+                {
+                    files.text += (files.text.empty() ? "" : "\n") + path;
+                }
+                files.timeUnix = lastTime;
+                messages.push_back(std::move(files));
+                changed.clear();
+            }
+            if (finished != nullptr)
+            {
+                if (finished->isError)
+                {
+                    AssistantMessage error;
+                    error.kind = AssistantMessage::Kind::Error;
+                    error.text = finished->text.empty() ? std::string("The turn ended with an error.") : finished->text;
+                    error.timeUnix = lastTime;
+                    messages.push_back(std::move(error));
+                }
+                const double seconds = durationMs > 0 ? static_cast<double>(durationMs) / 1000.0
+                                                      : (turnStart > 0 && lastTime >= turnStart ? static_cast<double>(lastTime - turnStart) : 0.0);
+                AssistantMessage footer;
+                footer.kind = AssistantMessage::Kind::Summary;
+                footer.text = FormatTurnSummary(finished->inputTokens, finished->outputTokens, seconds, 0.0);
+                footer.timeUnix = lastTime;
+                messages.push_back(std::move(footer));
+            }
+            turnOpen = false;
+        };
+
+        AssistantEvent finishedEvent;
+        bool haveFinished = false;
+        std::size_t position = 0;
+        while (position < jsonl.size())
+        {
+            auto end = jsonl.find('\n', position);
+            if (end == std::string::npos)
+            {
+                end = jsonl.size();
+            }
+            const std::string_view line(jsonl.data() + position, end - position);
+            position = end + 1;
+            if (line.size() < 2 || line.size() > kMaxLineBytes || line.front() != '{')
+            {
+                continue;
+            }
+
+            if (HasType(line, "myengine.user"))
+            {
+                const json record = json::parse(line.begin(), line.end(), nullptr, false);
+                if (record.is_discarded() || !record.is_object())
+                {
+                    continue;
+                }
+                closeTurn(nullptr, 0);
+                parser = CodexStreamParser();
+                parser.SetRootDirectory(displayRoot);
+                AssistantMessage user;
+                user.kind = AssistantMessage::Kind::User;
+                user.text = GetString(record, "text");
+                user.timeUnix = record.value("time", static_cast<std::int64_t>(0));
+                const auto attachments = record.find("attachments");
+                if (attachments != record.end() && attachments->is_array())
+                {
+                    for (const auto& item : *attachments)
+                    {
+                        AssistantAttachment attachment;
+                        attachment.path = GetString(item, "path");
+                        attachment.name = GetString(item, "name");
+                        attachment.mediaType = GetString(item, "mediaType");
+                        user.attachments.push_back(std::move(attachment));
+                    }
+                }
+                model = GetString(record, "model");
+                lastTime = user.timeUnix;
+                turnStart = user.timeUnix;
+                messages.push_back(std::move(user));
+                turnOpen = true;
+                changed.clear();
+                haveFinished = false;
+                continue;
+            }
+            if (HasType(line, "myengine.turn_end"))
+            {
+                const json record = json::parse(line.begin(), line.end(), nullptr, false);
+                if (!record.is_discarded() && record.is_object())
+                {
+                    lastTime = std::max(lastTime, record.value("time", static_cast<std::int64_t>(0)));
+                    closeTurn(haveFinished ? &finishedEvent : nullptr, record.value("durationMs", static_cast<std::int64_t>(0)));
+                    haveFinished = false;
+                }
+                continue;
+            }
+
+            events.clear();
+            parser.ParseLine(line, events);
+            const std::size_t before = messages.size();
+            for (const auto& event : events)
+            {
+                if (event.type == AssistantEventType::Finished)
+                {
+                    finishedEvent = event;
+                    haveFinished = true;
+                }
+                else if (event.type == AssistantEventType::SessionStarted && !event.text.empty())
+                {
+                    model = event.text;
+                }
+                else
+                {
+                    ApplyContentEvent(messages, event, &changed);
+                }
+            }
+            for (std::size_t index = before; index < messages.size(); ++index)
+            {
+                if (messages[index].timeUnix == 0)
+                {
+                    messages[index].timeUnix = lastTime;
+                }
+                if (messages[index].kind == AssistantMessage::Kind::Assistant && messages[index].model.empty())
+                {
+                    messages[index].model = model;
+                }
+            }
+        }
+        // A turn that was cut (stopped, the editor closed): the transcript simply ends
+        closeTurn(haveFinished ? &finishedEvent : nullptr, 0);
 
         while (maxMessages > 0 && messages.size() > maxMessages)
         {

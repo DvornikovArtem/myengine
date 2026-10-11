@@ -284,6 +284,7 @@ namespace myengine::assistant
             request.connection = impl.connection;
             request.op = op;
             request.tool = message.contains("tool") && message["tool"].is_string() ? message["tool"].get<std::string>() : std::string();
+            request.client = message.contains("client") && message["client"].is_string() ? message["client"].get<std::string>() : std::string();
             if (message.contains("arguments") && message["arguments"].is_object())
             {
                 request.arguments = message["arguments"];

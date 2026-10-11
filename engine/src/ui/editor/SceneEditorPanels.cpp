@@ -155,17 +155,18 @@ namespace myengine::ui
             return;
         }
         assistantPanel_->Update(); // pumps the pipe even while the window is hidden
-        if (!editorState.showAssistant)
+        if (editorState.showAssistant)
         {
-            return;
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            const bool visible = ImGui::Begin(kAssistantWindowName, &editorState.showAssistant);
+            ImGui::PopStyleVar();
+            if (visible)
+            {
+                assistantPanel_->Draw();
+            }
+            ImGui::End();
         }
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        const bool visible = ImGui::Begin(kAssistantWindowName, &editorState.showAssistant);
-        ImGui::PopStyleVar();
-        if (visible)
-        {
-            assistantPanel_->Draw();
-        }
-        ImGui::End();
+        // Cards that the window does not show (it is closed, or the assistant is off) go to a modal of the editor
+        assistantPanel_->DrawExternalApprovals();
     }
 }

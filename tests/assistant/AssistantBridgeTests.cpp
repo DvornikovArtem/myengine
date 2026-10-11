@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 
 #include <myengine/assistant/AssistantBridge.h>
+#include <myengine/assistant/AssistantSettings.h>
 #include <myengine/assistant/AssistantTools.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/core/Logger.h>
@@ -104,6 +105,7 @@ namespace
                 undoSnapshots.push_back(before);
             };
             context.saveScene = [this]() { ++saves; return true; };
+            context.mapLoading = [this]() { return mapLoading; };
             context.describeScriptFields = [](const std::string& module, const std::string& className)
             {
                 std::vector<myengine::scripting::ScriptFieldInfo> fields;
@@ -154,6 +156,7 @@ namespace
         std::vector<std::string> undoLabels;
         std::vector<std::string> undoSnapshots;
         int saves = 0;
+        bool mapLoading = false;
     };
 
     void TestToolsDirectly(Fixture& fixture)
@@ -223,6 +226,18 @@ namespace
         const auto deleted = tools.Call("delete_entity", {{"name", "Marker"}});
         Check(deleted.ok && fixture.CountNamed("Marker") == 0, "delete_entity failed");
 
+        // A map is being loaded behind the loading window: nothing changes (it would be replaced), reading works
+        fixture.mapLoading = true;
+        const auto entitiesBefore = fixture.world.GetEntities().size();
+        for (const char* tool : {"spawn_prefab", "create_entity", "delete_entity", "set_script_props", "set_component", "play", "stop", "save_scene"})
+        {
+            const auto refusedWhileLoading = tools.Call(tool, {{"name", "coin"}, {"position", json::array({0, 0, 0})}});
+            Check(!refusedWhileLoading.ok && refusedWhileLoading.message.find("loaded") != std::string::npos, "A changing tool ran while a map was loading");
+        }
+        Check(fixture.world.GetEntities().size() == entitiesBefore && fixture.saves == 0, "A tool changed the scene while a map was loading");
+        Check(tools.Call("list_entities", json::object()).ok && tools.Call("get_mode", json::object()).ok, "A read tool was refused while a map was loading");
+        fixture.mapLoading = false;
+
         // Play: changes are refused, stop restores the scene
         Check(tools.Call("play", json::object()).ok, "play failed");
         Check(myengine::core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play, "play did not switch the mode");
@@ -241,7 +256,9 @@ namespace
     class McpClient
     {
     public:
-        McpClient(const std::filesystem::path& executable, const std::wstring& pipeName, const std::string& token)
+        // endpointFile: an external client: no --pipe and no token, myengine_mcp reads them from the file
+        McpClient(const std::filesystem::path& executable, const std::wstring& pipeName, const std::string& token,
+                  const std::filesystem::path& endpointFile = {})
         {
             SECURITY_ATTRIBUTES inheritable{};
             inheritable.nLength = sizeof(inheritable);
@@ -251,7 +268,7 @@ namespace
             Check(CreatePipe(&stdinRead, &stdinWrite_, &inheritable, 0) && CreatePipe(&stdoutRead_, &stdoutWrite, &inheritable, 0), "CreatePipe failed");
             SetHandleInformation(stdinWrite_, HANDLE_FLAG_INHERIT, 0);
             SetHandleInformation(stdoutRead_, HANDLE_FLAG_INHERIT, 0);
-            SetEnvironmentVariableW(L"MYENGINE_BRIDGE_TOKEN", std::wstring(token.begin(), token.end()).c_str());
+            SetEnvironmentVariableW(L"MYENGINE_BRIDGE_TOKEN", token.empty() ? nullptr : std::wstring(token.begin(), token.end()).c_str());
 
             STARTUPINFOW startup{};
             startup.cb = sizeof(startup);
@@ -259,7 +276,8 @@ namespace
             startup.hStdInput = stdinRead;
             startup.hStdOutput = stdoutWrite;
             startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-            std::wstring commandLine = L"\"" + executable.wstring() + L"\" --pipe " + pipeName;
+            std::wstring commandLine = L"\"" + executable.wstring() + L"\"";
+            commandLine += endpointFile.empty() ? L" --pipe " + pipeName : L" --endpoint \"" + endpointFile.wstring() + L"\"";
             PROCESS_INFORMATION information{};
             Check(CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &information) != FALSE,
                 "Could not start myengine_mcp.exe");
@@ -564,6 +582,7 @@ namespace
         PanelFixture imgui;
         myengine::ui::AssistantPanelConfig config;
         config.repositoryRoot = fixture.root;
+        config.settings.backend = assistant::AssistantBackendKind::Claude;
         config.tools = fixture.tools.get();
         config.bridgeExecutable = executable;
         myengine::ui::AssistantPanel panel(config);
@@ -603,6 +622,194 @@ namespace
         SetEnvironmentVariableW(L"MYENGINE_CLAUDE_PATH", nullptr);
         SetEnvironmentVariableW(L"FAKE_CLAUDE_MODE", nullptr);
     }
+
+    std::string ReadTextFile(const std::filesystem::path& path)
+    {
+        std::ifstream stream(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    }
+
+    // Codex has no permission prompt tool: a changing call waits for the card inside the call, and files are
+    // changed with edit_file / write_file (the same editable areas and the same card with a diff)
+    void TestCodexMode(Fixture& fixture)
+    {
+        const auto executable = BridgeExecutable();
+        assistant::AssistantBridgeConfig config;
+        config.repositoryRoot = fixture.root;
+        config.pipeName = L"\\\\.\\pipe\\myengine-assistant-codex-" + std::to_wstring(GetCurrentProcessId());
+        config.confirmInCall = true;
+        config.offerApproveTool = false;
+        config.fileTools = true;
+        assistant::AssistantBridge bridge(*fixture.tools, config);
+        std::vector<std::string> notices;
+        bridge.onNotice = [&](const std::string& text) { notices.push_back(text); };
+        std::string error;
+        Check(bridge.Start(error), error.c_str());
+
+        McpClient client(executable, config.pipeName, bridge.GetToken());
+        int id = 300;
+        Request(client, bridge, ++id, "initialize", {{"protocolVersion", "2025-03-26"}, {"capabilities", json::object()}});
+
+        const auto list = Request(client, bridge, ++id, "tools/list", json::object());
+        std::vector<std::string> names;
+        for (const auto& tool : list["result"]["tools"])
+        {
+            names.push_back(tool["name"].get<std::string>());
+        }
+        const auto has = [&](const char* name) { return std::find(names.begin(), names.end(), name) != names.end(); };
+        Check(has("edit_file") && has("write_file") && has("spawn_prefab") && !has("approve"),
+            "The tool list of Codex mode is wrong (file tools in, the approve tool out)");
+
+        // A changing engine call waits for the card; nothing is answered or changed before the user decides
+        const json spawn = {{"name", "coin"}, {"position", json::array({4, 0, 4})}};
+        client.Send({{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"}, {"params", {{"name", "spawn_prefab"}, {"arguments", spawn}}}});
+        PumpUntilPending(bridge, 1);
+        Check(bridge.GetPending()[0].title.find("Spawn prefab 'coin'") != std::string::npos, "The card of the call is wrong");
+        json premature;
+        Check(!client.TryRead(premature) && fixture.CountNamed("Coin") == 0, "The call ran before the user decided");
+        bridge.Resolve(bridge.GetPending()[0].id, true);
+        const auto spawned = Await(client, bridge);
+        Check(!IsError(spawned) && fixture.CountNamed("Coin") == 1, "The confirmed call did not run");
+
+        client.Send({{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"}, {"params", {{"name", "spawn_prefab"}, {"arguments", spawn}}}});
+        PumpUntilPending(bridge, 1);
+        bridge.Resolve(bridge.GetPending()[0].id, false);
+        const auto rejected = Await(client, bridge);
+        Check(IsError(rejected) && ResultText(rejected) == assistant::kUserRejectedText && fixture.CountNamed("Coin") == 1,
+            "A rejected call ran or was not answered with the refusal text");
+
+        // edit_file: a card with the diff, the file is written after Apply only
+        const auto script = fixture.root / "assets" / "scripts" / "coin.py";
+        const auto original = ReadTextFile(script);
+        client.Send({{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"},
+            {"params", {{"name", "edit_file"}, {"arguments", {{"path", "assets/scripts/coin.py"}, {"old_text", "90.0"}, {"new_text", "300.0"}}}}}});
+        PumpUntilPending(bridge, 1);
+        Check(bridge.GetPending()[0].title == "Edit assets/scripts/coin.py" && bridge.GetPending()[0].detail.find("+ ") != std::string::npos,
+            "The edit card is wrong");
+        Check(ReadTextFile(script) == original, "The file changed before the user decided");
+        bridge.Resolve(bridge.GetPending()[0].id, true);
+        const auto edited = Await(client, bridge);
+        Check(!IsError(edited) && ReadTextFile(script).find("300.0") != std::string::npos && ReadTextFile(script).find("90.0") == std::string::npos,
+            "The confirmed edit was not written");
+
+        // Rejected edit: nothing is written
+        const auto afterEdit = ReadTextFile(script);
+        client.Send({{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"},
+            {"params", {{"name", "edit_file"}, {"arguments", {{"path", "assets/scripts/coin.py"}, {"old_text", "300.0"}, {"new_text", "1.0"}}}}}});
+        PumpUntilPending(bridge, 1);
+        bridge.Resolve(bridge.GetPending()[0].id, false);
+        Check(IsError(Await(client, bridge)) && ReadTextFile(script) == afterEdit, "A rejected edit was written");
+
+        // write_file creates a new script after Apply
+        const auto created = fixture.root / "assets" / "scripts" / "new_script.py";
+        client.Send({{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"},
+            {"params", {{"name", "write_file"}, {"arguments", {{"path", "assets/scripts/new_script.py"}, {"content", "x = 1\n"}}}}}});
+        PumpUntilPending(bridge, 1);
+        Check(bridge.GetPending()[0].title == "Create assets/scripts/new_script.py", "The write card is wrong");
+        bridge.Resolve(bridge.GetPending()[0].id, true);
+        Check(!IsError(Await(client, bridge)) && ReadTextFile(created) == "x = 1\n", "write_file did not create the file");
+
+        // Refused without a card: outside the editable areas, outside the project, wrong suffix, no or many matches
+        const auto refused = [&](const json& arguments, const char* tool, const char* what)
+        {
+            const auto response = CallTool(client, bridge, ++id, tool, arguments);
+            Check(IsError(response) && bridge.GetPending().empty(), what);
+        };
+        refused({{"path", "assets/scenes/demo.json"}, {"old_text", "a"}, {"new_text", "b"}}, "edit_file", "A scene file was editable");
+        refused({{"path", "engine/src/Application.cpp"}, {"content", "x"}}, "write_file", "C++ was writable");
+        refused({{"path", "../outside.py"}, {"content", "x"}}, "write_file", "A path outside the project was writable");
+        refused({{"path", "assets/scripts/readme.txt"}, {"content", "x"}}, "write_file", "A file with the wrong suffix was writable");
+        refused({{"path", "assets/scripts/coin.py"}, {"old_text", "not in the file"}, {"new_text", "b"}}, "edit_file", "A missing old_text was accepted");
+        refused({{"path", "assets/scripts/nothing.py"}, {"old_text", "a"}, {"new_text", "b"}}, "edit_file", "A missing file was edited");
+        Check(notices.size() >= 4, "The confirmations left no notes in the transcript");
+    }
+
+    // An external MCP client (its own myengine_mcp.exe without --pipe) finds the editor through the endpoint file
+    void TestExternalClient(Fixture& fixture)
+    {
+        const auto executable = BridgeExecutable();
+        PanelFixture imgui;
+        myengine::ui::AssistantPanelConfig config;
+        config.repositoryRoot = fixture.root;
+        config.tools = fixture.tools.get();
+        config.bridgeExecutable = executable;
+        config.settingsFile = fixture.root / "settings" / "editor_settings.json";
+
+        // The assistant is off and external clients are not allowed: no bridge, no endpoint file
+        {
+            myengine::ui::AssistantPanel panel(config);
+            imgui.Frame(panel);
+            Check(!panel.IsEnabled() && panel.GetBridge() == nullptr && panel.GetEndpointFile().empty(),
+                "The bridge runs although nothing allowed it");
+            Check(!std::filesystem::exists(config.settingsFile.parent_path() / "mcp_endpoint.json"), "An endpoint file was written");
+        }
+
+        // Allowed: the bridge runs with the assistant off, and the endpoint file names its pipe and token
+        config.settings.allowExternalMcp = true;
+        const auto endpoint = config.settingsFile.parent_path() / "mcp_endpoint.json";
+        {
+            myengine::ui::AssistantPanel panel(config);
+            imgui.Frame(panel);
+            auto* bridge = panel.GetBridge();
+            Check(!panel.IsEnabled() && bridge != nullptr && bridge->IsRunning(), "Allowing external clients did not start the bridge");
+            Check(std::filesystem::exists(endpoint) && panel.GetEndpointFile() == endpoint, "The endpoint file was not written");
+            {
+                std::ifstream stream(endpoint, std::ios::binary); // closed before the editor deletes the file
+                const json document = json::parse(stream);
+                Check(document["token"] == bridge->GetToken() && document.contains("pipe"), "The endpoint file is wrong");
+            }
+
+            McpClient client(executable, L"", "", endpoint);
+            int id = 700;
+            const auto initialize = Request(client, *bridge, ++id, "initialize",
+                {{"protocolVersion", "2025-03-26"}, {"capabilities", json::object()}, {"clientInfo", {{"name", "test-agent"}, {"version", "1"}}}});
+            Check(initialize["result"]["serverInfo"]["name"] == "myengine", "initialize through the endpoint file failed");
+            const auto mode = CallTool(client, *bridge, ++id, "get_mode", json::object());
+            Check(!IsError(mode) && json::parse(ResultText(mode))["mode"] == "Edit", "A read tool failed for an external client");
+
+            // A changing call waits for a card; the panel is off, so the card is the editor's modal (no turn ends it)
+            client.Send({{"jsonrpc", "2.0"}, {"id", ++id}, {"method", "tools/call"},
+                {"params", {{"name", "spawn_prefab"}, {"arguments", {{"name", "coin"}, {"position", json::array({1, 0, 1})}}}}}});
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (bridge->GetPending().empty())
+            {
+                Check(std::chrono::steady_clock::now() < deadline, "The card of an external call never appeared");
+                imgui.Frame(panel);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            for (int frame = 0; frame < 5; ++frame)
+            {
+                imgui.Frame(panel); // no turn is running: the card of an external client must not be rejected
+            }
+            Check(bridge->GetPending().size() == 1 && fixture.CountNamed("Coin") == 0, "The card of an external call was dropped or ran early");
+            Check(bridge->GetPending()[0].client == "test-agent", "The card does not name the client from initialize");
+            bridge->Resolve(bridge->GetPending()[0].id, true);
+            const auto spawned = Await(client, *bridge);
+            Check(!IsError(spawned) && fixture.CountNamed("Coin") == 1, "The confirmed external call did not run");
+
+            // The editor is the one that owns the file: turning the option off removes it
+            panel.SetAllowExternalMcp(false);
+            imgui.Frame(panel);
+            Check(panel.GetBridge() == nullptr, "Turning the option off left the bridge");
+            Check(!std::filesystem::exists(endpoint), "Turning the option off left the endpoint file");
+            panel.SetAllowExternalMcp(true);
+            imgui.Frame(panel);
+            Check(panel.GetBridge() != nullptr && std::filesystem::exists(endpoint), "Turning the option on again did not restore them");
+        }
+        Check(!std::filesystem::exists(endpoint), "The endpoint file stayed after the panel was closed");
+        Check(assistant::AssistantSettings::Load(config.settingsFile).allowExternalMcp, "The option was not saved");
+
+        // Nothing to connect to: the client says why
+        {
+            assistant::AssistantBridgeConfig bridgeConfig;
+            bridgeConfig.repositoryRoot = fixture.root;
+            assistant::AssistantBridge bridge(*fixture.tools, bridgeConfig);
+            McpClient client(executable, L"", "", fixture.root / "settings" / "no_such_endpoint.json");
+            const auto response = CallTool(client, bridge, 1, "get_mode", json::object());
+            Check(IsError(response) && ResultText(response).find("Allow external MCP clients") != std::string::npos,
+                "A missing endpoint file was not explained");
+        }
+    }
 }
 
 int main()
@@ -625,6 +832,16 @@ int main()
             Fixture fixture;
             const auto run = [&](const char* name, const auto& test) { test(); std::cout << "  ok: " << name << '\n'; };
             run("panel cards", [&] { TestPanelCards(fixture); });
+        }
+        {
+            Fixture fixture;
+            const auto run = [&](const char* name, const auto& test) { test(); std::cout << "  ok: " << name << '\n'; };
+            run("Codex mode: confirmation in the call, file tools", [&] { TestCodexMode(fixture); });
+        }
+        {
+            Fixture fixture;
+            const auto run = [&](const char* name, const auto& test) { test(); std::cout << "  ok: " << name << '\n'; };
+            run("external MCP client through the endpoint file", [&] { TestExternalClient(fixture); });
         }
         std::cout << "OK: AI2 engine tools, undo steps, MCP bridge over a named pipe, confirmations, file and tool permissions\n";
         result = 0;

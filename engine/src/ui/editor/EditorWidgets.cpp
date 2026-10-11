@@ -1370,7 +1370,7 @@ namespace myengine::ui
 
     // ---- dialogs ----
 
-    bool BeginDialog(const char* popupName, const char* title, const char* icon, const float width, bool* open)
+    bool BeginDialog(const char* popupName, const char* title, const char* icon, const float width, bool* open, const ImU32 iconColor)
     {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -1399,7 +1399,8 @@ namespace myengine::ui
         float textX = position.x + 16.0f;
         if (icon != nullptr)
         {
-            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(textX + 7.5f, position.y + headerHeight * 0.5f), style::kTextDim);
+            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(textX + 7.5f, position.y + headerHeight * 0.5f),
+                     iconColor != 0 ? iconColor : style::kTextDim);
             textX += 24.0f;
         }
         float sizePx = 0.0f;
