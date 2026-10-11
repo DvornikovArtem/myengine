@@ -516,7 +516,7 @@ namespace myengine::scene
             }
             if (progress)
             {
-                progress(1.0f, "Done");
+                progress(1.0f, ""); // the last real stage stays on the screen
             }
 
             Log(logger, "SceneSerializer: scene read from " + path.u8string() + " (read " + std::to_string(static_cast<int>(readMs)) +

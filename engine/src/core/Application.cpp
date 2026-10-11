@@ -454,7 +454,7 @@ namespace myengine::core
         if (deferredSceneLoad_ && std::filesystem::exists(sceneSavePath_, mapExistsError))
         {
             const bool explicitScene = !scenePath.empty();
-            const std::string subtitle = "Opening project " + project.Name() + "  \xC2\xB7  " + sceneSavePath_.stem().u8string();
+            const std::string subtitle = "Opening project " + project.Name();
             StartSceneLoad(sceneSavePath_, true, "myengine", subtitle, editor::LoadingMode::Splash,
                 [this, explicitScene, finishStartup](const bool loaded)
                 {
@@ -1176,6 +1176,7 @@ namespace myengine::core
         bool success = false;
         bool makeCurrent = false; // Open: the file becomes the one that Save writes. Revert: it already is.
         editor::LoadingId loadingId = 0;
+        std::string detailPrefix; // "Loading map Main  .  " on the splash
         std::function<void(bool)> done;
     };
 
@@ -1234,6 +1235,12 @@ namespace myengine::core
         load->done = std::move(done);
         load->loadingId = loadingService_.Begin(std::move(label), mode);
         loadingService_.SetSubtitle(load->loadingId, std::move(subtitle));
+        // The splash has no second line for the map: its name goes in front of the stage ("Loading map Main - Parsing")
+        if (mode == editor::LoadingMode::Splash)
+        {
+            load->detailPrefix = "Loading map " + path.stem().u8string() + "  \xC2\xB7  ";
+            loadingService_.SetProgress(load->loadingId, -1.0f, "Loading map " + path.stem().u8string());
+        }
         load->context.priority = jobs::Priority::Streaming;
         PendingSceneLoad* raw = load.get();
         pendingSceneLoad_ = std::move(load);
@@ -1243,7 +1250,12 @@ namespace myengine::core
         {
             const auto progress = [this, raw](const float fraction, const char* stage)
             {
-                loadingService_.SetProgress(raw->loadingId, fraction, stage);
+                std::string detail = stage != nullptr ? stage : "";
+                if (!detail.empty())
+                {
+                    detail = raw->detailPrefix + detail;
+                }
+                loadingService_.SetProgress(raw->loadingId, fraction, std::move(detail));
             };
             raw->success = scene::ReadWorldFromFile(raw->loaded, raw->path, &logger_, progress);
             raw->finished.store(true, std::memory_order_release);

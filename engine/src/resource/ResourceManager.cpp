@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,7 @@
 
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
+#include <myengine/editor/LoadingService.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
 
@@ -1821,6 +1823,21 @@ namespace myengine::resource
         }
     }
 
+    namespace
+    {
+        // MYENGINE_LOADING_DEBUG_DELAY: the worker waits before it loads, in small steps so that shutdown is not held
+        void SleepForLoadingDebugDelay(const std::atomic<bool>& shuttingDown)
+        {
+            int remaining = editor::LoadingService::DebugDelayMs();
+            while (remaining > 0 && !shuttingDown.load())
+            {
+                const int step = std::min(remaining, 50);
+                std::this_thread::sleep_for(std::chrono::milliseconds(step));
+                remaining -= step;
+            }
+        }
+    }
+
     void ResourceManager::ScheduleMeshLoad(const std::string& key, const std::filesystem::path& path)
     {
         if (shuttingDown_)
@@ -1841,6 +1858,7 @@ namespace myengine::resource
             {
                 return;
             }
+            SleepForLoadingDebugDelay(shuttingDown_);
 
             MeshLoadResult result;
             result.request = request;
@@ -1890,6 +1908,7 @@ namespace myengine::resource
             {
                 return;
             }
+            SleepForLoadingDebugDelay(shuttingDown_);
 
             TextureLoadResult result;
             result.request = request;

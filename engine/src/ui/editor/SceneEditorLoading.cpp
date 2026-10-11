@@ -142,7 +142,10 @@ namespace myengine::ui
             const ImVec2 textPosition = ImGui::GetCursorScreenPos();
             ImDrawList* windowDraw = ImGui::GetWindowDrawList();
             PushFontRole(FontRole::Tiny);
+            // The percent has its place at the right: a long stage is cut before it
+            windowDraw->PushClipRect(textPosition, ImVec2(textPosition.x + kBarWidth - 48.0f, textPosition.y + 20.0f), true);
             windowDraw->AddText(textPosition, style::kTextDim, splash->detail.empty() ? " " : splash->detail.c_str());
+            windowDraw->PopClipRect();
             PopFontRole();
             if (splash->progress >= 0.0f)
             {

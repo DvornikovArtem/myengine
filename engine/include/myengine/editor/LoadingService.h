@@ -80,6 +80,11 @@ namespace myengine::editor
         bool HasSplash() const;
         std::size_t ActiveCount() const;
 
+        // Manual checks: MYENGINE_LOADING_DEBUG_DELAY=<ms> makes every step of the background operations (a thumbnail,
+        // an asset streamed in a viewer) take at least that long, so that the task list and the viewer spinner can
+        // be seen. 0 (the default): off. Read once.
+        static int DebugDelayMs();
+
         // Forgets the finished operations that no longer need to be shown. Once per frame.
         void Update();
         void Update(Clock::time_point now);

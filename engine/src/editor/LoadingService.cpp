@@ -3,6 +3,7 @@
 #include <myengine/editor/LoadingService.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <utility>
 
 namespace myengine::editor
@@ -13,6 +14,23 @@ namespace myengine::editor
         {
             return std::chrono::duration<double>(to - from).count();
         }
+    }
+
+    int LoadingService::DebugDelayMs()
+    {
+        static const int delay = []()
+        {
+            char* text = nullptr;
+            std::size_t length = 0;
+            if (_dupenv_s(&text, &length, "MYENGINE_LOADING_DEBUG_DELAY") != 0 || text == nullptr)
+            {
+                return 0;
+            }
+            const long value = std::strtol(text, nullptr, 10);
+            std::free(text);
+            return static_cast<int>(std::clamp(value, 0L, 10000L));
+        }();
+        return delay;
     }
 
     LoadingOperation LoadingService::Describe(const Entry& entry, const Clock::time_point now) const
