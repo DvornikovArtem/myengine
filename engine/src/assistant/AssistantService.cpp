@@ -3,8 +3,11 @@
 #include <myengine/assistant/AssistantService.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <utility>
+
+#include <myengine/assistant/ChatStore.h>
 
 namespace myengine::assistant
 {
@@ -22,6 +25,94 @@ namespace myengine::assistant
             }
             const auto last = text.find_last_not_of(" \t\r\n");
             return text.substr(first, last - first + 1);
+        }
+
+        std::int64_t NowUnix()
+        {
+            return static_cast<std::int64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+        }
+    }
+
+    void ApplyContentEvent(std::deque<AssistantMessage>& messages, const AssistantEvent& event, std::vector<std::string>* changedFiles)
+    {
+        using Kind = AssistantMessage::Kind;
+        switch (event.type)
+        {
+        case AssistantEventType::TextDelta:
+        {
+            if (event.text.empty())
+            {
+                break;
+            }
+            if (messages.empty() || messages.back().kind != Kind::Assistant)
+            {
+                AssistantMessage message;
+                message.kind = Kind::Assistant;
+                messages.push_back(std::move(message));
+            }
+            auto& text = messages.back().text;
+            if (text.size() < kMaxTextBytes)
+            {
+                text += event.text;
+            }
+            break;
+        }
+
+        case AssistantEventType::Thinking:
+        {
+            if (event.text.empty())
+            {
+                break;
+            }
+            if (messages.empty() || messages.back().kind != Kind::Thinking)
+            {
+                AssistantMessage message;
+                message.kind = Kind::Thinking;
+                messages.push_back(std::move(message));
+            }
+            auto& text = messages.back().text;
+            if (text.size() < kMaxTextBytes)
+            {
+                text += event.text;
+            }
+            break;
+        }
+
+        case AssistantEventType::ToolUse:
+        {
+            AssistantMessage message;
+            message.kind = Kind::Tool;
+            message.toolId = event.toolId;
+            message.toolName = event.toolName;
+            message.text = event.text;
+            message.detail = event.detail;
+            messages.push_back(std::move(message));
+            break;
+        }
+
+        case AssistantEventType::ToolResult:
+        {
+            for (auto it = messages.rbegin(); it != messages.rend(); ++it)
+            {
+                if (it->kind == Kind::Tool && it->toolId == event.toolId)
+                {
+                    it->toolDone = true;
+                    it->toolFailed = event.isError;
+                    it->toolOutput = event.text;
+                    break;
+                }
+            }
+            if (changedFiles != nullptr && !event.isError && !event.filePath.empty() &&
+                std::find(changedFiles->begin(), changedFiles->end(), event.filePath) == changedFiles->end())
+            {
+                changedFiles->push_back(event.filePath);
+            }
+            break;
+        }
+
+        default:
+            break;
         }
     }
 
@@ -65,6 +156,10 @@ namespace myengine::assistant
 
     void AssistantService::Append(AssistantMessage message)
     {
+        if (message.timeUnix == 0)
+        {
+            message.timeUnix = NowUnix();
+        }
         messages_.push_back(std::move(message));
         while (messages_.size() > kMaxMessages)
         {
@@ -98,12 +193,17 @@ namespace myengine::assistant
 
     bool AssistantService::Send(const std::string& text)
     {
+        return Send(text, {});
+    }
+
+    bool AssistantService::Send(const std::string& text, std::vector<AssistantAttachment> attachments)
+    {
         if (backend_ == nullptr || IsBusy())
         {
             return false;
         }
         const auto prompt = Trim(text);
-        if (prompt.empty())
+        if (prompt.empty() && attachments.empty())
         {
             return false;
         }
@@ -121,10 +221,22 @@ namespace myengine::assistant
         AssistantMessage user;
         user.kind = AssistantMessage::Kind::User;
         user.text = prompt;
+        user.attachments = attachments;
         Append(std::move(user));
 
+        AssistantTurnRequest request;
+        request.prompt = prompt.empty() ? std::string("See the attached files.") : prompt;
+        request.sessionId = sessionId_;
+        request.model = model_;
+        request.effort = effort_;
+        request.attachments = std::move(attachments);
+        if (sessionId_.empty() && firstPrompt_.empty())
+        {
+            firstPrompt_ = prompt;
+        }
+
         std::string error;
-        if (!backend_->BeginTurn(prompt, sessionId_, error))
+        if (!backend_->BeginTurn(request, error))
         {
             AssistantMessage message;
             message.kind = AssistantMessage::Kind::Error;
@@ -169,8 +281,133 @@ namespace myengine::assistant
         messages_.clear();
         changedFiles_.clear();
         sessionId_.clear();
+        firstPrompt_.clear();
+        actualModel_.clear();
         totalCostUsd_ = 0.0;
+        totalInputTokens_ = 0;
+        totalOutputTokens_ = 0;
         turnOpen_ = false;
+        ++revision_;
+    }
+
+    bool AssistantService::Retry()
+    {
+        if (backend_ == nullptr || IsBusy())
+        {
+            return false;
+        }
+        for (auto it = messages_.rbegin(); it != messages_.rend(); ++it)
+        {
+            if (it->kind == AssistantMessage::Kind::User)
+            {
+                const auto text = it->text;
+                auto attachments = it->attachments;
+                return Send(text, std::move(attachments));
+            }
+        }
+        return false;
+    }
+
+    void AssistantService::SetChatStore(std::unique_ptr<ChatStore> store)
+    {
+        chats_ = std::move(store);
+        if (chats_ != nullptr)
+        {
+            chats_->Refresh();
+        }
+    }
+
+    bool AssistantService::OpenChat(const std::string& id, std::string& error)
+    {
+        if (chats_ == nullptr)
+        {
+            error = "Chat history is not available.";
+            return false;
+        }
+        if (IsBusy())
+        {
+            error = "Stop the current answer before switching chats.";
+            return false;
+        }
+        std::deque<AssistantMessage> loaded;
+        if (!chats_->LoadTranscript(id, loaded, rootDirectory_, kMaxMessages, error))
+        {
+            return false;
+        }
+        messages_ = std::move(loaded);
+        changedFiles_.clear();
+        sessionId_ = id;
+        firstPrompt_.clear();
+        turnOpen_ = false;
+        totalCostUsd_ = 0.0;
+        totalInputTokens_ = 0;
+        totalOutputTokens_ = 0;
+        actualModel_.clear();
+        if (const auto* info = chats_->Find(id); info != nullptr)
+        {
+            model_ = info->model;
+            effort_ = info->effort;
+            totalCostUsd_ = info->costUsd;
+            totalInputTokens_ = info->inputTokens;
+            totalOutputTokens_ = info->outputTokens;
+            actualModel_ = info->lastModel;
+        }
+        ++revision_;
+        return true;
+    }
+
+    void AssistantService::RenameChat(const std::string& id, const std::string& title)
+    {
+        if (chats_ != nullptr && !id.empty() && !Trim(title).empty())
+        {
+            chats_->Rename(id, Trim(title));
+            ++revision_;
+        }
+    }
+
+    void AssistantService::HideChat(const std::string& id)
+    {
+        if (chats_ == nullptr || id.empty())
+        {
+            return;
+        }
+        chats_->Hide(id);
+        if (id == sessionId_)
+        {
+            NewConversation();
+        }
+        ++revision_;
+    }
+
+    std::string AssistantService::GetChatTitle() const
+    {
+        if (chats_ != nullptr && !sessionId_.empty())
+        {
+            if (const auto* info = chats_->Find(sessionId_); info != nullptr && !info->title.empty())
+            {
+                return info->title;
+            }
+        }
+        return firstPrompt_.empty() ? std::string() : MakeChatTitle(firstPrompt_);
+    }
+
+    void AssistantService::SetModel(const std::string& model)
+    {
+        model_ = model;
+        if (chats_ != nullptr && !sessionId_.empty())
+        {
+            chats_->SetModel(sessionId_, model_);
+        }
+        ++revision_;
+    }
+
+    void AssistantService::SetEffort(const std::string& effort)
+    {
+        effort_ = effort;
+        if (chats_ != nullptr && !sessionId_.empty())
+        {
+            chats_->SetEffort(sessionId_, effort_);
+        }
         ++revision_;
     }
 
@@ -202,60 +439,53 @@ namespace myengine::assistant
             if (!event.sessionId.empty())
             {
                 sessionId_ = event.sessionId;
+                if (chats_ != nullptr)
+                {
+                    // The chat exists from its first answer on: the index keeps its title and settings
+                    chats_->Touch(sessionId_, MakeChatTitle(firstPrompt_), model_, effort_);
+                }
             }
+            if (!event.text.empty())
+            {
+                actualModel_ = event.text;
+            }
+            ++revision_;
             break;
 
         case AssistantEventType::TextDelta:
-        {
-            if (event.text.empty())
-            {
-                break;
-            }
-            if (messages_.empty() || messages_.back().kind != AssistantMessage::Kind::Assistant)
-            {
-                AssistantMessage message;
-                message.kind = AssistantMessage::Kind::Assistant;
-                Append(std::move(message));
-            }
-            auto& text = messages_.back().text;
-            if (text.size() < kMaxTextBytes)
-            {
-                text += event.text;
-                ++revision_;
-            }
-            break;
-        }
-
+        case AssistantEventType::Thinking:
         case AssistantEventType::ToolUse:
-        {
-            AssistantMessage message;
-            message.kind = AssistantMessage::Kind::Tool;
-            message.toolId = event.toolId;
-            message.toolName = event.toolName;
-            message.text = event.text;
-            message.detail = event.detail;
-            Append(std::move(message));
-            break;
-        }
-
         case AssistantEventType::ToolResult:
         {
-            for (auto it = messages_.rbegin(); it != messages_.rend(); ++it)
+            const std::size_t before = messages_.size();
+            ApplyContentEvent(messages_, event, &changedFiles_);
+            if (event.type != AssistantEventType::Thinking && !messages_.empty())
             {
-                if (it->kind == AssistantMessage::Kind::Tool && it->toolId == event.toolId)
+                // anything after the reasoning ends it
+                for (auto it = messages_.rbegin(); it != messages_.rend() && it->kind != AssistantMessage::Kind::User; ++it)
                 {
-                    it->toolDone = true;
-                    it->toolFailed = event.isError;
-                    it->toolOutput = event.text;
-                    ++revision_;
-                    break;
+                    if (it->kind == AssistantMessage::Kind::Thinking && it->endTimeUnix == 0)
+                    {
+                        it->endTimeUnix = NowUnix();
+                    }
                 }
             }
-            if (!event.isError && !event.filePath.empty() &&
-                std::find(changedFiles_.begin(), changedFiles_.end(), event.filePath) == changedFiles_.end())
+            for (std::size_t i = before; i < messages_.size(); ++i)
             {
-                changedFiles_.push_back(event.filePath);
+                if (messages_[i].timeUnix == 0)
+                {
+                    messages_[i].timeUnix = NowUnix();
+                }
+                if (messages_[i].kind == AssistantMessage::Kind::Assistant && messages_[i].model.empty())
+                {
+                    messages_[i].model = actualModel_;
+                }
             }
+            while (messages_.size() > kMaxMessages)
+            {
+                messages_.pop_front();
+            }
+            ++revision_;
             break;
         }
 
@@ -275,6 +505,12 @@ namespace myengine::assistant
                 sessionId_ = event.sessionId;
             }
             totalCostUsd_ += event.costUsd;
+            totalInputTokens_ += event.inputTokens;
+            totalOutputTokens_ += event.outputTokens;
+            if (chats_ != nullptr && !sessionId_.empty())
+            {
+                chats_->Touch(sessionId_, MakeChatTitle(firstPrompt_), model_, effort_); // the time of the last answer
+            }
 
             bool hasAnswer = false; // an Assistant message since the user's prompt of this turn
             for (auto it = messages_.rbegin(); it != messages_.rend() && it->kind != AssistantMessage::Kind::User; ++it)

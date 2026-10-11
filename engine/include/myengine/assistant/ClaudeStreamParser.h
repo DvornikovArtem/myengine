@@ -36,5 +36,6 @@ namespace myengine::assistant
         std::string streamingMessageId_; // message whose text already came as deltas
         std::unordered_map<std::string, std::string> toolFiles_; // tool_use id -> file the tool edits
         bool finished_ = false;
+        bool thinkingStreamed_ = false;
     };
 }

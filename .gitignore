@@ -52,3 +52,6 @@ external/**/x64/**
 # Python for scripting
 !external/python/libs/*.lib
 !external/runtime/*.dll
+
+# Editor runtime data of a project (assistant chats index, thumbnails)
+Saved/
