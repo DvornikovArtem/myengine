@@ -807,8 +807,8 @@ namespace myengine::core
                 }
 
                 mouseCaptureButtons_ = 0;
-                uiManager_.HandleWindowMessage(window.Id(), window.Handle(), WM_LBUTTONUP, 0, lparam);
-                uiManager_.HandleWindowMessage(window.Id(), window.Handle(), WM_RBUTTONUP, 0, lparam);
+                // (lparam of this message is the window that took the capture, not a position)
+                uiManager_.ReleaseMouseButtons(window.Id());
                 input_.OnMouseUp(MouseButton::Left);
                 if (cameraControlActive_ && inputOwnerWindowId_ == window.Id())
                 {

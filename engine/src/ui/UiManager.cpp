@@ -538,30 +538,50 @@ namespace myengine::ui
                 io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
                 break;
 
+            // A button message carries the position of the click: the click lands where it was made even when
+            // the last WM_MOUSEMOVE is old (a fast click, a posted message, the cursor moved by the system)
             case WM_LBUTTONDOWN:
             case WM_LBUTTONDBLCLK:
+                io.AddMousePosEvent(
+                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
                 break;
 
             case WM_LBUTTONUP:
+                io.AddMousePosEvent(
+                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
                 break;
 
             case WM_RBUTTONDOWN:
             case WM_RBUTTONDBLCLK:
+                io.AddMousePosEvent(
+                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
                 break;
 
             case WM_RBUTTONUP:
+                io.AddMousePosEvent(
+                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
                 break;
 
             case WM_MBUTTONDOWN:
             case WM_MBUTTONDBLCLK:
+                io.AddMousePosEvent(
+                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 io.AddMouseButtonEvent(ImGuiMouseButton_Middle, true);
                 break;
 
             case WM_MBUTTONUP:
+                io.AddMousePosEvent(
+                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
+                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
                 io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
                 break;
 
@@ -605,6 +625,26 @@ namespace myengine::ui
             default:
                 break;
         }
+    }
+
+    void UiManager::ReleaseMouseButtons(const core::WindowId windowId)
+    {
+        if (!initialized_)
+        {
+            return;
+        }
+
+        const auto it = windows_.find(windowId);
+        if (it == windows_.end() || it->second == nullptr || it->second->imguiContext == nullptr)
+        {
+            return;
+        }
+
+        ImGui::SetCurrentContext(it->second->imguiContext);
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Middle, false);
     }
 
     void UiManager::Update(const float deltaTime)
