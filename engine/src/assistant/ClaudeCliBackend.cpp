@@ -23,6 +23,8 @@ namespace myengine::assistant
     namespace
     {
         constexpr std::size_t kMaxPromptBytes = 128 * 1024;
+        constexpr std::size_t kMaxImageBytes = 5 * 1024 * 1024; // the API refuses bigger images
+        constexpr std::size_t kMaxAttachments = 12;
         constexpr std::size_t kMaxLineBytes = 16 * 1024 * 1024;
         constexpr std::size_t kBytesPerFrame = 256 * 1024;     // limit of stdout read in one Poll while the process runs
         constexpr std::size_t kBytesAtExit = 64 * 1024 * 1024; // what is left in the pipe after the process ended
@@ -67,12 +69,70 @@ namespace myengine::assistant
             return std::filesystem::is_regular_file(path, error);
         }
 
-        bool IsSafeModelName(const std::string& model)
+        std::string Base64(const std::string& bytes)
         {
-            return !model.empty() && model.size() <= 64 && std::all_of(model.begin(), model.end(), [](const char c)
+            static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            std::string out;
+            out.reserve((bytes.size() + 2) / 3 * 4);
+            std::size_t i = 0;
+            for (; i + 2 < bytes.size(); i += 3)
             {
-                return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '.' || c == '-' || c == '_' || c == '[' || c == ']';
-            });
+                const unsigned v = (static_cast<unsigned char>(bytes[i]) << 16) | (static_cast<unsigned char>(bytes[i + 1]) << 8) |
+                    static_cast<unsigned char>(bytes[i + 2]);
+                out += kAlphabet[(v >> 18) & 63];
+                out += kAlphabet[(v >> 12) & 63];
+                out += kAlphabet[(v >> 6) & 63];
+                out += kAlphabet[v & 63];
+            }
+            if (i + 1 == bytes.size())
+            {
+                const unsigned v = static_cast<unsigned char>(bytes[i]) << 16;
+                out += kAlphabet[(v >> 18) & 63];
+                out += kAlphabet[(v >> 12) & 63];
+                out += "==";
+            }
+            else if (i + 2 == bytes.size())
+            {
+                const unsigned v = (static_cast<unsigned char>(bytes[i]) << 16) | (static_cast<unsigned char>(bytes[i + 1]) << 8);
+                out += kAlphabet[(v >> 18) & 63];
+                out += kAlphabet[(v >> 12) & 63];
+                out += kAlphabet[(v >> 6) & 63];
+                out += '=';
+            }
+            return out;
+        }
+
+        bool ReadSmallFile(const std::filesystem::path& path, const std::size_t limit, std::string& bytes)
+        {
+            std::ifstream file(path, std::ios::binary | std::ios::ate);
+            if (!file)
+            {
+                return false;
+            }
+            const std::streamoff size = file.tellg();
+            if (size <= 0 || static_cast<std::size_t>(size) > limit)
+            {
+                return false;
+            }
+            bytes.resize(static_cast<std::size_t>(size));
+            file.seekg(0);
+            return static_cast<bool>(file.read(bytes.data(), size));
+        }
+
+        // A path as it is shown to the model: relative to the project when the file is inside it
+        std::string PromptPath(const std::filesystem::path& file, const std::filesystem::path& root)
+        {
+            std::error_code error;
+            if (!root.empty())
+            {
+                const auto relative = std::filesystem::relative(file, root, error);
+                const auto text = relative.generic_u8string();
+                if (!error && !relative.empty() && text.rfind("..", 0) != 0 && !relative.is_absolute())
+                {
+                    return text;
+                }
+            }
+            return file.generic_u8string();
         }
 
         // Moves what is available in a pipe to `buffer`, at most `budget` bytes. Never blocks
@@ -285,12 +345,28 @@ namespace myengine::assistant
         });
     }
 
+    bool ClaudeCliBackend::IsSafeModelName(const std::string& model)
+    {
+        return !model.empty() && model.size() <= 64 && std::all_of(model.begin(), model.end(), [](const char c)
+        {
+            return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '.' || c == '-' || c == '_' || c == '[' || c == ']';
+        });
+    }
+
+    bool ClaudeCliBackend::IsValidEffort(const std::string& effort)
+    {
+        return effort == "low" || effort == "medium" || effort == "high" || effort == "xhigh" || effort == "max";
+    }
+
     std::wstring ClaudeCliBackend::BuildCommandLine(
         const std::filesystem::path& executable,
         const ClaudeCliConfig& config,
         const std::filesystem::path& settingsFile,
         const std::string& sessionId,
-        const std::filesystem::path& mcpConfigFile)
+        const std::filesystem::path& mcpConfigFile,
+        const std::string& modelOverride,
+        const std::string& effort,
+        const std::vector<std::filesystem::path>& extraDirectories)
     {
         const bool bridge = !config.bridge.executable.empty() && !mcpConfigFile.empty() && !config.bridge.approveTool.empty();
         std::wstring line = Quote(executable.wstring());
@@ -327,9 +403,18 @@ namespace myengine::assistant
             line += L" --max-budget-usd ";
             line += budget;
         }
-        if (IsSafeModelName(config.model))
+        const std::string& model = IsSafeModelName(modelOverride) ? modelOverride : config.model;
+        if (IsSafeModelName(model))
         {
-            line += L" --model " + std::wstring(config.model.begin(), config.model.end());
+            line += L" --model " + std::wstring(model.begin(), model.end());
+        }
+        if (IsValidEffort(effort))
+        {
+            line += L" --effort " + std::wstring(effort.begin(), effort.end());
+        }
+        for (const auto& directory : extraDirectories)
+        {
+            line += L" --add-dir " + Quote(directory.wstring());
         }
         if (IsValidSessionId(sessionId))
         {
@@ -351,6 +436,63 @@ namespace myengine::assistant
         return message.dump(-1, ' ', false, json::error_handler_t::replace) + "\n";
     }
 
+    std::string ClaudeCliBackend::BuildUserMessageLine(const AssistantTurnRequest& request, const std::filesystem::path& root)
+    {
+        using json = nlohmann::json;
+        json content = json::array();
+        std::string text = request.prompt;
+        std::string fileList;
+        std::size_t count = 0;
+        for (const auto& attachment : request.attachments)
+        {
+            if (attachment.path.empty() || ++count > kMaxAttachments)
+            {
+                continue;
+            }
+            const auto path = std::filesystem::u8path(attachment.path);
+            std::string bytes;
+            if (attachment.IsImage() && ReadSmallFile(path, kMaxImageBytes, bytes))
+            {
+                content.push_back({{"type", "image"},
+                    {"source", {{"type", "base64"}, {"media_type", attachment.mediaType}, {"data", Base64(bytes)}}}});
+                continue;
+            }
+            fileList += "\n- " + PromptPath(path, root);
+        }
+        if (!fileList.empty())
+        {
+            text += "\n\nAttached files (open them with the Read tool):" + fileList;
+        }
+        content.push_back({{"type", "text"}, {"text", text}});
+        const json message = {
+            {"type", "user"},
+            {"message", {{"role", "user"}, {"content", std::move(content)}}},
+        };
+        return message.dump(-1, ' ', false, json::error_handler_t::replace) + "\n";
+    }
+
+    std::vector<std::filesystem::path> ClaudeCliBackend::ExtraDirectoriesFor(const AssistantTurnRequest& request, const std::filesystem::path& root)
+    {
+        std::vector<std::filesystem::path> result;
+        std::error_code error;
+        for (const auto& attachment : request.attachments)
+        {
+            // Images are sent inline; any other file is read by the CLI, so its folder has to be allowed
+            if (attachment.path.empty())
+            {
+                continue;
+            }
+            const auto directory = std::filesystem::u8path(attachment.path).parent_path();
+            const auto relative = std::filesystem::relative(directory, root, error);
+            const bool inside = !error && !relative.empty() && relative.generic_u8string().rfind("..", 0) != 0;
+            if (!attachment.IsImage() && !inside && std::find(result.begin(), result.end(), directory) == result.end() && result.size() < 8)
+            {
+                result.push_back(directory);
+            }
+        }
+        return result;
+    }
+
     bool ClaudeCliBackend::IsBusy() const
     {
         return process_ != nullptr;
@@ -358,6 +500,16 @@ namespace myengine::assistant
 
     bool ClaudeCliBackend::BeginTurn(const std::string& prompt, const std::string& sessionId, std::string& error)
     {
+        AssistantTurnRequest request;
+        request.prompt = prompt;
+        request.sessionId = sessionId;
+        return BeginTurn(request, error);
+    }
+
+    bool ClaudeCliBackend::BeginTurn(const AssistantTurnRequest& request, std::string& error)
+    {
+        const std::string& prompt = request.prompt;
+        const std::string& sessionId = request.sessionId;
         if (IsBusy())
         {
             error = "The assistant is still answering.";
@@ -403,7 +555,8 @@ namespace myengine::assistant
             }
         }
 
-        std::wstring commandLine = BuildCommandLine(resolved_, config_, settingsFile_, sessionId, mcpConfigFile_);
+        std::wstring commandLine = BuildCommandLine(resolved_, config_, settingsFile_, sessionId, mcpConfigFile_,
+                                                    request.model, request.effort, ExtraDirectoriesFor(request, config_.workingDirectory));
         const bool viaShell = HasExtension(resolved_, L".cmd") || HasExtension(resolved_, L".bat");
         if (viaShell)
         {
@@ -518,7 +671,7 @@ namespace myengine::assistant
         parser_.SetRootDirectory(config_.workingDirectory.u8string());
 
         // The whole prompt fits into the 1 MB pipe buffer, so this does not wait for the child
-        const std::string line = BuildUserMessageLine(prompt);
+        const std::string line = BuildUserMessageLine(request, config_.workingDirectory);
         std::size_t written = 0;
         bool writeFailed = false;
         while (written < line.size())
@@ -542,7 +695,10 @@ namespace myengine::assistant
 
         if (config_.logger != nullptr)
         {
-            config_.logger->Info("Assistant: started " + resolved_.u8string() + (sessionId.empty() ? " (new session)" : " (resume " + sessionId + ")"));
+            config_.logger->Info("Assistant: started " + resolved_.u8string() + (sessionId.empty() ? " (new session)" : " (resume " + sessionId + ")") +
+                " model=" + (IsSafeModelName(request.model) ? request.model : (config_.model.empty() ? std::string("default") : config_.model)) +
+                " effort=" + (IsValidEffort(request.effort) ? request.effort : std::string("default")) +
+                " attachments=" + std::to_string(request.attachments.size()));
         }
         return true;
     }

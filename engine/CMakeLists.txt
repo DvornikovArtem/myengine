@@ -3,9 +3,11 @@
   include/myengine/assistant/AssistantBridgeServer.h
   include/myengine/assistant/AssistantService.h
   include/myengine/assistant/AssistantTools.h
+  include/myengine/assistant/ChatStore.h
   include/myengine/assistant/ClaudeCliBackend.h
   include/myengine/assistant/ClaudeStreamParser.h
   include/myengine/assistant/IAssistantBackend.h
+  include/myengine/assistant/Markdown.h
   include/myengine/assistant/McpBridgeCore.h
   include/myengine/config/AppConfig.h
   include/myengine/core/Application.h
@@ -81,8 +83,10 @@ set(ENGINE_SOURCES
   src/assistant/AssistantBridgeServer.cpp
   src/assistant/AssistantService.cpp
   src/assistant/AssistantTools.cpp
+  src/assistant/ChatStore.cpp
   src/assistant/ClaudeCliBackend.cpp
   src/assistant/ClaudeStreamParser.cpp
+  src/assistant/Markdown.cpp
   src/config/AppConfig.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
@@ -125,6 +129,8 @@ set(ENGINE_SOURCES
   src/scripting/ScriptRuntime.cpp
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
+  src/ui/AssistantImages.cpp
+  src/ui/AssistantMarkdownView.cpp
   src/ui/AssistantPanel.cpp
   src/ui/editor/EditorIcons.h
   src/ui/editor/EditorStyle.h
@@ -220,6 +226,8 @@ target_link_libraries(myengine_engine
     uuid
     dwmapi
     gdi32
+    gdiplus
+    comdlg32
     shell32
     TracyClient
   PRIVATE

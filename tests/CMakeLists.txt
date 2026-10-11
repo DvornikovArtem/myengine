@@ -128,6 +128,15 @@ set_property(TARGET myengine_script_console_tests PROPERTY FOLDER "Tests")
 add_test(NAME script_console COMMAND myengine_script_console_tests)
 set_tests_properties(script_console PROPERTIES TIMEOUT 30)
 
+# AS3: markdown, chat history, per-chat settings, attachments (no process is started)
+add_executable(myengine_assistant_chat_tests
+  assistant/ChatTests.cpp)
+target_link_libraries(myengine_assistant_chat_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_assistant_chat_tests)
+set_property(TARGET myengine_assistant_chat_tests PROPERTY FOLDER "Tests")
+add_test(NAME assistant_chat COMMAND myengine_assistant_chat_tests)
+set_tests_properties(assistant_chat PROPERTIES TIMEOUT 60)
+
 # AI1: stand-in for the claude CLI. The assistant tests start it through the real pipes and CreateProcess path
 add_executable(myengine_fake_claude
   assistant/FakeClaude.cpp)

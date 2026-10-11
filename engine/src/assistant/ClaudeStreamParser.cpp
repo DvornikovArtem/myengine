@@ -296,13 +296,25 @@ namespace myengine::assistant
             else if (streamType == "content_block_delta")
             {
                 const auto* delta = GetChild(*streamEvent, "delta");
-                if (delta != nullptr && GetString(*delta, "type") == "text_delta")
+                const auto deltaType = delta != nullptr ? GetString(*delta, "type") : std::string();
+                if (deltaType == "text_delta")
                 {
                     AssistantEvent event;
                     event.type = AssistantEventType::TextDelta;
                     event.text = GetString(*delta, "text");
                     if (!event.text.empty())
                     {
+                        events.push_back(std::move(event));
+                    }
+                }
+                else if (deltaType == "thinking_delta")
+                {
+                    AssistantEvent event;
+                    event.type = AssistantEventType::Thinking;
+                    event.text = GetString(*delta, "thinking");
+                    if (!event.text.empty())
+                    {
+                        thinkingStreamed_ = true;
                         events.push_back(std::move(event));
                     }
                 }
@@ -339,6 +351,20 @@ namespace myengine::assistant
                         AssistantEvent event;
                         event.type = AssistantEventType::TextDelta;
                         event.text = GetString(block, "text");
+                        if (!event.text.empty())
+                        {
+                            events.push_back(std::move(event));
+                        }
+                    }
+                }
+                else if (blockType == "thinking")
+                {
+                    // Whole block of a transcript line, or the final message of a turn whose deltas were not streamed
+                    if (!textAlreadyStreamed || !thinkingStreamed_)
+                    {
+                        AssistantEvent event;
+                        event.type = AssistantEventType::Thinking;
+                        event.text = GetString(block, "thinking");
                         if (!event.text.empty())
                         {
                             events.push_back(std::move(event));

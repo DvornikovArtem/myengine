@@ -1,18 +1,157 @@
 // Window.cpp
 
 #include <mutex>
+#include <string>
+#include <vector>
+
+#include <ole2.h>
+#include <shellapi.h>
 
 #include <myengine/core/Window.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/ServiceLocator.h>
 
 namespace myengine::core
 {
+    namespace
+    {
+        std::string ToUtf8(const wchar_t* text, const int length)
+        {
+            if (length <= 0)
+            {
+                return {};
+            }
+            const int bytes = WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0, nullptr, nullptr);
+            std::string result(static_cast<std::size_t>(std::max(bytes, 0)), '\0');
+            if (bytes > 0)
+            {
+                WideCharToMultiByte(CP_UTF8, 0, text, length, result.data(), bytes, nullptr, nullptr);
+            }
+            return result;
+        }
+
+        // Accepts files dragged in from Explorer (OLE drop target) and reports them through the editor state:
+        // the panels decide what to do. Everything runs on the thread of the window.
+        class FileDropTarget final : public IDropTarget
+        {
+        public:
+            FileDropTarget(const HWND hwnd, const WindowId windowId) : hwnd_(hwnd), windowId_(windowId) {}
+
+            HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** object) override
+            {
+                if (id == IID_IUnknown || id == IID_IDropTarget)
+                {
+                    *object = static_cast<IDropTarget*>(this);
+                    AddRef();
+                    return S_OK;
+                }
+                *object = nullptr;
+                return E_NOINTERFACE;
+            }
+            ULONG STDMETHODCALLTYPE AddRef() override { return static_cast<ULONG>(InterlockedIncrement(&references_)); }
+            ULONG STDMETHODCALLTYPE Release() override
+            {
+                const auto count = static_cast<ULONG>(InterlockedDecrement(&references_));
+                if (count == 0)
+                {
+                    delete this;
+                }
+                return count;
+            }
+
+            HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD, POINTL point, DWORD* effect) override
+            {
+                hasFiles_ = HasFiles(data);
+                *effect = hasFiles_ ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+                Update(point, hasFiles_);
+                return S_OK;
+            }
+
+            HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL point, DWORD* effect) override
+            {
+                *effect = hasFiles_ ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+                Update(point, hasFiles_);
+                return S_OK;
+            }
+
+            HRESULT STDMETHODCALLTYPE DragLeave() override
+            {
+                auto& drag = ServiceLocator::GetEditorRuntimeState().fileDrag;
+                drag.dragging = false;
+                hasFiles_ = false;
+                return S_OK;
+            }
+
+            HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL point, DWORD* effect) override
+            {
+                auto& drag = ServiceLocator::GetEditorRuntimeState().fileDrag;
+                drag.dragging = false;
+                *effect = DROPEFFECT_NONE;
+                FORMATETC format{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+                STGMEDIUM medium{};
+                if (data != nullptr && SUCCEEDED(data->GetData(&format, &medium)))
+                {
+                    const auto drop = static_cast<HDROP>(GlobalLock(medium.hGlobal));
+                    if (drop != nullptr)
+                    {
+                        const UINT count = DragQueryFileW(drop, 0xFFFFFFFFu, nullptr, 0);
+                        drag.dropped.clear();
+                        for (UINT i = 0; i < count && i < 32; ++i)
+                        {
+                            std::wstring path(static_cast<std::size_t>(DragQueryFileW(drop, i, nullptr, 0)) + 1, L'\0');
+                            const UINT length = DragQueryFileW(drop, i, path.data(), static_cast<UINT>(path.size()));
+                            drag.dropped.push_back(ToUtf8(path.c_str(), static_cast<int>(length)));
+                        }
+                        GlobalUnlock(medium.hGlobal);
+                        POINT client{point.x, point.y};
+                        ScreenToClient(hwnd_, &client);
+                        drag.dropX = static_cast<float>(client.x);
+                        drag.dropY = static_cast<float>(client.y);
+                        drag.windowId = windowId_;
+                        *effect = DROPEFFECT_COPY;
+                    }
+                    ReleaseStgMedium(&medium);
+                }
+                hasFiles_ = false;
+                return S_OK;
+            }
+
+        private:
+            static bool HasFiles(IDataObject* data)
+            {
+                FORMATETC format{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+                return data != nullptr && data->QueryGetData(&format) == S_OK;
+            }
+
+            void Update(const POINTL point, const bool dragging)
+            {
+                auto& drag = ServiceLocator::GetEditorRuntimeState().fileDrag;
+                POINT client{point.x, point.y};
+                ScreenToClient(hwnd_, &client);
+                drag.windowId = windowId_;
+                drag.dragging = dragging;
+                drag.x = static_cast<float>(client.x);
+                drag.y = static_cast<float>(client.y);
+            }
+
+            HWND hwnd_ = nullptr;
+            WindowId windowId_ = 0;
+            LONG references_ = 1;
+            bool hasFiles_ = false;
+        };
+    }
+
     Window::Window(WindowDesc desc) : desc_(std::move(desc)) {}
 
     Window::~Window()
     {
         if (hwnd_ != nullptr)
         {
+            if (dropRegistered_)
+            {
+                RevokeDragDrop(hwnd_);
+                dropRegistered_ = false;
+            }
             DestroyWindow(hwnd_);
             hwnd_ = nullptr;
         }
@@ -35,6 +174,18 @@ namespace myengine::core
 
         hwnd_ = CreateWindowExW(0, ClassName(), desc_.title.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                 width, height, nullptr, nullptr, GetModuleHandleW(nullptr), this);
+
+        if (hwnd_ != nullptr)
+        {
+            // Files dragged in from Explorer: the assistant attaches them. A failure only costs this feature.
+            const HRESULT initialized = OleInitialize(nullptr);
+            if (SUCCEEDED(initialized) || initialized == RPC_E_CHANGED_MODE)
+            {
+                auto* target = new FileDropTarget(hwnd_, desc_.id);
+                dropRegistered_ = SUCCEEDED(RegisterDragDrop(hwnd_, target));
+                target->Release();
+            }
+        }
 
         return hwnd_ != nullptr;
     }
