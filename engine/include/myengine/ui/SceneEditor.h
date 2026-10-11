@@ -81,6 +81,10 @@ namespace myengine::ui
         std::function<bool()> isVSyncEnabled;
         std::function<void(bool)> setVSync;
         std::function<void(bool)> setWireframe;
+        // A small RGBA picture as an ImGui texture (the assistant's attachment chips): the id to give ImGui::AddImage, 0 on
+        // failure; the second function releases it. Set by UiManager.
+        std::function<std::uint64_t(const unsigned char* rgba, std::uint32_t width, std::uint32_t height)> createUiTexture;
+        std::function<void(std::uint64_t)> destroyUiTexture;
     };
 
     struct SceneEditorWindowContext

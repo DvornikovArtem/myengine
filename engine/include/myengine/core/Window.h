@@ -55,5 +55,6 @@ namespace myengine::core
 		WindowDesc desc_;
 		HWND hwnd_ = nullptr;
 		Application* owner_ = nullptr;
+		bool dropRegistered_ = false; // the OLE drop target of the window (files from Explorer)
 	};
 }

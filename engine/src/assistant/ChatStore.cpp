@@ -51,12 +51,13 @@ namespace myengine::assistant
             return static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::seconds>(system.time_since_epoch()).count());
         }
 
-        std::string EnvironmentValue(const char* name)
+        // The wide variant: a profile folder with letters of the user's language is not UTF-8 in the narrow environment
+        std::wstring EnvironmentValue(const wchar_t* name)
         {
-            char* value = nullptr;
+            wchar_t* value = nullptr;
             std::size_t length = 0;
-            std::string result;
-            if (_dupenv_s(&value, &length, name) == 0 && value != nullptr)
+            std::wstring result;
+            if (_wdupenv_s(&value, &length, name) == 0 && value != nullptr)
             {
                 result = value;
                 std::free(value);
@@ -277,13 +278,13 @@ namespace myengine::assistant
     std::filesystem::path ChatStore::DefaultSessionsDirectory(const std::filesystem::path& workingDirectory)
     {
         std::filesystem::path home;
-        if (const auto profile = EnvironmentValue("USERPROFILE"); !profile.empty())
+        if (const auto profile = EnvironmentValue(L"USERPROFILE"); !profile.empty())
         {
-            home = std::filesystem::u8path(profile);
+            home = std::filesystem::path(profile);
         }
-        else if (const auto unixHome = EnvironmentValue("HOME"); !unixHome.empty())
+        else if (const auto unixHome = EnvironmentValue(L"HOME"); !unixHome.empty())
         {
-            home = std::filesystem::u8path(unixHome);
+            home = std::filesystem::path(unixHome);
         }
         if (home.empty())
         {

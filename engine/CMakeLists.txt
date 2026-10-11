@@ -125,6 +125,8 @@ set(ENGINE_SOURCES
   src/scripting/ScriptRuntime.cpp
   src/scripting/ScriptSystem.cpp
   src/state/StateMachine.cpp
+  src/ui/AssistantImages.cpp
+  src/ui/AssistantMarkdownView.cpp
   src/ui/AssistantPanel.cpp
   src/ui/editor/EditorIcons.h
   src/ui/editor/EditorStyle.h
@@ -220,6 +222,8 @@ target_link_libraries(myengine_engine
     uuid
     dwmapi
     gdi32
+    gdiplus
+    comdlg32
     shell32
     TracyClient
   PRIVATE

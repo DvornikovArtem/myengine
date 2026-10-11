@@ -695,7 +695,10 @@ namespace myengine::assistant
 
         if (config_.logger != nullptr)
         {
-            config_.logger->Info("Assistant: started " + resolved_.u8string() + (sessionId.empty() ? " (new session)" : " (resume " + sessionId + ")"));
+            config_.logger->Info("Assistant: started " + resolved_.u8string() + (sessionId.empty() ? " (new session)" : " (resume " + sessionId + ")") +
+                " model=" + (IsSafeModelName(request.model) ? request.model : (config_.model.empty() ? std::string("default") : config_.model)) +
+                " effort=" + (IsValidEffort(request.effort) ? request.effort : std::string("default")) +
+                " attachments=" + std::to_string(request.attachments.size()));
         }
         return true;
     }
