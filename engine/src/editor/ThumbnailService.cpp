@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <limits>
@@ -279,8 +280,8 @@ namespace myengine::editor
                 DirectX::XMMatrixTranslation(position[0], position[1], position[2]);
         }
 
-        // The meshes of a .prefab.json with their world matrices (children multiply by their parents)
-        bool ParsePrefab(const fs::path& file, std::vector<PrefabMesh>& out)
+        // The entities of a .prefab.json with their world matrices (children multiply by their parents)
+        bool ReadPrefabEntities(const fs::path& file, std::vector<PrefabEntityInfo>& out)
         {
             out.clear();
             std::ifstream stream(file, std::ios::binary);
@@ -307,10 +308,8 @@ namespace myengine::editor
             {
                 long long parent = -1;
                 DirectX::XMFLOAT4X4 local{};
-                const json* meshRenderer = nullptr;
             };
             std::unordered_map<long long, Node> nodes;
-            std::vector<long long> order;
             for (const auto& entity : *entitiesIt)
             {
                 if (!entity.is_object() || !entity.contains("id") || !entity["id"].is_number_integer())
@@ -319,46 +318,104 @@ namespace myengine::editor
                 }
                 Node node;
                 const long long id = entity["id"].get<long long>();
+                PrefabEntityInfo info;
+                info.id = id;
                 if (const auto it = entity.find("Hierarchy"); it != entity.end() && it->is_object() &&
                     it->contains("parent") && (*it)["parent"].is_number_integer())
                 {
                     node.parent = (*it)["parent"].get<long long>();
+                    if (node.parent <= 0)
+                    {
+                        node.parent = -1; // 0 is "no entity" in the files
+                    }
                 }
+                info.parent = node.parent;
                 DirectX::XMMATRIX local = DirectX::XMMatrixIdentity();
                 if (const auto it = entity.find("Transform"); it != entity.end() && it->is_object())
                 {
                     local = LocalMatrix(*it);
                 }
                 DirectX::XMStoreFloat4x4(&node.local, local);
+                nodes[id] = node;
+
+                if (const auto it = entity.find("Tag"); it != entity.end() && it->is_object())
+                {
+                    const auto name = it->find("name");
+                    if (name != it->end() && name->is_string())
+                    {
+                        info.name = name->get<std::string>();
+                    }
+                }
                 if (const auto it = entity.find("MeshRenderer"); it != entity.end() && it->is_object())
                 {
-                    node.meshRenderer = &*it;
+                    const auto meshPath = it->find("meshPath");
+                    const auto materialPath = it->find("materialPath");
+                    info.meshPath = meshPath != it->end() && meshPath->is_string() ? meshPath->get<std::string>() : std::string();
+                    info.materialPath = materialPath != it->end() && materialPath->is_string() ? materialPath->get<std::string>() : std::string();
+                    const auto visible = it->find("visible");
+                    info.visible = !(visible != it->end() && visible->is_boolean() && !visible->get<bool>());
+                    info.hasMesh = !info.meshPath.empty();
                 }
-                nodes[id] = node;
-                order.push_back(id);
+                info.hasRigidbody = entity.contains("Rigidbody");
+                if (const auto it = entity.find("Rigidbody"); it != entity.end() && it->is_object())
+                {
+                    const bool gravity = it->value("useGravity", true);
+                    const bool kinematic = it->value("isKinematic", false);
+                    char buffer[64];
+                    std::snprintf(buffer, sizeof(buffer), "%s \xC2\xB7 mass %.3g",
+                        kinematic ? "Kinematic" : (gravity ? "Gravity on" : "Gravity off"), static_cast<double>(it->value("mass", 1.0)));
+                    info.rigidbody = buffer;
+                }
+                if (const auto it = entity.find("Collider"); it != entity.end() && it->is_object())
+                {
+                    const auto number = [&](const char* key, const float fallback)
+                    {
+                        const auto value = it->find(key);
+                        return value != it->end() && value->is_number() ? value->get<float>() : fallback;
+                    };
+                    const std::string type = it->value("type", std::string("box"));
+                    char buffer[96];
+                    if (type == "sphere")
+                    {
+                        std::snprintf(buffer, sizeof(buffer), "Sphere \xC2\xB7 %.2g", static_cast<double>(number("radius", 0.5f)));
+                    }
+                    else
+                    {
+                        float extents[3] = {0.5f, 0.5f, 0.5f};
+                        if (const auto half = it->find("halfExtents"); half != it->end() && half->is_array() && half->size() >= 3)
+                        {
+                            for (std::size_t axis = 0; axis < 3; ++axis)
+                            {
+                                extents[axis] = (*half)[axis].is_number() ? (*half)[axis].get<float>() : 0.5f;
+                            }
+                        }
+                        std::snprintf(buffer, sizeof(buffer), "Box \xC2\xB7 %.2g %.2g %.2g", static_cast<double>(extents[0]),
+                            static_cast<double>(extents[1]), static_cast<double>(extents[2]));
+                    }
+                    info.collider = buffer;
+                }
+                if (const auto it = entity.find("Script"); it != entity.end() && it->is_object())
+                {
+                    if (const auto scripts = it->find("scripts"); scripts != it->end() && scripts->is_array() && !scripts->empty() &&
+                        (*scripts)[0].is_object())
+                    {
+                        const std::string module = (*scripts)[0].value("module", std::string());
+                        const std::string className = (*scripts)[0].value("class", std::string());
+                        info.script = module.empty() ? className : module + "." + className;
+                    }
+                }
+                out.push_back(std::move(info));
             }
 
-            for (const long long id : order)
+            for (PrefabEntityInfo& info : out)
             {
-                const Node& node = nodes[id];
-                if (node.meshRenderer == nullptr)
+                const auto nodeIt = nodes.find(info.id);
+                if (nodeIt == nodes.end())
                 {
                     continue;
                 }
-                const json& renderer = *node.meshRenderer;
-                if (renderer.value("visible", true) == false)
-                {
-                    continue;
-                }
-                const std::string meshPath = renderer.value("meshPath", std::string());
-                const std::string materialPath = renderer.value("materialPath", std::string());
-                if (meshPath.empty() || materialPath.empty())
-                {
-                    continue;
-                }
-
-                DirectX::XMMATRIX world = DirectX::XMLoadFloat4x4(&node.local);
-                long long parent = node.parent;
+                DirectX::XMMATRIX world = DirectX::XMLoadFloat4x4(&nodeIt->second.local);
+                long long parent = nodeIt->second.parent;
                 for (int depth = 0; parent >= 0 && depth < 32; ++depth)
                 {
                     const auto parentIt = nodes.find(parent);
@@ -369,11 +426,32 @@ namespace myengine::editor
                     world = DirectX::XMMatrixMultiply(world, DirectX::XMLoadFloat4x4(&parentIt->second.local));
                     parent = parentIt->second.parent;
                 }
+                DirectX::XMFLOAT4X4 value{};
+                DirectX::XMStoreFloat4x4(&value, world);
+                std::memcpy(info.world.data.data(), &value, sizeof(float) * 16);
+            }
+            return true;
+        }
 
+        // The meshes of a .prefab.json with their world matrices
+        bool ParsePrefab(const fs::path& file, std::vector<PrefabMesh>& out)
+        {
+            out.clear();
+            std::vector<PrefabEntityInfo> entities;
+            if (!ReadPrefabEntities(file, entities))
+            {
+                return false;
+            }
+            for (const PrefabEntityInfo& entity : entities)
+            {
+                if (!entity.hasMesh || !entity.visible || entity.materialPath.empty())
+                {
+                    continue;
+                }
                 PrefabMesh mesh;
-                mesh.meshPath = meshPath;
-                mesh.materialPath = materialPath;
-                DirectX::XMStoreFloat4x4(&mesh.world, world);
+                mesh.meshPath = entity.meshPath;
+                mesh.materialPath = entity.materialPath;
+                std::memcpy(&mesh.world, entity.world.data.data(), sizeof(float) * 16);
                 out.push_back(std::move(mesh));
             }
             return true;
@@ -867,6 +945,7 @@ namespace myengine::editor
                     continue;
                 }
                 adapter.SetViewProjection(surface, view.request.view, view.request.projection);
+                adapter.SetWireframe(view.request.wireframe);
                 for (const auto& item : view.request.items)
                 {
                     adapter.Draw(surface, item);
@@ -982,6 +1061,24 @@ namespace myengine::editor
             worldBounds->Add(render::Float3{bounds.max.x, bounds.max.y, bounds.max.z});
         }
         return DrawItemStatus::Ready;
+    }
+
+    bool ThumbnailService::ReadPrefab(const std::string& assetPath, std::vector<PrefabEntityInfo>& out)
+    {
+        return ReadPrefabEntities(impl_->Resolve(PathFromText(assetPath)), out);
+    }
+
+    render::TextureHandle ThumbnailService::CreateViewTexture(const render::TextureData& data)
+    {
+        return impl_->adapter.CreateTexture(data);
+    }
+
+    void ThumbnailService::DestroyViewTexture(const render::TextureHandle texture)
+    {
+        if (texture.IsValid())
+        {
+            impl_->adapter.DestroyTexture(texture);
+        }
     }
 
     render::TextureHandle ThumbnailService::SubmitLiveView(LiveViewRequest request)

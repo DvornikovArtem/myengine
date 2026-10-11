@@ -214,6 +214,16 @@ namespace myengine::ui
                                 renderer->meshPath = chosen;
                                 RecordSceneMutationImmediate("Change Mesh", beforeMeshSnapshot);
                             }
+
+                            // Third column: opens the asset in a viewer tab (reading is allowed in Play too)
+                            ImGui::TableSetColumnIndex(2);
+                            ImGui::EndDisabled();
+                            if (IconButton("##open_mesh_viewer", ICON_EXTERNAL_LINK, "Open in Mesh Viewer", false,
+                                    !renderer->meshPath.empty(), 0, 22.0f, nullptr, IconSize::Row14))
+                            {
+                                OpenAssetViewer(renderer->meshPath, AssetViewerType::Mesh);
+                            }
+                            ImGui::BeginDisabled(!editEnabled);
                         }
 
                         PropertyLabel("Material", false, style::kPickerRowHeight);
@@ -268,16 +278,7 @@ namespace myengine::ui
                             resource::MaterialAsset beforeAsset = CloneMaterialAsset(materialResource->asset);
                             const auto commitMaterialChange = [&](const char* label)
                             {
-                                if ((ImGui::IsItemDeactivatedAfterEdit() || !ImGui::IsItemActive()) &&
-                                    !MaterialEquals(beforeAsset, materialResource->asset))
-                                {
-                                    PushMaterialAssetCommand(
-                                        label,
-                                        renderer->materialPath,
-                                        beforeAsset,
-                                        CloneMaterialAsset(materialResource->asset));
-                                    beforeAsset = CloneMaterialAsset(materialResource->asset);
-                                }
+                                CommitMaterialWidgetEdit(label, renderer->materialPath, beforeAsset, materialResource->asset);
                             };
 
                             PropertyLabel("Texture", false, style::kPickerRowHeight);
@@ -295,6 +296,15 @@ namespace myengine::ui
                                     services_.resourceManager->Load<resource::TextureAsset>(chosen);
                                 }
                                 commitMaterialChange("Change Renderer Texture");
+
+                                ImGui::TableSetColumnIndex(2);
+                                ImGui::EndDisabled();
+                                if (IconButton("##open_texture_viewer", ICON_EXTERNAL_LINK, "Open in Texture Viewer", false,
+                                        !materialResource->asset.texturePath.empty(), 0, 22.0f, nullptr, IconSize::Row14))
+                                {
+                                    OpenAssetViewer(materialResource->asset.texturePath, AssetViewerType::Texture);
+                                }
+                                ImGui::BeginDisabled(!editEnabled);
                             }
 
                             PropertyLabel("Tint");

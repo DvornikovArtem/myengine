@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -47,6 +48,7 @@ namespace
             return {nextTexture_++};
         }
         void DestroyTexture(render::TextureHandle) override { ++destroyedTextures; }
+        void SetWireframe(bool enabled) override { wireframe = enabled; }
         render::ShaderHandle CreateShaderProgram(const render::ShaderProgramData&) override { return {nextShader_++}; }
         render::RenderSurfaceHandle CreateSurface(HWND, std::uint32_t, std::uint32_t) override { return {1}; }
         void ResizeSurface(render::RenderSurfaceHandle, std::uint32_t, std::uint32_t) override {}
@@ -58,6 +60,7 @@ namespace
             if (inTarget)
             {
                 ++drawsInTarget;
+                wireframeDraws += wireframe ? 1 : 0;
             }
             else
             {
@@ -141,6 +144,8 @@ namespace
         int createdTextures = 0;
         int destroyedTextures = 0;
         int readbacks = 0;
+        int wireframeDraws = 0;
+        bool wireframe = false;
         std::uint32_t lastTextureWidth = 0;
 
     private:
@@ -416,6 +421,124 @@ namespace
         Check(harness.service->GetStats().leasedTargets == 0, "An abandoned live view must release its target");
     }
 
+    // The wireframe switch of a live view reaches the adapter for the draws of that view only
+    void TestLiveViewWireframe()
+    {
+        Harness harness({}, 8, 2);
+        render::DrawItem item;
+        bool ready = false;
+        for (int frame = 0; frame < 2000 && !ready; ++frame)
+        {
+            harness.resources.UpdateHotReload();
+            ready = harness.service->BuildDrawItem("assets/models/sphere.obj", "assets/materials/gold.material.json",
+                        render::Matrix4::Identity(), item) == editor::DrawItemStatus::Ready;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        Check(ready, "The draw item never became ready");
+
+        const auto render = [&](const char* id, const bool wireframe)
+        {
+            editor::LiveViewRequest request;
+            request.id = id;
+            request.width = 64;
+            request.height = 64;
+            request.wireframe = wireframe;
+            request.items.push_back(item);
+            harness.service->SubmitLiveView(std::move(request));
+            harness.service->Update();
+            harness.service->Render(render::RenderSurfaceHandle{1});
+        };
+
+        render("solid", false);
+        Check(harness.adapter.drawsInTarget == 1 && harness.adapter.wireframeDraws == 0, "A solid view must not draw wireframe");
+        render("wire", true);
+        Check(harness.adapter.drawsInTarget == 2 && harness.adapter.wireframeDraws == 1, "A wireframe view must draw wireframe");
+    }
+
+    // The prefab viewer reads the entities of a file: names, meshes, hierarchy, a short summary of the components
+    void TestReadPrefab(const fs::path& workDirectory)
+    {
+        Harness harness({}, 4, 2);
+        std::vector<editor::PrefabEntityInfo> entities;
+
+        // A prefab of the project: a car with a cabin on top of it
+        Check(harness.service->ReadPrefab("assets/prefabs/rl_car.prefab.json", entities), "The car prefab must be readable");
+        Check(entities.size() == 2 && entities[0].name == "RlCar" && entities[1].name == "RlCarCabin", "The car has two named entities");
+        Check(entities[0].hasMesh && entities[0].hasRigidbody && entities[0].collider.rfind("Box", 0) == 0, "The car body has a mesh, a rigidbody and a box");
+        Check(entities[0].parent == -1 && entities[1].parent == entities[0].id, "The cabin is a child of the body");
+        Check(entities[0].rigidbody == "Gravity on \xC2\xB7 mass 3", "The rigidbody is summarised");
+        Check(entities[0].collider == "Box \xC2\xB7 0.5 0.5 0.5", "The collider is summarised");
+        // child translation (0, 0.8, -0.1) through the parent scale (1.4, 0.6, 2.4) and position (0, 0.5, 0)
+        Check(std::abs(entities[1].world.data[13] - 0.98f) < 1e-4f && std::abs(entities[1].world.data[14] + 0.24f) < 1e-4f,
+            "The world matrix of a child includes its parent");
+
+        // A made-up one: invisible mesh, a sphere collider, a script, a parent that is not in the file
+        const fs::path file = workDirectory / "viewer.prefab.json";
+        WriteText(file,
+            "{ \"name\": \"V\", \"entities\": ["
+            "{ \"id\": 1, \"Tag\": {\"name\": \"Root\"}, \"Transform\": {\"position\": [1, 0, 0]} },"
+            "{ \"id\": 2, \"Tag\": {\"name\": \"Child\"}, \"Hierarchy\": {\"parent\": 1}, \"Transform\": {\"position\": [0, 2, 0]},"
+            "  \"MeshRenderer\": {\"meshPath\": \"assets/models/crate.obj\", \"materialPath\": \"assets/materials/default.material.json\", \"visible\": false},"
+            "  \"Collider\": {\"type\": \"sphere\", \"radius\": 0.25},"
+            "  \"Script\": {\"scripts\": [{\"module\": \"coin\", \"class\": \"Coin\"}]} },"
+            "{ \"id\": 3, \"Tag\": {\"name\": \"Orphan\"}, \"Hierarchy\": {\"parent\": 99} } ] }");
+        Check(harness.service->ReadPrefab(file.generic_u8string(), entities), "The made-up prefab must be readable");
+        Check(entities.size() == 3, "Three entities");
+        Check(!entities[0].hasMesh && entities[0].collider.empty() && entities[0].script.empty() && !entities[0].hasRigidbody, "The root has only a transform");
+        Check(entities[1].hasMesh && !entities[1].visible && entities[1].collider == "Sphere \xC2\xB7 0.25" && entities[1].script == "coin.Coin",
+            "The child's components are summarised");
+        Check(std::abs(entities[1].world.data[12] - 1.0f) < 1e-5f && std::abs(entities[1].world.data[13] - 2.0f) < 1e-5f,
+            "The child is at (1, 2, 0) in the prefab space");
+        Check(entities[2].parent == 99, "An unknown parent is kept for the viewer, which treats it as a root");
+
+        // Not a prefab
+        Check(!harness.service->ReadPrefab((workDirectory / "missing.prefab.json").generic_u8string(), entities) && entities.empty(),
+            "A missing file must fail");
+        WriteText(file, "this is not json");
+        Check(!harness.service->ReadPrefab(file.generic_u8string(), entities) && entities.empty(), "A broken file must fail");
+
+        // Textures built by a viewer go to the adapter and back
+        render::TextureData data;
+        data.width = 2;
+        data.height = 2;
+        data.pixelsRgba8.assign(16, 255);
+        const int created = harness.adapter.createdTextures;
+        const render::TextureHandle texture = harness.service->CreateViewTexture(data);
+        Check(texture.IsValid() && harness.adapter.createdTextures == created + 1, "A view texture must be created");
+        harness.service->DestroyViewTexture(texture);
+        Check(harness.adapter.destroyedTextures >= 1, "A view texture must be destroyed");
+    }
+
+    // The viewers show "Cannot open this file" for a file that the loader could not read (it is served by a fallback)
+    void TestLoadFailed(const fs::path& workDirectory)
+    {
+        Harness harness({}, 4, 2);
+        const fs::path broken = workDirectory / "broken.obj";
+        WriteText(broken, "this is not a mesh");
+        const std::string brokenPath = broken.generic_u8string();
+        const std::string goodPath = "assets/models/crate.obj";
+
+        harness.resources.Load<resource::MeshAsset>(brokenPath);
+        harness.resources.Load<resource::MeshAsset>(goodPath);
+        for (int frame = 0; frame < 2000; ++frame)
+        {
+            harness.resources.UpdateHotReload();
+            if (!harness.resources.IsLoadPending(brokenPath) && !harness.resources.IsLoadPending(goodPath))
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        Check(!harness.resources.IsLoadPending(brokenPath), "The broken mesh never finished loading");
+        Check(harness.resources.LoadFailed(brokenPath), "A mesh that cannot be parsed must be reported as failed");
+        Check(!harness.resources.LoadFailed(goodPath), "A good mesh must not be reported as failed");
+
+        // The same file fixed on disk loads again
+        WriteText(broken, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+        harness.resources.Reload<resource::MeshAsset>(brokenPath);
+        Check(!harness.resources.LoadFailed(brokenPath), "A reload must forget the failure");
+    }
+
     // Changing the file changes the signature: the image is dropped and drawn again (no stale image from disk)
     void TestInvalidationByFileTime(const fs::path& workDirectory)
     {
@@ -467,8 +590,12 @@ int main()
         TestDiskCacheReuse(cache);
         TestInvalidationByFileTime(directory);
         TestLiveView();
+        TestLiveViewWireframe();
+        TestReadPrefab(directory);
+        TestLoadFailed(directory);
 
-        std::cout << "OK: thumbnail service: placeholder and image, kinds, budget, pool eviction, disk cache, invalidation\n";
+        std::cout << "OK: thumbnail service: placeholder and image, kinds, budget, pool eviction, disk cache, invalidation, "
+                     "live view wireframe, prefab entities\n";
     }
     catch (const std::exception& error)
     {

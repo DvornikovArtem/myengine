@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -57,6 +58,8 @@ namespace myengine::ui
     struct ProjectUiState;
     class AssistantPanel;
     class PrefabInspector;
+    enum class AssetViewerType : std::uint8_t;
+    struct AssetViewerTab;
 
     struct SceneEditorServices
     {
@@ -127,6 +130,20 @@ namespace myengine::ui
         void OpenMapDialog();
         void BuildProjectDialogs(); // Project Browser and the map dialogs
         void DrawMaterialPreview(const std::string& materialPath, editor::WindowEditorState& windowState);
+        // The Material category (shader, texture, tint): shared by the Material Editor and the Material Viewer
+        void DrawMaterialCategory(const std::string& materialPath, bool editEnabled);
+        // Asset viewers: tabs next to the Viewport (SceneEditorViewers.cpp)
+        void OpenAssetViewer(const std::string& assetPath, AssetViewerType type);
+        void BuildAssetViewers(const SceneEditorWindowContext& windowContext);
+        void CloseAssetViewers();
+        void DrawTextureCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
+        void DrawTexturePanel(AssetViewerTab& tab);
+        void DrawMeshCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
+        void DrawMeshPanel(AssetViewerTab& tab);
+        void DrawMaterialCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
+        void DrawMaterialPanel(AssetViewerTab& tab);
+        void DrawPrefabCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
+        void DrawPrefabPanel(AssetViewerTab& tab);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void RequestOpenProject(const std::string& projectFile);
         ContentThumbnail MakeContentThumbnail(const ContentEntry& entry, std::uint32_t pixelSize) const;
@@ -148,6 +165,13 @@ namespace myengine::ui
             const std::string& materialPath,
             const resource::MaterialAsset& beforeAsset,
             const resource::MaterialAsset& afterAsset);
+        // Called right after a material widget: one undo entry per interaction (a drag, a typed value, a pick).
+        // `frameStartAsset` is the asset at the start of the frame; it is moved to `current` afterwards.
+        void CommitMaterialWidgetEdit(
+            const char* label,
+            const std::string& materialPath,
+            resource::MaterialAsset& frameStartAsset,
+            const resource::MaterialAsset& current);
         std::string ResolveSuggestedMaterialForMesh(const std::string& meshPath) const;
         std::string EnsureTexturePreviewMaterial(const std::string& texturePath) const;
         std::string CaptureSceneSnapshot() const;
@@ -185,6 +209,8 @@ namespace myengine::ui
         float materialPreviewYaw_ = 0.55f;   // orbit camera of the Material Editor preview (radians)
         float materialPreviewPitch_ = 0.32f;
         float materialPreviewDistance_ = 3.0f;
+        std::vector<std::unique_ptr<AssetViewerTab>> viewers_; // open Texture / Mesh / Material / Prefab viewer tabs
+        std::unique_ptr<resource::MaterialAsset> materialEditBefore_; // the material when the current widget interaction began
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
     };
