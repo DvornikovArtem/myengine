@@ -15,6 +15,11 @@ namespace myengine::scene
     class PrefabLibrary;
 }
 
+namespace myengine::editor
+{
+    class ThumbnailService;
+}
+
 namespace myengine::ui
 {
     // A separate draft: typing in the panel must not change the next spawn until Save is pressed.
@@ -23,6 +28,9 @@ namespace myengine::ui
     {
     public:
         using DescribeFields = std::function<std::vector<scripting::ScriptFieldInfo>(const std::string&, const std::string&)>;
+
+        // The preview service for the template thumbnails (null: the package icon only)
+        void SetThumbnails(editor::ThumbnailService* thumbnails) { thumbnails_ = thumbnails; }
 
         void Clear();
         bool Select(scene::PrefabLibrary& library, const std::string& name);
@@ -43,5 +51,6 @@ namespace myengine::ui
         nlohmann::json draft_;
         std::string lastError_;
         bool conflict_ = false;
+        editor::ThumbnailService* thumbnails_ = nullptr;
     };
 }

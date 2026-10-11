@@ -102,9 +102,7 @@ namespace myengine::editor
         bool gizmoHovered = false;
         bool gizmoActive = false;
         bool dockLayoutInitialized = false;
-        bool materialPreviewEnabled = false;
         MaterialPreviewShape materialPreviewShape = MaterialPreviewShape::Sphere;
-        std::string materialPreviewMaterialPath;
         FrameTimingStats timings{};
         RenderStats renderStats{};
     };

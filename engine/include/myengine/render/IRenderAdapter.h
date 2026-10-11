@@ -41,6 +41,14 @@ namespace myengine::render
         virtual bool IsVSyncEnabled() const { return false; }
         // View mode: draw the meshes of Draw() as wireframe (debug lines and the UI are not affected)
         virtual void SetWireframe(bool enabled) { (void)enabled; }
+        // Light of the meshes drawn into a render target (previews): the way the light travels in world space and
+        // the share of the colour that the dark side keeps (0..1). Applies until the next call; the lighting of
+        // the scene surface is not affected.
+        virtual void SetTargetLighting(const Float3& direction, float ambient)
+        {
+            (void)direction;
+            (void)ambient;
+        }
 
         // ---- render to texture ----
         // An RGBA8 colour target with its own depth. Create and destroy it between frames, never between

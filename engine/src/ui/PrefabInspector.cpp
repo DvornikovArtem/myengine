@@ -11,6 +11,7 @@
 
 #include <imgui/imgui.h>
 
+#include <myengine/editor/ThumbnailService.h>
 #include <myengine/scripting/PrefabLibrary.h>
 #include <myengine/ui/ScriptInspector.h>
 
@@ -24,6 +25,27 @@ namespace myengine::ui
         void DrawNoPrefabs()
         {
             EmptyState(ICON_PACKAGE, "No prefabs", "Add .prefab.json files to assets/prefabs.");
+        }
+
+        // A square with the thumbnail of a template (or the package icon while it is not ready)
+        void DrawPrefabThumbnail(ImDrawList* drawList, const ImVec2 min, const float size, editor::ThumbnailService* thumbnails, const std::string& path)
+        {
+            drawList->AddRectFilled(min, ImVec2(min.x + size, min.y + size), IM_COL32(0x12, 0x12, 0x12, 255), 4.0f);
+            if (thumbnails != nullptr)
+            {
+                const editor::Thumbnail thumbnail = thumbnails->Request(path, size > 40.0f ? 128 : 64);
+                if (thumbnail.ready)
+                {
+                    drawList->AddImage(static_cast<ImTextureID>(thumbnail.ImGuiTextureId()), min, ImVec2(min.x + size, min.y + size));
+                    return;
+                }
+            }
+            DrawIcon(
+                drawList,
+                size >= 40.0f ? IconSize::Tile40 : IconSize::Row14,
+                ICON_PACKAGE,
+                ImVec2(min.x + size * 0.5f, min.y + size * 0.5f),
+                IM_COL32(0x3D, 0x3D, 0x3D, 255));
         }
     }
 
@@ -144,23 +166,56 @@ namespace myengine::ui
             return;
         }
 
-        // ---- Header: a package icon and the template combo; the path and the Saved / Unsaved chip below
+        // ---- Header: the template thumbnail (64) on the left; the combo and, under it, the path with the
+        // Saved / Unsaved chip on the right
+        constexpr float kThumb = 64.0f;
+        const float headerLeft = kThumb + 8.0f;
         {
             const ImVec2 start = ImGui::GetCursorScreenPos();
-            const float squareSize = 28.0f;
+            const float available = ImGui::GetContentRegionAvail().x;
             ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(start, ImVec2(start.x + squareSize, start.y + squareSize), style::kRecessed, style::kRounding);
-            DrawIcon(drawList, IconSize::Row14, ICON_PACKAGE, ImVec2(start.x + squareSize * 0.5f, start.y + squareSize * 0.5f), style::kTypePrefab);
+            const std::string path = "assets/prefabs/" + selectedName_ + ".prefab.json";
+
+            DrawPrefabThumbnail(drawList, start, kThumb, selectedName_.empty() ? nullptr : thumbnails_, path);
+            ImGui::InvisibleButton("##prefab_thumbnail", ImVec2(kThumb, kThumb));
+            if (!selectedName_.empty() && thumbnails_ != nullptr && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::BeginTooltip();
+                const ImVec2 imageMin = ImGui::GetCursorScreenPos();
+                DrawPrefabThumbnail(ImGui::GetWindowDrawList(), imageMin, 256.0f, thumbnails_, path);
+                ImGui::Dummy(ImVec2(256.0f, 256.0f));
+                PushFontRole(FontRole::Strong);
+                ImGui::TextUnformatted(selectedName_.c_str());
+                PopFontRole();
+                PushFontRole(FontRole::Secondary);
+                ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(style::kTextDim));
+                ImGui::TextUnformatted(path.c_str());
+                ImGui::PopStyleColor();
+                PopFontRole();
+                ImGui::EndTooltip();
+            }
 
             // Keep unsaved values when changing templates: explicitly Save or Reload first.
-            ImGui::SetCursorScreenPos(ImVec2(start.x + squareSize + 8.0f, start.y + (squareSize - style::kFrameHeight) * 0.5f));
+            ImGui::SetCursorScreenPos(ImVec2(start.x + headerLeft, start.y + 4.0f));
             ImGui::BeginDisabled(IsDirty());
-            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::SetNextItemWidth(std::max(available - headerLeft, 40.0f));
             if (BeginCombo("##prefab", selectedName_.empty() ? "Select a template" : selectedName_.c_str()))
             {
                 for (const auto& name : names)
                 {
-                    if (ImGui::Selectable(name.c_str(), name == selectedName_))
+                    // A row with a 20 px preview of the template
+                    ImGui::PushID(name.c_str());
+                    const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                    const float rowWidth = std::max(ImGui::GetContentRegionAvail().x, 60.0f);
+                    const bool picked = ImGui::Selectable("##prefab_item", name == selectedName_, 0, ImVec2(rowWidth, 26.0f));
+                    ImDrawList* rowDraw = ImGui::GetWindowDrawList();
+                    DrawPrefabThumbnail(rowDraw, ImVec2(rowMin.x + 4.0f, rowMin.y + 3.0f), 20.0f, thumbnails_,
+                        "assets/prefabs/" + name + ".prefab.json");
+                    PushFontRole(FontRole::Body);
+                    rowDraw->AddText(ImVec2(rowMin.x + 32.0f, rowMin.y + (26.0f - ImGui::GetFontSize()) * 0.5f), style::kTextStrong, name.c_str());
+                    PopFontRole();
+                    ImGui::PopID();
+                    if (picked)
                     {
                         Select(library, name);
                     }
@@ -168,39 +223,39 @@ namespace myengine::ui
                 EndCombo();
             }
             ImGui::EndDisabled();
-            ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + squareSize + 6.0f));
+
+            if (!selectedName_.empty())
+            {
+                const bool dirty = IsDirty();
+                const float lineY = start.y + 4.0f + style::kFrameHeight + 8.0f;
+
+                PushFontRole(FontRole::Secondary);
+                ImFont* font = ImGui::GetFont();
+                const float size = ImGui::GetFontSize();
+                PopFontRole();
+                PushFontRole(FontRole::Tiny);
+                const float chipWidth = ImGui::CalcTextSize(dirty ? "Unsaved" : "Saved").x + 16.0f + (dirty ? 12.0f : 0.0f);
+                PopFontRole();
+
+                drawList->PushClipRect(
+                    ImVec2(start.x + headerLeft, lineY),
+                    ImVec2(start.x + std::max(available - chipWidth - 8.0f, headerLeft + 20.0f), lineY + 20.0f),
+                    true);
+                drawList->AddText(font, size, ImVec2(start.x + headerLeft + 2.0f, lineY + 2.0f), style::kTextDim, path.c_str());
+                drawList->PopClipRect();
+
+                ImGui::SetCursorScreenPos(ImVec2(start.x + available - chipWidth, lineY + 1.0f));
+                Chip(dirty ? "Unsaved" : "Saved", dirty ? ChipKind::Amber : ChipKind::Gray, dirty);
+            }
+
+            ImGui::SetCursorScreenPos(start);
+            ImGui::Dummy(ImVec2(available, kThumb + 8.0f));
         }
 
         if (selectedName_.empty())
         {
             DrawNoPrefabs();
             return;
-        }
-
-        // Path (dim) and the state chip on the right
-        {
-            const std::string path = "assets/prefabs/" + selectedName_ + ".prefab.json";
-            const bool dirty = IsDirty();
-            const ImVec2 start = ImGui::GetCursorScreenPos();
-            const float available = ImGui::GetContentRegionAvail().x;
-
-            PushFontRole(FontRole::Secondary);
-            ImFont* font = ImGui::GetFont();
-            const float size = ImGui::GetFontSize();
-            PopFontRole();
-            PushFontRole(FontRole::Tiny);
-            const float chipWidth = ImGui::CalcTextSize(dirty ? "Unsaved" : "Saved").x + 16.0f + (dirty ? 12.0f : 0.0f);
-            PopFontRole();
-
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->PushClipRect(start, ImVec2(start.x + std::max(available - chipWidth - 8.0f, 20.0f), start.y + 20.0f), true);
-            drawList->AddText(font, size, ImVec2(start.x + 2.0f, start.y + 2.0f), style::kTextDim, path.c_str());
-            drawList->PopClipRect();
-
-            ImGui::SetCursorScreenPos(ImVec2(start.x + available - chipWidth, start.y + 1.0f));
-            Chip(dirty ? "Unsaved" : "Saved", dirty ? ChipKind::Amber : ChipKind::Gray, dirty);
-            ImGui::SetCursorScreenPos(start);
-            ImGui::Dummy(ImVec2(available, 22.0f));
         }
 
         // Reload (secondary) and Save (primary), right aligned

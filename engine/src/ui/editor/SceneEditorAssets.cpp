@@ -373,6 +373,114 @@ namespace myengine::ui
         EndDialog();
     }
 
+    // The live preview of the Material Editor: a sphere or a cube with the material, drawn by the preview
+    // service into a render target; the left button orbits, the wheel zooms (only while the cursor is over it).
+    void SceneEditor::DrawMaterialPreview(const std::string& materialPath, editor::WindowEditorState& windowState)
+    {
+        constexpr float kHeight = 220.0f;
+        constexpr float kMargin = 8.0f;
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float width = std::max(available - 2.0f * kMargin, 60.0f);
+        ImGui::Dummy(ImVec2(0.0f, kMargin * 0.5f));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + kMargin);
+        const ImVec2 min = ImGui::GetCursorScreenPos();
+        const ImVec2 max(min.x + width, min.y + kHeight);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        // The background: a dark gradient behind the (transparent) target
+        drawList->AddRectFilled(min, max, IM_COL32(0x17, 0x19, 0x1D, 255), 4.0f);
+        drawList->AddRectFilledMultiColor(
+            ImVec2(min.x + 1.0f, min.y + 1.0f),
+            ImVec2(max.x - 1.0f, min.y + kHeight * 0.55f),
+            IM_COL32(0x2B, 0x2F, 0x36, 255), IM_COL32(0x2B, 0x2F, 0x36, 255), IM_COL32(0x17, 0x19, 0x1D, 255), IM_COL32(0x17, 0x19, 0x1D, 255));
+
+        ImGui::SetNextItemAllowOverlap(); // the shape switch and Reset camera sit on top of it
+        ImGui::InvisibleButton("##material_preview", ImVec2(width, kHeight));
+        const bool hovered = ImGui::IsItemHovered();
+        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
+        {
+            const ImVec2 delta = ImGui::GetIO().MouseDelta;
+            materialPreviewYaw_ -= delta.x * 0.012f;
+            materialPreviewPitch_ = std::clamp(materialPreviewPitch_ + delta.y * 0.012f, -1.35f, 1.35f);
+        }
+        if (hovered && ImGui::GetIO().MouseWheel != 0.0f)
+        {
+            materialPreviewDistance_ = std::clamp(materialPreviewDistance_ * (1.0f - ImGui::GetIO().MouseWheel * 0.1f), 1.6f, 9.0f);
+        }
+
+        if (services_.thumbnails != nullptr)
+        {
+            const bool cube = windowState.materialPreviewShape == editor::MaterialPreviewShape::Cube;
+            const std::string meshPath = cube ? kCubeMeshPath : "assets/models/sphere.obj";
+
+            // The shape is scaled to a unit radius around the origin, whatever its own size is
+            render::DrawItem item;
+            editor::BoundsBox bounds;
+            auto status = services_.thumbnails->BuildDrawItem(meshPath, materialPath, render::Matrix4::Identity(), item, &bounds);
+            if (status == editor::DrawItemStatus::Ready && bounds.IsValid())
+            {
+                const DirectX::XMFLOAT3 center{
+                    (bounds.min.x + bounds.max.x) * 0.5f, (bounds.min.y + bounds.max.y) * 0.5f, (bounds.min.z + bounds.max.z) * 0.5f};
+                const float extent = std::max({bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z, 0.001f});
+                const float scale = (cube ? 0.78f : 1.25f) / extent;
+                const DirectX::XMMATRIX model =
+                    DirectX::XMMatrixTranslation(-center.x, -center.y, -center.z) * DirectX::XMMatrixScaling(scale, scale, scale);
+                status = services_.thumbnails->BuildDrawItem(meshPath, materialPath, scene::ToRenderMatrix(model), item, nullptr);
+            }
+
+            editor::LiveViewRequest request;
+            request.id = "material-editor";
+            request.width = static_cast<std::uint32_t>(width);
+            request.height = static_cast<std::uint32_t>(kHeight);
+            if (status == editor::DrawItemStatus::Ready)
+            {
+                request.items.push_back(item);
+            }
+
+            const float distance = materialPreviewDistance_;
+            const DirectX::XMVECTOR eye = DirectX::XMVectorSet(
+                distance * std::sin(materialPreviewYaw_) * std::cos(materialPreviewPitch_),
+                distance * std::sin(materialPreviewPitch_),
+                -distance * std::cos(materialPreviewYaw_) * std::cos(materialPreviewPitch_),
+                1.0f);
+            request.view = scene::ToRenderMatrix(DirectX::XMMatrixLookAtLH(
+                eye, DirectX::XMVectorZero(), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)));
+            request.projection = scene::ToRenderMatrix(DirectX::XMMatrixPerspectiveFovLH(
+                DirectX::XMConvertToRadians(32.0f), width / kHeight, 0.05f, 40.0f));
+
+            const render::TextureHandle texture = services_.thumbnails->SubmitLiveView(std::move(request));
+            if (texture.IsValid())
+            {
+                drawList->AddImage(static_cast<ImTextureID>(texture.value), min, max);
+            }
+        }
+
+        // Overlay: the shape switch on the left, Reset camera on the right, a hint at the bottom
+        const ImVec2 afterPreview(min.x, max.y);
+        ImGui::SetCursorScreenPos(ImVec2(min.x + 8.0f, min.y + 8.0f));
+        static const char* const kShapes[] = {"Sphere", "Cube"};
+        const int current = windowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 1 : 0;
+        const int next = Segmented("##preview_shape", kShapes, 2, current);
+        if (next != current)
+        {
+            windowState.materialPreviewShape = next == 1 ? editor::MaterialPreviewShape::Cube : editor::MaterialPreviewShape::Sphere;
+        }
+        ImGui::SetCursorScreenPos(ImVec2(max.x - 8.0f - 26.0f, min.y + 8.0f));
+        if (IconButton("##preview_reset_camera", ICON_ROTATE_3D, "Reset camera", false, true, 0, 26.0f, nullptr, IconSize::Row14))
+        {
+            materialPreviewYaw_ = 0.61f;
+            materialPreviewPitch_ = 0.44f;
+            materialPreviewDistance_ = 3.0f;
+        }
+        PushFontRole(FontRole::Mono);
+        drawList->AddText(ImVec2(min.x + 10.0f, max.y - 8.0f - ImGui::GetFontSize()), style::kTextDim, "Drag: orbit \xC2\xB7 Wheel: zoom");
+        PopFontRole();
+
+        ImGui::SetCursorScreenPos(afterPreview);
+        ImGui::Dummy(ImVec2(width, 0.0f));
+        ImGui::Dummy(ImVec2(0.0f, kMargin));
+    }
+
     void SceneEditor::BuildMaterialEditorPanel(const SceneEditorWindowContext& windowContext)
     {
         auto& editorState = core::ServiceLocator::GetEditorRuntimeState();
@@ -476,11 +584,14 @@ namespace myengine::ui
 
             if (!editEnabled)
             {
-                Banner(BannerKind::Play, "Playing â edit the material after Stop.");
+                Banner(BannerKind::Play, "Playing - edit the material after Stop.");
                 ImGui::Dummy(ImVec2(0.0f, 6.0f));
             }
 
             DrawInfoLine("Edits apply live to every entity using this material.");
+
+            // ---- the live preview (a render target of the preview service), orbit with the mouse
+            DrawMaterialPreview(materialPath, windowState);
 
             // ---- Material: shader, texture, tint
             if (BeginCategory("Material"))
@@ -499,48 +610,36 @@ namespace myengine::ui
                         }
                     };
 
-                    PropertyLabel("Shader");
+                    PropertyLabel("Shader", false, style::kPickerRowHeight);
                     {
                         const auto shaderKeys = services_.resourceManager->GetKnownShaderKeys();
-                        if (BeginAssetPicker("##shader", AssetName(materialResource->asset.shaderPath).c_str(), ICON_CODE_XML, style::kTypeShader, materialResource->asset.shaderPath.c_str()))
+                        std::string chosen;
+                        if (AssetPicker(
+                                "##shader",
+                                materialResource->asset.shaderPath,
+                                shaderKeys,
+                                MakePickerOptions(PickerKind::Shader, *services_.resourceManager, services_.thumbnails),
+                                chosen))
                         {
-                            for (const auto& shaderKey : shaderKeys)
-                            {
-                                const bool selected = ResourcePathsEqual(*services_.resourceManager, shaderKey, materialResource->asset.shaderPath);
-                                if (ImGui::Selectable(PickerItem(ICON_CODE_XML, AssetName(shaderKey), shaderKey).c_str(), selected))
-                                {
-                                    materialResource->asset.shaderPath = shaderKey;
-                                    services_.resourceManager->Load<resource::ShaderAsset>(shaderKey);
-                                }
-                                if (selected)
-                                {
-                                    ImGui::SetItemDefaultFocus();
-                                }
-                            }
-                            EndAssetPicker();
+                            materialResource->asset.shaderPath = chosen;
+                            services_.resourceManager->Load<resource::ShaderAsset>(chosen);
                         }
                         commitMaterialChange("Change Material Shader");
                     }
 
-                    PropertyLabel("Texture");
+                    PropertyLabel("Texture", false, style::kPickerRowHeight);
                     {
                         const auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
-                        if (BeginAssetPicker("##texture", AssetName(materialResource->asset.texturePath).c_str(), ICON_IMAGE, style::kTypeTexture, materialResource->asset.texturePath.c_str()))
+                        std::string chosen;
+                        if (AssetPicker(
+                                "##texture",
+                                materialResource->asset.texturePath,
+                                textureKeys,
+                                MakePickerOptions(PickerKind::Texture, *services_.resourceManager, services_.thumbnails),
+                                chosen))
                         {
-                            for (const auto& textureKey : textureKeys)
-                            {
-                                const bool selected = ResourcePathsEqual(*services_.resourceManager, textureKey, materialResource->asset.texturePath);
-                                if (ImGui::Selectable(PickerItem(ICON_IMAGE, AssetName(textureKey), textureKey).c_str(), selected))
-                                {
-                                    materialResource->asset.texturePath = textureKey;
-                                    services_.resourceManager->Load<resource::TextureAsset>(textureKey);
-                                }
-                                if (selected)
-                                {
-                                    ImGui::SetItemDefaultFocus();
-                                }
-                            }
-                            EndAssetPicker();
+                            materialResource->asset.texturePath = chosen;
+                            services_.resourceManager->Load<resource::TextureAsset>(chosen);
                         }
                         commitMaterialChange("Change Material Texture");
                     }
@@ -595,31 +694,6 @@ namespace myengine::ui
                 ImGui::EndDisabled();
                 EndCategory();
             }
-
-            // ---- Preview: the mesh the viewport shows while this tab is open
-            if (BeginCategory("Preview"))
-            {
-                ImGui::Indent(20.0f);
-                static const char* const kShapes[] = {"Sphere", "Cube"};
-                const int current = windowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 1 : 0;
-                const int next = Segmented("##preview_shape", kShapes, 2, current);
-                if (next != current)
-                {
-                    windowState.materialPreviewShape =
-                        next == 1 ? editor::MaterialPreviewShape::Cube : editor::MaterialPreviewShape::Sphere;
-                }
-                ImGui::Dummy(ImVec2(0.0f, 2.0f));
-                PushFontRole(FontRole::Tiny);
-                ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(style::kTextDim));
-                ImGui::TextUnformatted("Shown in the viewport while this tab is open");
-                ImGui::PopStyleColor();
-                PopFontRole();
-                ImGui::Unindent(20.0f);
-                EndCategory();
-            }
-
-            windowState.materialPreviewEnabled = true;
-            windowState.materialPreviewMaterialPath = materialPath;
 
             if (backToSelection)
             {

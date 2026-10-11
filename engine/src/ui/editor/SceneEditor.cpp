@@ -18,6 +18,7 @@ namespace myengine::ui
         history_ = std::make_unique<editor::EditorCommandHistory>();
         gizmo_ = std::make_unique<editor::TransformGizmo>();
         prefabInspector_ = std::make_unique<PrefabInspector>();
+        prefabInspector_->SetThumbnails(services_.thumbnails);
         scriptConsole_ = std::make_unique<ScriptConsole>();
         contentBrowser_ = std::make_unique<ContentBrowser>();
         projectUi_ = std::make_unique<ProjectUiState>();
@@ -103,8 +104,6 @@ namespace myengine::ui
         windowState.gizmoActive = false;
         windowState.viewport = {};
         windowState.viewportToolbar = {};
-        windowState.materialPreviewEnabled = false;
-        windowState.materialPreviewMaterialPath.clear();
 
         // When Play starts, the input goes to the game, as in UE: a text field of a panel (the chat, the script
         // console) that held the keyboard lets it go, and the viewport is the focused window. Esc inside a text

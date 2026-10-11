@@ -32,8 +32,6 @@ namespace myengine::ecs::systems
     namespace
     {
         constexpr float kDefaultRenderableRadius = 0.8660254f;
-        constexpr char kPreviewCubeMesh[] = "assets/models/crate.obj";
-        constexpr char kPreviewSphereMesh[] = "assets/models/sphere.obj";
 
         struct RenderableEntry
         {
@@ -149,11 +147,6 @@ namespace myengine::ecs::systems
             const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(&determinant, viewMatrix);
             viewFrustum.Transform(worldFrustum, inverseView);
             return worldFrustum;
-        }
-
-        const char* PreviewMeshPath(const editor::MaterialPreviewShape shape)
-        {
-            return shape == editor::MaterialPreviewShape::Cube ? kPreviewCubeMesh : kPreviewSphereMesh;
         }
     }
 
@@ -356,41 +349,6 @@ namespace myengine::ecs::systems
                 editorWindowState.renderStats.camera.available = cameraFound;
                 editorWindowState.renderStats.camera.view = scene::ToRenderMatrix(viewMatrix);
                 editorWindowState.renderStats.camera.projection = scene::ToRenderMatrix(projectionMatrix);
-
-                if (cameraFound &&
-                    editorWindowState.materialPreviewEnabled &&
-                    !editorWindowState.materialPreviewMaterialPath.empty())
-                {
-                    const float previewDistance = 3.2f;
-                    const float verticalHalf = std::tan(cameraFovYDeg * 0.5f * DirectX::XM_PI / 180.0f) * previewDistance;
-                    const float horizontalHalf = verticalHalf * std::max(aspect, 0.01f);
-                    const DirectX::XMVECTOR cameraRight = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(cameraUp, cameraForward));
-
-                    const DirectX::XMVECTOR previewPosition = DirectX::XMVectorSubtract(
-                        DirectX::XMVectorAdd(
-                            DirectX::XMVectorAdd(
-                                cameraEye,
-                                DirectX::XMVectorScale(cameraForward, previewDistance)),
-                            DirectX::XMVectorScale(cameraRight, horizontalHalf * 0.55f)),
-                        DirectX::XMVectorScale(cameraUp, verticalHalf * 0.48f));
-
-                    DirectX::XMFLOAT3 previewTranslation{};
-                    DirectX::XMStoreFloat3(&previewTranslation, previewPosition);
-
-                    const float previewScale = editorWindowState.materialPreviewShape == editor::MaterialPreviewShape::Cube ? 0.55f : 0.7f;
-                    const DirectX::XMMATRIX previewWorld =
-                        DirectX::XMMatrixScaling(previewScale, previewScale, previewScale) *
-                        DirectX::XMMatrixRotationRollPitchYaw(
-                            DirectX::XMConvertToRadians(-18.0f),
-                            DirectX::XMConvertToRadians(32.0f),
-                            0.0f) *
-                        DirectX::XMMatrixTranslation(previewTranslation.x, previewTranslation.y, previewTranslation.z);
-
-                    appendDrawItem(
-                        PreviewMeshPath(editorWindowState.materialPreviewShape),
-                        editorWindowState.materialPreviewMaterialPath,
-                        previewWorld);
-                }
             }
         }
 

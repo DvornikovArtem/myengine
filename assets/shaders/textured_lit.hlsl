@@ -44,6 +44,8 @@ float4 PSMain(PSInput input) : SV_TARGET
     float lighting = gLightDirection.w + ndotl * (1.0f - gLightDirection.w);
 
     float4 texColor = gTexture.Sample(gSampler, input.UV);
-    return texColor * gColor * lighting;
-    //return texColor * gColor * 0.1f;
+    // The light scales the colour only: alpha stays the texture and tint alpha (previews draw into a target with
+    // a transparent background, where an alpha scaled by the light would show the shadow side as see-through)
+    const float4 color = texColor * gColor;
+    return float4(color.rgb * lighting, color.a);
 }

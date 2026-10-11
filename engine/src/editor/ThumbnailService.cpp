@@ -32,7 +32,7 @@ namespace myengine::editor
         constexpr char kDefaultMaterial[] = "assets/materials/default.material.json";
         constexpr std::uint64_t kFnvOffset = 1469598103934665603ull;
         constexpr std::uint64_t kFnvPrime = 1099511628211ull;
-        constexpr std::uint64_t kCacheVersion = 1; // bump when the way thumbnails are drawn changes
+        constexpr std::uint64_t kCacheVersion = 3; // bump when the way thumbnails are drawn changes
         constexpr int kMaxWaitFrames = 1200;       // a resource that has not loaded by then fails the thumbnail
         constexpr std::size_t kDiskLoadsPerUpdate = 4;
         constexpr std::uint64_t kStalenessInterval = 30; // frames between staleness passes
@@ -40,6 +40,69 @@ namespace myengine::editor
         constexpr std::uint64_t kForgetAfterFrames = 7200; // an image nobody asked for this long is dropped
         constexpr float kFovYRadians = 0.5235988f;         // 30 degrees
         constexpr auto kDiskCacheMaxAge = std::chrono::hours(24 * 30);
+
+        // Asset paths come as UTF-8 (the Content Browser, JSON) or as the narrow strings of the ResourceManager keys
+        // (the system code page): text that is valid UTF-8 is UTF-8, anything else is read as the code page
+        bool IsValidUtf8(const std::string& text)
+        {
+            std::size_t index = 0;
+            while (index < text.size())
+            {
+                const auto byte = static_cast<unsigned char>(text[index]);
+                std::size_t extra = 0;
+                if (byte < 0x80)
+                {
+                    extra = 0;
+                }
+                else if ((byte & 0xE0) == 0xC0 && byte >= 0xC2)
+                {
+                    extra = 1;
+                }
+                else if ((byte & 0xF0) == 0xE0)
+                {
+                    extra = 2;
+                }
+                else if ((byte & 0xF8) == 0xF0 && byte <= 0xF4)
+                {
+                    extra = 3;
+                }
+                else
+                {
+                    return false;
+                }
+                for (std::size_t offset = 1; offset <= extra; ++offset)
+                {
+                    if (index + offset >= text.size() || (static_cast<unsigned char>(text[index + offset]) & 0xC0) != 0x80)
+                    {
+                        return false;
+                    }
+                }
+                index += extra + 1;
+            }
+            return true;
+        }
+
+        // The light of every preview (thumbnails and live views): a key light from the top left in front of the
+        // camera and a soft fill, so that the darkest side keeps about a third of the colour. It follows the camera:
+        // orbiting does not turn the shadow side to the viewer. The scene viewport has its own light.
+        constexpr float kPreviewAmbient = 0.35f;
+
+        void ApplyPreviewLight(render::IRenderAdapter& adapter, const render::Matrix4& view)
+        {
+            // the way the light travels in view space: to the right, down and away from the camera
+            const DirectX::XMVECTOR viewDirection = DirectX::XMVectorSet(0.5f, -0.65f, 0.6f, 0.0f);
+            DirectX::XMVECTOR determinant = DirectX::XMVectorZero();
+            const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(&determinant, scene::ToDirectXMatrix(view));
+            DirectX::XMFLOAT3 world{};
+            DirectX::XMStoreFloat3(
+                &world, DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(viewDirection, inverseView)));
+            adapter.SetTargetLighting(render::Float3{world.x, world.y, world.z}, kPreviewAmbient);
+        }
+
+        fs::path PathFromText(const std::string& text)
+        {
+            return IsValidUtf8(text) ? fs::u8path(text) : fs::path(text);
+        }
 
         void HashBytes(std::uint64_t& hash, const void* data, const std::size_t size)
         {
@@ -368,6 +431,17 @@ namespace myengine::editor
             Failed,
         };
 
+        struct LiveView
+        {
+            LiveViewRequest request;
+            render::RenderTargetHandle target{};
+            render::TextureHandle texture{};
+            std::uint32_t targetWidth = 0;
+            std::uint32_t targetHeight = 0;
+            std::uint64_t lastSubmitted = 0;
+            bool dirty = false; // a new request that has not been drawn yet
+        };
+
         Impl(render::IRenderAdapter& adapterRef, resource::ResourceManager& resourcesRef, core::Logger& loggerRef, ThumbnailServiceConfig configValue)
             : adapter(adapterRef)
             , resources(resourcesRef)
@@ -385,13 +459,21 @@ namespace myengine::editor
                 (void)key;
                 ReleaseImage(entry);
             }
+            for (auto& [id, view] : liveViews)
+            {
+                (void)id;
+                if (view.target.IsValid())
+                {
+                    pool.Release(view.target);
+                }
+            }
         }
 
         // ---- helpers ----
 
         static std::string MakeKey(const std::string& assetPath, const std::uint32_t size)
         {
-            std::string key = ToLower(fs::u8path(assetPath).lexically_normal().generic_u8string());
+            std::string key = ToLower(PathFromText(assetPath).lexically_normal().generic_u8string());
             key += '@';
             key += std::to_string(size);
             return key;
@@ -447,12 +529,12 @@ namespace myengine::editor
         void CollectDependencies(const Entry& entry, std::vector<fs::path>& out)
         {
             out.clear();
-            const fs::path source = Resolve(fs::u8path(entry.assetPath));
+            const fs::path source = Resolve(PathFromText(entry.assetPath));
             out.push_back(source);
 
             const auto addMaterial = [&](const std::string& materialPath)
             {
-                const fs::path materialFile = Resolve(fs::u8path(materialPath));
+                const fs::path materialFile = Resolve(PathFromText(materialPath));
                 out.push_back(materialFile);
                 std::ifstream stream(materialFile, std::ios::binary);
                 if (!stream.is_open())
@@ -590,19 +672,19 @@ namespace myengine::editor
             std::vector<render::DrawItem>& items,
             Bounds& bounds)
         {
-            auto mesh = resources.Load<resource::MeshAsset>(meshPath);
-            auto material = resources.Load<resource::MaterialAsset>(materialPath);
+            auto mesh = resources.Load<resource::MeshAsset>(PathFromText(meshPath));
+            auto material = resources.Load<resource::MaterialAsset>(PathFromText(materialPath));
             if (mesh == nullptr || material == nullptr)
             {
                 return Build::Failed;
             }
-            auto shader = resources.Load<resource::ShaderAsset>(material->asset.shaderPath);
-            auto texture = resources.Load<resource::TextureAsset>(material->asset.texturePath);
+            auto shader = resources.Load<resource::ShaderAsset>(PathFromText(material->asset.shaderPath));
+            auto texture = resources.Load<resource::TextureAsset>(PathFromText(material->asset.texturePath));
             if (shader == nullptr || texture == nullptr)
             {
                 return Build::Failed;
             }
-            if (resources.IsLoadPending(meshPath) || resources.IsLoadPending(material->asset.texturePath))
+            if (resources.IsLoadPending(PathFromText(meshPath)) || resources.IsLoadPending(PathFromText(material->asset.texturePath)))
             {
                 return Build::Pending;
             }
@@ -655,7 +737,7 @@ namespace myengine::editor
                 case ThumbnailKind::Prefab:
                 {
                     std::vector<PrefabMesh> meshes;
-                    if (!ParsePrefab(Resolve(fs::u8path(entry.assetPath)), meshes) || meshes.empty())
+                    if (!ParsePrefab(Resolve(PathFromText(entry.assetPath)), meshes) || meshes.empty())
                     {
                         return Build::Failed;
                     }
@@ -746,6 +828,7 @@ namespace myengine::editor
                 return false;
             }
             adapter.SetViewProjection(surface, view, projection);
+            ApplyPreviewLight(adapter, view);
             for (const auto& item : items)
             {
                 adapter.Draw(surface, item);
@@ -767,7 +850,59 @@ namespace myengine::editor
         ThumbnailServiceConfig config;
         render::RenderTargetPool pool;
 
+        // Draws the live views that were submitted since the last render
+        void RenderLiveViews(const render::RenderSurfaceHandle surface)
+        {
+            for (auto& [id, view] : liveViews)
+            {
+                (void)id;
+                if (!view.dirty)
+                {
+                    continue;
+                }
+                const std::uint32_t width = std::clamp<std::uint32_t>(view.request.width, 8, 2048);
+                const std::uint32_t height = std::clamp<std::uint32_t>(view.request.height, 8, 2048);
+                if (view.target.IsValid() && (view.targetWidth != width || view.targetHeight != height))
+                {
+                    pool.Release(view.target);
+                    view.target = {};
+                    view.texture = {};
+                }
+                if (!view.target.IsValid())
+                {
+                    view.target = pool.Acquire(width, height);
+                    if (!view.target.IsValid())
+                    {
+                        continue; // the pool is exhausted: the panel keeps its old image
+                    }
+                    view.targetWidth = width;
+                    view.targetHeight = height;
+                    view.texture = adapter.GetRenderTargetTexture(view.target);
+                }
+
+                if (!adapter.BeginRenderTarget(view.target, view.request.clearColor))
+                {
+                    continue;
+                }
+                adapter.SetViewProjection(surface, view.request.view, view.request.projection);
+                ApplyPreviewLight(adapter, view.request.view);
+                for (const auto& item : view.request.items)
+                {
+                    adapter.Draw(surface, item);
+                }
+                if (!view.request.lines.empty())
+                {
+                    adapter.DrawDebugLines(surface, view.request.lines);
+                }
+                adapter.EndRenderTarget(view.target);
+                view.dirty = false;
+                view.request.items.clear();
+                view.request.lines.clear();
+            }
+        }
+
         std::unordered_map<std::string, Entry> entries;
+        std::unordered_map<std::string, LiveView> liveViews;
         std::deque<std::string> queue;
         std::uint64_t frame = 0;
         std::uint64_t renderedTotal = 0;
@@ -826,6 +961,57 @@ namespace myengine::editor
 
     ThumbnailService::~ThumbnailService() = default;
 
+    void BoundsBox::Add(const render::Float3& point)
+    {
+        min.x = std::min(min.x, point.x);
+        min.y = std::min(min.y, point.y);
+        min.z = std::min(min.z, point.z);
+        max.x = std::max(max.x, point.x);
+        max.y = std::max(max.y, point.y);
+        max.z = std::max(max.z, point.z);
+    }
+
+    void BoundsBox::Add(const BoundsBox& other)
+    {
+        if (other.IsValid())
+        {
+            Add(other.min);
+            Add(other.max);
+        }
+    }
+
+    DrawItemStatus ThumbnailService::BuildDrawItem(
+        const std::string& meshPath,
+        const std::string& materialPath,
+        const render::Matrix4& model,
+        render::DrawItem& item,
+        BoundsBox* worldBounds)
+    {
+        std::vector<render::DrawItem> items;
+        Bounds bounds;
+        const auto result = impl_->AppendItem(meshPath, materialPath, scene::ToDirectXMatrix(model), items, bounds);
+        if (result != Impl::Build::Ready || items.empty())
+        {
+            return result == Impl::Build::Pending ? DrawItemStatus::Pending : DrawItemStatus::Failed;
+        }
+        item = items.front();
+        if (worldBounds != nullptr && bounds.IsValid())
+        {
+            worldBounds->Add(render::Float3{bounds.min.x, bounds.min.y, bounds.min.z});
+            worldBounds->Add(render::Float3{bounds.max.x, bounds.max.y, bounds.max.z});
+        }
+        return DrawItemStatus::Ready;
+    }
+
+    render::TextureHandle ThumbnailService::SubmitLiveView(LiveViewRequest request)
+    {
+        auto& view = impl_->liveViews[request.id];
+        view.lastSubmitted = impl_->frame;
+        view.request = std::move(request);
+        view.dirty = true;
+        return view.texture;
+    }
+
     void ThumbnailService::SetMaterialSuggestion(std::function<std::string(const std::string& meshPath)> suggest)
     {
         impl_->config.suggestMaterial = std::move(suggest);
@@ -834,7 +1020,7 @@ namespace myengine::editor
     Thumbnail ThumbnailService::Request(const std::string& assetPath, const std::uint32_t size)
     {
         Thumbnail result;
-        result.kind = KindOf(fs::u8path(assetPath));
+        result.kind = KindOf(PathFromText(assetPath));
         if (assetPath.empty() || result.kind == ThumbnailKind::Other)
         {
             return result;
@@ -843,8 +1029,8 @@ namespace myengine::editor
         if (result.kind == ThumbnailKind::Texture)
         {
             // The texture is its own thumbnail (ImGui scales it); the handle is read each time, hot reload replaces it
-            auto texture = impl_->resources.Load<resource::TextureAsset>(assetPath);
-            if (texture != nullptr && !impl_->resources.IsLoadPending(assetPath) && texture->asset.gpuHandle.IsValid())
+            auto texture = impl_->resources.Load<resource::TextureAsset>(PathFromText(assetPath));
+            if (texture != nullptr && !impl_->resources.IsLoadPending(PathFromText(assetPath)) && texture->asset.gpuHandle.IsValid())
             {
                 result.texture = texture->asset.gpuHandle;
                 result.ready = true;
@@ -1001,6 +1187,23 @@ namespace myengine::editor
             }
         }
 
+        // 3b. A live view that is not submitted any more gives its target back
+        for (auto it = impl.liveViews.begin(); it != impl.liveViews.end();)
+        {
+            if (impl.frame - it->second.lastSubmitted > 30)
+            {
+                if (it->second.target.IsValid())
+                {
+                    impl.pool.Release(it->second.target);
+                }
+                it = impl.liveViews.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
         // 4. Cached textures are limited; images nobody asked for in a long time are forgotten
         std::size_t cached = 0;
         for (const auto& [key, entry] : impl.entries)
@@ -1036,6 +1239,10 @@ namespace myengine::editor
     void ThumbnailService::Render(const render::RenderSurfaceHandle surface)
     {
         Impl& impl = *impl_;
+        if (surface.IsValid())
+        {
+            impl.RenderLiveViews(surface);
+        }
         std::size_t budget = impl.config.budgetPerFrame;
         if (budget == 0 || impl.queue.empty() || !surface.IsValid())
         {
@@ -1074,10 +1281,10 @@ namespace myengine::editor
     void ThumbnailService::Invalidate(const std::string& assetPath)
     {
         Impl& impl = *impl_;
-        const std::string wanted = ToLower(fs::u8path(assetPath).lexically_normal().generic_u8string());
+        const std::string wanted = ToLower(PathFromText(assetPath).lexically_normal().generic_u8string());
         for (auto& [key, entry] : impl.entries)
         {
-            if (ToLower(fs::u8path(entry.assetPath).lexically_normal().generic_u8string()) == wanted)
+            if (ToLower(PathFromText(entry.assetPath).lexically_normal().generic_u8string()) == wanted)
             {
                 impl.Requeue(key, entry);
             }
@@ -1103,6 +1310,17 @@ namespace myengine::editor
         }
         impl.entries.clear();
         impl.queue.clear();
+        for (auto& [id, view] : impl.liveViews)
+        {
+            (void)id;
+            if (view.target.IsValid())
+            {
+                impl.pool.Release(view.target);
+                view.target = {};
+                view.texture = {};
+            }
+            view.dirty = true;
+        }
         impl.pool.Trim();
     }
 
