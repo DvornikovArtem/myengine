@@ -795,13 +795,10 @@ namespace myengine::assistant
                 messages.push_back(std::move(files));
                 changed.clear();
             }
-            char summary[160];
             const double seconds = turnStart > 0 && lastTime >= turnStart ? static_cast<double>(lastTime - turnStart) : 0.0;
-            std::snprintf(summary, sizeof(summary), "%.0f s | %llu in / %llu out tokens | %u request(s)", seconds,
-                          static_cast<unsigned long long>(turnInput), static_cast<unsigned long long>(turnOutput), turnRequests);
             AssistantMessage footer;
             footer.kind = AssistantMessage::Kind::Summary;
-            footer.text = summary;
+            footer.text = FormatTurnSummary(turnInput, turnOutput, seconds, 0.0);
             footer.timeUnix = lastTime;
             messages.push_back(std::move(footer));
             turnOpen = false;

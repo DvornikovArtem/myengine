@@ -34,6 +34,37 @@ namespace myengine::assistant
         }
     }
 
+    std::string FormatTurnSummary(const std::uint64_t inputTokens, const std::uint64_t outputTokens, const double seconds, const double costUsd)
+    {
+        const auto tokens = [](const std::uint64_t count)
+        {
+            char buffer[32];
+            if (count < 1000)
+            {
+                std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(count));
+            }
+            else if (count < 1000000)
+            {
+                std::snprintf(buffer, sizeof(buffer), "%.1fk", static_cast<double>(count) / 1000.0);
+            }
+            else
+            {
+                std::snprintf(buffer, sizeof(buffer), "%.1fM", static_cast<double>(count) / 1000000.0);
+            }
+            return std::string(buffer);
+        };
+        char tail[64];
+        std::snprintf(tail, sizeof(tail), " \xC2\xB7 %.1f s", seconds);
+        std::string text = tokens(inputTokens) + " in / " + tokens(outputTokens) + " out" + tail;
+        if (costUsd > 0.0)
+        {
+            char cost[32];
+            std::snprintf(cost, sizeof(cost), " \xC2\xB7 $%.3f", costUsd);
+            text += cost;
+        }
+        return text;
+    }
+
     void ApplyContentEvent(std::deque<AssistantMessage>& messages, const AssistantEvent& event, std::vector<std::string>* changedFiles)
     {
         using Kind = AssistantMessage::Kind;
@@ -533,13 +564,9 @@ namespace myengine::assistant
                 Append(std::move(message));
             }
 
-            char summary[160];
-            std::snprintf(summary, sizeof(summary), "%.1f s | $%.4f | %llu in / %llu out tokens | %u turn(s)",
-                static_cast<double>(event.durationMs) / 1000.0, event.costUsd,
-                static_cast<unsigned long long>(event.inputTokens), static_cast<unsigned long long>(event.outputTokens), event.turns);
             AssistantMessage footer;
             footer.kind = AssistantMessage::Kind::Summary;
-            footer.text = summary;
+            footer.text = FormatTurnSummary(event.inputTokens, event.outputTokens, static_cast<double>(event.durationMs) / 1000.0, event.costUsd);
             Append(std::move(footer));
             FinishTurn();
             break;

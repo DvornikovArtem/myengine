@@ -138,6 +138,44 @@ namespace myengine::ui
 
         std::string FriendlyAliasLabel(const std::string& model);
 
+        // The text cut to `maxWidth` in the current font with "..." (U+2026) at the end; whole characters only
+        std::string EllipsizeToWidth(const std::string& text, const float maxWidth, bool* truncated = nullptr)
+        {
+            if (truncated != nullptr)
+            {
+                *truncated = false;
+            }
+            if (maxWidth <= 0.0f || ImGui::CalcTextSize(text.c_str()).x <= maxWidth)
+            {
+                return text;
+            }
+            if (truncated != nullptr)
+            {
+                *truncated = true;
+            }
+            static const std::string kDots = "\xE2\x80\xA6";
+            std::size_t end = text.size();
+            while (end > 0)
+            {
+                do
+                {
+                    --end;
+                }
+                while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80);
+                std::string candidate = text.substr(0, end);
+                while (!candidate.empty() && candidate.back() == ' ')
+                {
+                    candidate.pop_back();
+                }
+                candidate += kDots;
+                if (ImGui::CalcTextSize(candidate.c_str()).x <= maxWidth)
+                {
+                    return candidate;
+                }
+            }
+            return kDots;
+        }
+
         std::string Lower(std::string text)
         {
             std::transform(text.begin(), text.end(), text.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -756,14 +794,17 @@ namespace myengine::ui
         const float textRight = max.x - (hovered || renaming ? 30.0f : 8.0f);
         if (renaming)
         {
-            ImGui::SetCursorScreenPos(ImVec2(textX, min.y + 4.0f));
-            ImGui::SetNextItemWidth(std::max(textRight - textX, 40.0f));
+            // as high as the title line: the meta line under it stays visible
+            ImGui::SetCursorScreenPos(ImVec2(textX - 4.0f, min.y + 3.0f));
+            ImGui::SetNextItemWidth(std::max(textRight - textX + 4.0f, 40.0f));
             if (renameFocus_)
             {
                 ImGui::SetKeyboardFocusHere();
                 renameFocus_ = false;
             }
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 1.0f));
             const bool enter = ImGui::InputText("##rename", &renameText_, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+            ImGui::PopStyleVar();
             FocusOutline();
             if (enter)
             {
@@ -780,11 +821,16 @@ namespace myengine::ui
         else
         {
             PushFontRole(FontRole::Body);
-            drawList->PushClipRect(ImVec2(textX, min.y), ImVec2(textRight, max.y), true);
+            const std::string fullTitle = chat.title.empty() ? std::string("New chat") : chat.title;
+            bool cut = false;
+            const std::string shownTitle = EllipsizeToWidth(fullTitle, textRight - textX, &cut);
             drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(textX, min.y + 4.0f),
-                              selected ? style::kTextStrong : style::kText, chat.title.empty() ? "New chat" : chat.title.c_str());
-            drawList->PopClipRect();
+                              selected ? style::kTextStrong : style::kText, shownTitle.c_str());
             PopFontRole();
+            if (cut && hovered && ImGui::GetIO().MousePos.x < textRight)
+            {
+                Tooltip(fullTitle.c_str());
+            }
         }
 
         // second line: model, effort, time or date
@@ -962,10 +1008,10 @@ namespace myengine::ui
             }
             else
             {
-                modelText = selected.empty() ? std::string("Default") : selected;
+                modelText = selected.empty() ? std::string("Default model") : selected;
             }
         }
-        std::string effortText = "Default";
+        std::string effortText = "Default effort";
         for (const auto& effort : kEfforts)
         {
             if (service_->GetEffort() == effort.value)
@@ -1045,10 +1091,14 @@ namespace myengine::ui
                     renameFocus_ = true;
                 }
                 PushFontRole(FontRole::Strong);
-                drawList->PushClipRect(ImVec2(cursor.x, cursor.y), ImVec2(cursor.x + titleWidth, cursor.y + 28.0f), true);
-                drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(cursor.x, cursor.y + 4.0f), style::kTextStrong, shown.c_str());
-                drawList->PopClipRect();
+                bool titleCut = false;
+                const std::string shownTitle = EllipsizeToWidth(shown, titleWidth, &titleCut);
+                drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(cursor.x, cursor.y + 4.0f), style::kTextStrong, shownTitle.c_str());
                 PopFontRole();
+                if (titleCut && ImGui::IsMouseHoveringRect(ImVec2(cursor.x, cursor.y), ImVec2(cursor.x + titleWidth, cursor.y + 28.0f)))
+                {
+                    Tooltip(shown.c_str());
+                }
                 if (busy)
                 {
                     // nothing next to the title: the working state is in the list and in the Stop button
@@ -1276,8 +1326,22 @@ namespace myengine::ui
         const auto& messages = service_->GetMessages();
         if (messages.empty())
         {
-            EmptyState(ICON_SPARKLES, "Ask the assistant",
-                       "Where something lives in the project, or a change to a script or a prefab. Attach screenshots or files with the paperclip.");
+            if (ImGui::GetContentRegionAvail().y < 140.0f)
+            {
+                // a low panel: only the title, the icon and the hint would be covered by the composer
+                PushFontRole(FontRole::Secondary);
+                const char* title = "Ask the assistant";
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(style::kTextDim));
+                ImGui::SetCursorPosX(std::max((ImGui::GetWindowWidth() - ImGui::CalcTextSize(title).x) * 0.5f, 8.0f));
+                ImGui::TextUnformatted(title);
+                ImGui::PopStyleColor();
+                PopFontRole();
+            }
+            else
+            {
+                EmptyState(ICON_SPARKLES, "Ask the assistant",
+                           "Where something lives in the project, or a change to a script or a prefab. Attach screenshots or files with the paperclip.");
+            }
         }
         std::size_t index = 0;
         for (const auto& message : messages)
@@ -1348,7 +1412,9 @@ namespace myengine::ui
         for (const auto& attachment : attachments)
         {
             PushFontRole(FontRole::Tiny);
-            const float nameWidth = std::min(ImGui::CalcTextSize(attachment.name.c_str()).x, 180.0f);
+            bool nameCut = false;
+            const std::string shownName = EllipsizeToWidth(attachment.name, 180.0f, &nameCut);
+            const float nameWidth = ImGui::CalcTextSize(shownName.c_str()).x;
             PopFontRole();
             const float chipWidth = 8.0f + 24.0f + 6.0f + nameWidth + 10.0f;
             if (x > 0.0f && x + chipWidth > available)
@@ -1362,11 +1428,13 @@ namespace myengine::ui
             drawList->AddRect(min, max, IM_COL32(0x33, 0x33, 0x33, 255), 4.0f);
             DrawIcon(drawList, IconSize::Row14, attachment.IsImage() ? ICON_IMAGE : ICON_FILE, ImVec2(min.x + 20.0f, min.y + 15.0f), style::kTextDim);
             PushFontRole(FontRole::Tiny);
-            drawList->PushClipRect(ImVec2(min.x + 38.0f, min.y), ImVec2(max.x - 6.0f, max.y), true);
             drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(min.x + 38.0f, min.y + (30.0f - ImGui::GetFontSize()) * 0.5f),
-                              style::kText, attachment.name.c_str());
-            drawList->PopClipRect();
+                              style::kText, shownName.c_str());
             PopFontRole();
+            if (nameCut && ImGui::IsMouseHoveringRect(min, max) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
+            {
+                Tooltip(attachment.name.c_str());
+            }
             x += chipWidth + 6.0f;
         }
         ImGui::Dummy(ImVec2(available, y + 30.0f));
@@ -1507,21 +1575,19 @@ namespace myengine::ui
             DrawIcon(drawList, IconSize::Row14, rejected ? ICON_CIRCLE_X : ICON_WRENCH, ImVec2(min.x + 12.0f, centerY),
                      failed ? style::kError : style::kTextDim);
 
-            const char* chipText = rejected ? "rejected" : (failed ? "failed" : (message.toolDone ? "done" : "running"));
-            const ChipKind chipKind = (rejected || (!failed && !message.toolDone)) ? ChipKind::Gray : (failed ? ChipKind::Red : ChipKind::Green);
-            PushFontRole(FontRole::Tiny);
-            const float chipWidth = ImGui::CalcTextSize(chipText).x + 16.0f + 12.0f;
-            PopFontRole();
-
+            // text, then the status icon right after it: check / loader-circle / x (the user's "no" is neutral)
             PushFontRole(FontRole::Mono);
-            drawList->PushClipRect(ImVec2(min.x + 26.0f, min.y), ImVec2(max.x - chipWidth - 16.0f, max.y), true);
-            drawList->AddText(ImVec2(min.x + 26.0f, std::floor(centerY - FontRoleSize(FontRole::Mono) * 0.5f - 0.5f)),
-                              failed ? style::kErrorText : style::kTextDim, header.c_str());
-            drawList->PopClipRect();
+            const float textLeft = min.x + 26.0f;
+            const float textRoom = std::max(max.x - textLeft - (expandable ? 48.0f : 30.0f), 20.0f);
+            bool headerCut = false;
+            const std::string shownHeader = EllipsizeToWidth(header, textRoom, &headerCut);
+            const float shownWidth = ImGui::CalcTextSize(shownHeader.c_str()).x;
+            drawList->AddText(ImVec2(textLeft, std::floor(centerY - FontRoleSize(FontRole::Mono) * 0.5f - 0.5f)),
+                              failed ? style::kErrorText : style::kTextDim, shownHeader.c_str());
             PopFontRole();
-
-            ImGui::SetCursorScreenPos(ImVec2(max.x - chipWidth - (expandable ? 14.0f : 4.0f), min.y + 3.0f));
-            Chip(chipText, chipKind, !message.toolDone && !message.toolFailed);
+            const char* statusIcon = rejected ? ICON_CIRCLE_X : (failed ? ICON_X : (message.toolDone ? ICON_CHECK : ICON_LOADER_CIRCLE));
+            const ImU32 statusColor = rejected ? style::kTextDim : (failed ? style::kError : (message.toolDone ? style::kPlay : style::kTextDim));
+            DrawIcon(drawList, IconSize::Row14, statusIcon, ImVec2(textLeft + shownWidth + 14.0f, centerY), statusColor);
             if (expandable)
             {
                 DrawIcon(drawList, IconSize::Chevron12, open ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT, ImVec2(max.x - 8.0f, centerY), style::kTextDim);
@@ -1530,6 +1596,10 @@ namespace myengine::ui
             // The row's own button last: it ends the row with an item and keeps the cursor spacing
             ImGui::SetCursorScreenPos(min);
             const bool pressed = ImGui::InvisibleButton("##tool", ImVec2(rowWidth, rowHeight));
+            if (ImGui::IsItemHovered() && headerCut)
+            {
+                Tooltip(header.c_str());
+            }
             if (pressed && expandable)
             {
                 open = !open;
@@ -1700,7 +1770,9 @@ namespace myengine::ui
             {
                 const auto& attachment = attachments_[i];
                 PushFontRole(FontRole::Tiny);
-                const float nameWidth = std::min(ImGui::CalcTextSize(attachment.info.name.c_str()).x, 150.0f);
+                bool nameCut = false;
+                const std::string shownName = EllipsizeToWidth(attachment.info.name, 150.0f, &nameCut);
+                const float nameWidth = ImGui::CalcTextSize(shownName.c_str()).x;
                 PopFontRole();
                 const float chipWidth = 6.0f + 24.0f + 6.0f + nameWidth + 6.0f + 18.0f + 4.0f;
                 if (x > boxMin.x + 8.0f && x + chipWidth > right)
@@ -1724,11 +1796,14 @@ namespace myengine::ui
                              ImVec2(thumbMin.x + 12.0f, thumbMin.y + 12.0f), problem ? style::kErrorText : style::kTextDim);
                 }
                 PushFontRole(FontRole::Tiny);
-                drawList->PushClipRect(ImVec2(chipMin.x + 36.0f, chipMin.y), ImVec2(chipMax.x - 26.0f, chipMax.y), true);
                 drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(chipMin.x + 36.0f, chipMin.y + (30.0f - ImGui::GetFontSize()) * 0.5f),
-                                  problem ? style::kErrorText : style::kText, attachment.info.name.c_str());
-                drawList->PopClipRect();
+                                  problem ? style::kErrorText : style::kText, shownName.c_str());
                 PopFontRole();
+                if (nameCut && !problem && ImGui::IsMouseHoveringRect(chipMin, ImVec2(chipMax.x - 26.0f, chipMax.y)) &&
+                    ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
+                {
+                    Tooltip(attachment.info.name.c_str(), nullptr, attachment.info.path.c_str());
+                }
                 ImGui::SetCursorScreenPos(ImVec2(chipMax.x - 24.0f, chipMin.y + 3.0f));
                 ImGui::PushID(static_cast<int>(i));
                 if (IconButton("##remove", ICON_X, problem ? attachment.problem.c_str() : "Remove", false, true, 0, 24.0f, nullptr, IconSize::Chevron12))

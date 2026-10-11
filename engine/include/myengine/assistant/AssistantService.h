@@ -43,6 +43,9 @@ namespace myengine::assistant
         std::vector<AssistantAttachment> attachments; // User: images and files that came with the message
     };
 
+    // The footer of an answer: "12.5k in / 4 out Â· 5.0 s Â· $0.018" (the cost is left out when it is not known)
+    std::string FormatTurnSummary(std::uint64_t inputTokens, std::uint64_t outputTokens, double seconds, double costUsd);
+
     // Turns one backend event into the transcript (text, reasoning, tool calls and their results). Everything that
     // does not touch the transcript - session ids, cost, the end of a turn - stays with the service. Also used when an
     // old session is read from its file. `changedFiles` (optional) collects files that tools have changed.

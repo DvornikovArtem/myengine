@@ -382,7 +382,8 @@ namespace
         const auto* files = FindMessage(service, Kind::Files);
         Check(files != nullptr && files->text == "assets/prefabs/coin.prefab.json", "The changed files list is wrong");
         const auto* summary = FindMessage(service, Kind::Summary);
-        Check(summary != nullptr && summary->text.find("$0.0123") != std::string::npos && summary->text.find("100 in / 5 out") != std::string::npos,
+        Check(summary != nullptr && summary->text.find("$0.012") != std::string::npos && summary->text.find("100 in / 5 out") != std::string::npos &&
+                summary->text.find("1.5 s") != std::string::npos,
             "The turn summary is wrong");
         Check(service.GetTotalCostUsd() > 0.012 && service.GetTotalCostUsd() < 0.013, "Cost was not accumulated");
 
