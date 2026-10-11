@@ -890,7 +890,7 @@ namespace myengine::ui
             });
     }
 
-    ContentThumbnail ContentBrowser::ResolveThumbnail(const ContentEntry& entry, const ContentBrowserHooks& hooks)
+    ContentThumbnail ContentBrowser::ResolveThumbnail(const ContentEntry& entry, const ContentBrowserHooks& hooks, const std::uint32_t pixelSize)
     {
         if (!hooks.thumbnail || entry.kind == ContentKind::Folder)
         {
@@ -899,15 +899,17 @@ namespace myengine::ui
 
         const auto found = thumbnails_.find(entry.path);
         const bool upToDate = found != thumbnails_.end() && found->second.modifiedTime == entry.modifiedTime &&
-                              !found->second.thumbnail.pending;
+                              found->second.pixelSize == pixelSize && !found->second.thumbnail.pending &&
+                              !found->second.thumbnail.live;
         if (upToDate)
         {
             return found->second.thumbnail;
         }
 
-        // A picture that was already asked for and is still loading is only checked again: that is a lookup,
-        // so it does not take a place in the budget of new requests
-        const bool recheck = found != thumbnails_.end() && found->second.modifiedTime == entry.modifiedTime;
+        // A picture that was already asked for and is still loading (or is live) is only checked again: that is a
+        // lookup, so it does not take a place in the budget of new requests
+        const bool recheck = found != thumbnails_.end() && found->second.modifiedTime == entry.modifiedTime &&
+                             found->second.pixelSize == pixelSize;
         if (!recheck)
         {
             if (thumbnailBudget_ <= 0)
@@ -920,8 +922,9 @@ namespace myengine::ui
         }
 
         CachedThumbnail cached;
-        cached.thumbnail = hooks.thumbnail(entry);
+        cached.thumbnail = hooks.thumbnail(entry, pixelSize);
         cached.modifiedTime = entry.modifiedTime;
+        cached.pixelSize = pixelSize;
         thumbnails_[entry.path] = cached;
         if (cached.thumbnail.pending)
         {
@@ -1097,7 +1100,9 @@ namespace myengine::ui
 
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
-        const ContentThumbnail thumbnail = ImGui::IsRectVisible(min, max) ? ResolveThumbnail(entry, hooks) : ContentThumbnail{};
+        const ContentThumbnail thumbnail = ImGui::IsRectVisible(min, max)
+            ? ResolveThumbnail(entry, hooks, static_cast<std::uint32_t>(tileSize))
+            : ContentThumbnail{};
         {
             const std::string detail = DescribeEntry(entry, thumbnail);
             Tooltip(entry.name.c_str(), nullptr, detail.c_str());
@@ -1246,7 +1251,7 @@ namespace myengine::ui
 
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
-        const ContentThumbnail thumbnail = ImGui::IsRectVisible(min, max) ? ResolveThumbnail(entry, hooks) : ContentThumbnail{};
+        const ContentThumbnail thumbnail = ImGui::IsRectVisible(min, max) ? ResolveThumbnail(entry, hooks, 64u) : ContentThumbnail{};
         {
             const std::string detail = DescribeEntry(entry, thumbnail);
             Tooltip(entry.name.c_str(), nullptr, detail.c_str());

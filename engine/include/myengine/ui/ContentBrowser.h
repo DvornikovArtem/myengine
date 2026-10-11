@@ -60,6 +60,9 @@ namespace myengine::ui
         std::uint32_t tint = 0xFFFFFFFFu; // IM_COL32 colour that multiplies the picture
         bool hasAlpha = false; // the picture has transparent pixels: a checkerboard is drawn under it
         bool pending = false; // not ready yet, the browser asks again on the next frame
+        // The id can change or die at any time (the preview service reuses and evicts its render targets): the
+        // browser does not keep it and asks again every frame, which must be cheap
+        bool live = false;
     };
 
     // What the browser does for the editor; every callback is optional.
@@ -74,9 +77,10 @@ namespace myengine::ui
         std::function<void(const std::string& scenePath)> openScene;
         std::function<void(const std::string& prefabName)> openPrefab; // file name without ".prefab.json"
         std::function<void(const std::string& materialPath)> openMaterial;
-        // The picture of an item. Asked only for items that are on screen, a few per frame; the answer is kept
-        // until the file changes. Folders are never asked.
-        std::function<ContentThumbnail(const ContentEntry& entry)> thumbnail;
+        // The picture of an item at about pixelSize x pixelSize. Asked only for items that are on screen, a few
+        // new items per frame; the answer is kept until the file or the size changes (unless it is `live` or
+        // `pending`: then the item is asked again every frame). Folders are never asked.
+        std::function<ContentThumbnail(const ContentEntry& entry, std::uint32_t pixelSize)> thumbnail;
         const char* meshPayloadType = nullptr;
         const char* materialPayloadType = nullptr;
         const char* texturePayloadType = nullptr;
@@ -149,6 +153,7 @@ namespace myengine::ui
         {
             ContentThumbnail thumbnail;
             std::int64_t modifiedTime = 0; // the file version it was made for
+            std::uint32_t pixelSize = 0;   // the size it was asked for
         };
 
         void BuildTree(FolderNode& node, int depth) const;
@@ -157,7 +162,7 @@ namespace myengine::ui
         void RebuildEntries();
         void SortEntries();
         ContentEntry MakeEntry(const std::filesystem::directory_entry& item, bool isFolder) const;
-        ContentThumbnail ResolveThumbnail(const ContentEntry& entry, const ContentBrowserHooks& hooks);
+        ContentThumbnail ResolveThumbnail(const ContentEntry& entry, const ContentBrowserHooks& hooks, std::uint32_t pixelSize);
 
         void DrawTree(const FolderNode& node, bool isRoot, bool panelFocused);
         void DrawTile(const ContentEntry& entry, float tileSize, const ContentBrowserHooks& hooks);

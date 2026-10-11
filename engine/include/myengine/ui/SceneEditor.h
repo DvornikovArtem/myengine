@@ -128,7 +128,7 @@ namespace myengine::ui
         void BuildProjectDialogs(); // Project Browser and the map dialogs
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void RequestOpenProject(const std::string& projectFile);
-        ContentThumbnail MakeContentThumbnail(const ContentEntry& entry) const;
+        ContentThumbnail MakeContentThumbnail(const ContentEntry& entry, std::uint32_t pixelSize) const;
         void RequestOpenScene(const std::string& scenePath);
         void OpenSceneNow(const std::string& scenePath);
         void DrawOpenScenePrompt();

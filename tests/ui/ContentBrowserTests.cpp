@@ -452,9 +452,11 @@ namespace
         int calls = 0;
         int pendingAnswers = 0;
         ContentBrowserHooks hooks;
-        hooks.thumbnail = [&](const ContentEntry& entry)
+        std::uint32_t lastSize = 0;
+        hooks.thumbnail = [&](const ContentEntry& entry, const std::uint32_t pixelSize)
         {
             ++calls;
+            lastSize = pixelSize;
             ContentThumbnail thumbnail;
             thumbnail.textureId = 5;
             thumbnail.width = 64;
@@ -489,13 +491,23 @@ namespace
         // 8 items, and p0 answered "pending" twice: 8 first answers + 2 repeats
         Check(calls == 10, "Every item is asked once, a pending one until it is ready");
 
+        Check(lastSize == 104u, "A tile asks for a picture of its own size");
+
         const int before = calls;
         browser.SetViewMode(ContentViewMode::List);
-        for (int index = 0; index < 3; ++index)
+        for (int index = 0; index < 6; ++index)
         {
             frame();
         }
-        Check(calls == before, "Answers are kept when the view changes");
+        Check(lastSize == 64u, "A list row asks for a small picture");
+        Check(calls == before + 8, "The small pictures are asked for once each");
+        browser.SetViewMode(ContentViewMode::Tiles);
+        for (int index = 0; index < 6; ++index)
+        {
+            frame();
+        }
+        Check(calls == before + 16, "Going back to tiles asks for the tile size again");
+        const int afterSwitch = calls;
 
         // A file with a newer write time asks again
         std::error_code error;
@@ -505,7 +517,69 @@ namespace
         {
             frame();
         }
-        Check(calls == before + 1, "A file that changed gets a new picture");
+        Check(calls == afterSwitch + 1, "A file that changed gets a new picture");
+
+        ImGui::DestroyContext(context);
+    }
+
+    // A live answer (an id that can die) is asked for again every frame, without using the budget of new items
+    void TestLiveThumbnails()
+    {
+        Fixture fixture;
+        for (int index = 0; index < 5; ++index)
+        {
+            Touch(fixture.root / "live" / ("m" + std::to_string(index) + ".material.json"));
+        }
+
+        ContentBrowser browser;
+        browser.SetRoot(fixture.root);
+        Check(browser.OpenFolder("live"), "live");
+
+        IMGUI_CHECKVERSION();
+        ImGuiContext* context = ImGui::CreateContext();
+        auto& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
+        io.DisplaySize = ImVec2(1024.0f, 768.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        unsigned char* pixels = nullptr;
+        int width = 0, height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+        int calls = 0;
+        ContentBrowserHooks hooks;
+        hooks.thumbnail = [&](const ContentEntry&, const std::uint32_t pixelSize)
+        {
+            ++calls;
+            ContentThumbnail thumbnail;
+            thumbnail.textureId = 9;
+            thumbnail.width = pixelSize;
+            thumbnail.height = pixelSize;
+            thumbnail.live = true;
+            return thumbnail;
+        };
+
+        const auto frame = [&]()
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f));
+            ImGui::Begin("Content Browser", nullptr, ImGuiWindowFlags_NoSavedSettings);
+            browser.Draw(hooks);
+            ImGui::End();
+            ImGui::Render();
+        };
+
+        frame();
+        Check(calls == 3, "The first frame asks for three new items (the budget)");
+        frame();
+        Check(calls == 8, "The three live items are asked again, the two new ones for the first time");
+        const int afterSecond = calls;
+        for (int index = 0; index < 4; ++index)
+        {
+            frame();
+        }
+        Check(calls == afterSecond + 4 * 5, "Five live items are asked once per frame");
 
         ImGui::DestroyContext(context);
     }
@@ -565,6 +639,7 @@ int main()
         TestMirrorsDisk();
         TestSortAndViewMode();
         TestThumbnailHook();
+        TestLiveThumbnails();
         std::cout << "OK: content browser classifies assets, mirrors folders, sorts, navigates, activates, gives thumbnails and draws\n";
         return 0;
     }

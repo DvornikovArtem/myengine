@@ -1,3 +1,4 @@
+#include <myengine/editor/ThumbnailService.h>
 #include "SceneEditorInternal.h"
 
 namespace myengine::ui
@@ -121,7 +122,10 @@ namespace myengine::ui
                 }
                 return false;
             };
-            hooks.thumbnail = [this](const ContentEntry& entry) { return MakeContentThumbnail(entry); };
+            hooks.thumbnail = [this](const ContentEntry& entry, const std::uint32_t pixelSize)
+            {
+                return MakeContentThumbnail(entry, pixelSize);
+            };
 
             contentBrowser_->Draw(hooks);
         }
@@ -130,7 +134,7 @@ namespace myengine::ui
         DrawOpenScenePrompt();
     }
 
-    ContentThumbnail SceneEditor::MakeContentThumbnail(const ContentEntry& entry) const
+    ContentThumbnail SceneEditor::MakeContentThumbnail(const ContentEntry& entry, const std::uint32_t pixelSize) const
     {
         ContentThumbnail thumbnail;
         if (services_.resourceManager == nullptr)
@@ -138,8 +142,32 @@ namespace myengine::ui
             return thumbnail;
         }
 
-        // A texture is its own picture. A material shows its base colour map with the tint until the
-        // render-to-texture thumbnails (sphere with the material) come; meshes and the rest keep the type icon.
+        // Materials, meshes and prefabs are drawn by the preview service (a sphere with the material, the mesh
+        // framed by its bounds, the meshes of the template). It answers with a placeholder until the picture is
+        // rendered and the browser asks again.
+        const bool drawnByService = entry.kind == ContentKind::Material || entry.kind == ContentKind::Mesh ||
+                                    entry.kind == ContentKind::Prefab;
+        if (drawnByService && services_.thumbnails != nullptr)
+        {
+            // The images of the service are pooled render targets that it evicts and reuses: the id is only good
+            // for the frame it was given in, so the browser asks again every frame
+            thumbnail.live = true;
+            const editor::Thumbnail preview = services_.thumbnails->Request(entry.path, pixelSize);
+            if (preview.ready && preview.texture.IsValid())
+            {
+                thumbnail.textureId = preview.ImGuiTextureId();
+                thumbnail.width = pixelSize; // the pictures of the service are square
+                thumbnail.height = pixelSize;
+            }
+            else if (!preview.failed && preview.kind != editor::ThumbnailKind::Other)
+            {
+                thumbnail.pending = true;
+            }
+            return thumbnail;
+        }
+
+        // A texture is its own picture (this also covers .dds, which the service does not list). Without the
+        // preview service a material shows its base colour map with the tint; the rest keeps the type icon.
         std::string texturePath;
         core::Color tint{1.0f, 1.0f, 1.0f, 1.0f};
         if (entry.kind == ContentKind::Texture)

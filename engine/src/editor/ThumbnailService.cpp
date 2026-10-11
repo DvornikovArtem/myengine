@@ -876,6 +876,7 @@ namespace myengine::editor
             result.texture = entry.texture;
             result.ready = true;
         }
+        result.failed = entry.state == Impl::State::Failed;
         return result;
     }
 
