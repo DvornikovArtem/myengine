@@ -34,6 +34,8 @@ namespace myengine::ui
         void UnregisterWindow(core::WindowId windowId);
 
         void HandleWindowMessage(core::WindowId windowId, HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+        // The held mouse buttons are released at the current position (the capture was lost, the window lost the focus)
+        void ReleaseMouseButtons(core::WindowId windowId);
         void Update(float deltaTime);
         void RenderWindow(core::WindowId windowId);
 
