@@ -122,6 +122,12 @@ namespace
             globals["base_scene"] = fixture.baseScene;
             globals["load_scene"] = py::cpp_function([&](const std::string& text) { fixture.LoadScene(text); });
             globals["tick"] = py::cpp_function([&](const float dt) { fixture.Tick(dt); }, py::arg("dt") = 1.0f / 60.0f);
+            globals["hud_line"] = py::cpp_function([&](const std::string& name)
+                {
+                    const auto& lines = fixture.system->GetHudLines();
+                    const auto found = lines.find(name);
+                    return found == lines.end() ? std::string() : found->second;
+                });
             globals["key"] = py::cpp_function([&](const unsigned code, const bool down)
                 {
                     if (down)

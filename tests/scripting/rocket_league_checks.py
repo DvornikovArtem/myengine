@@ -38,6 +38,39 @@ def step(game):
         assert abs(rotation.x - car.pitch) < 1e-2 and abs(rotation.y - car.yaw) < 1e-2 and abs(rotation.z - car.roll) < 1e-2
 
 
+def drop(car, roll=0.0, pitch=0.0, height=0.9):
+    """Put a car in the air above the floor in the given attitude (the physics root is set from the script state)."""
+    car.place(0.0, -10.0)
+    car.was_grounded = False
+    car.jumps = 1
+    car.pitch, car.roll = pitch, roll
+    car.e.transform.position = me.Vec3(0.0, height, -10.0)
+
+
+def fall_holding(game, car, roll):
+    """Let the car fall and keep its roll the same until the touchdown, as a driver who holds the air roll would."""
+    for _ in range(90):
+        car.roll = roll
+        step(game)
+        if car.grounded:
+            return
+    assert False, "the car did not land"
+
+
+def flat_speed(car):
+    v = car.e.rigidbody.velocity
+    return (v.x ** 2 + v.z ** 2) ** 0.5
+
+
+def attitude(car):
+    return wrap(car.pitch), wrap(car.roll)
+
+
+def is_attitude(car, pitch, roll, tolerance=1.0):
+    p, r = attitude(car)
+    return abs(p - pitch) < tolerance and abs(abs(r) - abs(roll)) < tolerance and (roll in (0.0, 180.0) or r * roll > 0)
+
+
 def check_car_parts(car):
     """The parts of the prefab are reached through the hierarchy, and the root has no mesh of its own."""
     root = car.e
@@ -230,6 +263,66 @@ def run_checks():
     key(KEY_D, False)
     key(KEY_W, False)
 
+    # A bad landing. The player car is dropped from a small height; its roll is held until the touchdown.
+    # Upside down: it ends on its roof and stays there, the controls do nothing.
+    drop(player, 180.0)
+    fall_holding(game, player, 180.0)
+    for _ in range(40):
+        step(game)
+    assert player.tilt == "lying" and is_attitude(player, 0.0, 180.0), (player.tilt, attitude(player))
+    assert hud_line("6flip") == "SPACE - flip back"
+    boost_before = player.boost
+    key(KEY_W, True)
+    key(KEY_D, True)
+    key(KEY_SHIFT, True)
+    for _ in range(90):
+        step(game)
+        assert player.tilt == "lying" and is_attitude(player, 0.0, 180.0), "a car on its roof must not level out by itself"
+        assert flat_speed(player) < 0.5, "a car on its roof must not drive"
+        assert not player.flame.mesh.visible and player.boost == boost_before, "a car on its roof must not boost"
+    key(KEY_W, False)
+    key(KEY_D, False)
+    key(KEY_SHIFT, False)
+    # Space: a hop and a turn onto the wheels; then it drives again.
+    key(KEY_SPACE, True)
+    step(game)
+    key(KEY_SPACE, False)
+    assert player.tilt == "righting" and not player.grounded
+    for _ in range(150):
+        step(game)
+    assert player.tilt == "wheels" and player.grounded and abs(wrap(player.pitch)) < 5.0 and abs(wrap(player.roll)) < 5.0, attitude(player)
+    assert hud_line("6flip") == "", "the hint goes away after the flip back"
+    key(KEY_W, True)
+    for _ in range(60):
+        step(game)
+    assert flat_speed(player) > 5.0, "after the flip back the car drives again"
+    key(KEY_W, False)
+
+    # Landing on a side: a stable attitude (a side), on either side, not something between.
+    for roll in (80.0, -80.0):
+        drop(player, roll)
+        fall_holding(game, player, roll)
+        for _ in range(40):
+            step(game)
+        assert player.tilt == "lying" and is_attitude(player, 0.0, 90.0 * (1 if roll > 0 else -1)), (roll, player.tilt, attitude(player))
+    # A small tilt is levelled out on the wheels as before.
+    drop(player, 30.0)
+    fall_holding(game, player, 30.0)
+    for _ in range(30):
+        step(game)
+    assert player.tilt == "wheels" and is_attitude(player, 0.0, 0.0), (player.tilt, attitude(player))
+    # A dodge that the ground interrupts does not turn the car onto its wheels any more.
+    drop(player, 0.0, height=1.3)
+    player.jumps, player.flip, player.flip_dir = 2, 0.5, (0.0, 1.0)
+    for _ in range(60):
+        step(game)
+        if player.grounded:
+            break
+    assert player.grounded and player.flip == 0.0
+    for _ in range(40):
+        step(game)
+    assert player.tilt == "lying" and abs(wrap(player.roll)) > 80.0 and wrap(player.pitch) == 0.0, (player.tilt, attitude(player))
+
     # Back to the menu and a new 2v2 match: fresh cars get all their parts again.
     press(KEY_M)
     assert game.state == "menu" and not game.cars
@@ -242,3 +335,23 @@ def run_checks():
     for _ in range(30):
         step(game)
     assert all(car.e.alive for car in game.cars)
+
+    # A bot on its roof flips back by itself, within about a second.
+    for _ in range(400):
+        step(game)
+        if game.state == "play":
+            break
+    assert game.state == "play"
+    bot = next(c for c in game.cars if not c.player)
+    drop(bot, 180.0)
+    fall_holding(game, bot, 180.0)
+    lying = 0
+    while bot.tilt != "lying":
+        step(game)
+        lying += 1
+        assert lying < 60, "the bot did not come to rest on its roof"
+    for frames in range(1, 100):
+        step(game)
+        if bot.tilt == "wheels":
+            break
+    assert bot.tilt == "wheels" and frames < 90 and abs(wrap(bot.roll)) < 5.0, (frames, bot.tilt, attitude(bot))
