@@ -53,6 +53,20 @@ MAX_STEER = 25.0                # degrees of the front wheels at full steering
 STEER_EASE = 14.0               # how fast the front wheels follow the steering (1 / s)
 WHEEL_AIR_DRAG = 1.2            # in the air the wheels slow down (1 / s)
 
+# Suspension of the body (the chassis node only; the root with the physics is never touched). Every axis is a spring
+# with a damper: x'' = w^2 (target - x) - 2 zeta w x', w = 2 pi f. zeta 0.5..0.7 gives a small overshoot, no ringing.
+# Signs (row-vector XMMatrixRotationRollPitchYaw): +pitch lowers the nose, +roll raises the right side.
+SUSP_FREQ, SUSP_ZETA = 2.5, 0.6         # pitch and roll: frequency (Hz) and damping ratio
+HEAVE_FREQ, HEAVE_ZETA = 3.0, 0.5       # the vertical travel after a landing
+PITCH_PER_ACC = 0.2                     # degrees of pitch per m/s^2 of forward acceleration (gas = nose up, brake = nose down)
+ROLL_PER_LAT = 0.12                     # degrees of roll per m/s^2 of lateral acceleration (a right turn leans the body left)
+HEAVE_KICK = 0.25                       # m/s of downward travel per m/s of falling speed at the touchdown
+LAND_MIN_SPEED, LAND_MAX_SPEED = 1.5, 20.0   # falling speeds (m/s) that count for the touchdown kick
+SUSP_ACC_EASE = 12.0                    # smoothing of the measured accelerations (1 / s)
+SUSP_ACC_MAX = 60.0                     # a crash does not count as more than this acceleration (m/s^2)
+PITCH_MAX, ROLL_MAX = 6.0, 7.0          # degrees
+HEAVE_MIN, HEAVE_MAX = -0.08, 0.05      # metres, the chassis offset along y
+
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -64,6 +78,18 @@ def wrap(a):
 
 def flat(v):
     return V(v.x, 0.0, v.z)
+
+
+def spring(x, v, target, freq, zeta, lo, hi, dt):
+    """One step of a damped spring towards `target`, kept inside [lo, hi]. Returns the new (x, v)."""
+    w = 2.0 * math.pi * freq
+    v += (w * w * (target - x) - 2.0 * zeta * w * v) * dt
+    x += v * dt
+    if x > hi:
+        x, v = hi, min(v, 0.0)
+    elif x < lo:
+        x, v = lo, max(v, 0.0)
+    return x, v
 
 
 class Car:
@@ -98,6 +124,7 @@ class Car:
         self.wheel_spin = 0.0       # degrees, 0..360, the same for all four wheels
         self.wheel_rate = 0.0       # degrees per second
         self.steer_angle = 0.0      # degrees, the front wheels
+        self.reset_suspension()
 
     @property
     def sign(self):
@@ -113,6 +140,8 @@ class Car:
         self.jumps, self.flip, self.dodge_t = 0, 0.0, 0.0
         self.was_grounded, self.jump_lock = True, 0.0
         self.wheel_rate = self.steer_angle = 0.0
+        self.pose_wheels()
+        self.reset_suspension()
         rb = self.e.rigidbody
         rb.is_kinematic = False
         rb.velocity = V(0.0, 0.0, 0.0)
@@ -234,8 +263,54 @@ class Car:
         # the pitch of a wheel grows when the car drives forward (+z), the same sign for the left and the right side
         self.wheel_spin = (self.wheel_spin + self.wheel_rate * dt) % 360.0
         self.steer_angle += (target - self.steer_angle) * min(1.0, STEER_EASE * dt)
+        self.pose_wheels()
+
+    def pose_wheels(self):
         for k, wheel in enumerate(self.wheels):
             wheel.transform.rotation = V(self.wheel_spin, self.steer_angle if k < 2 else 0.0, 0.0)
+
+    def reset_suspension(self):
+        self.susp_pitch = self.susp_roll = self.heave = 0.0         # degrees, degrees, metres
+        self.susp_pitch_v = self.susp_roll_v = self.heave_v = 0.0   # their speeds
+        self.susp_acc = self.susp_lat = 0.0                         # smoothed forward and lateral acceleration
+        self.prev_vf = self.prev_yaw = None
+        self.susp_grounded = True
+        self.fall_speed = 0.0
+        self.pose_chassis()
+
+    def pose_chassis(self):
+        t = self.chassis.transform
+        t.rotation = V(self.susp_pitch, 0.0, self.susp_roll)
+        t.position = V(0.0, self.heave, 0.0)
+
+    def update_suspension(self, dt):
+        """Springs of the body: pitch follows the forward acceleration, roll the lateral one, heave the landings."""
+        if dt <= 0.0:
+            return
+        v = self.e.rigidbody.velocity
+        vf = v.dot(self.forward())
+        acc = lat = 0.0
+        if self.grounded:
+            if self.prev_vf is not None:
+                acc = clamp((vf - self.prev_vf) / dt, -SUSP_ACC_MAX, SUSP_ACC_MAX)
+                lat = clamp(vf * math.radians(wrap(self.yaw - self.prev_yaw) / dt), -SUSP_ACC_MAX, SUSP_ACC_MAX)
+            if not self.susp_grounded and self.fall_speed > LAND_MIN_SPEED:
+                self.heave_v -= min(self.fall_speed, LAND_MAX_SPEED) * HEAVE_KICK   # the touchdown pushes the body down
+            self.fall_speed = 0.0
+        else:
+            self.fall_speed = max(self.fall_speed, -v.y)
+        self.susp_grounded = self.grounded
+        self.prev_vf, self.prev_yaw = vf, self.yaw
+        # in the air the measured accelerations fade to zero, so the body settles back by itself
+        ease = min(1.0, SUSP_ACC_EASE * dt)
+        self.susp_acc += (acc - self.susp_acc) * ease
+        self.susp_lat += (lat - self.susp_lat) * ease
+        pitch_to = clamp(-self.susp_acc * PITCH_PER_ACC, -PITCH_MAX, PITCH_MAX)    # gas lifts the nose
+        roll_to = clamp(self.susp_lat * ROLL_PER_LAT, -ROLL_MAX, ROLL_MAX)         # a right turn leans the body left
+        self.susp_pitch, self.susp_pitch_v = spring(self.susp_pitch, self.susp_pitch_v, pitch_to, SUSP_FREQ, SUSP_ZETA, -PITCH_MAX, PITCH_MAX, dt)
+        self.susp_roll, self.susp_roll_v = spring(self.susp_roll, self.susp_roll_v, roll_to, SUSP_FREQ, SUSP_ZETA, -ROLL_MAX, ROLL_MAX, dt)
+        self.heave, self.heave_v = spring(self.heave, self.heave_v, 0.0, HEAVE_FREQ, HEAVE_ZETA, HEAVE_MIN, HEAVE_MAX, dt)
+        self.pose_chassis()
 
 
 class RocketLeague(me.Behaviour):
@@ -478,6 +553,7 @@ class RocketLeague(me.Behaviour):
                 inp = self._bot_input(c)
             c.drive(inp, dt)
             c.update_wheels(inp, dt)
+            c.update_suspension(dt)
             top = WALL_TOP - 1.0  # there is no ceiling collider
             cp = c.e.transform.position
             if cp.y > top:

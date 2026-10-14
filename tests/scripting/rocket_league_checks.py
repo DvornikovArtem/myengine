@@ -4,7 +4,7 @@ import json
 import myengine as me
 
 WHEELS = ["RlWheelFL", "RlWheelFR", "RlWheelRL", "RlWheelRR"]
-KEY_W, KEY_D, KEY_M, KEY_2 = ord("W"), ord("D"), ord("M"), ord("2")
+KEY_W, KEY_D, KEY_M, KEY_1, KEY_2, KEY_SPACE = ord("W"), ord("D"), ord("M"), ord("1"), ord("2"), ord(" ")
 
 
 def wrap(angle):
@@ -15,6 +15,21 @@ def press(code):
     key(code, True)
     tick()
     key(code, False)
+
+
+def step(game):
+    """One frame, then the checks that hold at every moment: the suspension limits and the untouched root."""
+    tick()
+    for car in game.cars:
+        pitch, _, roll = car.chassis.transform.rotation.x, 0, car.chassis.transform.rotation.z
+        heave = car.chassis.transform.position.y
+        eps = 1e-3
+        assert abs(pitch) <= rocket_league.PITCH_MAX + eps and abs(roll) <= rocket_league.ROLL_MAX + eps, (pitch, roll)
+        assert rocket_league.HEAVE_MIN - eps <= heave <= rocket_league.HEAVE_MAX + eps, heave
+        assert car.chassis.transform.rotation.y == 0.0 and car.chassis.transform.position.x == 0.0 and car.chassis.transform.position.z == 0.0
+        # the suspension moves the chassis only: the root keeps the orientation that drive() gives it
+        rotation = car.e.transform.rotation
+        assert abs(rotation.x - car.pitch) < 1e-2 and abs(rotation.y - car.yaw) < 1e-2 and abs(rotation.z - car.roll) < 1e-2
 
 
 def check_car_parts(car):
@@ -39,6 +54,7 @@ def check_car_parts(car):
 
 
 def run_checks():
+    global rocket_league
     import rocket_league
 
     scene = json.loads(base_scene)
@@ -61,8 +77,9 @@ def run_checks():
     front_yaw, rear_yaw = [], []
     forward_steps = []
     previous = None
+    pitches, rolls = [], []
     for frame in range(300):
-        tick()
+        step(game)
         for car in game.cars:
             name = car.index + 10 * (car.team == "orange")
             spin = car.wheels[0].transform.rotation.x
@@ -75,6 +92,8 @@ def run_checks():
             assert abs(car.wheels[1].transform.rotation.y) <= rocket_league.MAX_STEER + 0.001
             assert car.wheels[2].transform.rotation.y == 0.0 and car.wheels[3].transform.rotation.y == 0.0
             if car is player:
+                pitches.append(car.chassis.transform.rotation.x)
+                rolls.append(car.chassis.transform.rotation.z)
                 front_yaw.append(car.wheels[0].transform.rotation.y)
                 rear_yaw.append(car.wheels[2].transform.rotation.y)
                 forward = car.e.rigidbody.velocity.dot(car.forward())
@@ -94,9 +113,48 @@ def run_checks():
     assert max(front_yaw) > 15.0, "the front wheels did not follow the steering (D = to the right = positive yaw)"
     assert max(abs(y) for y in rear_yaw) == 0.0, "the rear wheels must not steer"
 
-    # Back to the menu and a new 2v2 match: fresh cars get all their parts again.
+    # Suspension: the gas lifts the nose (pitch < 0), a right turn at speed leans the body to the left (roll > 0).
+    assert min(pitches) < -1.0, "the body must pitch nose up when the car accelerates: %s" % min(pitches)
+    assert max(rolls) > 1.0, "the body must roll to the outside of a right turn: %s" % max(rolls)
     key(KEY_W, False)
     key(KEY_D, False)
+
+    # A new 1v1 from the menu: wait for the kickoff, jump on the spot and watch the chassis land.
+    press(KEY_M)
+    assert game.state == "menu" and not game.cars
+    press(KEY_1)
+    assert game.state == "countdown" and len(game.cars) == 2
+    for _ in range(400):
+        step(game)
+        if game.state == "play":
+            break
+    assert game.state == "play"
+    player = next(c for c in game.cars if c.player)
+    # Take the bot out of the game for this part, so that nothing bumps or demolishes the jumping car.
+    bot = next(c for c in game.cars if not c.player)
+    game._demolish(bot, player)
+    bot.dead = 1.0e6
+    for _ in range(30):
+        step(game)
+    assert abs(player.chassis.transform.position.y) < 1e-3, "the chassis must rest at the start"
+    key(KEY_SPACE, True)
+    step(game)
+    key(KEY_SPACE, False)
+    heave, grounded = [], []
+    for _ in range(300):
+        step(game)
+        heave.append(player.chassis.transform.position.y)
+        grounded.append(player.grounded)
+    assert not all(grounded) and any(grounded[i] and not grounded[i - 1] for i in range(1, len(grounded))), "the car must jump and land"
+    landing = next(i for i in range(1, len(grounded)) if grounded[i] and not grounded[i - 1])
+    assert all(abs(h) < 0.005 for h in heave[:landing]), "the chassis stays level in the air"
+    after = heave[landing:landing + 30]
+    assert min(after) < -0.01, "the landing must push the chassis down: %s" % min(after)
+    assert after.index(min(after)) < 12 and after[0] < 0.01, "the first move after the touchdown is downwards"
+    assert max(after) <= rocket_league.HEAVE_MAX + 1e-3
+    assert all(abs(h) < 0.005 for h in heave[-30:]), "the chassis returns to rest: %s" % heave[-1]
+
+    # Back to the menu and a new 2v2 match: fresh cars get all their parts again.
     press(KEY_M)
     assert game.state == "menu" and not game.cars
     press(KEY_2)
@@ -106,5 +164,5 @@ def run_checks():
     for car in game.cars:
         check_car_parts(car)
     for _ in range(30):
-        tick()
+        step(game)
     assert all(car.e.alive for car in game.cars)
