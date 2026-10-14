@@ -4,7 +4,13 @@ import json
 import myengine as me
 
 WHEELS = ["RlWheelFL", "RlWheelFR", "RlWheelRL", "RlWheelRR"]
-KEY_W, KEY_D, KEY_M, KEY_1, KEY_2, KEY_SPACE = ord("W"), ord("D"), ord("M"), ord("1"), ord("2"), ord(" ")
+KEY_W, KEY_S, KEY_D, KEY_M, KEY_1, KEY_2, KEY_SPACE = ord("W"), ord("S"), ord("D"), ord("M"), ord("1"), ord("2"), ord(" ")
+KEY_SHIFT, KEY_CTRL = 0x10, 0x11
+DETAILS = {  # part of the prefab -> material file
+    "RlCarBumperF": "car_trim", "RlCarBumperR": "car_trim", "RlCarHeadlightL": "car_headlight", "RlCarHeadlightR": "car_headlight",
+    "RlCarTaillightL": "car_taillight", "RlCarTaillightR": "car_taillight", "RlCarSpoilerWing": "car_trim",
+    "RlCarSpoilerStrutL": "car_trim", "RlCarSpoilerStrutR": "car_trim", "RlCarNozzle": "car_trim", "RlCarFlame": "fx_boost",
+}
 
 
 def wrap(angle):
@@ -47,6 +53,16 @@ def check_car_parts(car):
         pass
     assert root.transform.scale == me.Vec3(1, 1, 1)
     assert root.collider.half_extents == me.Vec3(0.7, 0.3, 1.2)
+    # lights, bumpers, spoiler, nozzle and the flame hang on the chassis, so they move with the body
+    for name, material in DETAILS.items():
+        part = car.chassis.find_child(name)
+        assert part is not None and part.parent == car.chassis, name
+        assert part.mesh.material.endswith("%s.material.json" % material), name
+        # nothing hangs below the lower face of the collider (y = -0.3), even with the body at the bottom of its travel
+        bottom = part.transform.position.y - part.transform.scale.y / 2 + rocket_league.HEAVE_MIN
+        assert bottom >= -0.3, (name, bottom)
+    assert car.flame == car.chassis.find_child("RlCarFlame") and not car.flame.mesh.visible, "the flame is hidden without boost"
+    assert [l.name for l in car.taillights] == ["RlCarTaillightL", "RlCarTaillightR"]
     team = car.team
     assert car.body.mesh.material.endswith("car_%s.material.json" % team)
     gold = "cabin_gold.material.json" if car.player else "cabin_glass.material.json"
@@ -153,6 +169,66 @@ def run_checks():
     assert after.index(min(after)) < 12 and after[0] < 0.01, "the first move after the touchdown is downwards"
     assert max(after) <= rocket_league.HEAVE_MAX + 1e-3
     assert all(abs(h) < 0.005 for h in heave[-30:]), "the chassis returns to rest: %s" % heave[-1]
+
+    # Details of the car, the bot is still out of the game: stop lights, the flame of the boost, sparks of a slide.
+    def lights():
+        return [l.mesh.material.rsplit("/", 1)[-1] for l in player.taillights]
+
+    def forward_speed():
+        return player.e.rigidbody.velocity.dot(player.forward())
+
+    tail, brake = ["car_taillight.material.json"] * 2, ["car_brakelight.material.json"] * 2
+    assert lights() == tail and not player.flame.mesh.visible
+    key(KEY_W, True)
+    for _ in range(80):
+        step(game)
+    assert forward_speed() > 8.0 and lights() == tail and not player.flame.mesh.visible, "the gas alone shows no stop light and no flame"
+    key(KEY_SHIFT, True)
+    lengths = set()
+    for _ in range(20):
+        step(game)
+        assert player.flame.mesh.visible, "the boost lights the flame"
+        flame = player.flame.transform
+        lengths.add(round(flame.scale.z, 4))
+        assert abs(flame.position.z + flame.scale.z - rocket_league.FLAME_Z) < 1e-4, "the flame grows back from the nozzle"
+    assert len(lengths) > 5, "the flame must flicker"
+    key(KEY_SHIFT, False)
+    step(game)
+    assert not player.flame.mesh.visible, "no boost, no flame"
+    key(KEY_W, False)
+    key(KEY_S, True)
+    for _ in range(5):
+        step(game)
+    assert forward_speed() > rocket_league.LIGHT_SPEED and lights() == brake, "braking lights the stop lights"
+    for _ in range(90):
+        step(game)
+    assert forward_speed() < -rocket_league.LIGHT_SPEED and lights() == brake, "reversing keeps the stop lights on"
+    key(KEY_S, False)
+    key(KEY_W, True)
+    for _ in range(60):
+        step(game)
+    assert forward_speed() > rocket_league.LIGHT_SPEED and lights() == tail, "driving forward switches the tail lights back"
+    sparks = lambda: {f[0].id for f in game.fx if f[0].name == "RlDeco"}
+    for _ in range(25):
+        step(game)  # speed up
+    before = sparks()
+    for _ in range(15):  # fast, but no slide: no sparks
+        step(game)
+        velocity = player.e.rigidbody.velocity
+        assert (velocity.x ** 2 + velocity.z ** 2) ** 0.5 > rocket_league.SPARK_SPEED, "the car must be fast, or this proves nothing"
+        assert not (sparks() - before), "no slide, no sparks"
+    before, thrown, most = sparks(), set(), 0
+    key(KEY_CTRL, True)
+    key(KEY_D, True)
+    for _ in range(40):
+        step(game)
+        thrown |= sparks() - before
+        most = max(most, len(game.fx))
+    assert len(thrown) >= 6, "a slide at speed must throw sparks: %d" % len(thrown)
+    assert most <= 261, "the limit of the effects was exceeded: %d" % most
+    key(KEY_CTRL, False)
+    key(KEY_D, False)
+    key(KEY_W, False)
 
     # Back to the menu and a new 2v2 match: fresh cars get all their parts again.
     press(KEY_M)

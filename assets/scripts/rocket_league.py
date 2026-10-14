@@ -21,6 +21,8 @@ MAT = {
     "blue": _mat("fx_blue"), "orange": _mat("fx_orange"), "gold": _mat("fx_gold"), "white": _mat("fx_white"),
     "car_blue": _mat("car_blue"), "car_orange": _mat("car_orange"),
     "cabin_gold": _mat("cabin_gold"), "cabin_glass": _mat("cabin_glass"),
+    "car_headlight": _mat("car_headlight"), "car_taillight": _mat("car_taillight"), "car_brakelight": _mat("car_brakelight"),
+    "car_trim": _mat("car_trim"), "fx_boost": _mat("fx_boost"),
     "pad_big": _mat("pad_big"), "pad_small": _mat("pad_small"),
     "goal_blue": _mat("goal_blue"), "goal_orange": _mat("goal_orange"),
     "crowd_blue": _mat("crowd_blue"), "crowd_orange": _mat("crowd_orange"), "crowd_white": _mat("crowd_white"),
@@ -66,6 +68,13 @@ SUSP_ACC_EASE = 12.0                    # smoothing of the measured acceleration
 SUSP_ACC_MAX = 60.0                     # a crash does not count as more than this acceleration (m/s^2)
 PITCH_MAX, ROLL_MAX = 6.0, 7.0          # degrees
 HEAVE_MIN, HEAVE_MAX = -0.08, 0.05      # metres, the chassis offset along y
+
+# Details of the car prefab: stop lights, boost flame, sparks of a slide
+LIGHT_SPEED = 0.5                       # m/s: the stop lights need a speed above this (against the gas, or backwards)
+FLAME_LEN, FLAME_WIDTH = 0.5, 0.12      # half length (scale z) and radius of the flame; both flicker around these
+FLAME_Y, FLAME_Z = 0.2, -1.27           # the flame starts at the nozzle (chassis space) and grows backwards
+SPARK_SPEED = 8.0                       # m/s: a car that slides faster than this throws sparks
+SPARK_INTERVAL = 0.05                   # s between two bursts of sparks of one car
 
 
 def clamp(v, lo, hi):
@@ -121,6 +130,11 @@ class Car:
         self.body = self.chassis.find_child("RlCarBody")
         self.cabin = self.chassis.find_child("RlCarCabin")
         self.wheels = [entity.find_child(name) for name in WHEEL_NAMES]
+        self.taillights = [entity.find_child("RlCarTaillightL"), entity.find_child("RlCarTaillightR")]
+        self.flame = entity.find_child("RlCarFlame")
+        self.braking = False        # the stop lights are on
+        self.flame_on = False
+        self.spark_cd = 0.0
         self.wheel_spin = 0.0       # degrees, 0..360, the same for all four wheels
         self.wheel_rate = 0.0       # degrees per second
         self.steer_angle = 0.0      # degrees, the front wheels
@@ -142,6 +156,7 @@ class Car:
         self.wheel_rate = self.steer_angle = 0.0
         self.pose_wheels()
         self.reset_suspension()
+        self.reset_details()
         rb = self.e.rigidbody
         rb.is_kinematic = False
         rb.velocity = V(0.0, 0.0, 0.0)
@@ -268,6 +283,36 @@ class Car:
     def pose_wheels(self):
         for k, wheel in enumerate(self.wheels):
             wheel.transform.rotation = V(self.wheel_spin, self.steer_angle if k < 2 else 0.0, 0.0)
+
+    def reset_details(self):
+        self.spark_cd = 0.0
+        if self.braking:
+            self.set_stop_lights(False)
+        if self.flame_on:
+            self.flame_on = False
+            self.flame.mesh.visible = False
+
+    def set_stop_lights(self, on):
+        self.braking = on
+        material = MAT["car_brakelight" if on else "car_taillight"]
+        for light in self.taillights:
+            light.mesh.material = material
+
+    def update_details(self, inp):
+        """Stop lights while braking or reversing, and the flame of the nozzle while boosting."""
+        vf = self.e.rigidbody.velocity.dot(self.forward())
+        braking = self.grounded and ((inp["throttle"] < 0 and vf > LIGHT_SPEED) or vf < -LIGHT_SPEED)
+        if braking != self.braking:  # the material changes only with the state, not every frame
+            self.set_stop_lights(braking)
+        if self.boosting != self.flame_on:
+            self.flame_on = self.boosting
+            self.flame.mesh.visible = self.boosting
+        if self.boosting:
+            length = FLAME_LEN * random.uniform(0.75, 1.25)
+            width = FLAME_WIDTH * random.uniform(0.85, 1.15)
+            t = self.flame.transform
+            t.scale = V(width, width, length)
+            t.position = V(0.0, FLAME_Y, FLAME_Z - length)
 
     def reset_suspension(self):
         self.susp_pitch = self.susp_roll = self.heave = 0.0         # degrees, degrees, metres
@@ -536,6 +581,7 @@ class RocketLeague(me.Behaviour):
         for c in self.cars:
             c.hit_cd = max(0.0, c.hit_cd - dt)
             c.bump_cd = max(0.0, c.bump_cd - dt)
+            c.spark_cd = max(0.0, c.spark_cd - dt)
             if c.dead > 0.0:
                 c.dead -= dt
                 if c.dead <= 0.0:
@@ -554,6 +600,10 @@ class RocketLeague(me.Behaviour):
             c.drive(inp, dt)
             c.update_wheels(inp, dt)
             c.update_suspension(dt)
+            c.update_details(inp)
+            if inp["slide"] and c.grounded and c.spark_cd <= 0.0 and flat(c.e.rigidbody.velocity).length() > SPARK_SPEED:
+                c.spark_cd = SPARK_INTERVAL
+                self._sparks(c)
             top = WALL_TOP - 1.0  # there is no ceiling collider
             cp = c.e.transform.position
             if cp.y > top:
@@ -569,6 +619,17 @@ class RocketLeague(me.Behaviour):
         if self.state == "play":
             self._car_ball_hits()
             self._car_car_hits()
+
+    def _sparks(self, c):
+        """Small sparks at the rear wheels of a car that slides (the effect limit is checked in _spawn_fx)."""
+        p = c.e.transform.position
+        fwd = c.forward()
+        right = V(fwd.z, 0.0, -fwd.x)
+        for side in (-1.0, 1.0):
+            pos = p - fwd * 0.75 + right * (0.72 * side)
+            vel = fwd * -random.uniform(2.0, 5.0) + right * (side * random.uniform(0.5, 2.0)) + V(0.0, random.uniform(2.5, 5.0), 0.0)
+            self._spawn_fx("rl_deco", V(pos.x, max(0.05, p.y - 0.25), pos.z), vel, random.uniform(0.12, 0.2), -0.3,
+                           random.uniform(0.3, 0.5), random.choice(("gold", "white")), True)
 
     def _player_input(self):
         k = me.input.is_key_down
