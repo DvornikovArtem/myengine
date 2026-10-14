@@ -6,6 +6,7 @@ Writes
   assets/materials/rl/*.material.json textured_lit materials, one per texture
   assets/models/rl_box.obj            unit cube, every face has an upright 0..1 UV
   assets/models/rl_sphere.obj         UV sphere of radius 1 (the stock sphere.obj has no UV)
+  assets/models/rl_wheel.obj          cylinder along X, radius 1, width 1; the tread and both discs share one atlas
 
 Run from anywhere:  python tools/gen_rl_assets.py
 Needs Pillow (pip install pillow); nothing else.
@@ -13,6 +14,9 @@ Needs Pillow (pip install pillow); nothing else.
 Texture conventions (rl_box.obj): on every face u runs left to right and the image top is up when the face is
 looked at from outside. On the top face (+y) the image top is +z (the orange end), the left edge is -x.
 Sizes are authored for the stretched crate of the game, e.g. a 42 x 74 m floor is 756 x 1332 px (18 px/m).
+Wheel atlas (rl_wheel.obj, car_wheel.tga): the tread is the strip WHEEL_TREAD_V over the whole width, u runs around the
+wheel; the discs are two circles of radius WHEEL_DISC_R centred at u = 0.25 (the -x side) and u = 0.75 (the +x side),
+v = WHEEL_DISC_V. Seen from outside both discs show the same upright image.
 """
 
 import json
@@ -45,6 +49,12 @@ WHITE = (240, 242, 245)
 FIELD_W, FIELD_L = 42.0, 74.0
 HX, HZ, GOAL_W = 20.0, 30.0, 6.0
 PX_PER_M = 18
+
+# atlas layout of the wheel (see the header)
+WHEEL_TREAD_V = (0.02, 0.36)
+WHEEL_DISC_V = 0.70
+WHEEL_DISC_R = 0.22
+WHEEL_SEGMENTS = 28
 
 
 def rgb(c, a=255):
@@ -418,6 +428,67 @@ def panel_texture(size=256):
     return cv.finish()
 
 
+def wheel_texture(size=512):
+    """Atlas of the wheel: the tread strip at the bottom, two identical discs with five swirled spokes above it."""
+    S = size
+    cv = Canvas(S, S, (22, 22, 25))
+    # tread: 16 chevrons pointing along the rolling direction, so that the spin reads in either direction
+    y0, y1 = (1.0 - WHEEL_TREAD_V[1]) * S, (1.0 - WHEEL_TREAD_V[0]) * S
+    ym = (y0 + y1) / 2
+    cv.rect(0, y0, S, y1, fill=(36, 36, 40))
+    cv.rect(0, y0, S, y0 + 10, fill=(24, 24, 27))
+    cv.rect(0, y1 - 10, S, y1, fill=(24, 24, 27))
+    step = S / 16
+    for i in range(16):
+        x = i * step
+        cv.line([(x, y0 + 8), (x + step * 0.5, ym), (x, y1 - 8)], (10, 10, 12), 8)
+    cv.line([(0, ym), (S, ym)], (10, 10, 12), 5)
+    # a pale block on the tread: one clear mark that goes round once per turn
+    cv.rect(step * 2, y0 + 10, step * 3, y1 - 10, fill=(205, 207, 212))
+    cv.line([(step * 2.5, y0 + 10), (step * 2.5, y1 - 10)], ORANGE, 6)
+
+    # discs
+    rw = WHEEL_DISC_R * S  # the wheel radius in the image
+    cy = (1.0 - WHEEL_DISC_V) * S
+    for cx in (0.25 * S, 0.75 * S):
+        cv.ellipse(cx, cy, rw * 1.04, rw * 1.04, fill=(22, 22, 25))
+        cv.ellipse(cx, cy, rw * 0.93, rw * 0.93, outline=(44, 44, 49), width=3)
+        cv.ellipse(cx, cy, rw * 0.76, rw * 0.76, fill=(164, 168, 176))
+        cv.ellipse(cx, cy, rw * 0.71, rw * 0.71, fill=(40, 42, 48))
+        for k in range(5):
+            base = 72.0 * k - 90.0
+            pts = []
+            for r, da in ((0.15, -10.0), (0.15, 10.0), (0.71, 24.0), (0.71, 8.0)):
+                a = math.radians(base + da)
+                pts.append((cx + rw * r * math.cos(a), cy + rw * r * math.sin(a)))
+            cv.poly(pts, fill=ORANGE if k == 0 else (206, 210, 218))
+        cv.ellipse(cx, cy, rw * 0.17, rw * 0.17, fill=(70, 72, 80))
+        cv.ellipse(cx, cy, rw * 0.08, rw * 0.08, fill=(224, 226, 232))
+        # a mark on the tyre wall, off the spokes
+        a = math.radians(-35)
+        cv.ellipse(cx + rw * 0.85 * math.cos(a), cy + rw * 0.85 * math.sin(a), rw * 0.04, rw * 0.04, fill=WHITE)
+    return cv.finish()
+
+
+def lamp_texture(center, edge, size=64):
+    """A lamp lens: bright in the middle, a little darker at the rim."""
+    cv = Canvas(size, size, edge)
+    steps = 20
+    for i in range(steps):
+        t = i / (steps - 1)
+        r = size * 0.72 * (1 - t)
+        cv.ellipse(size / 2, size / 2, r, r, fill=mix(edge, center, t))
+    return cv.finish()
+
+
+def trim_texture(size=128):
+    cv = Canvas(size, size, (46, 48, 54))
+    cv.vgrad(0, 0, size, size, (62, 65, 72), (32, 34, 39))
+    cv.rect(0, 0, size, size, outline=(22, 23, 27), width=4)
+    cv.line([(0, size / 2), (size, size / 2)], (28, 30, 35), 2)
+    return cv.finish()
+
+
 # --------------------------------------------------------------------------- meshes
 # ResourceManager loads OBJ like assimp's ConvertToLeftHanded: z and the z of the normals are negated and the winding is
 # reversed. Meshes below are described in the world space of the engine and written with z mirrored.
@@ -521,11 +592,74 @@ def write_sphere_obj(path, seg=32, rings=16):
     print("  mesh    %s" % path.name)
 
 
+def write_wheel_obj(path, seg=WHEEL_SEGMENTS):
+    """Cylinder along X (radius 1, x from -0.5 to 0.5): a tread band with radial normals and a fan on each end."""
+    half = 0.5
+    verts, uvs, normals, tris = [], [], [], []
+
+    def add(p, uv, n):
+        verts.append(obj_space(p))
+        uvs.append(uv)
+        normals.append(obj_space(n))
+        return len(verts)
+
+    def tri(i, j, k):
+        # wind so that (p1 - p0) x (p2 - p1) points along the normal of the corners
+        p0, p1, p2 = verts[i - 1], verts[j - 1], verts[k - 1]
+        e1 = [p1[m] - p0[m] for m in range(3)]
+        e2 = [p2[m] - p1[m] for m in range(3)]
+        cr = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+        n = [sum(normals[idx - 1][m] for idx in (i, j, k)) for m in range(3)]
+        if cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2] < 0:
+            j, k = k, j
+        tris.append((i, j, k))
+
+    # the tread: u runs round the wheel (the seam gets its own pair of vertices), v across the width
+    ring = []
+    for s in range(seg + 1):
+        a = 2 * math.pi * s / seg
+        y, z = math.cos(a), math.sin(a)
+        lo = add((-half, y, z), (s / seg, WHEEL_TREAD_V[0]), (0, y, z))
+        hi = add((half, y, z), (s / seg, WHEEL_TREAD_V[1]), (0, y, z))
+        ring.append((lo, hi))
+    for s in range(seg):
+        lo0, hi0 = ring[s]
+        lo1, hi1 = ring[s + 1]
+        tri(lo0, hi0, hi1)
+        tri(lo0, hi1, lo1)
+
+    # the discs: seen from outside, u runs to the right (+z on the +x end, -z on the -x end) and v up (+y)
+    for sign, cu in ((1, 0.75), (-1, 0.25)):
+        centre = add((sign * half, 0, 0), (cu, WHEEL_DISC_V), (sign, 0, 0))
+        rim = []
+        for s in range(seg):
+            a = 2 * math.pi * s / seg
+            y, z = math.cos(a), math.sin(a)
+            rim.append(add((sign * half, y, z), (cu + sign * z * WHEEL_DISC_R, WHEEL_DISC_V + y * WHEEL_DISC_R),
+                           (sign, 0, 0)))
+        for s in range(seg):
+            tri(centre, rim[s], rim[(s + 1) % seg])
+
+    out = ["# Wheel: a cylinder along X, radius 1, width 1; tread and discs share one atlas (tools/gen_rl_assets.py)",
+           "o rl_wheel"]
+    for p in verts:
+        out.append("v %.5f %.5f %.5f" % p)
+    for uv in uvs:
+        out.append("vt %.5f %.5f" % uv)
+    for n in normals:
+        out.append("vn %.5f %.5f %.5f" % n)
+    for t in tris:
+        out.append("f " + " ".join("%d/%d/%d" % (i, i, i) for i in t))
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    print("  mesh    %s" % path.name)
+
+
 def main():
     print("meshes")
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     write_box_obj(MODEL_DIR / "rl_box.obj")
     write_sphere_obj(MODEL_DIR / "rl_sphere.obj")
+    write_wheel_obj(MODEL_DIR / "rl_wheel.obj")
 
     print("textures")
     for theme, t in THEMES.items():
@@ -544,6 +678,12 @@ def main():
     save_tga("car_orange", car_texture("orange", ORANGE_GLOW))
     save_tga("cabin_glass", cabin_texture("glass"))
     save_tga("cabin_gold", cabin_texture("gold"))
+    save_tga("car_wheel", wheel_texture())
+    save_tga("car_headlight", lamp_texture((255, 248, 226), (255, 222, 150)))
+    save_tga("car_taillight", lamp_texture((170, 26, 22), (110, 12, 12)))
+    save_tga("car_brakelight", lamp_texture((255, 120, 96), (255, 28, 24)))
+    save_tga("car_trim", trim_texture())
+    save_tga("fx_boost", lamp_texture((255, 238, 150), (255, 124, 20)))
     save_tga("pad_big", pad_texture(True))
     save_tga("pad_small", pad_texture(False))
     save_tga("fx_blue", glow_texture(BLUE))
