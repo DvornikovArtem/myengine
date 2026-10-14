@@ -13,6 +13,7 @@ T2 дает обратную связь: теперь сам Python-скрипт
 - `entity.rigidbody`: `velocity`, `mass`, `use_gravity`, `is_kinematic`, `is_grounded` (только чтение), `add_impulse(vector)`.
 - `entity.collider`: `is_trigger`, `radius`, `half_extents`.
 - `entity.mesh`: `mesh`, `material`, `visible`.
+- `entity.parent`, `entity.children`, `entity.find_child(name)`: иерархия сущности, см. раздел «Иерархия».
 - `world.find(name)` возвращает `Entity` или `None`; `find_all(prefix="")` — список по префиксу имени; `find_in_radius(center, radius, prefix="")` — ближайшие первыми, с учетом мировой позиции дочерних объектов.
 - `input.is_down(action)`, `was_pressed(action)`, `is_key_down(key)`, `was_key_pressed(key)`. Названия клавиш: `"R"`, `"Space"`, `"F1"`, стрелки, Shift и другие стандартные клавиши. Регистр не важен; неизвестное имя дает `ValueError`.
 - `time.dt`, `total`, `frame` обновляются каждый шаг ScriptSystem, в Edit тоже. `total` — сумма переданных dt, а не отдельные часы ОС.
@@ -44,6 +45,34 @@ class Mover(me.Behaviour):
 
 `transform.position.x += 1` меняет только временную копию. Нужно присваивать весь `Vec3`, как в примере. Векторы с NaN/бесконечностью, неположительная масса и размеры коллайдера отклоняются с `ValueError`.
 
+## Иерархия
+
+Три члена `Entity` читают `HierarchyComponent` и позволяют брать части составной модели напрямую, а не через `world.find_all` по префиксу имени. Пример: машина «корень → шасси → кузов».
+
+| Член | Что возвращает |
+|---|---|
+| `entity.parent` | `Entity` родителя или `None`: для корня, для сущности без `HierarchyComponent` и если родитель не жив |
+| `entity.children` | Новый список `Entity` прямых детей в порядке `HierarchyComponent.children`; изменение списка иерархию не меняет |
+| `entity.find_child(name)` | Первый потомок с таким именем или `None` |
+
+- `find_child` ищет рекурсивно, в глубину: сначала целиком поддерево первого ребенка, затем следующий ребенок. Саму сущность и ее предков он не ищет.
+- Сущности, поставленные на удаление через `destroy()` до конца шага скрипта, в `children` и `find_child` не попадают (как в запросах `world.find*`); после шага удаленные пропадают из иерархии.
+- Для мертвой сущности и для ссылки из прошлой сцены все три члена бросают `myengine.EntityDeadError`. Как и весь API, работают только в главном потоке.
+
+```python
+import myengine as me
+
+class Car(me.Behaviour):
+    def OnStart(self):
+        chassis = self.entity.find_child("Chassis")
+        self.body = chassis.find_child("Body") if chassis else None
+        self.parts = [part.name for part in self.entity.children]
+
+    def OnUpdate(self, dt):
+        if self.body is not None and self.body.alive:
+            self.body.mesh.visible = self.entity.parent is None
+```
+
 ## Проверка
 
 Из корня репозитория, в PowerShell:
@@ -58,6 +87,8 @@ ctest --test-dir build -C Debug --output-on-failure
 Для второй конфигурации заменить `Debug` на `RelWithDebInfo`. Установленный Python не используется: тест запускает тот же встроенный интерпретатор, что и движок.
 
 `script_api` проверяет изменения C++-компонентов из Python, копии векторов, запросы по именам/радиусу/иерархии, ввод, время, сообщения и HUD, мертвые и сохраненные от другой сцены ссылки. Дополнительно проверяется интеграция с T3/T5/D1/T7: `props`, жизненный цикл, события обеим сторонам, удаление поддерева, ошибки с файлом и строкой, `Faulted`, hot reload L1/L2, сохранение старого кода после SyntaxError и обновление списка полей инспектора.
+
+Для иерархии `script_api` спавнит prefab и проверяет `parent`, `children` и `find_child` (порядок, обход в глубину, скрытие помеченных на удаление, `EntityDeadError` после удаления); сценарий лежит в функции `hierarchy` файла `tests/scripting/api_checks.py`.
 
 Скрипты тестов лежат в `tests/scripting`, копируются во временный каталог с кириллицей в пути. Исходные сцены и `assets/scripts` не меняются. При ошибке каталог и лог сохраняются для диагностики; после успешного теста временные файлы удаляются.
 

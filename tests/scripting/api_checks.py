@@ -89,3 +89,29 @@ def input_and_time():
         assert False, "Script time must be read-only"
     except AttributeError:
         pass
+
+
+def hierarchy(root):
+    """root is a spawned prefab: Prefabricated > (PrefabChild > PrefabTwin, PrefabTwin)."""
+    assert root.parent is None
+    kids = root.children
+    assert isinstance(kids, list) and [kid.name for kid in kids] == ["PrefabChild", "PrefabTwin"]
+    child, sibling = kids
+    assert child.parent == root and sibling.parent == root
+    grandchildren = child.children
+    assert [g.name for g in grandchildren] == ["PrefabTwin"]
+    grandchild = grandchildren[0]
+    assert grandchild.parent == child and grandchild.parent.parent == root
+    assert grandchild.children == [] and sibling.children == []
+    # find_child is recursive and depth-first: the grandchild comes before the later sibling with the same name.
+    assert root.find_child("PrefabChild") == child
+    assert root.find_child("PrefabTwin") == grandchild
+    assert child.find_child("PrefabTwin") == grandchild
+    assert root.find_child("missing") is None
+    assert root.find_child("Prefabricated") is None, "find_child must not return the entity itself"
+    assert grandchild.find_child("PrefabChild") is None, "find_child must not search upward"
+    assert child.find_child("PrefabTwin") != sibling
+    # An entity without a hierarchy component has no relatives.
+    lone = me.world.find("NewPlayer")
+    assert lone.parent is None and lone.children == [] and lone.find_child("PrefabChild") is None
+    return grandchild, sibling

@@ -69,7 +69,9 @@ namespace
                 {{"id", 10}, {"Tag", {{"name", "Prefabricated"}}}, {"Transform", {{"position", {1, 0, 0}}}},
                     {"Script", {{"scripts", nlohmann::json::array({{{"module", "api_behaviours"}, {"class", "Counter"}, {"props", {{"count", 20}}}}})}}}},
                 {{"id", 30}, {"Tag", {{"name", "PrefabChild"}}}, {"Hierarchy", {{"parent", 10}}},
-                    {"Script", {{"scripts", nlohmann::json::array({{{"module", "api_behaviours"}, {"class", "Counter"}, {"props", {{"count", 30}}}}})}}}}
+                    {"Script", {{"scripts", nlohmann::json::array({{{"module", "api_behaviours"}, {"class", "Counter"}, {"props", {{"count", 30}}}}})}}}},
+                {{"id", 40}, {"Tag", {{"name", "PrefabTwin"}}}, {"Hierarchy", {{"parent", 30}}}},
+                {{"id", 50}, {"Tag", {{"name", "PrefabTwin"}}}, {"Hierarchy", {{"parent", 10}}}}
             })}};
             std::ofstream prefabFile(prefabsDirectory / "test.prefab.json", std::ios::binary);
             prefabFile << prefab.dump();
@@ -393,6 +395,21 @@ assert second != third and second != spawned
 assert second.transform.position == me.Vec3(1, 0, 0)
 assert third.get_script(behaviours.Counter) is None
 )PY", globals);
+        py::eval_file((std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "tests/scripting/api_checks.py").u8string(), globals);
+        const auto hierarchyParts = globals["hierarchy"](globals["spawned"]).cast<py::tuple>();
+        globals["grandchild"] = hierarchyParts[0];
+        globals["twin"] = hierarchyParts[1];
+        py::exec(R"PY(
+# Requests waiting for the end of the script step are already hidden from children and find_child.
+grandchild.destroy()
+assert grandchild.alive and grandchild.parent is not None
+assert spawned.children[0].children == [] and spawned.find_child("PrefabTwin") == twin
+)PY", globals);
+        fixture.Tick();
+        py::exec(R"PY(
+assert not grandchild.alive and spawned.children[0].children == []
+assert [kid.name for kid in spawned.children] == ["PrefabChild", "PrefabTwin"]
+)PY", globals);
         const auto count = fixture.world.GetEntities().size();
         py::exec(R"PY(
 for name in ("missing", "../test"):
@@ -417,6 +434,14 @@ spawned.destroy()
         fixture.Tick();
         Check(!fixture.world.IsAlive(root) && !fixture.world.IsAlive(child), "Destroy did not remove a spawned prefab subtree");
         py::exec("assert not spawned.alive and saved_player.alive\nassert behaviours.events.count(('destroy', 'PrefabChild')) == 1", globals);
+        py::exec(R"PY(
+for access in (lambda: spawned.parent, lambda: spawned.children, lambda: spawned.find_child("PrefabChild"), lambda: grandchild.children):
+    try:
+        access()
+        assert False, "A dead entity answered a hierarchy query"
+    except me.EntityDeadError:
+        pass
+)PY", globals);
     }
 
     void TestHotReloadAndFields(Fixture& fixture)
