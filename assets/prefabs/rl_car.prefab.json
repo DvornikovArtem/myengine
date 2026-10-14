@@ -249,6 +249,347 @@
       "Hierarchy": {
         "parent": 1
       }
+    },
+    {
+      "id": 9,
+      "Tag": {
+        "name": "RlCarBumperF"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.0,
+          1.2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          0.2,
+          0.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_trim.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 10,
+      "Tag": {
+        "name": "RlCarBumperR"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.0,
+          -1.2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          0.2,
+          0.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_trim.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 11,
+      "Tag": {
+        "name": "RlCarHeadlightL"
+      },
+      "Transform": {
+        "position": [
+          -0.45,
+          0.17,
+          1.16
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.28,
+          0.12,
+          0.06
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_headlight.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 12,
+      "Tag": {
+        "name": "RlCarHeadlightR"
+      },
+      "Transform": {
+        "position": [
+          0.45,
+          0.17,
+          1.16
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.28,
+          0.12,
+          0.06
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_headlight.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 13,
+      "Tag": {
+        "name": "RlCarTaillightL"
+      },
+      "Transform": {
+        "position": [
+          -0.45,
+          0.17,
+          -1.16
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.1,
+          0.06
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_taillight.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 14,
+      "Tag": {
+        "name": "RlCarTaillightR"
+      },
+      "Transform": {
+        "position": [
+          0.45,
+          0.17,
+          -1.16
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.1,
+          0.06
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_taillight.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 15,
+      "Tag": {
+        "name": "RlCarSpoilerWing"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.52,
+          -1.05
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.2,
+          0.05,
+          0.35
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_trim.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 16,
+      "Tag": {
+        "name": "RlCarSpoilerStrutL"
+      },
+      "Transform": {
+        "position": [
+          -0.4,
+          0.38,
+          -1.05
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.06,
+          0.3,
+          0.12
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_trim.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 17,
+      "Tag": {
+        "name": "RlCarSpoilerStrutR"
+      },
+      "Transform": {
+        "position": [
+          0.4,
+          0.38,
+          -1.05
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.06,
+          0.3,
+          0.12
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_trim.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 18,
+      "Tag": {
+        "name": "RlCarNozzle"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.2,
+          -1.2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.28,
+          0.16,
+          0.14
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_trim.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 19,
+      "Tag": {
+        "name": "RlCarFlame"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.2,
+          -1.77
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.12,
+          0.12,
+          0.5
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_sphere.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": false
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
     }
   ]
 }
