@@ -46,6 +46,13 @@ BOOST_ACC, BOOST_USE = 26.0, 33.0
 JUMP_V, DOUBLE_V, DODGE_V = 8.5, 7.0, 11.0
 DEMO_SPEED = 26.0
 
+# Wheels (assets/prefabs/rl_car.prefab.json): the wheel mesh has radius 1, the prefab scales it to WHEEL_R
+WHEEL_NAMES = ("RlWheelFL", "RlWheelFR", "RlWheelRL", "RlWheelRR")   # front pair first
+WHEEL_R = 0.3
+MAX_STEER = 25.0                # degrees of the front wheels at full steering
+STEER_EASE = 14.0               # how fast the front wheels follow the steering (1 / s)
+WHEEL_AIR_DRAG = 1.2            # in the air the wheels slow down (1 / s)
+
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -83,6 +90,14 @@ class Car:
         self.was_grounded = True
         self.jump_lock = 0.0
         self.role = "attacker"
+        # parts of the car prefab, found through the hierarchy
+        self.chassis = entity.find_child("RlCarChassis")
+        self.body = self.chassis.find_child("RlCarBody")
+        self.cabin = self.chassis.find_child("RlCarCabin")
+        self.wheels = [entity.find_child(name) for name in WHEEL_NAMES]
+        self.wheel_spin = 0.0       # degrees, 0..360, the same for all four wheels
+        self.wheel_rate = 0.0       # degrees per second
+        self.steer_angle = 0.0      # degrees, the front wheels
 
     @property
     def sign(self):
@@ -97,6 +112,7 @@ class Car:
         self.pitch = self.roll = 0.0
         self.jumps, self.flip, self.dodge_t = 0, 0.0, 0.0
         self.was_grounded, self.jump_lock = True, 0.0
+        self.wheel_rate = self.steer_angle = 0.0
         rb = self.e.rigidbody
         rb.is_kinematic = False
         rb.velocity = V(0.0, 0.0, 0.0)
@@ -206,6 +222,20 @@ class Car:
                 v = v * ((MAX_BOOST + 6.0) / v.length())
             rb.velocity = v
         t.rotation = V(self.pitch, self.yaw, self.roll)
+
+    def update_wheels(self, inp, dt):
+        """Roll the wheels with the forward speed and turn the front pair with the steering."""
+        if self.grounded:
+            self.wheel_rate = math.degrees(self.e.rigidbody.velocity.dot(self.forward()) / WHEEL_R)
+            target = inp["steer"] * MAX_STEER
+        else:
+            self.wheel_rate -= self.wheel_rate * min(1.0, WHEEL_AIR_DRAG * dt)
+            target = 0.0
+        # the pitch of a wheel grows when the car drives forward (+z), the same sign for the left and the right side
+        self.wheel_spin = (self.wheel_spin + self.wheel_rate * dt) % 360.0
+        self.steer_angle += (target - self.steer_angle) * min(1.0, STEER_EASE * dt)
+        for k, wheel in enumerate(self.wheels):
+            wheel.transform.rotation = V(self.wheel_spin, self.steer_angle if k < 2 else 0.0, 0.0)
 
 
 class RocketLeague(me.Behaviour):
@@ -324,13 +354,12 @@ class RocketLeague(me.Behaviour):
             for i in range(n):
                 e = me.world.spawn("rl_car", V(0.0, CAR_Y, 0.0))
                 e.name = "Car_%s_%d" % (team, i)
-                e.mesh.material = MAT["car_" + team]
                 player = team == "blue" and i == 0
-                for cabin in me.world.find_all("RlCarCabin"):
-                    cabin.name = "Cabin_%s_%d" % (team, i)
-                    if player:
-                        cabin.mesh.material = MAT["cabin_gold"]
-                self.cars.append(Car(e, team, i, player))
+                car = Car(e, team, i, player)
+                car.body.mesh.material = MAT["car_" + team]
+                if player:
+                    car.cabin.mesh.material = MAT["cabin_gold"]
+                self.cars.append(car)
         self.score = {"blue": 0, "orange": 0}
         self.clock = max(0.1, self.match_minutes) * 60.0
         self.overtime = False
@@ -448,6 +477,7 @@ class RocketLeague(me.Behaviour):
             else:
                 inp = self._bot_input(c)
             c.drive(inp, dt)
+            c.update_wheels(inp, dt)
             top = WALL_TOP - 1.0  # there is no ceiling collider
             cp = c.e.transform.position
             if cp.y > top:
