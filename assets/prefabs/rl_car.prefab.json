@@ -18,15 +18,10 @@
           0
         ],
         "scale": [
-          1.4,
-          0.6,
-          2.4
+          1,
+          1,
+          1
         ]
-      },
-      "MeshRenderer": {
-        "meshPath": "assets/models/rl_box.obj",
-        "materialPath": "assets/materials/rl/car_blue.material.json",
-        "visible": true
       },
       "Rigidbody": {
         "mass": 3.0,
@@ -36,9 +31,9 @@
       "Collider": {
         "type": "box",
         "halfExtents": [
-          0.5,
-          0.5,
-          0.5
+          0.7,
+          0.3,
+          1.2
         ],
         "bounciness": 0.2
       }
@@ -46,13 +41,13 @@
     {
       "id": 2,
       "Tag": {
-        "name": "RlCarCabin"
+        "name": "RlCarChassis"
       },
       "Transform": {
         "position": [
           0,
-          0.8,
-          -0.1
+          0,
+          0
         ],
         "rotationDeg": [
           0,
@@ -60,14 +55,195 @@
           0
         ],
         "scale": [
-          0.75,
-          0.8,
-          0.45
+          1,
+          1,
+          1
+        ]
+      },
+      "Hierarchy": {
+        "parent": 1
+      }
+    },
+    {
+      "id": 3,
+      "Tag": {
+        "name": "RlCarBody"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.12,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.3,
+          0.42,
+          2.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_blue.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 4,
+      "Tag": {
+        "name": "RlCarCabin"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.5,
+          -0.25
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.05,
+          0.4,
+          1.1
         ]
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl_box.obj",
         "materialPath": "assets/materials/rl/cabin_glass.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 2
+      }
+    },
+    {
+      "id": 5,
+      "Tag": {
+        "name": "RlWheelFL"
+      },
+      "Transform": {
+        "position": [
+          -0.72,
+          0,
+          0.75
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 1
+      }
+    },
+    {
+      "id": 6,
+      "Tag": {
+        "name": "RlWheelFR"
+      },
+      "Transform": {
+        "position": [
+          0.72,
+          0,
+          0.75
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 1
+      }
+    },
+    {
+      "id": 7,
+      "Tag": {
+        "name": "RlWheelRL"
+      },
+      "Transform": {
+        "position": [
+          -0.72,
+          0,
+          -0.75
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "Hierarchy": {
+        "parent": 1
+      }
+    },
+    {
+      "id": 8,
+      "Tag": {
+        "name": "RlWheelRR"
+      },
+      "Transform": {
+        "position": [
+          0.72,
+          0,
+          -0.75
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
         "visible": true
       },
       "Hierarchy": {

@@ -520,15 +520,20 @@ namespace
         Harness harness({}, 4, 2);
         std::vector<editor::PrefabEntityInfo> entities;
 
-        // A prefab of the project: a car with a cabin on top of it
+        // A prefab of the project: a car (the root with the physics) with a chassis, a body, a cabin and four wheels
         Check(harness.service->ReadPrefab("assets/prefabs/rl_car.prefab.json", entities), "The car prefab must be readable");
-        Check(entities.size() == 2 && entities[0].name == "RlCar" && entities[1].name == "RlCarCabin", "The car has two named entities");
-        Check(entities[0].hasMesh && entities[0].hasRigidbody && entities[0].collider.rfind("Box", 0) == 0, "The car body has a mesh, a rigidbody and a box");
-        Check(entities[0].parent == -1 && entities[1].parent == entities[0].id, "The cabin is a child of the body");
+        Check(entities.size() == 8 && entities[0].name == "RlCar" && entities[1].name == "RlCarChassis" && entities[2].name == "RlCarBody"
+                && entities[3].name == "RlCarCabin" && entities[4].name == "RlWheelFL" && entities[7].name == "RlWheelRR",
+            "The car has a chassis, a body, a cabin and four wheels");
+        Check(!entities[0].hasMesh && entities[0].hasRigidbody && entities[0].collider.rfind("Box", 0) == 0 && entities[2].hasMesh && entities[4].hasMesh,
+            "The car root has a rigidbody and a box, the body and the wheels have meshes");
+        Check(entities[0].parent == -1 && entities[1].parent == entities[0].id && entities[2].parent == entities[1].id
+                && entities[3].parent == entities[1].id && entities[4].parent == entities[0].id,
+            "The body and the cabin are on the chassis, the wheels are on the root");
         Check(entities[0].rigidbody == "Gravity on \xC2\xB7 mass 3", "The rigidbody is summarised");
-        Check(entities[0].collider == "Box \xC2\xB7 0.5 0.5 0.5", "The collider is summarised");
-        // child translation (0, 0.8, -0.1) through the parent scale (1.4, 0.6, 2.4) and position (0, 0.5, 0)
-        Check(std::abs(entities[1].world.data[13] - 0.98f) < 1e-4f && std::abs(entities[1].world.data[14] + 0.24f) < 1e-4f,
+        Check(entities[0].collider == "Box \xC2\xB7 0.7 0.3 1.2", "The collider is summarised");
+        // cabin translation (0, 0.5, -0.25) through the unscaled chassis and the root position (0, 0.5, 0)
+        Check(std::abs(entities[3].world.data[13] - 1.0f) < 1e-4f && std::abs(entities[3].world.data[14] + 0.25f) < 1e-4f,
             "The world matrix of a child includes its parent");
 
         // A made-up one: invisible mesh, a sphere collider, a script, a parent that is not in the file

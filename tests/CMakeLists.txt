@@ -66,6 +66,17 @@ set_property(TARGET myengine_gameplay_tests PROPERTY FOLDER "Tests")
 add_test(NAME scripting_gameplay COMMAND myengine_gameplay_tests)
 set_tests_properties(scripting_gameplay PROPERTIES TIMEOUT 30)
 
+# Headless Rocket League match: the car prefab, its wheels and the real script, without a window.
+add_executable(myengine_rocket_league_tests
+  scripting/RocketLeagueTests.cpp)
+
+target_link_libraries(myengine_rocket_league_tests PRIVATE myengine_engine myengine_python)
+myengine_apply_compiler_options(myengine_rocket_league_tests)
+myengine_copy_runtime_assets(myengine_rocket_league_tests)
+set_property(TARGET myengine_rocket_league_tests PROPERTY FOLDER "Tests")
+add_test(NAME rocket_league COMMAND myengine_rocket_league_tests)
+set_tests_properties(rocket_league PROPERTIES TIMEOUT 60)
+
 # Manual integration test: plays a scripted round in a DX12 window.
 add_executable(myengine_gameplay_smoke
   scene/GameplaySceneSmoke.cpp)
