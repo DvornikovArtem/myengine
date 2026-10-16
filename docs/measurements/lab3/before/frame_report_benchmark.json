@@ -1,0 +1,172 @@
+{
+  "capture": "Saved/Captures/benchmark_20261016_172745_frame600.rdc",
+  "api": "D3D12",
+  "eventCount": 8143,
+  "apiCalls": {
+    "IDXGISwapChain::GetBuffer": 1,
+    "ID3D12GraphicsCommandList::Reset": 1,
+    "ID3D12GraphicsCommandList::BeginEvent": 6,
+    "ID3D12GraphicsCommandList::EndQuery": 12,
+    "ID3D12GraphicsCommandList::ResourceBarrier": 2,
+    "ID3D12GraphicsCommandList::RSSetViewports": 3,
+    "ID3D12GraphicsCommandList::RSSetScissorRects": 59,
+    "ID3D12GraphicsCommandList::OMSetRenderTargets": 1,
+    "ID3D12GraphicsCommandList::ClearRenderTargetView": 1,
+    "ID3D12GraphicsCommandList::ClearDepthStencilView": 1,
+    "ID3D12GraphicsCommandList::SetGraphicsRootSignature": 59,
+    "ID3D12GraphicsCommandList::EndEvent": 6,
+    "ID3D12GraphicsCommandList::SetPipelineState": 999,
+    "ID3D12GraphicsCommandList::IASetPrimitiveTopology": 999,
+    "ID3D12GraphicsCommandList::IASetVertexBuffers": 999,
+    "ID3D12GraphicsCommandList::IASetIndexBuffer": 998,
+    "ID3D12GraphicsCommandList::SetDescriptorHeaps": 998,
+    "ID3D12GraphicsCommandList::SetGraphicsRootDescriptorTable": 998,
+    "ID3D12GraphicsCommandList::SetGraphicsRoot32BitConstants": 998,
+    "ID3D12GraphicsCommandList::DrawIndexedInstanced": 998,
+    "ID3D12GraphicsCommandList::DrawInstanced": 1,
+    "ID3D12GraphicsCommandList::ResolveQueryData": 1,
+    "ID3D12GraphicsCommandList::Close": 1,
+    "IDXGISwapChain::Present": 1
+  },
+  "pipelines": [
+    "pipeline 326",
+    "pipeline 288",
+    "pipeline 295"
+  ],
+  "shaders": [],
+  "root": {
+    "name": "Frame",
+    "depth": 0,
+    "draws": 0,
+    "dispatches": 0,
+    "clears": 0,
+    "copies": 0,
+    "triangles": 0,
+    "pipelines": [],
+    "shaders": [],
+    "renderTargets": [],
+    "children": [
+      {
+        "name": "Clear Back Buffer",
+        "depth": 1,
+        "draws": 0,
+        "dispatches": 0,
+        "clears": 2,
+        "copies": 0,
+        "triangles": 0,
+        "pipelines": [],
+        "shaders": [],
+        "renderTargets": [],
+        "children": [],
+        "totals": {
+          "draws": 0,
+          "dispatches": 0,
+          "clears": 2,
+          "copies": 0,
+          "triangles": 0
+        }
+      },
+      {
+        "name": "Scene",
+        "depth": 1,
+        "draws": 970,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 829972,
+        "pipelines": [
+          "pipeline 326"
+        ],
+        "shaders": [],
+        "renderTargets": [
+          "viewport 856x345"
+        ],
+        "children": [],
+        "totals": {
+          "draws": 970,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 829972
+        }
+      },
+      {
+        "name": "Debug Lines",
+        "depth": 1,
+        "draws": 1,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 0,
+        "pipelines": [
+          "pipeline 288"
+        ],
+        "shaders": [],
+        "renderTargets": [
+          "viewport 856x345"
+        ],
+        "children": [],
+        "totals": {
+          "draws": 1,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 0
+        }
+      },
+      {
+        "name": "UI",
+        "depth": 1,
+        "draws": 28,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 2082,
+        "pipelines": [
+          "pipeline 295"
+        ],
+        "shaders": [],
+        "renderTargets": [
+          "viewport 1280x720"
+        ],
+        "children": [],
+        "totals": {
+          "draws": 28,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 2082
+        }
+      },
+      {
+        "name": "Present Transition",
+        "depth": 1,
+        "draws": 0,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 0,
+        "pipelines": [],
+        "shaders": [],
+        "renderTargets": [],
+        "children": [],
+        "totals": {
+          "draws": 0,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 0
+        }
+      }
+    ],
+    "totals": {
+      "draws": 999,
+      "dispatches": 0,
+      "clears": 2,
+      "copies": 0,
+      "triangles": 832054
+    }
+  },
+  "source": "renderdoccmd convert -c xml (the API calls of the capture; no shader or texture data)",
+  "warnings": []
+}
