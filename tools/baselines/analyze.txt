@@ -1,0 +1,22 @@
+# MSVC /analyze findings in engine/, app/, tests/ (code|file|count) # key|file|count; regenerate with tools\check.ps1 -UpdateBaseline
+C28020|engine/src/ui/editor/SceneEditorInternal.h|1
+C6001|engine/src/render/dx12/Dx12RenderAdapter.cpp|2
+C6011|tests/assistant/AssistantBridgeTests.cpp|1
+C6011|tests/assistant/AssistantTests.cpp|1
+C6011|tests/assistant/CodexTests.cpp|2
+C6011|tests/ui/ContentBrowserTests.cpp|3
+C6262|app/mcp_bridge/main.cpp|1
+C6262|engine/src/assistant/AssistantBridgeServer.cpp|1
+C6262|engine/src/assistant/CliProcess.cpp|1
+C6262|engine/src/ui/AssistantPanel.cpp|1
+C6262|tests/assistant/AssistantBridgeTests.cpp|1
+C6262|tests/assistant/AssistantLive.cpp|1
+C6262|tests/assistant/AssistantTests.cpp|1
+C6262|tests/assistant/CodexTests.cpp|1
+C6262|tests/scripting/GameplayTests.cpp|1
+C6262|tests/scripting/RocketLeagueTests.cpp|1
+C6262|tests/scripting/ScriptApiTests.cpp|1
+C6262|tests/scripting/ScriptConsoleTests.cpp|1
+C6262|tests/ui/PrefabInspectorTests.cpp|1
+C6387|tests/assistant/AssistantBridgeTests.cpp|2
+C6387|tests/render/RenderTargetSmoke.cpp|1
