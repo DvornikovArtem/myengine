@@ -15,6 +15,7 @@
 #include <myengine/render/RenderTypes.h>
 #include <myengine/render/ShaderDescriptor.h>
 #include <myengine/render/ShaderLayout.h>
+#include <myengine/render/dx12/InputLayoutBuilder.h>
 #include <myengine/render/dx12/RootSignatureBuilder.h>
 
 #include "ShaderReflector.h"
@@ -80,8 +81,29 @@ namespace myengine::render::dx12
                 text += "NO ROOT SIGNATURE\n\n";
                 return;
             }
-            text += FormatRootSignature(build.description) + "\n";
+            text += FormatRootSignature(build.description);
             shapes[build.description.shapeHash].push_back(title);
+
+            // The input layout: the inputs of the vertex shader against the vertex stream of the program
+            const VertexStreamDesc* stream = FindVertexStream(program.vertexStream);
+            if (stream == nullptr)
+            {
+                ++failures;
+                text += "NO INPUT LAYOUT: unknown vertex stream '" + program.vertexStream + "'\n\n";
+                return;
+            }
+            const InputLayoutBuild inputLayout = BuildInputLayout(result.program->layout, *stream, title);
+            for (const ShaderDiagnostic& diagnostic : inputLayout.diagnostics)
+            {
+                text += AnsiToUtf8(FormatShaderDiagnostic(diagnostic)) + "\n";
+            }
+            if (!inputLayout.ok)
+            {
+                ++failures;
+                text += "NO INPUT LAYOUT\n\n";
+                return;
+            }
+            text += FormatInputLayout(inputLayout) + "\n";
         }
     }
 

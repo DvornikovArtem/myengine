@@ -14,7 +14,7 @@ namespace myengine::render
 {
     // {
     //   "source": "textured_lit.hlsl", "vertexEntry": "VSMain", "pixelEntry": "PSMain",
-    //   "vertexProfile": "vs_5_0", "pixelProfile": "ps_5_0",
+    //   "vertexProfile": "vs_5_0", "pixelProfile": "ps_5_0", "vertexStream": "mesh",
     //   "samplers": { "gSampler": "linear_wrap" }
     // }
     // `source` is made relative to the folder of the descriptor. false: `outError` says what is wrong.

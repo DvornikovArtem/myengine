@@ -16,6 +16,7 @@
 
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/render/dx12/Dx12Context.h>
+#include <myengine/render/dx12/InputLayoutBuilder.h>
 #include <myengine/render/dx12/RootSignatureBuilder.h>
 
 namespace myengine::core
@@ -148,6 +149,11 @@ namespace myengine::render::dx12
             std::uint8_t color[4];
             float uv[2];
         };
+
+        // The tables of the vertex streams (InputLayoutBuilder) describe these structs
+        static_assert(sizeof(DxVertex) == kMeshVertexStride, "the mesh vertex stream table is out of date");
+        static_assert(sizeof(DxDebugVertex) == kDebugLineVertexStride, "the debug line vertex stream table is out of date");
+        static_assert(sizeof(DxUiVertex) == kUiVertexStride, "the UI vertex stream table is out of date");
 
         struct MeshRecord
         {

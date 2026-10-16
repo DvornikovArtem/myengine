@@ -36,6 +36,8 @@ namespace myengine::render
             program.vertexProfile = descriptor.value("vertexProfile", program.vertexProfile);
             program.pixelProfile = descriptor.value("pixelProfile", program.pixelProfile);
 
+            program.vertexStream = descriptor.value("vertexStream", program.vertexStream);
+
             program.samplers.clear();
             const auto samplers = descriptor.find("samplers");
             if (samplers != descriptor.end())
