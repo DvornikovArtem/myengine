@@ -1,0 +1,33 @@
+# clang-tidy for our code (engine/, app/, tests/). Run: tools\check.ps1 -Tidy, see docs/dev/cpp-checks.md.
+# A moderate set: the checks that find real bugs; style checks are not here on purpose.
+# What is left in the code goes to tools/baselines/tidy.txt, only new findings fail the check.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-narrowing-conversions,
+  -bugprone-reserved-identifier,
+  -bugprone-unchecked-optional-access,
+  -bugprone-invalid-enum-default-initialization,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  performance-*,
+  -performance-enum-size,
+  -performance-no-int-to-ptr,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-virtual-class-destructor,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  modernize-use-override,
+  modernize-use-nullptr
+# Off, and why:
+#   bugprone-invalid-enum-default-initialization  D3D12 descriptions are zeroed with {} on purpose (D3D12_BLEND 0 = "unset")
+#   bugprone-multi-level-implicit-pointer-conversion  LocalFree(wchar_t**) after CommandLineToArgvW is the documented idiom
+#   cppcoreguidelines-pro-type-member-init  fires on every class with std::vector / std::map members that has a
+#       constructor: 30 findings, all of them containers that initialize themselves
+WarningsAsErrors: ''
+# Headers of ours are checked together with the sources; third-party headers are not
+HeaderFilterRegex: '[/\\](engine|app|tests)[/\\].*'
+SystemHeaders: false
+FormatStyle: none
