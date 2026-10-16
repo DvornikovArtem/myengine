@@ -7,6 +7,7 @@
 #include <myengine/core/Types.h>
 #include <myengine/render/GpuStats.h>
 #include <myengine/render/RenderTypes.h>
+#include <myengine/render/ShaderLayout.h>
 
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
 #ifndef WIN32_LEAN_AND_MEAN
@@ -27,6 +28,27 @@ namespace myengine::render
         virtual TextureHandle CreateTexture(const TextureData& textureData) = 0;
         virtual void DestroyTexture(TextureHandle texture) = 0;
         virtual ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) = 0;
+
+        // ---- shader reflection ----
+        // What the program expects (resources, constant buffers with offsets, vertex inputs), read from the compiled
+        // shaders. false: no such program, or the adapter does not reflect.
+        virtual bool GetShaderLayout(ShaderHandle shader, ShaderLayout& outLayout, ShaderVariant variant = ShaderVariant::Normal) const
+        {
+            (void)shader;
+            (void)variant;
+            outLayout = {};
+            return false;
+        }
+        // The same for the programs that the renderer builds for itself (debug lines, the UI)
+        virtual bool GetBuiltinShaderLayout(BuiltinShader shader, ShaderLayout& outLayout) const
+        {
+            (void)shader;
+            outLayout = {};
+            return false;
+        }
+        // The errors and warnings (file, line, column) of the last CreateShaderProgram call; empty when it succeeded
+        // without messages
+        virtual std::vector<ShaderDiagnostic> GetLastShaderDiagnostics() const { return {}; }
 
         virtual RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) = 0;
         virtual void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) = 0;

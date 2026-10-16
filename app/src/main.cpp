@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,7 @@
 
 #include <myengine/config/AppConfig.h>
 #include <myengine/core/Application.h>
+#include <myengine/render/dx12/ShaderLayoutDump.h>
 
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
 #ifndef WIN32_LEAN_AND_MEAN
@@ -30,6 +32,7 @@ namespace
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
         std::uint32_t exitAfterFrames = 0; // 0: run until the window is closed
+        std::filesystem::path dumpShaderLayouts; // not empty: write the shader layouts to this file and exit
     };
 
     bool ParseCount(const std::wstring_view text, std::uint64_t& value)
@@ -105,7 +108,8 @@ namespace
             const bool isFrameStats = argument == L"--frame-stats";
             const bool isFrameStatsOut = argument == L"--frame-stats-out";
             const bool isFrames = argument == L"--exit-after-frames";
-            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames)
+            const bool isDumpLayouts = argument == L"--dump-shader-layouts";
+            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts)
             {
                 valid = false;
                 break;
@@ -154,6 +158,10 @@ namespace
                 valid = ParseCount(value, frames);
                 options.exitAfterFrames = static_cast<std::uint32_t>(frames);
             }
+            else if (isDumpLayouts && options.dumpShaderLayouts.empty())
+            {
+                options.dumpShaderLayouts = std::wstring(value);
+            }
             else
             {
                 valid = false;
@@ -177,6 +185,46 @@ namespace
             WaitForSingleObject(process, 10000);
             CloseHandle(process);
         }
+    }
+
+    // The folder with the shaders: next to the working directory, next to the executable or in the sources
+    std::filesystem::path ResolveShadersDirectory()
+    {
+        std::vector<std::filesystem::path> candidates;
+        candidates.emplace_back(std::filesystem::current_path() / "assets/shaders");
+
+        wchar_t modulePath[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+        candidates.emplace_back(std::filesystem::path(modulePath).parent_path() / "assets/shaders");
+
+    #ifdef MYENGINE_SOURCE_DIR
+        candidates.emplace_back(std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/shaders");
+    #endif
+
+        for (const auto& candidate : candidates)
+        {
+            if (std::filesystem::exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        return candidates.front();
+    }
+
+    // --dump-shader-layouts <file>: the layouts of all the shader programs as text (no window, no GPU)
+    int DumpShaderLayoutsToFile(const std::filesystem::path& outputFile)
+    {
+        std::string text;
+        const int failures = myengine::render::dx12::DumpShaderLayouts(ResolveShadersDirectory(), text);
+
+        std::ofstream stream(outputFile, std::ios::binary);
+        if (!stream.is_open())
+        {
+            MessageBoxW(nullptr, (L"Cannot write " + outputFile.wstring()).c_str(), L"myengine", MB_OK | MB_ICONERROR);
+            return -1;
+        }
+        stream << text;
+        return failures == 0 ? 0 : 1;
     }
 
     // Searches for the application config path
@@ -221,10 +269,15 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser]\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
-            L"  Other: [--exit-after-frames <n>]",
+            L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]",
             L"myengine",
             MB_OK | MB_ICONERROR);
         return -1;
+    }
+
+    if (!options.dumpShaderLayouts.empty())
+    {
+        return DumpShaderLayoutsToFile(options.dumpShaderLayouts);
     }
 
     WaitForProcess(options.waitForPid);

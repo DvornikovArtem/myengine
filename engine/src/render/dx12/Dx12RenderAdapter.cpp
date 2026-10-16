@@ -18,6 +18,8 @@
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 
 #include "Dx12GpuProfiler.h"
+#include "ShaderCompiler.h"
+#include "ShaderReflector.h"
 
 #include <tracy/Tracy.hpp>
 
@@ -122,6 +124,7 @@ namespace myengine::render::dx12
 
     Dx12RenderAdapter::Dx12RenderAdapter(core::Logger& logger)
         : logger_(logger)
+        , shaderReflector_(std::make_unique<ShaderReflector>())
         , profiler_(std::make_unique<Dx12GpuProfiler>())
     {
     }
@@ -337,16 +340,15 @@ namespace myengine::render::dx12
 
     ShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderProgramData& shaderProgram)
     {
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        if (!CompileShaderBlob(shaderProgram.sourcePath, shaderProgram.vertexEntry, shaderProgram.vertexProfile, vertexShader))
+        const ShaderCompileResult compiled = shaderReflector_->CompileProgram(shaderProgram);
+        lastShaderDiagnostics_ = compiled.diagnostics;
+        LogShaderDiagnostics(compiled.diagnostics);
+        if (!compiled.ok)
         {
             return {};
         }
-        if (!CompileShaderBlob(shaderProgram.sourcePath, shaderProgram.pixelEntry, shaderProgram.pixelProfile, pixelShader))
-        {
-            return {};
-        }
+        const Microsoft::WRL::ComPtr<ID3DBlob>& vertexShader = compiled.program->vertexBlob;
+        const Microsoft::WRL::ComPtr<ID3DBlob>& pixelShader = compiled.program->pixelBlob;
 
         static constexpr D3D12_INPUT_ELEMENT_DESC inputLayout[] =
         {
@@ -383,12 +385,19 @@ namespace myengine::render::dx12
         // vanish on a dark background), wireframe fill. Without this variant the mode is simply not drawn.
         if (wireframePixelShader_ == nullptr)
         {
-            static constexpr char kWireframePixelShader[] = "float4 main() : SV_Target { return float4(0.753, 0.753, 0.753, 1.0); }";
-            Microsoft::WRL::ComPtr<ID3DBlob> wireframeErrors;
-            if (FAILED(D3DCompile(kWireframePixelShader, sizeof(kWireframePixelShader) - 1, "wireframe_ps", nullptr, nullptr, "main", "ps_5_0",
-                    D3DCOMPILE_ENABLE_STRICTNESS, 0, wireframePixelShader_.GetAddressOf(), wireframeErrors.GetAddressOf())))
+            static const std::string kWireframePixelShader = "float4 main() : SV_Target { return float4(0.753, 0.753, 0.753, 1.0); }";
+            ShaderStageSource wireframeSource;
+            wireframeSource.sourceName = "wireframe_ps";
+            wireframeSource.source = &kWireframePixelShader;
+            wireframeSource.entry = "main";
+            wireframeSource.profile = "ps_5_0";
+            wireframeSource.stage = ShaderStage::Pixel;
+            std::vector<ShaderDiagnostic> wireframeDiagnostics;
+            if (!CompileShaderStage(wireframeSource, wireframePixelShader_, wireframeDiagnostics) ||
+                !ReflectShader(wireframePixelShader_->GetBufferPointer(), wireframePixelShader_->GetBufferSize(), ShaderStage::Pixel, wireframePixelLayout_, wireframeDiagnostics))
             {
                 wireframePixelShader_.Reset();
+                LogShaderDiagnostics(wireframeDiagnostics);
             }
         }
         if (wireframePixelShader_ != nullptr)
@@ -402,9 +411,76 @@ namespace myengine::render::dx12
             logger_.Warning("CreateGraphicsPipelineState (wireframe) failed; the shader has no wireframe variant");
         }
 
+        shaderRecord.layout = compiled.program->layout;
+        if (wireframePixelShader_ != nullptr)
+        {
+            std::vector<ShaderDiagnostic> wireframeConflicts;
+            shaderRecord.wireframeLayout = MergeShaderLayouts(compiled.program->vertexLayout, wireframePixelLayout_, wireframeConflicts);
+        }
+
         const std::uint32_t shaderId = nextShaderId_++;
         shaders_.insert_or_assign(shaderId, std::move(shaderRecord));
         return ShaderHandle{shaderId};
+    }
+
+    bool Dx12RenderAdapter::GetShaderLayout(const ShaderHandle shader, ShaderLayout& outLayout, const ShaderVariant variant) const
+    {
+        outLayout = {};
+        const auto it = shaders_.find(shader.value);
+        if (it == shaders_.end())
+        {
+            return false;
+        }
+        if (variant == ShaderVariant::Wireframe)
+        {
+            if (it->second.wireframePipelineState == nullptr)
+            {
+                return false;
+            }
+            outLayout = it->second.wireframeLayout;
+            return true;
+        }
+        outLayout = it->second.layout;
+        return true;
+    }
+
+    bool Dx12RenderAdapter::GetBuiltinShaderLayout(const BuiltinShader shader, ShaderLayout& outLayout) const
+    {
+        const ShaderLayout& layout = shader == BuiltinShader::DebugLines ? debugLineLayout_ : uiLayout_;
+        outLayout = layout;
+        return !layout.Empty();
+    }
+
+    void Dx12RenderAdapter::LogShaderDiagnostics(const std::vector<ShaderDiagnostic>& diagnostics) const
+    {
+        for (const ShaderDiagnostic& diagnostic : diagnostics)
+        {
+            const std::string text = "Shader " + std::string(diagnostic.warning ? "warning: " : "error: ") + FormatShaderDiagnostic(diagnostic);
+            if (diagnostic.warning)
+            {
+                logger_.Warning(text);
+            }
+            else
+            {
+                logger_.Error(text);
+            }
+        }
+    }
+
+    bool Dx12RenderAdapter::CompileBuiltinProgram(const char* relativePath, Microsoft::WRL::ComPtr<ID3DBlob>& outVertex, Microsoft::WRL::ComPtr<ID3DBlob>& outPixel, ShaderLayout& outLayout)
+    {
+        ShaderProgramData program;
+        program.sourcePath = ResolveSourcePath(relativePath);
+        const ShaderCompileResult compiled = shaderReflector_->CompileProgram(program);
+        LogShaderDiagnostics(compiled.diagnostics);
+        if (!compiled.ok)
+        {
+            return false;
+        }
+        outVertex = compiled.program->vertexBlob;
+        outPixel = compiled.program->pixelBlob;
+        outLayout = compiled.program->layout;
+        return true;
     }
 
     RenderSurfaceHandle Dx12RenderAdapter::CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height)
@@ -1863,8 +1939,7 @@ namespace myengine::render::dx12
 
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        if (!CompileShaderBlob(ResolveSourcePath("assets/shaders/debug_line.hlsl"), "VSMain", "vs_5_0", vertexShader) ||
-            !CompileShaderBlob(ResolveSourcePath("assets/shaders/debug_line.hlsl"), "PSMain", "ps_5_0", pixelShader))
+        if (!CompileBuiltinProgram("assets/shaders/debug_line.hlsl", vertexShader, pixelShader, debugLineLayout_))
         {
             return false;
         }
@@ -1970,8 +2045,7 @@ namespace myengine::render::dx12
 
         Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
         Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        if (!CompileShaderBlob(ResolveSourcePath("assets/shaders/ui_overlay.hlsl"), "VSMain", "vs_5_0", vertexShader) ||
-            !CompileShaderBlob(ResolveSourcePath("assets/shaders/ui_overlay.hlsl"), "PSMain", "ps_5_0", pixelShader))
+        if (!CompileBuiltinProgram("assets/shaders/ui_overlay.hlsl", vertexShader, pixelShader, uiLayout_))
         {
             return false;
         }
@@ -2323,61 +2397,6 @@ namespace myengine::render::dx12
         context_.commandList->ResourceBarrier(1, &barrier);
 
         return ExecuteCommandListAndWait("texture upload");
-    }
-
-    bool Dx12RenderAdapter::CompileShaderBlob(const std::filesystem::path& sourcePath, const std::string& entryPoint, const std::string& profile, Microsoft::WRL::ComPtr<ID3DBlob>& outBlob) const
-    {
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-
-        std::ifstream sourceFile(sourcePath, std::ios::binary);
-        if (!sourceFile.is_open())
-        {
-            logger_.Error("Shader source file could not be opened: " + sourcePath.string());
-            return false;
-        }
-
-        const std::string source(
-            (std::istreambuf_iterator<char>(sourceFile)),
-            std::istreambuf_iterator<char>());
-        if (source.empty())
-        {
-            logger_.Error("Shader source file is empty: " + sourcePath.string());
-            return false;
-        }
-
-        UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
-#if defined(_DEBUG)
-        compileFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-
-        const HRESULT hr = D3DCompile(
-            source.data(),
-            source.size(),
-            sourcePath.string().c_str(),
-            nullptr,
-            D3D_COMPILE_STANDARD_FILE_INCLUDE,
-            entryPoint.c_str(),
-            profile.c_str(),
-            compileFlags,
-            0,
-            outBlob.GetAddressOf(),
-            errorBlob.GetAddressOf());
-        if (FAILED(hr))
-        {
-            const char* errorText = errorBlob != nullptr
-                ? static_cast<const char*>(errorBlob->GetBufferPointer())
-                : "unknown shader compilation error";
-            logger_.Error(
-                "D3DCompileFromFile failed for " +
-                sourcePath.string() +
-                " entry=" + entryPoint +
-                " profile=" + profile +
-                " hr=" + HrToString(hr) +
-                " error=" + errorText);
-            return false;
-        }
-
-        return true;
     }
 
     void Dx12RenderAdapter::RebuildSurfaceBuffers(SurfaceData& surface)
