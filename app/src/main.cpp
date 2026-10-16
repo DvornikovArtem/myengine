@@ -27,7 +27,18 @@ namespace
         bool startInPlay = false;
         bool showProjectBrowser = false;
         DWORD waitForPid = 0;
+        myengine::core::DiagnosticsOptions diagnostics;
     };
+
+    bool ParseCount(const std::wstring_view text, std::uint64_t& value)
+    {
+        if (text.empty() || text.find_first_not_of(L"0123456789") != std::wstring_view::npos)
+        {
+            return false;
+        }
+        value = std::wcstoull(std::wstring(text).c_str(), nullptr, 10);
+        return value > 0;
+    }
 
     bool ParseArguments(LaunchOptions& options)
     {
@@ -53,10 +64,45 @@ namespace
                 continue;
             }
 
+            // GPU diagnostics (docs/dev/gpu-debugging.md). The DX12 switches reach the adapter as environment variables.
+            if (argument == L"--exit-after-capture")
+            {
+                options.diagnostics.exitAfterCapture = true;
+                continue;
+            }
+            if (argument == L"--renderdoc")
+            {
+                options.diagnostics.renderDoc = true;
+                continue;
+            }
+            if (argument == L"--pix")
+            {
+                options.diagnostics.pix = true;
+                continue;
+            }
+            if (argument == L"--dx12-debug")
+            {
+                _wputenv_s(L"MYENGINE_DX12_DEBUG", L"1"); // the CRT copy of the environment, which the adapter reads
+                continue;
+            }
+            if (argument == L"--dx12-gbv")
+            {
+                _wputenv_s(L"MYENGINE_DX12_GBV", L"1");
+                continue;
+            }
+            if (argument == L"--dx12-dred")
+            {
+                _wputenv_s(L"MYENGINE_DX12_DRED", L"1");
+                continue;
+            }
+
             const bool isScene = argument == L"--scene";
             const bool isProject = argument == L"--project";
             const bool isWait = argument == L"--wait-for-pid";
-            if (!isScene && !isProject && !isWait)
+            const bool isCaptureFrame = argument == L"--gpu-capture-frame";
+            const bool isFrameStats = argument == L"--frame-stats";
+            const bool isFrameStatsOut = argument == L"--frame-stats-out";
+            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut)
             {
                 valid = false;
                 break;
@@ -86,6 +132,18 @@ namespace
             else if (isWait && options.waitForPid == 0)
             {
                 options.waitForPid = static_cast<DWORD>(std::wcstoul(std::wstring(value).c_str(), nullptr, 10));
+            }
+            else if (isCaptureFrame && options.diagnostics.captureFrame == 0)
+            {
+                valid = ParseCount(value, options.diagnostics.captureFrame);
+            }
+            else if (isFrameStats && options.diagnostics.frameStatsFrame == 0)
+            {
+                valid = ParseCount(value, options.diagnostics.frameStatsFrame);
+            }
+            else if (isFrameStatsOut && options.diagnostics.frameStatsOut.empty())
+            {
+                options.diagnostics.frameStatsOut = std::wstring(value);
             }
             else
             {
@@ -151,7 +209,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     {
         MessageBoxW(
             nullptr,
-            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser]",
+            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser]\n"
+            L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
+            L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]",
             L"myengine",
             MB_OK | MB_ICONERROR);
         return -1;
@@ -163,14 +223,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     app.SetProjectFile(options.projectFile);
     app.SetShowProjectBrowser(options.showProjectBrowser);
     // The editor window is up while the start map is read: it shows the splash instead of waiting in the dark
-    app.SetDeferredSceneLoad(true);
+    // (not for the GPU diagnostics: they count frames, and the map has to be there from the first one)
+    const bool gpuDiagnostics = options.diagnostics.captureFrame != 0 || options.diagnostics.frameStatsFrame != 0;
+    app.SetDeferredSceneLoad(!gpuDiagnostics);
+    app.SetDiagnosticsOptions(options.diagnostics);
 
     const auto configPath = ResolveConfigPath();
     const auto config = myengine::config::AppConfig::LoadFromFile(configPath);
 
     if (!app.Initialize(config, options.scenePath, options.startInPlay))
     {
-        return -1;
+        return app.GetExitCode() != 0 ? app.GetExitCode() : -1;
     }
 
     app.GetLogger().Info("Config path: " + configPath.string());

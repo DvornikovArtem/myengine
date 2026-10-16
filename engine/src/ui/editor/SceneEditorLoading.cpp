@@ -73,6 +73,19 @@ namespace myengine::ui
         loadErrorText_ = text;
     }
 
+    void SceneEditor::CaptureGpuFrame()
+    {
+        if (!services_.captureGpuFrame)
+        {
+            return;
+        }
+        std::string message;
+        if (!services_.captureGpuFrame(message))
+        {
+            ReportLoadError("Cannot capture a GPU frame", message);
+        }
+    }
+
     bool SceneEditor::DrawStartupSplash()
     {
         if (services_.loading == nullptr || !services_.loading->HasSplash())

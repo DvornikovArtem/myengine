@@ -4,6 +4,7 @@
 
 #include <array>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,8 @@ namespace myengine::core
 
 namespace myengine::render::dx12
 {
+    class Dx12GpuProfiler;
+
     class Dx12RenderAdapter final : public IRenderAdapter
     {
     public:
@@ -63,6 +66,13 @@ namespace myengine::render::dx12
         void EndRenderTarget(RenderTargetHandle target) override;
         bool ReadRenderTargetPixels(RenderTargetHandle target, std::vector<std::uint8_t>& outRgba8) override;
         bool GetRenderTargetSize(RenderTargetHandle target, std::uint32_t& outWidth, std::uint32_t& outHeight) const override;
+
+        void BeginDebugEvent(const std::string& name) override;
+        void EndDebugEvent() override;
+        void SetRenderTargetLabel(const std::string& label) override { pendingTargetLabel_ = label; }
+        bool GetLastFrameStats(GpuFrameStats& out, bool waitForGpu) override;
+        std::string GetAdapterName() const override { return adapterName_; }
+        bool IsDeviceRemoved() const override { return deviceRemovedLogged_; }
 
         void Shutdown() override;
 
@@ -177,6 +187,20 @@ namespace myengine::render::dx12
             Microsoft::WRL::ComPtr<ID3D12PipelineState> wireframePipelineState; // same shaders, fill mode wireframe (may be empty)
         };
 
+        // The marker group that the draw calls outside render targets fall into: switched when the kind of calls changes
+        enum class AutoGroup
+        {
+            None,
+            Scene,
+            DebugLines,
+            Ui,
+        };
+
+        void EnterAutoGroup(AutoGroup group);
+        void CloseAutoGroup();
+        // DRED: the breadcrumbs and the page fault of a device that was removed (once)
+        void LogDeviceRemoved(const char* where);
+
         bool CreateDevice();
         bool CreateCommandObjects();
         bool CreateFence();
@@ -251,5 +275,14 @@ namespace myengine::render::dx12
         Float3 targetLightDirection_{0.35f, -1.0f, 0.25f}; // light of the meshes drawn into a render target
         float targetAmbient_ = 0.25f;
         Microsoft::WRL::ComPtr<ID3DBlob> wireframePixelShader_; // constant colour, shared by every wireframe PSO
+
+        std::unique_ptr<Dx12GpuProfiler> profiler_;
+        std::uint64_t frameCounter_ = 0; // frames begun so far; the first one is 1
+        AutoGroup autoGroup_ = AutoGroup::None;
+        std::string pendingTargetLabel_;
+        std::string adapterName_;
+        bool dredEnabled_ = false;
+        bool deviceRemovedLogged_ = false;
+        std::uint64_t testRemoveDeviceFrame_ = 0; // MYENGINE_DX12_TEST_REMOVE_DEVICE=<frame>: removes the device on purpose
     };
 }

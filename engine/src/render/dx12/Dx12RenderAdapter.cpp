@@ -17,6 +17,8 @@
 #include <myengine/core/Logger.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 
+#include "Dx12GpuProfiler.h"
+
 #include <tracy/Tracy.hpp>
 
 namespace myengine::render::dx12
@@ -120,6 +122,7 @@ namespace myengine::render::dx12
 
     Dx12RenderAdapter::Dx12RenderAdapter(core::Logger& logger)
         : logger_(logger)
+        , profiler_(std::make_unique<Dx12GpuProfiler>())
     {
     }
 
@@ -143,6 +146,14 @@ namespace myengine::render::dx12
         if (!CreateFence())
         {
             return false;
+        }
+        if (profiler_->Initialize(context_.device.Get(), context_.commandQueue.Get(), kBackBufferCount))
+        {
+            logger_.Info("GPU timestamps are available: frame statistics have GPU times");
+        }
+        else
+        {
+            logger_.Warning("GPU timestamps are not available: frame statistics have no GPU times");
         }
         if (!BuildRootSignature())
         {
@@ -533,6 +544,20 @@ namespace myengine::render::dx12
             WaitForFenceValue(surface->frameFenceValues[backBufferIndex]);
         }
 
+        // That frame's GPU work is done: its timings become the last frame statistics
+        if (surface->frameFenceValues[backBufferIndex] != 0 &&
+            context_.fence->GetCompletedValue() >= surface->frameFenceValues[backBufferIndex])
+        {
+            profiler_->CollectSlot(backBufferIndex);
+        }
+
+        ++frameCounter_;
+        if (context_.device->GetDeviceRemovedReason() != S_OK)
+        {
+            LogDeviceRemoved("BeginFrame");
+            return false;
+        }
+
         if (FAILED(surface->frameAllocators[backBufferIndex]->Reset()))
         {
             logger_.Error("Frame command allocator reset failed");
@@ -552,8 +577,13 @@ namespace myengine::render::dx12
 
         ID3D12Resource* backBuffer = surface->backBuffers[backBufferIndex].Get();
 
+        profiler_->BeginFrame(context_.commandList.Get(), backBufferIndex, frameCounter_);
+        autoGroup_ = AutoGroup::None;
+        profiler_->BeginPass(context_.commandList.Get(), "Clear Back Buffer");
+
         const auto toRenderTarget = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
         context_.commandList->ResourceBarrier(1, &toRenderTarget);
+        profiler_->NoteBarriers(1);
 
         const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(surface->rtvHeap->GetCPUDescriptorHandleForHeapStart(), static_cast<INT>(surface->currentBackBuffer), static_cast<INT>(surface->rtvDescriptorSize));
         const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = surface->dsvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -566,6 +596,7 @@ namespace myengine::render::dx12
         context_.commandList->ClearRenderTargetView(rtvHandle, color, 0, nullptr);
         context_.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
+        profiler_->EndPass(context_.commandList.Get());
 
         activeSurface_ = surface;
         activeFrameTransientResources_ = &surface->frameTransientResources[backBufferIndex];
@@ -668,8 +699,12 @@ namespace myengine::render::dx12
         const TextureRecord& texture = textureIt->second;
         const ShaderRecord& shader = shaderIt->second;
 
-        context_.commandList->SetPipelineState(
-            wireframe_ && shader.wireframePipelineState != nullptr ? shader.wireframePipelineState.Get() : shader.pipelineState.Get());
+        EnterAutoGroup(AutoGroup::Scene);
+        ID3D12PipelineState* pipelineState =
+            wireframe_ && shader.wireframePipelineState != nullptr ? shader.wireframePipelineState.Get() : shader.pipelineState.Get();
+        profiler_->NotePipeline(pipelineState);
+        profiler_->NoteTexture(texture.descriptorIndex);
+        context_.commandList->SetPipelineState(pipelineState);
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
         context_.commandList->IASetIndexBuffer(&mesh.indexBufferView);
@@ -717,6 +752,7 @@ namespace myengine::render::dx12
 
         context_.commandList->SetGraphicsRoot32BitConstants(0, 40, &constants, 0);
         context_.commandList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
+        profiler_->NoteDraw(mesh.indexCount / 3);
     }
 
     void Dx12RenderAdapter::DrawDebugLines(const RenderSurfaceHandle handle, const std::vector<DebugLine>& lines)
@@ -771,11 +807,14 @@ namespace myengine::render::dx12
         vertexBufferView.StrideInBytes = sizeof(DxDebugVertex);
         vertexBufferView.SizeInBytes = static_cast<UINT>(vertexBufferSize);
 
+        EnterAutoGroup(AutoGroup::DebugLines);
+        profiler_->NotePipeline(debugLinePipelineState_.Get());
         context_.commandList->SetGraphicsRootSignature(debugRootSignature_.Get());
         context_.commandList->SetPipelineState(debugLinePipelineState_.Get());
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
         context_.commandList->DrawInstanced(static_cast<UINT>(vertices.size()), 1, 0, 0);
+        profiler_->NoteDraw(0, lines.size());
 
         context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
     }
@@ -841,6 +880,9 @@ namespace myengine::render::dx12
             scissorRect.bottom = std::clamp(drawData.scissor.bottom, 0, static_cast<int>(surface->height));
         }
 
+        EnterAutoGroup(AutoGroup::Ui);
+        profiler_->NotePipeline(uiPipelineState_.Get());
+        profiler_->NoteTexture(textureIt->second.descriptorIndex);
         ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
         context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
         context_.commandList->SetGraphicsRootSignature(uiRootSignature_.Get());
@@ -863,6 +905,7 @@ namespace myengine::render::dx12
         gpuTextureHandle.ptr += static_cast<UINT64>(textureIt->second.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
         context_.commandList->SetGraphicsRootDescriptorTable(1, gpuTextureHandle);
         context_.commandList->DrawIndexedInstanced(static_cast<UINT>(drawData.indexCount), 1, 0, 0, 0);
+        profiler_->NoteDraw(drawData.indexCount / 3);
 
         context_.commandList->RSSetScissorRects(1, &fullScissorRect);
         context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
@@ -878,9 +921,14 @@ namespace myengine::render::dx12
             return;
         }
 
+        CloseAutoGroup();
+        profiler_->BeginPass(context_.commandList.Get(), "Present Transition");
         ID3D12Resource* backBuffer = surface->backBuffers[surface->currentBackBuffer].Get();
         const auto toPresent = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
         context_.commandList->ResourceBarrier(1, &toPresent);
+        profiler_->NoteBarriers(1);
+        profiler_->EndPass(context_.commandList.Get());
+        profiler_->EndFrame(context_.commandList.Get());
 
         if (FAILED(context_.commandList->Close()))
         {
@@ -890,6 +938,18 @@ namespace myengine::render::dx12
 
         ID3D12CommandList* commandLists[] = {context_.commandList.Get()};
         context_.commandQueue->ExecuteCommandLists(1, commandLists);
+
+        // MYENGINE_DX12_TEST_REMOVE_DEVICE=<frame>: a device removal on purpose, with this frame's commands submitted,
+        // to see what DRED logs (docs/dev/gpu-debugging.md)
+        if (testRemoveDeviceFrame_ != 0 && frameCounter_ == testRemoveDeviceFrame_)
+        {
+            Microsoft::WRL::ComPtr<ID3D12Device5> device5;
+            if (SUCCEEDED(context_.device.As(&device5)))
+            {
+                logger_.Warning("MYENGINE_DX12_TEST_REMOVE_DEVICE: removing the device after frame " + std::to_string(frameCounter_));
+                device5->RemoveDevice();
+            }
+        }
 
         {
             ZoneScopedN("Present");
@@ -902,6 +962,7 @@ namespace myengine::render::dx12
                 if (presentResult == DXGI_ERROR_DEVICE_REMOVED || presentResult == DXGI_ERROR_DEVICE_RESET)
                 {
                     logger_.Error("DX12 device removed reason: " + HrToString(context_.device->GetDeviceRemovedReason()));
+                    LogDeviceRemoved("Present");
                 }
 
                 activeFrameTransientResources_ = nullptr;
@@ -1095,9 +1156,16 @@ namespace myengine::render::dx12
         }
 
         RenderTargetRecord& record = it->second;
+        CloseAutoGroup();
+        {
+            std::string label = pendingTargetLabel_.empty() ? "Render Target #" + std::to_string(target.value) : pendingTargetLabel_;
+            pendingTargetLabel_.clear();
+            profiler_->BeginPass(context_.commandList.Get(), label, true, record.width, record.height);
+        }
         const auto toRenderTarget = CD3DX12_RESOURCE_BARRIER::Transition(
             record.color.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
         context_.commandList->ResourceBarrier(1, &toRenderTarget);
+        profiler_->NoteBarriers(1);
 
         D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = targetRtvHeap_->GetCPUDescriptorHandleForHeapStart();
         rtvHandle.ptr += static_cast<UINT64>(record.slot) * static_cast<UINT64>(targetRtvDescriptorSize_);
@@ -1135,6 +1203,8 @@ namespace myengine::render::dx12
         const auto toShaderResource = CD3DX12_RESOURCE_BARRIER::Transition(
             it->second.color.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         context_.commandList->ResourceBarrier(1, &toShaderResource);
+        profiler_->NoteBarriers(1);
+        profiler_->EndPass(context_.commandList.Get());
 
         // Back to the surface that the frame draws into
         SurfaceData& surface = *activeSurface_;
@@ -1322,6 +1392,7 @@ namespace myengine::render::dx12
         }
 
         WaitForGpu();
+        profiler_->Shutdown();
 
         for (auto& [_, surface] : surfaces_)
         {
@@ -1413,8 +1484,10 @@ namespace myengine::render::dx12
     bool Dx12RenderAdapter::CreateDevice()
     {
         UINT factoryFlags = 0;
-#if defined(_DEBUG)
-        const bool enableDebugLayer = IsEnvironmentEnabled("MYENGINE_DX12_DEBUG");
+        // --dx12-debug / MYENGINE_DX12_DEBUG: the debug layer and DRED. --dx12-gbv / MYENGINE_DX12_GBV: GPU-based
+        // validation on top. Any configuration (the debug layer needs the "Graphics Tools" Windows feature).
+        const bool requestGbv = IsEnvironmentEnabled("MYENGINE_DX12_GBV");
+        const bool enableDebugLayer = IsEnvironmentEnabled("MYENGINE_DX12_DEBUG") || requestGbv;
         if (enableDebugLayer)
         {
             Microsoft::WRL::ComPtr<ID3D12Debug> debugController;
@@ -1422,14 +1495,63 @@ namespace myengine::render::dx12
             {
                 debugController->EnableDebugLayer();
                 factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-                logger_.Info("DX12 debug layer enabled via MYENGINE_DX12_DEBUG");
+                logger_.Info("DX12 debug layer enabled (--dx12-debug / MYENGINE_DX12_DEBUG)");
+
+                if (requestGbv)
+                {
+                    Microsoft::WRL::ComPtr<ID3D12Debug1> debugController1;
+                    if (SUCCEEDED(debugController.As(&debugController1)))
+                    {
+                        debugController1->SetEnableGPUBasedValidation(TRUE);
+                        logger_.Info("DX12 GPU-based validation enabled (--dx12-gbv): expect a much slower frame");
+                    }
+                    else
+                    {
+                        logger_.Warning("GPU-based validation is not available on this system");
+                    }
+                }
+            }
+            else
+            {
+                logger_.Warning(
+                    "DX12 debug layer was requested but is not available: install the Windows optional feature "
+                    "\"Graphics Tools\" (Settings > System > Optional features)");
             }
         }
+#if defined(_DEBUG)
         else
         {
-            logger_.Info("DX12 debug layer disabled. Set MYENGINE_DX12_DEBUG=1 to enable it.");
+            logger_.Info("DX12 debug layer disabled. Set MYENGINE_DX12_DEBUG=1 (or --dx12-debug) to enable it.");
         }
 #endif
+
+        // DRED: breadcrumbs and page-fault data of a removed device. It costs little: on with the debug layer, or alone
+        // with MYENGINE_DX12_DRED=1 / --dx12-dred.
+        if (enableDebugLayer || IsEnvironmentEnabled("MYENGINE_DX12_DRED"))
+        {
+            Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
+            if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(dredSettings.GetAddressOf()))))
+            {
+                dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                dredEnabled_ = true;
+                logger_.Info("DX12 DRED enabled: a removed device logs its breadcrumbs");
+            }
+            else
+            {
+                logger_.Warning("DX12 DRED is not available on this system");
+            }
+        }
+
+        {
+            char* testFrame = nullptr;
+            std::size_t testFrameLength = 0;
+            if (_dupenv_s(&testFrame, &testFrameLength, "MYENGINE_DX12_TEST_REMOVE_DEVICE") == 0 && testFrame != nullptr)
+            {
+                testRemoveDeviceFrame_ = static_cast<std::uint64_t>(std::strtoull(testFrame, nullptr, 10));
+                std::free(testFrame);
+            }
+        }
 
         HRESULT hr = CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(context_.factory.GetAddressOf()));
         if (FAILED(hr))
@@ -1577,6 +1699,7 @@ namespace myengine::render::dx12
             hr = D3D12CreateDevice(candidate.adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(context_.device.GetAddressOf()));
             if (SUCCEEDED(hr))
             {
+                adapterName_ = WideToUtf8(candidate.desc.Description);
                 logger_.Info(
                     "DX12 hardware adapter selected: " +
                     WideToUtf8(candidate.desc.Description) +
@@ -1610,6 +1733,7 @@ namespace myengine::render::dx12
             return false;
         }
 
+        adapterName_ = "WARP software rasterizer";
         logger_.Warning("DX12 is running on WARP software rasterizer.");
         return true;
     }
@@ -2330,6 +2454,164 @@ namespace myengine::render::dx12
 
         surface.viewport = {0.0f, 0.0f, static_cast<float>(surface.width), static_cast<float>(surface.height), 0.0f, 1.0f};
         surface.scissorRect = {0, 0, static_cast<LONG>(surface.width), static_cast<LONG>(surface.height)};
+    }
+
+    void Dx12RenderAdapter::EnterAutoGroup(const AutoGroup group)
+    {
+        if (activeTarget_ != nullptr || group == autoGroup_)
+        {
+            return; // inside a render target pass everything belongs to the pass
+        }
+
+        CloseAutoGroup();
+        const char* name = "Scene";
+        switch (group)
+        {
+            case AutoGroup::Scene: name = "Scene"; break;
+            case AutoGroup::DebugLines: name = "Debug Lines"; break;
+            case AutoGroup::Ui: name = "UI"; break;
+            case AutoGroup::None: return;
+        }
+        profiler_->BeginPass(context_.commandList.Get(), name);
+        autoGroup_ = group;
+    }
+
+    void Dx12RenderAdapter::CloseAutoGroup()
+    {
+        if (autoGroup_ != AutoGroup::None)
+        {
+            profiler_->EndPass(context_.commandList.Get());
+            autoGroup_ = AutoGroup::None;
+        }
+    }
+
+    void Dx12RenderAdapter::BeginDebugEvent(const std::string& name)
+    {
+        if (activeSurface_ != nullptr)
+        {
+            profiler_->BeginPass(context_.commandList.Get(), name);
+        }
+    }
+
+    void Dx12RenderAdapter::EndDebugEvent()
+    {
+        if (activeSurface_ != nullptr)
+        {
+            profiler_->EndPass(context_.commandList.Get());
+        }
+    }
+
+    bool Dx12RenderAdapter::GetLastFrameStats(GpuFrameStats& out, const bool waitForGpu)
+    {
+        if (waitForGpu && activeSurface_ == nullptr)
+        {
+            WaitForGpu();
+            // Every slot is finished now (the newest frame wins)
+            for (UINT slot = 0; slot < kBackBufferCount; ++slot)
+            {
+                profiler_->CollectSlot(slot);
+            }
+        }
+        return profiler_->GetLastCompleted(out);
+    }
+
+    void Dx12RenderAdapter::LogDeviceRemoved(const char* where)
+    {
+        if (deviceRemovedLogged_ || context_.device == nullptr)
+        {
+            return;
+        }
+        deviceRemovedLogged_ = true;
+
+        logger_.Error(std::string("DX12 device removed (") + where + "), reason " + HrToString(context_.device->GetDeviceRemovedReason()) +
+            " at frame " + std::to_string(frameCounter_));
+        if (!dredEnabled_)
+        {
+            logger_.Error("No DRED data: run with --dx12-debug (or --dx12-dred) to get the breadcrumbs of the commands that were executing");
+            return;
+        }
+
+        static const char* const kOpNames[] = {
+            "SetMarker", "BeginEvent", "EndEvent", "DrawInstanced", "DrawIndexedInstanced", "ExecuteIndirect", "Dispatch",
+            "CopyBufferRegion", "CopyTextureRegion", "CopyResource", "CopyTiles", "ResolveSubresource", "ClearRenderTargetView",
+            "ClearUnorderedAccessView", "ClearDepthStencilView", "ResourceBarrier", "ExecuteBundle", "Present", "ResolveQueryData",
+            "BeginSubmission", "EndSubmission", "DecodeFrame", "ProcessFrames", "AtomicCopyBufferUint", "AtomicCopyBufferUint64",
+            "ResolveSubresourceRegion", "WriteBufferImmediate", "DecodeFrame1", "SetProtectedResourceSession", "DecodeFrame2",
+            "ProcessFrames1", "BuildRaytracingAccelerationStructure", "EmitRaytracingAccelerationStructurePostBuildInfo",
+            "CopyRaytracingAccelerationStructure", "DispatchRays", "InitializeMetaCommand", "ExecuteMetaCommand", "EstimateMotion",
+            "ResolveMotionVectorHeap", "SetPipelineState1", "InitializeExtensionCommand", "ExecuteExtensionCommand", "DispatchMesh",
+        };
+        const auto opName = [&](const int op) -> std::string
+        {
+            if (op >= 0 && op < static_cast<int>(std::size(kOpNames)))
+            {
+                return kOpNames[op];
+            }
+            return "op#" + std::to_string(op);
+        };
+
+        Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedData> dred;
+        if (FAILED(context_.device.As(&dred)))
+        {
+            logger_.Error("DRED interface is not available");
+            return;
+        }
+
+        D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs{};
+        if (SUCCEEDED(dred->GetAutoBreadcrumbsOutput(&breadcrumbs)))
+        {
+            int listIndex = 0;
+            for (const D3D12_AUTO_BREADCRUMB_NODE* node = breadcrumbs.pHeadAutoBreadcrumbNode; node != nullptr; node = node->pNext, ++listIndex)
+            {
+                const UINT completed = node->pLastBreadcrumbValue != nullptr ? *node->pLastBreadcrumbValue : 0;
+                std::string line = "DRED breadcrumbs #" + std::to_string(listIndex) +
+                    ": commands " + std::to_string(completed) + " of " + std::to_string(node->BreadcrumbCount) + " completed";
+                if (node->pCommandListDebugNameA != nullptr)
+                {
+                    line += ", list \"" + std::string(node->pCommandListDebugNameA) + "\"";
+                }
+                if (node->pCommandQueueDebugNameA != nullptr)
+                {
+                    line += ", queue \"" + std::string(node->pCommandQueueDebugNameA) + "\"";
+                }
+                logger_.Error(line);
+
+                if (node->pCommandHistory != nullptr && node->BreadcrumbCount > 0)
+                {
+                    const UINT first = completed > 4 ? completed - 4 : 0;
+                    const UINT last = std::min(node->BreadcrumbCount, completed + 4);
+                    std::string around = "  around the last completed command:";
+                    for (UINT index = first; index < last; ++index)
+                    {
+                        around += (index == completed ? " >>" : " ") + std::to_string(index) + ":" +
+                            opName(static_cast<int>(node->pCommandHistory[index])) + (index == completed ? "<<" : "");
+                    }
+                    logger_.Error(around);
+                }
+            }
+            if (listIndex == 0)
+            {
+                logger_.Error("DRED: no breadcrumbs were recorded");
+            }
+        }
+
+        D3D12_DRED_PAGE_FAULT_OUTPUT pageFault{};
+        if (SUCCEEDED(dred->GetPageFaultAllocationOutput(&pageFault)) && pageFault.PageFaultVA != 0)
+        {
+            std::ostringstream address;
+            address << "DRED page fault at GPU address 0x" << std::hex << pageFault.PageFaultVA;
+            logger_.Error(address.str());
+            const auto logNodes = [&](const D3D12_DRED_ALLOCATION_NODE* node, const char* title)
+            {
+                for (int count = 0; node != nullptr && count < 8; node = node->pNext, ++count)
+                {
+                    logger_.Error(std::string("  ") + title + ": " + (node->ObjectNameA != nullptr ? node->ObjectNameA : "(unnamed)") +
+                        " type=" + std::to_string(static_cast<int>(node->AllocationType)));
+                }
+            };
+            logNodes(pageFault.pHeadExistingAllocationNode, "existing allocation");
+            logNodes(pageFault.pHeadRecentFreedAllocationNode, "recently freed allocation");
+        }
     }
 
     void Dx12RenderAdapter::WaitForGpu()

@@ -2,7 +2,10 @@
 
 #pragma once
 
+#include <string>
+
 #include <myengine/core/Types.h>
+#include <myengine/render/GpuStats.h>
 #include <myengine/render/RenderTypes.h>
 
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
@@ -93,6 +96,25 @@ namespace myengine::render
             outHeight = 0;
             return false;
         }
+
+        // ---- GPU diagnostics (capture tools, statistics) ----
+        // A named group of commands: a marker that RenderDoc / PIX show as a tree node, and a timed pass of the frame
+        // statistics. Inside a frame only; groups nest, EndDebugEvent closes the innermost.
+        virtual void BeginDebugEvent(const std::string& name) { (void)name; }
+        virtual void EndDebugEvent() {}
+        // The name of the next BeginRenderTarget pass in the capture ("Thumbnail: coin.prefab")
+        virtual void SetRenderTargetLabel(const std::string& label) { (void)label; }
+        // What the last finished frame cost (draws, triangles, state switches, GPU time per pass). waitForGpu waits for
+        // the frame in flight first: a diagnostics call between frames, not something for every frame.
+        virtual bool GetLastFrameStats(GpuFrameStats& out, bool waitForGpu)
+        {
+            (void)waitForGpu;
+            out = {};
+            return false;
+        }
+        virtual std::string GetAdapterName() const { return {}; }
+        // The GPU device was removed (a hang, a page fault, a driver reset): nothing is drawn any more
+        virtual bool IsDeviceRemoved() const { return false; }
 
         virtual void Shutdown() = 0;
     };

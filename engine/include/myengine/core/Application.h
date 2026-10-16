@@ -19,6 +19,7 @@
 #include <myengine/ecs/World.h>
 #include <myengine/editor/LoadingService.h>
 #include <myengine/input/InputManager.h>
+#include <myengine/render/GpuCapture.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scripting/PrefabLibrary.h>
@@ -38,6 +39,17 @@ namespace myengine::editor
 
 namespace myengine::core
 {
+    // Command-line diagnostics of the GPU (docs/dev/gpu-debugging.md)
+    struct DiagnosticsOptions
+    {
+        std::uint64_t captureFrame = 0;     // --gpu-capture-frame N: capture the N-th rendered frame with RenderDoc
+        bool exitAfterCapture = false;      // --exit-after-capture: quit with code 0 when the capture file is written
+        std::uint64_t frameStatsFrame = 0;  // --frame-stats N: write the statistics of the N-th frame and quit
+        std::filesystem::path frameStatsOut; // --frame-stats-out <file>: where (default Saved/FrameStats)
+        bool renderDoc = false;             // --renderdoc: load RenderDoc at start (F12 and Help > Developer)
+        bool pix = false;                   // --pix: load PIX's capturer so that PIX can attach
+    };
+
     class Application
     {
     public:
@@ -55,6 +67,12 @@ namespace myengine::core
         void SetProjectFile(const std::filesystem::path& projectFile);
         /// Before Initialize: open the Project Browser over the editor at start.
         void SetShowProjectBrowser(bool show);
+        /// Before Initialize: GPU capture and statistics requested on the command line.
+        void SetDiagnosticsOptions(const DiagnosticsOptions& options);
+        /// The code the process should return when the loop ended on purpose (a capture or statistics request).
+        int GetExitCode() const;
+        /// A capture of the next frame with RenderDoc (F12, Help > Developer). false: `message` says what to install.
+        bool RequestGpuCapture(std::string& message);
         /// Before Initialize: read the start map in the background (the window shows the splash meanwhile) instead of
         /// before Initialize returns. The map is in the world once Run has drawn a few frames.
         void SetDeferredSceneLoad(bool deferred);
@@ -152,6 +170,8 @@ namespace myengine::core
         void AdjustGravity(float delta);
         void RebindWindowControlledEntities();
         void RenderFrame();
+        void HandleDiagnosticsAfterFrame();
+        void WriteFrameStats();
 
         HINSTANCE instance_ = nullptr;
         bool quitRequested_ = false;
@@ -181,6 +201,14 @@ namespace myengine::core
         std::filesystem::path projectFile_; // from --project, empty: the project of the engine folder
         bool showProjectBrowser_ = false;
         bool deferredSceneLoad_ = false;
+        DiagnosticsOptions diagnostics_;
+        render::GpuCapture gpuCapture_;
+        std::uint64_t renderedFrames_ = 0;
+        std::uint64_t captureTriggeredAtFrame_ = 0;
+        std::uint32_t captureCountAtTrigger_ = 0;
+        bool captureTriggered_ = false;
+        bool frameStatsDone_ = false;
+        int exitCode_ = 0;
         // Another project was asked for: the window stays (with its loading window) until the new process is up
         std::chrono::steady_clock::time_point restartQuitTime_{};
         bool restartPending_ = false;

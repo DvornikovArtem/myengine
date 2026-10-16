@@ -83,6 +83,8 @@ namespace myengine::ui
         std::function<std::string()> captureSceneSnapshot;
         std::function<bool(std::string_view)> restoreSceneSnapshot;
         std::function<void()> reloadScripts; // hot reload of every script, same as F5
+        // GPU frame capture with RenderDoc (F12, Help > Developer). false: `message` says what to install or start.
+        std::function<bool(std::string& message)> captureGpuFrame;
         // Script fields for the inspector (ScriptRuntime::DescribeFields)
         std::function<std::vector<scripting::ScriptFieldInfo>(const std::string& module, const std::string& className)> describeScriptFields;
         // Play only: "Active" / "Starting" / "Faulted" and current field values of a running script object
@@ -158,6 +160,7 @@ namespace myengine::ui
         // The button of the background tasks in the status bar (its right edge at `rightEdge`) and their popup
         void DrawBackgroundTasks(ImDrawList* drawList, float rightEdge, float centerY);
         void ReportLoadError(const std::string& title, const std::string& text);
+        void CaptureGpuFrame(); // F12, Help > Developer: a failure is a dialog that says what to install
         void RequestOpenProject(const std::string& projectFile);
         ContentThumbnail MakeContentThumbnail(const ContentEntry& entry, std::uint32_t pixelSize) const;
         void RequestOpenScene(const std::string& scenePath);
