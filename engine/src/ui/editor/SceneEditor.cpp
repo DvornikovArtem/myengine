@@ -379,6 +379,11 @@ namespace myengine::ui
                     ImGui::MenuItem("ImGui Demo", nullptr, &editorState.showImGuiDemo);
                     ImGui::MenuItem("Widgets Gallery", nullptr, &showWidgetsGallery_);
                     ImGui::MenuItem("Thumbnails", nullptr, &showThumbnailsDebug_, services_.thumbnails != nullptr);
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Capture GPU Frame", "F12", false, services_.captureGpuFrame != nullptr))
+                    {
+                        CaptureGpuFrame();
+                    }
                     ImGui::EndMenu();
                 }
                 ImGui::EndMenu();
@@ -492,6 +497,10 @@ namespace myengine::ui
         }
 
         ImGuiIO& io = ImGui::GetIO();
+        if (ImGui::IsKeyPressed(ImGuiKey_F12, false))
+        {
+            CaptureGpuFrame(); // RenderDoc: the next frame goes to Saved/Captures
+        }
         if (io.WantTextInput)
         {
             return; // Delete / Ctrl+Z belong to the text field, not the selected scene entity

@@ -215,6 +215,20 @@ myengine_apply_compiler_options(myengine_loading_tests)
 set_property(TARGET myengine_loading_tests PROPERTY FOLDER "Tests")
 add_test(NAME loading_service COMMAND myengine_loading_tests)
 
+# QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
+add_executable(myengine_gpu_stats_tests
+  render/GpuStatsTests.cpp)
+
+target_link_libraries(myengine_gpu_stats_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_gpu_stats_tests)
+set_property(TARGET myengine_gpu_stats_tests PROPERTY FOLDER "Tests")
+add_test(NAME gpu_stats COMMAND myengine_gpu_stats_tests)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME gpu_frame_report_selftest COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/tools/gpu/frame_report.py" --self-test)
+endif()
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)

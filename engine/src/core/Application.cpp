@@ -133,6 +133,24 @@ namespace myengine::core
 
     Application::Application(HINSTANCE instance) : instance_(instance) {}
 
+    // The result lines of a command-line request: to the console of the parent (a GUI process has none of its own)
+    void WriteToConsole(const std::string& text)
+    {
+        HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (output == nullptr || output == INVALID_HANDLE_VALUE)
+        {
+            if (AttachConsole(ATTACH_PARENT_PROCESS))
+            {
+                output = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+            }
+        }
+        if (output != nullptr && output != INVALID_HANDLE_VALUE)
+        {
+            DWORD written = 0;
+            WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+        }
+    }
+
     Application::~Application()
     {
         Shutdown();
@@ -216,6 +234,53 @@ namespace myengine::core
             if (!prefabLibrary_.Initialize(prefabsDir, &logger_))
             {
                 logger_.Warning("Prefab spawning is disabled, the engine continues without prefabs");
+            }
+        }
+
+        // GPU capture tools hook the API when their DLL is in the process: before the device is created
+        {
+            const auto envEnabled = [](const char* name)
+            {
+                char* value = nullptr;
+                std::size_t length = 0;
+                const bool set = _dupenv_s(&value, &length, name) == 0 && value != nullptr && value[0] != '\0' && value[0] != '0';
+                std::free(value);
+                return set;
+            };
+
+            const bool wantsCapture = diagnostics_.captureFrame != 0;
+            if (diagnostics_.renderDoc || wantsCapture || envEnabled("MYENGINE_RENDERDOC"))
+            {
+                std::string message;
+                const bool loaded = gpuCapture_.LoadRenderDoc(message);
+                if (loaded)
+                {
+                    logger_.Info("GPU capture: " + message);
+                }
+                else
+                {
+                    logger_.Warning("GPU capture: " + message);
+                }
+                if (wantsCapture && !loaded)
+                {
+                    const std::string text = "--gpu-capture-frame needs RenderDoc: " + message;
+                    logger_.Error(text);
+                    WriteToConsole(text + "\n");
+                    exitCode_ = 3;
+                    return false;
+                }
+            }
+            if (diagnostics_.pix || envEnabled("MYENGINE_PIX"))
+            {
+                std::string message;
+                if (gpuCapture_.LoadPix(message))
+                {
+                    logger_.Info("GPU capture: " + message);
+                }
+                else
+                {
+                    logger_.Warning("GPU capture: " + message);
+                }
             }
         }
 
@@ -311,6 +376,7 @@ namespace myengine::core
                 renderAdapter_->SetWireframe(enabled);
             }
         };
+        sceneEditorServices.captureGpuFrame = [this](std::string& message) { return RequestGpuCapture(message); };
         sceneEditorServices.reloadScripts = [this]()
         {
             if (scriptSystem_ != nullptr)
@@ -409,6 +475,8 @@ namespace myengine::core
         {
             sceneSavePath_ = project.ResolveContentPath(scenePath);
         }
+
+        gpuCapture_.SetOutput(project.Root() / "Saved" / "Captures", sceneSavePath_.stem().u8string());
 
         BindRuntimeEventListeners();
 
@@ -606,6 +674,8 @@ namespace myengine::core
                 RenderFrame();
             }
             const auto renderEndTime = std::chrono::steady_clock::now();
+            ++renderedFrames_;
+            HandleDiagnosticsAfterFrame();
 
 
             const auto millisecondsBetween =
@@ -665,7 +735,12 @@ namespace myengine::core
         }
 
         logger_.Info("Main loop finished");
-        return static_cast<int>(msg.wParam);
+        // WM_QUIT carries the code of PostQuitMessage; a loop that ended by RequestQuit has no message to take it from
+        if (exitCode_ != 0)
+        {
+            return exitCode_;
+        }
+        return msg.message == WM_QUIT ? static_cast<int>(msg.wParam) : 0;
     }
 
     void Application::Shutdown()
@@ -725,6 +800,150 @@ namespace myengine::core
     void Application::RequestQuit()
     {
         quitRequested_ = true;
+    }
+
+    void Application::SetDiagnosticsOptions(const DiagnosticsOptions& options)
+    {
+        diagnostics_ = options;
+    }
+
+    int Application::GetExitCode() const
+    {
+        return exitCode_;
+    }
+
+    bool Application::RequestGpuCapture(std::string& message)
+    {
+        if (!gpuCapture_.IsRenderDocAvailable())
+        {
+            // F12 and the menu may be used in an editor that was started without RenderDoc: try to find it now. The
+            // device exists already, so RenderDoc can not hook it: the capture needs a restart.
+            std::string loadMessage;
+            if (gpuCapture_.LoadRenderDoc(loadMessage))
+            {
+                message = "RenderDoc was found (" + loadMessage + ") but it has to be loaded before the device is created: "
+                          "start the engine with --renderdoc (or MYENGINE_RENDERDOC=1) and capture again.";
+                return false;
+            }
+            message = loadMessage;
+            return false;
+        }
+
+        const bool triggered = gpuCapture_.TriggerNextFrame(message);
+        if (triggered)
+        {
+            message = "GPU capture of the next frame requested; the file goes to " +
+                      (core::ServiceLocator::GetProjectContext().Root() / "Saved" / "Captures").u8string();
+            logger_.Info(message);
+        }
+        return triggered;
+    }
+
+    // After a frame: advances the capture request and the statistics request of the command line
+    void Application::HandleDiagnosticsAfterFrame()
+    {
+        // A removed device ends a command-line request with a code of its own (the log has the breadcrumbs)
+        const bool cliRequest = diagnostics_.captureFrame != 0 || (diagnostics_.frameStatsFrame != 0 && !frameStatsDone_) || captureTriggered_;
+        if (cliRequest && renderAdapter_ != nullptr && renderAdapter_->IsDeviceRemoved())
+        {
+            const std::string text = "The GPU device was removed (see logs/myengine.log for the DRED breadcrumbs)";
+            logger_.Error(text);
+            WriteToConsole(text + "\n");
+            exitCode_ = 6;
+            RequestQuit();
+            return;
+        }
+
+        if (diagnostics_.captureFrame != 0 && !captureTriggered_ && renderedFrames_ + 1 >= diagnostics_.captureFrame)
+        {
+            // RenderDoc captures the frame that follows the trigger: frame N is captured when it is asked for after N-1
+            captureCountAtTrigger_ = gpuCapture_.CaptureCount();
+            std::string message;
+            if (gpuCapture_.TriggerNextFrame(message))
+            {
+                captureTriggered_ = true;
+                captureTriggeredAtFrame_ = renderedFrames_;
+                logger_.Info("GPU capture requested after frame " + std::to_string(renderedFrames_));
+            }
+            else
+            {
+                logger_.Error(message);
+                WriteToConsole(message + "\n");
+                exitCode_ = 3;
+                RequestQuit();
+                return;
+            }
+        }
+
+        if (captureTriggered_)
+        {
+            if (gpuCapture_.CaptureCount() > captureCountAtTrigger_ && !gpuCapture_.IsCapturing())
+            {
+                const std::string path = gpuCapture_.LastCapturePath();
+                logger_.Info("GPU capture written: " + path);
+                WriteToConsole("GPU capture: " + path + "\n");
+                captureTriggered_ = false;
+                diagnostics_.captureFrame = 0;
+                if (diagnostics_.exitAfterCapture && !(diagnostics_.frameStatsFrame != 0 && !frameStatsDone_))
+                {
+                    RequestQuit();
+                }
+            }
+            else if (renderedFrames_ > captureTriggeredAtFrame_ + 60)
+            {
+                const std::string text = "GPU capture did not appear within 60 frames (is the window minimized?)";
+                logger_.Error(text);
+                WriteToConsole(text + "\n");
+                exitCode_ = 4;
+                RequestQuit();
+                return;
+            }
+        }
+
+        if (diagnostics_.frameStatsFrame != 0 && !frameStatsDone_ && renderedFrames_ >= diagnostics_.frameStatsFrame)
+        {
+            WriteFrameStats();
+            frameStatsDone_ = true;
+            if (!captureTriggered_)
+            {
+                RequestQuit();
+            }
+        }
+    }
+
+    void Application::WriteFrameStats()
+    {
+        render::GpuFrameStats stats;
+        if (renderAdapter_ == nullptr || !renderAdapter_->GetLastFrameStats(stats, true))
+        {
+            const std::string text = "--frame-stats: the renderer has no statistics (no frame was finished)";
+            logger_.Error(text);
+            WriteToConsole(text + "\n");
+            exitCode_ = 5;
+            return;
+        }
+
+        const std::string map = sceneSavePath_.stem().u8string();
+        const std::string adapter = renderAdapter_->GetAdapterName();
+        std::filesystem::path target = diagnostics_.frameStatsOut;
+        if (target.empty())
+        {
+            target = core::ServiceLocator::GetProjectContext().Root() / "Saved" / "FrameStats" /
+                     std::filesystem::u8path("frame_stats_" + map + "_" + std::to_string(diagnostics_.frameStatsFrame) + ".json");
+        }
+
+        std::error_code error;
+        if (!target.parent_path().empty())
+        {
+            std::filesystem::create_directories(target.parent_path(), error);
+        }
+        std::ofstream file(target, std::ios::binary | std::ios::trunc);
+        file << render::GpuFrameStatsToJson(stats, map, adapter);
+        file.close();
+
+        const std::string markdown = render::GpuFrameStatsToMarkdown(stats, map, adapter);
+        logger_.Info("Frame statistics written: " + target.u8string());
+        WriteToConsole(markdown + "\nJSON: " + target.u8string() + "\n");
     }
 
     LRESULT Application::HandleWindowMessage(Window& window, UINT msg, WPARAM wparam, LPARAM lparam)

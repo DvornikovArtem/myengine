@@ -60,6 +60,8 @@
   include/myengine/render/RenderTargetPool.h
   include/myengine/render/RenderTypes.h
   include/myengine/render/dx12/Dx12Context.h
+  include/myengine/render/GpuCapture.h
+  include/myengine/render/GpuStats.h
   include/myengine/render/dx12/Dx12RenderAdapter.h
   include/myengine/resource/ResourceManager.h
   include/myengine/scene/SceneSerializer.h
@@ -121,6 +123,10 @@ set(ENGINE_SOURCES
   src/jobs/JobQueue.h
   src/jobs/JobSystem.cpp
   src/render/RenderTargetPool.cpp
+  src/render/GpuCapture.cpp
+  src/render/GpuStats.cpp
+  src/render/dx12/Dx12GpuProfiler.cpp
+  src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp
   src/resource/ResourceManager.cpp
   src/scene/PrefabLibrary.cpp
@@ -214,7 +220,8 @@ target_include_directories(myengine_engine
   PRIVATE
     ${IMGUI_ROOT}/Include
     ${IMGUI_ROOT}/Include/imgui
-    ${IMGUIZMO_ROOT})
+    ${IMGUIZMO_ROOT}
+    ${CMAKE_SOURCE_DIR}/external/renderdoc)
 
 target_compile_definitions(myengine_engine
   PUBLIC

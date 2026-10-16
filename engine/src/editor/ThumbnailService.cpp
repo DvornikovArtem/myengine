@@ -901,6 +901,7 @@ namespace myengine::editor
             render::Matrix4 projection = render::Matrix4::Identity();
             FrameCamera(bounds, view, projection);
 
+            adapter.SetRenderTargetLabel("Thumbnail: " + PathFromText(entry.assetPath).filename().u8string());
             if (!adapter.BeginRenderTarget(target, core::Color{0.0f, 0.0f, 0.0f, 0.0f}))
             {
                 pool.Release(target);
@@ -959,6 +960,7 @@ namespace myengine::editor
                     view.texture = adapter.GetRenderTargetTexture(view.target);
                 }
 
+                adapter.SetRenderTargetLabel("Live view: " + id);
                 if (!adapter.BeginRenderTarget(view.target, view.request.clearColor))
                 {
                     continue;
