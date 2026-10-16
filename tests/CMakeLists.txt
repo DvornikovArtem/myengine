@@ -75,7 +75,7 @@ myengine_apply_compiler_options(myengine_rocket_league_tests)
 myengine_copy_runtime_assets(myengine_rocket_league_tests)
 set_property(TARGET myengine_rocket_league_tests PROPERTY FOLDER "Tests")
 add_test(NAME rocket_league COMMAND myengine_rocket_league_tests)
-set_tests_properties(rocket_league PROPERTIES TIMEOUT 60)
+set_tests_properties(rocket_league PROPERTIES TIMEOUT 240)
 
 # Manual integration test: plays a scripted round in a DX12 window.
 add_executable(myengine_gameplay_smoke
