@@ -293,20 +293,20 @@ namespace myengine::ui
 
         std::filesystem::path ResolveFontRoot()
         {
-            const std::filesystem::path sourceRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/fonts";
+            std::filesystem::path sourceRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/fonts";
             if (HasFontFiles(sourceRoot))
             {
                 return sourceRoot;
             }
 
-            const std::filesystem::path executableRoot = GetExecutableDirectory() / "assets/fonts";
+            std::filesystem::path executableRoot = GetExecutableDirectory() / "assets/fonts";
             if (HasFontFiles(executableRoot))
             {
                 return executableRoot;
             }
 
             std::error_code ec;
-            const std::filesystem::path currentRoot = std::filesystem::current_path(ec) / "assets/fonts";
+            std::filesystem::path currentRoot = std::filesystem::current_path(ec) / "assets/fonts";
             if (!ec && HasFontFiles(currentRoot))
             {
                 return currentRoot;

@@ -177,7 +177,7 @@ namespace myengine::core
     fs::path ProjectContext::EngineRoot()
     {
 #ifdef MYENGINE_SOURCE_DIR
-        const fs::path source = fs::u8path(MYENGINE_SOURCE_DIR);
+        fs::path source = fs::u8path(MYENGINE_SOURCE_DIR);
         std::error_code error;
         if (fs::is_directory(source / "assets", error))
         {
@@ -294,7 +294,7 @@ namespace myengine::core
     std::string ProjectContext::ToProjectRelative(const fs::path& absolute) const
     {
         const fs::path relative = absolute.lexically_normal().lexically_relative(root_);
-        const std::string text = relative.generic_u8string();
+        std::string text = relative.generic_u8string();
         if (relative.empty() || text == ".." || text.rfind("../", 0) == 0 || relative.is_absolute())
         {
             return absolute.lexically_normal().generic_u8string();

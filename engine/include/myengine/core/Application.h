@@ -76,6 +76,8 @@ namespace myengine::core
         /// Before Initialize: read the start map in the background (the window shows the splash meanwhile) instead of
         /// before Initialize returns. The map is in the world once Run has drawn a few frames.
         void SetDeferredSceneLoad(bool deferred);
+        /// Quits after this many frames of the main loop (0: never). For short runs under a sanitizer or a profiler.
+        void SetExitAfterFrames(std::uint32_t frames);
         int Run();
         void Shutdown();
 
@@ -209,6 +211,8 @@ namespace myengine::core
         bool captureTriggered_ = false;
         bool frameStatsDone_ = false;
         int exitCode_ = 0;
+        std::uint32_t exitAfterFrames_ = 0;
+        std::uint32_t framesRun_ = 0;
         // Another project was asked for: the window stays (with its loading window) until the new process is up
         std::chrono::steady_clock::time_point restartQuitTime_{};
         bool restartPending_ = false;

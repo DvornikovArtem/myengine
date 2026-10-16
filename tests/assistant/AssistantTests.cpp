@@ -632,7 +632,12 @@ namespace
             }
             const auto perFrameMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() / kFrames;
             std::cout << "    full transcript: " << perFrameMs << " ms per frame\n";
-            Check(perFrameMs < 100.0, "A frame with a full transcript is too slow");
+#ifdef MYENGINE_ASAN_BUILD
+            constexpr double kFrameLimitMs = 500.0; // AddressSanitizer makes it several times slower
+#else
+            constexpr double kFrameLimitMs = 100.0;
+#endif
+            Check(perFrameMs < kFrameLimitMs, "A frame with a full transcript is too slow");
         }
 
         // A clean installation: the assistant is off, the panel draws "Assistant is off" and starts nothing

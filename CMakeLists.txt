@@ -8,10 +8,24 @@ set(CMAKE_SUPPRESS_REGENERATION ON)
 
 option(MYENGINE_COPY_RUNTIME_ASSETS "Copy assets/config to target output directory" ON)
 option(MYENGINE_BUILD_TESTS "Build myengine tests" ON)
+# Checks for C++ errors (tools/check.ps1 runs them, docs/dev/cpp-checks.md). Each one needs its own build directory:
+#   MYENGINE_ASAN    AddressSanitizer (MSVC /fsanitize=address) for our targets, build-asan/
+#   MYENGINE_ANALYZE MSVC /analyze for our targets, build-analyze/
+option(MYENGINE_ASAN "Build our targets with AddressSanitizer (MSVC)" OFF)
+option(MYENGINE_ANALYZE "Build our targets with MSVC /analyze" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(MYENGINE_ASAN AND MSVC)
+  # AddressSanitizer does not work with the run-time checks and with Edit and Continue
+  foreach(flags_var CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG)
+    string(REGEX REPLACE "/RTC[1csu]+" "" ${flags_var} "${${flags_var}}")
+    string(REPLACE "/ZI" "/Zi" ${flags_var} "${${flags_var}}")
+  endforeach()
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "ProgramDatabase")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerOptions)

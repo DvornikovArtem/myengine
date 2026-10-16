@@ -583,6 +583,7 @@ namespace myengine::core
             std::uint32_t frames = 0;
         } frameTimingStats;
 
+
         logger_.Info("Main loop started");
         tracy::SetThreadName("Main");
 
@@ -723,6 +724,13 @@ namespace myengine::core
 
                 deltaLogAccumulator_ = 0.0f;
                 frameTimingStats = {};
+            }
+
+            if (exitAfterFrames_ != 0 && ++framesRun_ >= exitAfterFrames_)
+            {
+                logger_.Info("Exit after " + std::to_string(framesRun_) + " frames");
+                RequestQuit();
+                PostQuitMessage(0);
             }
 
             if (AllWindowsClosed())
@@ -1617,6 +1625,11 @@ namespace myengine::core
     void Application::SetShowProjectBrowser(const bool show)
     {
         showProjectBrowser_ = show;
+    }
+
+    void Application::SetExitAfterFrames(const std::uint32_t frames)
+    {
+        exitAfterFrames_ = frames;
     }
 
     void Application::SetDeferredSceneLoad(const bool deferred)

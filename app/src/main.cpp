@@ -1,5 +1,6 @@
 // main.cpp
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -28,6 +29,7 @@ namespace
         bool showProjectBrowser = false;
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
+        std::uint32_t exitAfterFrames = 0; // 0: run until the window is closed
     };
 
     bool ParseCount(const std::wstring_view text, std::uint64_t& value)
@@ -102,7 +104,8 @@ namespace
             const bool isCaptureFrame = argument == L"--gpu-capture-frame";
             const bool isFrameStats = argument == L"--frame-stats";
             const bool isFrameStatsOut = argument == L"--frame-stats-out";
-            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut)
+            const bool isFrames = argument == L"--exit-after-frames";
+            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames)
             {
                 valid = false;
                 break;
@@ -144,6 +147,12 @@ namespace
             else if (isFrameStatsOut && options.diagnostics.frameStatsOut.empty())
             {
                 options.diagnostics.frameStatsOut = std::wstring(value);
+            }
+            else if (isFrames && options.exitAfterFrames == 0)
+            {
+                std::uint64_t frames = 0;
+                valid = ParseCount(value, frames);
+                options.exitAfterFrames = static_cast<std::uint32_t>(frames);
             }
             else
             {
@@ -202,7 +211,7 @@ namespace
     }
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
+int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
     LaunchOptions options;
     if (!ParseArguments(options))
@@ -211,7 +220,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
             nullptr,
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser]\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
-            L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]",
+            L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
+            L"  Other: [--exit-after-frames <n>]",
             L"myengine",
             MB_OK | MB_ICONERROR);
         return -1;
@@ -227,6 +237,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     const bool gpuDiagnostics = options.diagnostics.captureFrame != 0 || options.diagnostics.frameStatsFrame != 0;
     app.SetDeferredSceneLoad(!gpuDiagnostics);
     app.SetDiagnosticsOptions(options.diagnostics);
+    app.SetExitAfterFrames(options.exitAfterFrames);
 
     const auto configPath = ResolveConfigPath();
     const auto config = myengine::config::AppConfig::LoadFromFile(configPath);
