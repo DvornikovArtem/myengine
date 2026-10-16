@@ -246,3 +246,15 @@ add_executable(myengine_render_target_smoke
 target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
+
+# An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
+if(MYENGINE_ASAN)
+  get_property(myengine_all_tests DIRECTORY PROPERTY TESTS)
+  foreach(test_name IN LISTS myengine_all_tests)
+    get_test_property(${test_name} TIMEOUT test_timeout)
+    if(test_timeout)
+      math(EXPR test_timeout "${test_timeout} * 10")
+      set_tests_properties(${test_name} PROPERTIES TIMEOUT ${test_timeout})
+    endif()
+  endforeach()
+endif()
