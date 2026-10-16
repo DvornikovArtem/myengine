@@ -144,7 +144,7 @@ namespace myengine::assistant
         const auto fromEnvironment = detail::GetEnvironmentText(L"MYENGINE_CLAUDE_PATH");
         if (!fromEnvironment.empty())
         {
-            const std::filesystem::path path(fromEnvironment);
+            std::filesystem::path path(fromEnvironment);
             if (detail::IsRegularFile(path))
             {
                 return path;

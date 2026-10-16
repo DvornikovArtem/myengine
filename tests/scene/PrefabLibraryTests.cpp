@@ -189,7 +189,7 @@ namespace
         std::vector<json> invalid;
         invalid.push_back(json::object());
         invalid.push_back({{"entities", json::array()}});
-        for (const json id : {json(0), json(-1), json("1"), json(4294967296ULL)})
+        for (const json& id : {json(0), json(-1), json("1"), json(4294967296ULL)})
         {
             auto data = valid;
             data["entities"][0]["id"] = id;
@@ -198,7 +198,7 @@ namespace
         auto duplicate = valid;
         duplicate["entities"][1]["id"] = 1;
         invalid.push_back(duplicate);
-        for (const json parent : {json(99), json(2), json(-1), json("1")})
+        for (const json& parent : {json(99), json(2), json(-1), json("1")})
         {
             auto data = valid;
             data["entities"][1]["Hierarchy"]["parent"] = parent;
