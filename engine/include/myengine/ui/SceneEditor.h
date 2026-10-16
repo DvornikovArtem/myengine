@@ -153,6 +153,7 @@ namespace myengine::ui
         void DrawPrefabCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
         void DrawPrefabPanel(AssetViewerTab& tab);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
+        void DrawShaderLayoutsWindow();   // Help > Developer > Shader Layouts (what the reflection reads from the shaders)
         // The loading window of a long operation (SceneEditorLoading.cpp). Also blocks the input while one runs.
         void DrawLoadingUi();
         // The startup splash instead of the editor; true while it is on (nothing else is drawn then)
@@ -225,6 +226,9 @@ namespace myengine::ui
         std::string loadErrorText_;
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
+        bool showShaderLayouts_ = false;   // Help > Developer > Shader Layouts
+        std::string shaderLayoutsText_;    // the table of the window; empty: built at the next frame
+        int shaderLayoutsFailures_ = 0;    // programs that did not compile
         float materialPreviewYaw_ = 0.61f;   // orbit camera of the Material Editor preview (radians)
         float materialPreviewPitch_ = 0.44f;
         float materialPreviewDistance_ = 3.0f;

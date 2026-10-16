@@ -25,6 +25,7 @@ namespace myengine::core
 namespace myengine::render::dx12
 {
     class Dx12GpuProfiler;
+    class ShaderReflector;
 
     class Dx12RenderAdapter final : public IRenderAdapter
     {
@@ -38,6 +39,9 @@ namespace myengine::render::dx12
         TextureHandle CreateTexture(const TextureData& textureData) override;
         void DestroyTexture(TextureHandle texture) override;
         ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) override;
+        bool GetShaderLayout(ShaderHandle shader, ShaderLayout& outLayout, ShaderVariant variant = ShaderVariant::Normal) const override;
+        bool GetBuiltinShaderLayout(BuiltinShader shader, ShaderLayout& outLayout) const override;
+        std::vector<ShaderDiagnostic> GetLastShaderDiagnostics() const override { return lastShaderDiagnostics_; }
 
         RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) override;
         void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) override;
@@ -185,6 +189,8 @@ namespace myengine::render::dx12
         {
             Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
             Microsoft::WRL::ComPtr<ID3D12PipelineState> wireframePipelineState; // same shaders, fill mode wireframe (may be empty)
+            ShaderLayout layout;          // from the reflection of the compiled shaders
+            ShaderLayout wireframeLayout; // the vertex shader with the constant pixel shader of the wireframe variant
         };
 
         // The marker group that the draw calls outside render targets fall into: switched when the kind of calls changes
@@ -218,7 +224,10 @@ namespace myengine::render::dx12
         bool CreateBuffer(const void* data, UINT64 dataSize, D3D12_RESOURCE_STATES finalState, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer);
         bool CreateUploadBuffer(const void* data, UINT64 dataSize, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer);
         bool CreateTextureResource(const TextureData& textureData, Microsoft::WRL::ComPtr<ID3D12Resource>& outTexture);
-        bool CompileShaderBlob(const std::filesystem::path& sourcePath, const std::string& entryPoint, const std::string& profile, Microsoft::WRL::ComPtr<ID3DBlob>& outBlob) const;
+        // Compiles and reflects one of the renderer's own programs (the file is searched like the other assets).
+        // The messages go to the log.
+        bool CompileBuiltinProgram(const char* relativePath, Microsoft::WRL::ComPtr<ID3DBlob>& outVertex, Microsoft::WRL::ComPtr<ID3DBlob>& outPixel, ShaderLayout& outLayout);
+        void LogShaderDiagnostics(const std::vector<ShaderDiagnostic>& diagnostics) const;
         bool EnsureFrameUploadBuffer(FrameUploadBuffer& buffer, UINT64 requiredSize);
         bool AllocateFrameUploadData(FrameUploadBuffer& buffer, const void* data, UINT64 dataSize, UINT64 alignment, D3D12_GPU_VIRTUAL_ADDRESS& outGpuAddress);
         void ReleaseFrameUploadBuffer(FrameUploadBuffer& buffer);
@@ -275,6 +284,12 @@ namespace myengine::render::dx12
         Float3 targetLightDirection_{0.35f, -1.0f, 0.25f}; // light of the meshes drawn into a render target
         float targetAmbient_ = 0.25f;
         Microsoft::WRL::ComPtr<ID3DBlob> wireframePixelShader_; // constant colour, shared by every wireframe PSO
+        ShaderLayout wireframePixelLayout_;                      // its reflection (no resources)
+
+        std::unique_ptr<ShaderReflector> shaderReflector_;       // compiles the programs, keeps the cache
+        ShaderLayout debugLineLayout_;
+        ShaderLayout uiLayout_;
+        std::vector<ShaderDiagnostic> lastShaderDiagnostics_;
 
         std::unique_ptr<Dx12GpuProfiler> profiler_;
         std::uint64_t frameCounter_ = 0; // frames begun so far; the first one is 1

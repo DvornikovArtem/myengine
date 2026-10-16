@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <myengine/core/Types.h>
@@ -145,6 +146,7 @@ namespace myengine::render
         std::string pixelEntry = "PSMain";
         std::string vertexProfile = "vs_5_0";
         std::string pixelProfile = "ps_5_0";
+        std::vector<std::pair<std::string, std::string>> defines; // #define name value for both entry points
     };
 
     struct DrawItem

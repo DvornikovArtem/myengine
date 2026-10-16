@@ -229,6 +229,17 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME gpu_frame_report_selftest COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/tools/gpu/frame_report.py" --self-test)
 endif()
 
+# A1 (LR3): shader reflection without a GPU: layouts, messages with file and line, cache, the shaders of the engine
+add_executable(myengine_shader_reflection_tests
+  render/ShaderReflectionTests.cpp)
+
+target_link_libraries(myengine_shader_reflection_tests PRIVATE myengine_engine)
+target_include_directories(myengine_shader_reflection_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_shader_reflection_tests)
+set_property(TARGET myengine_shader_reflection_tests PROPERTY FOLDER "Tests")
+add_test(NAME shader_reflection COMMAND myengine_shader_reflection_tests)
+set_tests_properties(shader_reflection PROPERTIES TIMEOUT 120)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)
