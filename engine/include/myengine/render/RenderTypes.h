@@ -150,6 +150,9 @@ namespace myengine::render
         // The states of the static samplers, by the name of the sampler in the shader: "gSampler" -> "linear_wrap".
         // A sampler that is not named here is linear, wrap.
         std::vector<std::pair<std::string, std::string>> samplers;
+        // The vertex stream that the program reads: the table of the formats and offsets of the vertex buffer it is drawn
+        // with ("mesh", "debug_lines", "ui"). The input layout is built from it and from the inputs of the vertex shader.
+        std::string vertexStream = "mesh";
     };
 
     struct DrawItem

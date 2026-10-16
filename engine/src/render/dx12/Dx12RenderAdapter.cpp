@@ -469,24 +469,25 @@ namespace myengine::render::dx12
             }
         }
 
-        // The input layouts stay in the code until A3 (the third consumer)
-        static constexpr D3D12_INPUT_ELEMENT_DESC kSceneInputLayout[] =
+        // The input layout: the inputs of the vertex shader against the table of the vertex stream the program reads
+        const VertexStreamDesc* stream = FindVertexStream(data.vertexStream);
+        if (stream == nullptr)
         {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,                       D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, sizeof(float) * 3,       D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, sizeof(float) * (3 + 3), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
-        static constexpr D3D12_INPUT_ELEMENT_DESC kDebugInputLayout[] =
+            ShaderDiagnostic diagnostic;
+            diagnostic.file = compiled.sourceName;
+            diagnostic.message = "unknown vertex stream '" + data.vertexStream + "' (mesh, debug_lines, ui)";
+            lastShaderDiagnostics_.push_back(diagnostic);
+            LogShaderDiagnostics({diagnostic});
+            return false;
+        }
+        const InputLayoutBuild inputLayout = BuildInputLayout(compiled.layout, *stream, compiled.sourceName);
+        lastShaderDiagnostics_.insert(lastShaderDiagnostics_.end(), inputLayout.diagnostics.begin(), inputLayout.diagnostics.end());
+        LogShaderDiagnostics(inputLayout.diagnostics);
+        if (!inputLayout.ok)
         {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, sizeof(float) * 4, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
-        static constexpr D3D12_INPUT_ELEMENT_DESC kUiInputLayout[] =
-        {
-            {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, sizeof(float) * 2, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, sizeof(float) * 2 + sizeof(std::uint8_t) * 4, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
+            return false;
+        }
+        const std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements = ToD3D12Elements(inputLayout);
 
         const Microsoft::WRL::ComPtr<ID3DBlob>& vertexShader = compiled.vertexBlob;
         const Microsoft::WRL::ComPtr<ID3DBlob>& pixelShader = compiled.pixelBlob;
@@ -505,14 +506,13 @@ namespace myengine::render::dx12
         pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
         pipelineDesc.DSVFormat = kDepthFormat;
         pipelineDesc.SampleDesc.Count = 1;
+        pipelineDesc.InputLayout = {inputElements.data(), static_cast<UINT>(inputElements.size())};
 
         switch (kind)
         {
             case ProgramKind::Scene:
-                pipelineDesc.InputLayout = {kSceneInputLayout, static_cast<UINT>(std::size(kSceneInputLayout))};
                 break;
             case ProgramKind::DebugLines:
-                pipelineDesc.InputLayout = {kDebugInputLayout, static_cast<UINT>(std::size(kDebugInputLayout))};
                 pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
                 break;
             case ProgramKind::Ui:
@@ -531,7 +531,6 @@ namespace myengine::render::dx12
                 pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
                 pipelineDesc.DepthStencilState.DepthEnable = FALSE;
                 pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-                pipelineDesc.InputLayout = {kUiInputLayout, static_cast<UINT>(std::size(kUiInputLayout))};
                 break;
             }
         }

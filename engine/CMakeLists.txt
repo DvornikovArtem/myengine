@@ -65,6 +65,7 @@
   include/myengine/render/GpuCapture.h
   include/myengine/render/GpuStats.h
   include/myengine/render/dx12/Dx12RenderAdapter.h
+  include/myengine/render/dx12/InputLayoutBuilder.h
   include/myengine/render/dx12/RootSignatureBuilder.h
   include/myengine/render/dx12/ShaderLayoutDump.h
   include/myengine/resource/ResourceManager.h
@@ -134,6 +135,7 @@ set(ENGINE_SOURCES
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp
+  src/render/dx12/InputLayoutBuilder.cpp
   src/render/dx12/RootSignatureBuilder.cpp
   src/render/dx12/ShaderCompiler.cpp
   src/render/dx12/ShaderCompiler.h
