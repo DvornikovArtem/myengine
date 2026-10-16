@@ -230,6 +230,11 @@ namespace myengine::ui::assistant_images
         {
             return false;
         }
+        if (data.Scan0 == nullptr)
+        {
+            scaled.UnlockBits(&data);
+            return false;
+        }
         rgba.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
         for (int y = 0; y < height; ++y)
         {

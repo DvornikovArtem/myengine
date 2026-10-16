@@ -230,8 +230,11 @@ namespace
 
 int main()
 {
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
+    // The protocol is bytes: a text mode would turn LF into CRLF and cut the stream at Ctrl+Z
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 || _setmode(_fileno(stdout), _O_BINARY) == -1)
+    {
+        return 1;
+    }
 
     std::wstring pipeName;
     std::wstring endpointFile;
