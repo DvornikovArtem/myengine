@@ -240,6 +240,16 @@ set_property(TARGET myengine_shader_reflection_tests PROPERTY FOLDER "Tests")
 add_test(NAME shader_reflection COMMAND myengine_shader_reflection_tests)
 set_tests_properties(shader_reflection PROPERTIES TIMEOUT 120)
 
+# A2 (LR3): the root signature builder without a GPU: root constants / CBV, tables, visibility, samplers, shape hash
+add_executable(myengine_root_signature_tests
+  render/RootSignatureTests.cpp)
+
+target_link_libraries(myengine_root_signature_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_root_signature_tests)
+set_property(TARGET myengine_root_signature_tests PROPERTY FOLDER "Tests")
+add_test(NAME root_signature COMMAND myengine_root_signature_tests)
+set_tests_properties(root_signature PROPERTIES TIMEOUT 120)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)
