@@ -21,6 +21,8 @@ MAT = {
     "blue": _mat("fx_blue"), "orange": _mat("fx_orange"), "gold": _mat("fx_gold"), "white": _mat("fx_white"),
     "car_blue": _mat("car_blue"), "car_orange": _mat("car_orange"),
     "cabin_gold": _mat("cabin_gold"), "cabin_glass": _mat("cabin_glass"),
+    "car_headlight": _mat("car_headlight"), "car_taillight": _mat("car_taillight"), "car_brakelight": _mat("car_brakelight"),
+    "car_trim": _mat("car_trim"), "fx_boost": _mat("fx_boost"),
     "pad_big": _mat("pad_big"), "pad_small": _mat("pad_small"),
     "goal_blue": _mat("goal_blue"), "goal_orange": _mat("goal_orange"),
     "crowd_blue": _mat("crowd_blue"), "crowd_orange": _mat("crowd_orange"), "crowd_white": _mat("crowd_white"),
@@ -46,6 +48,44 @@ BOOST_ACC, BOOST_USE = 26.0, 33.0
 JUMP_V, DOUBLE_V, DODGE_V = 8.5, 7.0, 11.0
 DEMO_SPEED = 26.0
 
+# Wheels (assets/prefabs/rl_car.prefab.json): the wheel mesh has radius 1, the prefab scales it to WHEEL_R
+WHEEL_NAMES = ("RlWheelFL", "RlWheelFR", "RlWheelRL", "RlWheelRR")   # front pair first
+WHEEL_R = 0.3
+MAX_STEER = 25.0                # degrees of the front wheels at full steering
+STEER_EASE = 14.0               # how fast the front wheels follow the steering (1 / s)
+WHEEL_AIR_DRAG = 1.2            # in the air the wheels slow down (1 / s)
+
+# Suspension of the body (the chassis node only; the root with the physics is never touched). Every axis is a spring
+# with a damper: x'' = w^2 (target - x) - 2 zeta w x', w = 2 pi f. zeta 0.5..0.7 gives a small overshoot, no ringing.
+# Signs (row-vector XMMatrixRotationRollPitchYaw): +pitch lowers the nose, +roll raises the right side.
+SUSP_FREQ, SUSP_ZETA = 2.5, 0.6         # pitch and roll: frequency (Hz) and damping ratio
+HEAVE_FREQ, HEAVE_ZETA = 3.0, 0.5       # the vertical travel after a landing
+PITCH_PER_ACC = 0.2                     # degrees of pitch per m/s^2 of forward acceleration (gas = nose up, brake = nose down)
+ROLL_PER_LAT = 0.12                     # degrees of roll per m/s^2 of lateral acceleration (a right turn leans the body left)
+HEAVE_KICK = 0.25                       # m/s of downward travel per m/s of falling speed at the touchdown
+LAND_MIN_SPEED, LAND_MAX_SPEED = 1.5, 20.0   # falling speeds (m/s) that count for the touchdown kick
+SUSP_ACC_EASE = 12.0                    # smoothing of the measured accelerations (1 / s)
+SUSP_ACC_MAX = 60.0                     # a crash does not count as more than this acceleration (m/s^2)
+PITCH_MAX, ROLL_MAX = 6.0, 7.0          # degrees
+HEAVE_MIN, HEAVE_MAX = -0.08, 0.05      # metres, the chassis offset along y
+
+# Details of the car prefab: stop lights, boost flame, sparks of a slide
+LIGHT_SPEED = 0.5                       # m/s: the stop lights need a speed above this (against the gas, or backwards)
+FLAME_LEN, FLAME_WIDTH = 0.5, 0.12      # half length (scale z) and radius of the flame; both flicker around these
+FLAME_Y, FLAME_Z = 0.2, -1.27           # the flame starts at the nozzle (chassis space) and grows backwards
+SPARK_SPEED = 8.0                       # m/s: a car that slides faster than this throws sparks
+SPARK_INTERVAL = 0.05                   # s between two bursts of sparks of one car
+
+# A bad landing: the car falls on its side or roof and flips back with Space (bots flip back by themselves).
+# `up` is the vertical component of the car's own up axis: cos(pitch) cos(roll), 1 on the wheels, -1 on the roof.
+TILT_OK = 55.0                          # degrees from the vertical: up to this the car settles back on its wheels
+TILT_ROOF = 120.0                       # from this on the car is upside down and ends on its roof
+FALL_TIME = (0.3, 0.5)                  # s of the fall onto a side or the roof (longer for a bigger angle)
+RIGHT_TIME = 0.5                        # s of the flip back onto the wheels
+RIGHT_JUMP = 0.6 * JUMP_V               # m/s: the hop of a car that flips back
+LIE_FRICTION = 2.5                      # 1 / s: a lying car slides on and the speed dies out
+BOT_RIGHT_DELAY = (0.3, 0.7)            # s: how long a bot lies before it flips back
+
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -57,6 +97,18 @@ def wrap(a):
 
 def flat(v):
     return V(v.x, 0.0, v.z)
+
+
+def spring(x, v, target, freq, zeta, lo, hi, dt):
+    """One step of a damped spring towards `target`, kept inside [lo, hi]. Returns the new (x, v)."""
+    w = 2.0 * math.pi * freq
+    v += (w * w * (target - x) - 2.0 * zeta * w * v) * dt
+    x += v * dt
+    if x > hi:
+        x, v = hi, min(v, 0.0)
+    elif x < lo:
+        x, v = lo, max(v, 0.0)
+    return x, v
 
 
 class Car:
@@ -83,6 +135,23 @@ class Car:
         self.was_grounded = True
         self.jump_lock = 0.0
         self.role = "attacker"
+        # parts of the car prefab, found through the hierarchy
+        self.chassis = entity.find_child("RlCarChassis")
+        self.body = self.chassis.find_child("RlCarBody")
+        self.cabin = self.chassis.find_child("RlCarCabin")
+        self.wheels = [entity.find_child(name) for name in WHEEL_NAMES]
+        self.taillights = [entity.find_child("RlCarTaillightL"), entity.find_child("RlCarTaillightR")]
+        self.flame = entity.find_child("RlCarFlame")
+        self.braking = False        # the stop lights are on
+        self.flame_on = False
+        self.spark_cd = 0.0
+        self.wheel_spin = 0.0       # degrees, 0..360, the same for all four wheels
+        self.wheel_rate = 0.0       # degrees per second
+        self.steer_angle = 0.0      # degrees, the front wheels
+        self.tilt = "wheels"        # "wheels" (normal), "falling" (onto a side or the roof), "lying", "righting" (flipping back)
+        self.anim = None            # the running fall or flip back: [from pitch, from roll, to pitch, to roll, time, duration]
+        self.lie_timer = 0.0        # a bot flips back when this runs out
+        self.reset_suspension()
 
     @property
     def sign(self):
@@ -97,11 +166,19 @@ class Car:
         self.pitch = self.roll = 0.0
         self.jumps, self.flip, self.dodge_t = 0, 0.0, 0.0
         self.was_grounded, self.jump_lock = True, 0.0
+        self.wheel_rate = self.steer_angle = 0.0
+        self.reset_tilt()
+        self.pose_wheels()
+        self.reset_suspension()
+        self.reset_details()
         rb = self.e.rigidbody
         rb.is_kinematic = False
         rb.velocity = V(0.0, 0.0, 0.0)
         self.e.transform.position = V(x, CAR_Y + 0.05, z)
         self.e.transform.rotation = V(0.0, self.yaw, 0.0)
+
+    def reset_tilt(self):
+        self.tilt, self.anim = "wheels", None
 
     def drive(self, inp, dt):
         rb, t = self.e.rigidbody, self.e.transform
@@ -110,18 +187,31 @@ class Car:
         # floor, and a car that sits on the floor stays "on the ground" through the small bounces of the contact and
         # while the settling tilt lowers it. Without this the state flips every frame and the car rocks.
         self.jump_lock = max(0.0, self.jump_lock - dt)
-        tilt_p, tilt_r = math.radians(abs(wrap(self.pitch))), math.radians(abs(wrap(self.roll)))
-        # height of the body centre when it lies on the floor with this tilt (half sizes of the car 0.7 x 0.3 x 1.2)
-        rest_y = 0.3 * math.cos(tilt_p) * math.cos(tilt_r) + 1.2 * math.sin(tilt_p) + 0.7 * math.sin(tilt_r)
-        if self.was_grounded:
+        tilt_p, tilt_r = math.radians(wrap(self.pitch)), math.radians(wrap(self.roll))
+        # height of the body centre when it lies on the floor in this attitude (half sizes of the car 0.7 x 0.3 x 1.2):
+        # 0.3 on the wheels and on the roof, 0.7 on a side
+        rest_y = 0.7 * abs(math.sin(tilt_r) * math.cos(tilt_p)) + 0.3 * abs(math.cos(tilt_r) * math.cos(tilt_p)) + 1.2 * abs(math.sin(tilt_p))
+        if self.tilt == "righting":
+            touching = False
+        elif self.was_grounded:
             touching = p.y < rest_y + 1.5 and v.y < 3.0
         else:
-            touching = v.y < 1.0 and (rb.is_grounded or (p.y < rest_y + 0.25 and abs(v.y) < 1.5))
-        self.grounded = self.flip <= 0.0 and self.jump_lock <= 0.0 and touching
+            # a contact of the physics counts at once, also when it has bounced the car up a little
+            touching = (rb.is_grounded and v.y < 3.0) or (v.y < 1.0 and p.y < rest_y + 0.25 and abs(v.y) < 1.5)
+        landed = touching and self.jump_lock <= 0.0 and not self.was_grounded
+        self.grounded = self.jump_lock <= 0.0 and touching
         self.was_grounded = self.grounded
-        self.boosting = inp["boost"] and self.boost > 0.0
+        if self.grounded and self.flip > 0.0:
+            self.flip = 0.0  # the ground stops a dodge; the landing rule below decides how the car ends up
+        if not self.grounded and self.tilt in ("falling", "lying"):
+            self.reset_tilt()  # thrown into the air by a hit: the landing rule applies again
+        if landed and self.tilt == "wheels":
+            self.land()
+        self.boosting = inp["boost"] and self.boost > 0.0 and self.tilt == "wheels"
         self.dodge_t = max(0.0, self.dodge_t - dt)
-        if self.grounded:
+        if self.tilt != "wheels":
+            self.upset(inp, dt)
+        elif self.grounded:
             self.jumps, self.air_time = 0, 0.0
             # settle the tilt of the air smoothly (no snap), the script is the only owner of the orientation
             ease = min(1.0, 16.0 * dt)
@@ -207,6 +297,164 @@ class Car:
             rb.velocity = v
         t.rotation = V(self.pitch, self.yaw, self.roll)
 
+    def land(self):
+        """The landing rule. Nearly level: the car settles back on its wheels as always. Otherwise it falls onto the
+        nearest stable attitude: a side (roll +-90), the roof (roll 180) or the wheels again."""
+        pitch, roll, yaw = wrap(self.pitch), wrap(self.roll), self.yaw
+        if abs(pitch) > 90.0:  # the same attitude written with |pitch| <= 90 (nose and heading turned round)
+            pitch, roll, yaw = wrap(180.0 - pitch), wrap(roll + 180.0), yaw + 180.0
+        self.pitch, self.roll, self.yaw = pitch, roll, yaw
+        p, r = math.radians(pitch), math.radians(roll)
+        up = math.cos(p) * math.cos(r)       # the vertical components of the car's own axes
+        side = math.sin(r) * math.cos(p)     # right axis: > 0 when the right side is up
+        nose = -math.sin(p)                  # forward axis
+        if up > math.cos(math.radians(TILT_OK)):
+            return
+        if up < math.cos(math.radians(TILT_ROOF)):
+            target = (0.0, 180.0 if roll >= 0.0 else -180.0)
+        elif abs(nose) > abs(side):          # standing on the nose or the tail is not stable: it falls over
+            target = (0.0, 0.0) if up >= 0.0 else (0.0, 180.0 if roll >= 0.0 else -180.0)
+        else:
+            target = (0.0, 90.0 if side > 0.0 else -90.0)
+        turn = max(abs(target[0] - pitch), abs(target[1] - roll))
+        duration = clamp(FALL_TIME[0] + (FALL_TIME[1] - FALL_TIME[0]) * turn / 90.0, FALL_TIME[0], FALL_TIME[1])
+        self.tilt, self.anim = "falling", [pitch, roll, target[0], target[1], 0.0, duration]
+
+    def upset(self, inp, dt):
+        """A car that fell over: no driving, it slides on and waits for Space (a bot: for its timer) to flip back."""
+        rb = self.e.rigidbody
+        v = rb.velocity
+        a = self.anim
+        if self.tilt == "righting":
+            self.air_time += dt
+            a[4] += dt
+            k = min(1.0, a[4] / a[5])
+            k = k * k * (3.0 - 2.0 * k)  # smooth start and end of the flip
+            self.pitch, self.roll = a[0] + (a[2] - a[0]) * k, a[1] + (a[3] - a[1]) * k
+            if a[4] >= a[5]:
+                self.pitch = self.roll = 0.0
+                self.reset_tilt()
+            return
+        f = max(0.0, 1.0 - LIE_FRICTION * dt)
+        rb.velocity = V(v.x * f, v.y, v.z * f)
+        self.jumps, self.air_time = 0, 0.0
+        if self.tilt == "falling":
+            a[4] += dt
+            k = min(1.0, a[4] / a[5])
+            k *= k  # it speeds up as it falls
+            self.pitch, self.roll = a[0] + (a[2] - a[0]) * k, a[1] + (a[3] - a[1]) * k
+            if a[4] >= a[5]:
+                self.pitch, self.roll = a[2], a[3]
+                if a[2] == 0.0 and a[3] == 0.0:
+                    self.reset_tilt()
+                else:
+                    self.tilt, self.anim = "lying", None
+                    self.lie_timer = random.uniform(*BOT_RIGHT_DELAY)
+            return
+        self.lie_timer -= dt
+        flip_back = inp["jump"] if self.player else self.lie_timer <= 0.0   # Space for the player, the timer for a bot
+        if flip_back:
+            # a hop and a turn over the shortest way onto the wheels; the car is in the air until it is done
+            self.tilt = "righting"
+            self.anim = [self.pitch, self.roll, 0.0, 0.0, 0.0, RIGHT_TIME]
+            self.jumps, self.air_time = 1, 0.0
+            self.grounded = self.was_grounded = False
+            self.jump_lock = 0.15
+            rb.velocity = V(rb.velocity.x, RIGHT_JUMP, rb.velocity.z)
+
+    def update_wheels(self, inp, dt):
+        """Roll the wheels with the forward speed and turn the front pair with the steering."""
+        if self.grounded and self.tilt == "wheels":
+            self.wheel_rate = math.degrees(self.e.rigidbody.velocity.dot(self.forward()) / WHEEL_R)
+            target = inp["steer"] * MAX_STEER
+        else:
+            self.wheel_rate -= self.wheel_rate * min(1.0, WHEEL_AIR_DRAG * dt)
+            target = 0.0
+        # the pitch of a wheel grows when the car drives forward (+z), the same sign for the left and the right side
+        self.wheel_spin = (self.wheel_spin + self.wheel_rate * dt) % 360.0
+        self.steer_angle += (target - self.steer_angle) * min(1.0, STEER_EASE * dt)
+        self.pose_wheels()
+
+    def pose_wheels(self):
+        for k, wheel in enumerate(self.wheels):
+            wheel.transform.rotation = V(self.wheel_spin, self.steer_angle if k < 2 else 0.0, 0.0)
+
+    def reset_details(self):
+        self.spark_cd = 0.0
+        if self.braking:
+            self.set_stop_lights(False)
+        if self.flame_on:
+            self.flame_on = False
+            self.flame.mesh.visible = False
+
+    def set_stop_lights(self, on):
+        self.braking = on
+        material = MAT["car_brakelight" if on else "car_taillight"]
+        for light in self.taillights:
+            light.mesh.material = material
+
+    def update_details(self, inp):
+        """Stop lights while braking or reversing, and the flame of the nozzle while boosting."""
+        vf = self.e.rigidbody.velocity.dot(self.forward())
+        braking = self.grounded and self.tilt == "wheels" and ((inp["throttle"] < 0 and vf > LIGHT_SPEED) or vf < -LIGHT_SPEED)
+        if braking != self.braking:  # the material changes only with the state, not every frame
+            self.set_stop_lights(braking)
+        if self.boosting != self.flame_on:
+            self.flame_on = self.boosting
+            self.flame.mesh.visible = self.boosting
+        if self.boosting:
+            length = FLAME_LEN * random.uniform(0.75, 1.25)
+            width = FLAME_WIDTH * random.uniform(0.85, 1.15)
+            t = self.flame.transform
+            t.scale = V(width, width, length)
+            t.position = V(0.0, FLAME_Y, FLAME_Z - length)
+
+    def reset_suspension(self):
+        self.susp_pitch = self.susp_roll = self.heave = 0.0         # degrees, degrees, metres
+        self.susp_pitch_v = self.susp_roll_v = self.heave_v = 0.0   # their speeds
+        self.susp_acc = self.susp_lat = 0.0                         # smoothed forward and lateral acceleration
+        self.prev_vf = self.prev_yaw = None
+        self.susp_grounded = True
+        self.fall_speed = 0.0
+        self.pose_chassis()
+
+    def pose_chassis(self):
+        t = self.chassis.transform
+        t.rotation = V(self.susp_pitch, 0.0, self.susp_roll)
+        t.position = V(0.0, self.heave, 0.0)
+
+    def update_suspension(self, dt):
+        """Springs of the body: pitch follows the forward acceleration, roll the lateral one, heave the landings."""
+        if dt <= 0.0:
+            return
+        v = self.e.rigidbody.velocity
+        vf = v.dot(self.forward())
+        acc = lat = 0.0
+        on_wheels = self.grounded and self.tilt == "wheels"
+        if self.grounded and not on_wheels:
+            self.fall_speed = 0.0   # a car that lies on a side or the roof: the suspension rests
+        elif on_wheels:
+            if self.prev_vf is not None:
+                acc = clamp((vf - self.prev_vf) / dt, -SUSP_ACC_MAX, SUSP_ACC_MAX)
+                lat = clamp(vf * math.radians(wrap(self.yaw - self.prev_yaw) / dt), -SUSP_ACC_MAX, SUSP_ACC_MAX)
+            if not self.susp_grounded and self.fall_speed > LAND_MIN_SPEED:
+                self.heave_v -= min(self.fall_speed, LAND_MAX_SPEED) * HEAVE_KICK   # the touchdown pushes the body down
+            self.fall_speed = 0.0
+        else:
+            self.fall_speed = max(self.fall_speed, -v.y)
+        self.susp_grounded = on_wheels
+        self.prev_vf, self.prev_yaw = vf, self.yaw
+        # in the air the measured accelerations fade to zero, so the body settles back by itself
+        ease = min(1.0, SUSP_ACC_EASE * dt)
+        self.susp_acc += (acc - self.susp_acc) * ease
+        self.susp_lat += (lat - self.susp_lat) * ease
+        pitch_to = clamp(-self.susp_acc * PITCH_PER_ACC, -PITCH_MAX, PITCH_MAX)    # gas lifts the nose
+        roll_to = clamp(self.susp_lat * ROLL_PER_LAT, -ROLL_MAX, ROLL_MAX)         # a right turn leans the body left
+        self.susp_pitch, self.susp_pitch_v = spring(self.susp_pitch, self.susp_pitch_v, pitch_to, SUSP_FREQ, SUSP_ZETA, -PITCH_MAX, PITCH_MAX, dt)
+        self.susp_roll, self.susp_roll_v = spring(self.susp_roll, self.susp_roll_v, roll_to, SUSP_FREQ, SUSP_ZETA, -ROLL_MAX, ROLL_MAX, dt)
+        self.heave, self.heave_v = spring(self.heave, self.heave_v, 0.0, HEAVE_FREQ, HEAVE_ZETA, HEAVE_MIN, HEAVE_MAX, dt)
+        self.pose_chassis()
+
 
 class RocketLeague(me.Behaviour):
     match_minutes: float = 5.0
@@ -242,7 +490,7 @@ class RocketLeague(me.Behaviour):
     def OnDestroy(self):
         if hasattr(me, "debug"):
             me.debug.show_colliders(True)
-        for key in ("1title", "2score", "3time", "4boost", "5msg", "9help"):
+        for key in ("1title", "2score", "3time", "4boost", "5msg", "6flip", "9help"):
             me.hud.clear(key)
 
     # ------------------------------------------------------------------ main loop
@@ -310,7 +558,7 @@ class RocketLeague(me.Behaviour):
         me.hud.set("1title", "=== ROCKET LEAGUE ===")
         me.hud.set("5msg", "Press  1 = 1v1    2 = 2v2    3 = 3v3    4 = 4v4")
         me.hud.set("9help", "W/S gas/brake  A/D steer  Space jump, x2 + direction = dodge  Shift boost  Ctrl slide  C ball cam  V arena  M menu")
-        for key in ("2score", "3time", "4boost"):
+        for key in ("2score", "3time", "4boost", "6flip"):
             me.hud.clear(key)
 
     def _start_match(self, n):
@@ -324,13 +572,12 @@ class RocketLeague(me.Behaviour):
             for i in range(n):
                 e = me.world.spawn("rl_car", V(0.0, CAR_Y, 0.0))
                 e.name = "Car_%s_%d" % (team, i)
-                e.mesh.material = MAT["car_" + team]
                 player = team == "blue" and i == 0
-                for cabin in me.world.find_all("RlCarCabin"):
-                    cabin.name = "Cabin_%s_%d" % (team, i)
-                    if player:
-                        cabin.mesh.material = MAT["cabin_gold"]
-                self.cars.append(Car(e, team, i, player))
+                car = Car(e, team, i, player)
+                car.body.mesh.material = MAT["car_" + team]
+                if player:
+                    car.cabin.mesh.material = MAT["cabin_gold"]
+                self.cars.append(car)
         self.score = {"blue": 0, "orange": 0}
         self.clock = max(0.1, self.match_minutes) * 60.0
         self.overtime = False
@@ -384,6 +631,10 @@ class RocketLeague(me.Behaviour):
         prefix = "OVERTIME +" if self.overtime else "TIME "
         me.hud.set("3time", "%s%d:%02d" % (prefix, secs // 60, secs % 60))
         player = next((c for c in self.cars if c.player), None)
+        if player is not None and self.state == "play" and player.dead <= 0.0 and player.tilt == "lying":
+            me.hud.set("6flip", "SPACE - flip back")
+        else:
+            me.hud.clear("6flip")
         if player is not None:
             bar = "#" * int(player.boost / 10) + "." * (10 - int(player.boost / 10))
             state = "  DEMOLISHED" if player.dead > 0 else ""
@@ -432,6 +683,7 @@ class RocketLeague(me.Behaviour):
         for c in self.cars:
             c.hit_cd = max(0.0, c.hit_cd - dt)
             c.bump_cd = max(0.0, c.bump_cd - dt)
+            c.spark_cd = max(0.0, c.spark_cd - dt)
             if c.dead > 0.0:
                 c.dead -= dt
                 if c.dead <= 0.0:
@@ -448,6 +700,12 @@ class RocketLeague(me.Behaviour):
             else:
                 inp = self._bot_input(c)
             c.drive(inp, dt)
+            c.update_wheels(inp, dt)
+            c.update_suspension(dt)
+            c.update_details(inp)
+            if inp["slide"] and c.grounded and c.tilt == "wheels" and c.spark_cd <= 0.0 and flat(c.e.rigidbody.velocity).length() > SPARK_SPEED:
+                c.spark_cd = SPARK_INTERVAL
+                self._sparks(c)
             top = WALL_TOP - 1.0  # there is no ceiling collider
             cp = c.e.transform.position
             if cp.y > top:
@@ -463,6 +721,17 @@ class RocketLeague(me.Behaviour):
         if self.state == "play":
             self._car_ball_hits()
             self._car_car_hits()
+
+    def _sparks(self, c):
+        """Small sparks at the rear wheels of a car that slides (the effect limit is checked in _spawn_fx)."""
+        p = c.e.transform.position
+        fwd = c.forward()
+        right = V(fwd.z, 0.0, -fwd.x)
+        for side in (-1.0, 1.0):
+            pos = p - fwd * 0.75 + right * (0.72 * side)
+            vel = fwd * -random.uniform(2.0, 5.0) + right * (side * random.uniform(0.5, 2.0)) + V(0.0, random.uniform(2.5, 5.0), 0.0)
+            self._spawn_fx("rl_deco", V(pos.x, max(0.05, p.y - 0.25), pos.z), vel, random.uniform(0.12, 0.2), -0.3,
+                           random.uniform(0.3, 0.5), random.choice(("gold", "white")), True)
 
     def _player_input(self):
         k = me.input.is_key_down
@@ -524,6 +793,7 @@ class RocketLeague(me.Behaviour):
         p = victim.e.transform.position
         self._explosion(p, victim.team, False)
         victim.dead = 3.0
+        victim.reset_tilt()
         victim.e.rigidbody.is_kinematic = True
         victim.e.rigidbody.velocity = V(0.0, 0.0, 0.0)
         victim.e.transform.position = V(self.cars.index(victim) * 5.0 - 20.0, -40.0, 0.0)

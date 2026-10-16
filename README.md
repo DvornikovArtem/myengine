@@ -246,6 +246,7 @@ Notes:
 - Root CMake integrates both `DirectXTK` and `DirectXTex`
 - `myengine_engine` links both interfaces publicly
 - `myengine` executable links engine + interfaces
+- Assets, config and the Python runtime are copied next to each executable by one shared target per output folder (see [docs/build-runtime-assets.md](docs/build-runtime-assets.md), in Russian)
 
 ## 12. Repository Map
 

@@ -18,6 +18,7 @@
 #include <myengine/ecs/components/CameraComponent.h>
 #include <myengine/ecs/components/CameraControllerComponent.h>
 #include <myengine/ecs/components/ColliderComponent.h>
+#include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
 #include <myengine/ecs/components/TagComponent.h>
@@ -202,6 +203,49 @@ namespace myengine::scripting::detail
             const auto* tag = world.TryGet<TagComponent>(id);
             return prefix.empty() || (tag != nullptr && tag->name.compare(0, prefix.size(), prefix) == 0);
         }
+
+        // Direct children in HierarchyComponent order; entities waiting for the end-of-step destroy are skipped,
+        // like in the world queries.
+        std::vector<ecs::EntityId> LiveChildren(ecs::World& world, const ecs::EntityId parent)
+        {
+            std::vector<ecs::EntityId> result;
+            const auto* hierarchy = world.TryGet<ecs::components::HierarchyComponent>(parent);
+            if (hierarchy == nullptr)
+            {
+                return result;
+            }
+            const auto* system = GetScriptContext().system;
+            for (const auto child : hierarchy->children)
+            {
+                if (world.IsAlive(child) && (system == nullptr || !system->IsDestroyPending(child)))
+                {
+                    result.push_back(child);
+                }
+            }
+            return result;
+        }
+
+        // Depth-first (pre-order) search of the subtree below `root`; the root itself is not matched.
+        ecs::EntityId FindDescendant(ecs::World& world, const ecs::EntityId root, const std::string& name, std::unordered_set<ecs::EntityId>& visited)
+        {
+            for (const auto child : LiveChildren(world, root))
+            {
+                if (!visited.insert(child).second)
+                {
+                    continue; // a corrupted hierarchy must not loop forever
+                }
+                const auto* tag = world.TryGet<TagComponent>(child);
+                if (tag != nullptr && tag->name == name)
+                {
+                    return child;
+                }
+                if (const auto found = FindDescendant(world, child, name, visited); found != ecs::kInvalidEntity)
+                {
+                    return found;
+                }
+            }
+            return ecs::kInvalidEntity;
+        }
     }
 
     void BindScriptApi(py::module_& module)
@@ -310,6 +354,33 @@ namespace myengine::scripting::detail
             .def_property_readonly("rigidbody", [](const EntityRef& entity) { RequireComponent<RigidbodyComponent>(entity, "Rigidbody"); return RigidbodyRef{entity}; })
             .def_property_readonly("collider", [](const EntityRef& entity) { RequireComponent<ColliderComponent>(entity, "Collider"); return ColliderRef{entity}; })
             .def_property_readonly("mesh", [](const EntityRef& entity) { RequireComponent<MeshRendererComponent>(entity, "MeshRenderer"); return MeshRendererRef{entity}; })
+            .def_property_readonly("parent", [](const EntityRef& entity) -> py::object
+                {
+                    auto& world = RequireAlive(entity);
+                    const auto* hierarchy = world.TryGet<ecs::components::HierarchyComponent>(entity.id);
+                    if (hierarchy == nullptr || hierarchy->parent == ecs::kInvalidEntity || !world.IsAlive(hierarchy->parent))
+                    {
+                        return py::none();
+                    }
+                    return py::cast(EntityRef{hierarchy->parent});
+                }, "The parent Entity, or None for a root")
+            .def_property_readonly("children", [](const EntityRef& entity)
+                {
+                    auto& world = RequireAlive(entity);
+                    std::vector<EntityRef> result;
+                    for (const auto child : LiveChildren(world, entity.id))
+                    {
+                        result.push_back(EntityRef{child});
+                    }
+                    return result;
+                }, "A list copy of the direct children in hierarchy order, without entities waiting to be destroyed")
+            .def("find_child", [](const EntityRef& entity, const std::string& name) -> py::object
+                {
+                    auto& world = RequireAlive(entity);
+                    std::unordered_set<ecs::EntityId> visited{entity.id};
+                    const auto found = FindDescendant(world, entity.id, name, visited);
+                    return found != ecs::kInvalidEntity ? py::object(py::cast(EntityRef{found})) : py::none();
+                }, py::arg("name"), "The first descendant with this name (depth-first), or None")
             .def("get_script", [](const EntityRef& entity, const py::handle scriptClass)
                 {
                     RequireAlive(entity);
