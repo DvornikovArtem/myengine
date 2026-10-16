@@ -16,6 +16,7 @@
 
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/render/dx12/Dx12Context.h>
+#include <myengine/render/dx12/RootSignatureBuilder.h>
 
 namespace myengine::core
 {
@@ -26,6 +27,7 @@ namespace myengine::render::dx12
 {
     class Dx12GpuProfiler;
     class ShaderReflector;
+    struct CompiledShaderProgram;
 
     class Dx12RenderAdapter final : public IRenderAdapter
     {
@@ -116,6 +118,7 @@ namespace myengine::render::dx12
             std::array<FrameUploadBuffer, kBackBufferCount> uiVertexUploadBuffers;
             std::array<FrameUploadBuffer, kBackBufferCount> uiIndexUploadBuffers;
             std::array<FrameUploadBuffer, kBackBufferCount> debugVertexUploadBuffers;
+            std::array<FrameUploadBuffer, kBackBufferCount> constantUploadBuffers; // the data of root CBVs
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
             Microsoft::WRL::ComPtr<ID3D12Resource> depthStencil;
 
@@ -185,8 +188,34 @@ namespace myengine::render::dx12
             UINT slot = 0;
         };
 
+        // Where the renderer writes its own values in a program: found by name once, when the program is created
+        constexpr static std::uint32_t kNoOffset = 0xFFFFFFFFu;
+        struct ConstantBufferSlot
+        {
+            std::uint32_t rootParameter = kNoRootParameter;
+            bool rootConstants = true;   // root constants or a root CBV
+            std::uint32_t sizeBytes = 0;
+            std::uint32_t sizeDwords = 0;
+            // The "engine semantics" (docs/render/architecture.md, 3.5): offsets of the variables by name
+            std::uint32_t model = kNoOffset;          // gModel
+            std::uint32_t viewProjection = kNoOffset; // gViewProjection
+            std::uint32_t color = kNoOffset;          // gColor (the tint of the draw item)
+            std::uint32_t lightDirection = kNoOffset; // gLightDirection (xyz: direction, w: ambient)
+            std::uint32_t screenSize = kNoOffset;     // screenSize (the UI)
+            std::uint32_t translation = kNoOffset;    // translation (the UI)
+        };
+        struct DrawSlots
+        {
+            std::vector<ConstantBufferSlot> constantBuffers;
+            std::uint32_t textureParameter = kNoRootParameter; // the first texture of the shader
+        };
+
         struct ShaderRecord
         {
+            Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature; // from the layout, shared by programs of one shape
+            std::uint64_t rootSignatureShape = 0;
+            ProgramBinding binding;                                    // name -> root parameter
+            DrawSlots slots;
             Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
             Microsoft::WRL::ComPtr<ID3D12PipelineState> wireframePipelineState; // same shaders, fill mode wireframe (may be empty)
             ShaderLayout layout;          // from the reflection of the compiled shaders
@@ -210,7 +239,6 @@ namespace myengine::render::dx12
         bool CreateDevice();
         bool CreateCommandObjects();
         bool CreateFence();
-        bool BuildRootSignature();
         bool BuildDebugLinePipeline();
         bool BuildTextureDescriptorHeap();
         bool BuildRenderTargetHeaps();
@@ -224,10 +252,22 @@ namespace myengine::render::dx12
         bool CreateBuffer(const void* data, UINT64 dataSize, D3D12_RESOURCE_STATES finalState, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer);
         bool CreateUploadBuffer(const void* data, UINT64 dataSize, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer);
         bool CreateTextureResource(const TextureData& textureData, Microsoft::WRL::ComPtr<ID3D12Resource>& outTexture);
+        // The kind of pass a program is for: the states of its pipeline (the input layouts stay in the code until A3)
+        enum class ProgramKind
+        {
+            Scene,
+            DebugLines,
+            Ui,
+        };
         // Compiles and reflects one of the renderer's own programs (the file is searched like the other assets).
         // The messages go to the log.
-        bool CompileBuiltinProgram(const char* relativePath, Microsoft::WRL::ComPtr<ID3DBlob>& outVertex, Microsoft::WRL::ComPtr<ID3DBlob>& outPixel, ShaderLayout& outLayout);
+        bool BuildBuiltinProgram(const char* relativeDescriptorPath, ProgramKind kind, ShaderRecord& record);
         void LogShaderDiagnostics(const std::vector<ShaderDiagnostic>& diagnostics) const;
+        // The root signature (from the layout, cached by shape), the pipeline states and the draw slots of a program
+        bool BuildProgram(const CompiledShaderProgram& compiled, const ShaderProgramData& data, ProgramKind kind, ShaderRecord& record);
+        bool GetRootSignature(const RootSignatureDescription& description, Microsoft::WRL::ComPtr<ID3D12RootSignature>& outRootSignature);
+        void SetRootSignature(ID3D12RootSignature* rootSignature);
+        void SetConstants(const ConstantBufferSlot& slot, SurfaceData& surface);
         bool EnsureFrameUploadBuffer(FrameUploadBuffer& buffer, UINT64 requiredSize);
         bool AllocateFrameUploadData(FrameUploadBuffer& buffer, const void* data, UINT64 dataSize, UINT64 alignment, D3D12_GPU_VIRTUAL_ADDRESS& outGpuAddress);
         void ReleaseFrameUploadBuffer(FrameUploadBuffer& buffer);
@@ -241,11 +281,13 @@ namespace myengine::render::dx12
         core::Logger& logger_;
         Dx12Context context_;
 
-        Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature_;
-        Microsoft::WRL::ComPtr<ID3D12RootSignature> debugRootSignature_;
-        Microsoft::WRL::ComPtr<ID3D12PipelineState> debugLinePipelineState_;
-        Microsoft::WRL::ComPtr<ID3D12RootSignature> uiRootSignature_;
-        Microsoft::WRL::ComPtr<ID3D12PipelineState> uiPipelineState_;
+        // Root signatures by the shape of the layout: programs with the same structure share one
+        std::unordered_map<std::uint64_t, Microsoft::WRL::ComPtr<ID3D12RootSignature>> rootSignatures_;
+        ID3D12RootSignature* boundRootSignature_ = nullptr; // on the command list now (SetGraphicsRootSignature only when it changes)
+        std::vector<std::uint8_t> constantScratch_;         // the bytes of one cbuffer while a draw is prepared
+        bool forceRootCbv_ = false;                         // MYENGINE_DX12_ROOT_CBV=1: cbuffers as root CBVs, for checking that path
+        ShaderRecord debugProgram_;                         // the programs that the renderer builds itself
+        ShaderRecord uiProgram_;
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> textureSrvHeap_;
         UINT textureSrvDescriptorSize_ = 0;
         UINT nextTextureDescriptorIndex_ = 0;
@@ -287,8 +329,6 @@ namespace myengine::render::dx12
         ShaderLayout wireframePixelLayout_;                      // its reflection (no resources)
 
         std::unique_ptr<ShaderReflector> shaderReflector_;       // compiles the programs, keeps the cache
-        ShaderLayout debugLineLayout_;
-        ShaderLayout uiLayout_;
         std::vector<ShaderDiagnostic> lastShaderDiagnostics_;
 
         std::unique_ptr<Dx12GpuProfiler> profiler_;

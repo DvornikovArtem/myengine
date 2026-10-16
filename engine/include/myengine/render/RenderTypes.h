@@ -147,6 +147,9 @@ namespace myengine::render
         std::string vertexProfile = "vs_5_0";
         std::string pixelProfile = "ps_5_0";
         std::vector<std::pair<std::string, std::string>> defines; // #define name value for both entry points
+        // The states of the static samplers, by the name of the sampler in the shader: "gSampler" -> "linear_wrap".
+        // A sampler that is not named here is linear, wrap.
+        std::vector<std::pair<std::string, std::string>> samplers;
     };
 
     struct DrawItem

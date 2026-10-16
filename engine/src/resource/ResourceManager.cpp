@@ -29,6 +29,7 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/LoadingService.h>
 #include <myengine/render/IRenderAdapter.h>
+#include <myengine/render/ShaderDescriptor.h>
 #include <myengine/resource/ResourceManager.h>
 
 #include <tracy/Tracy.hpp>
@@ -2110,28 +2111,14 @@ namespace myengine::resource
             const std::string extension = ToLower(NarrowText(path.extension()));
             if (extension == ".json")
             {
-                std::ifstream stream(path);
-                if (!stream.is_open())
+                std::string error;
+                if (!render::LoadShaderDescriptor(path, program, error))
                 {
-                    logger_.Warning("ResourceManager: shader descriptor open failed: " + NarrowText(path));
+                    logger_.Warning("ResourceManager: shader descriptor " + NarrowText(path) + ": " + error);
                     return nullptr;
                 }
 
-                json descriptor;
-                stream >> descriptor;
-
-                const std::string sourceValue = descriptor.value("source", std::string());
-                if (sourceValue.empty())
-                {
-                    logger_.Warning("ResourceManager: shader descriptor has empty source: " + NarrowText(path));
-                    return nullptr;
-                }
-
-                program.sourcePath = ResolvePath(path.parent_path() / sourceValue);
-                program.vertexEntry = descriptor.value("vertexEntry", program.vertexEntry);
-                program.pixelEntry = descriptor.value("pixelEntry", program.pixelEntry);
-                program.vertexProfile = descriptor.value("vertexProfile", program.vertexProfile);
-                program.pixelProfile = descriptor.value("pixelProfile", program.pixelProfile);
+                program.sourcePath = ResolvePath(program.sourcePath);
                 dependencies = {path, program.sourcePath};
             }
             else

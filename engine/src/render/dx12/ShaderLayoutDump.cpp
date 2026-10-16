@@ -3,10 +3,9 @@
 #include <myengine/render/dx12/ShaderLayoutDump.h>
 
 #include <algorithm>
-#include <fstream>
+#include <cstdio>
+#include <map>
 #include <set>
-
-#include <nlohmann/json.hpp>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -14,7 +13,9 @@
 #include <windows.h>
 
 #include <myengine/render/RenderTypes.h>
+#include <myengine/render/ShaderDescriptor.h>
 #include <myengine/render/ShaderLayout.h>
+#include <myengine/render/dx12/RootSignatureBuilder.h>
 
 #include "ShaderReflector.h"
 
@@ -46,7 +47,10 @@ namespace myengine::render::dx12
             return utf8;
         }
 
-        void DumpProgram(ShaderReflector& reflector, const std::string& title, const ShaderProgramData& program, std::string& text, int& failures)
+        // The programs by the hash of the root signature shape: who shares a root signature with whom
+        using ShapeUsers = std::map<std::uint64_t, std::vector<std::string>>;
+
+        void DumpProgram(ShaderReflector& reflector, const std::string& title, const ShaderProgramData& program, std::string& text, int& failures, ShapeUsers& shapes)
         {
             text += "=== " + title + " ===\n";
             text += "source: " + program.sourcePath.generic_u8string() + "  VS " + program.vertexEntry + "/" + program.vertexProfile +
@@ -62,7 +66,22 @@ namespace myengine::render::dx12
                 text += "NOT COMPILED\n\n";
                 return;
             }
-            text += FormatShaderLayout(result.program->layout) + "\n";
+            text += FormatShaderLayout(result.program->layout);
+
+            // What the layout becomes: the root signature by the rules of the builder
+            const RootSignatureBuild build = BuildRootSignatureDescription(result.program->layout, program.samplers, title);
+            for (const ShaderDiagnostic& diagnostic : build.diagnostics)
+            {
+                text += AnsiToUtf8(FormatShaderDiagnostic(diagnostic)) + "\n";
+            }
+            if (!build.ok)
+            {
+                ++failures;
+                text += "NO ROOT SIGNATURE\n\n";
+                return;
+            }
+            text += FormatRootSignature(build.description) + "\n";
+            shapes[build.description.shapeHash].push_back(title);
         }
     }
 
@@ -90,28 +109,20 @@ namespace myengine::render::dx12
         ShaderReflector reflector;
         int failures = 0;
         std::set<std::string> named;
+        ShapeUsers shapes;
 
         for (const std::filesystem::path& description : descriptions)
         {
             ShaderProgramData program;
-            try
+            std::string error;
+            if (!LoadShaderDescriptor(description, program, error))
             {
-                std::ifstream stream(description);
-                const nlohmann::json json = nlohmann::json::parse(stream);
-                program.sourcePath = description.parent_path() / std::filesystem::u8path(json.at("source").get<std::string>());
-                program.vertexEntry = json.value("vertexEntry", program.vertexEntry);
-                program.pixelEntry = json.value("pixelEntry", program.pixelEntry);
-                program.vertexProfile = json.value("vertexProfile", program.vertexProfile);
-                program.pixelProfile = json.value("pixelProfile", program.pixelProfile);
-            }
-            catch (const std::exception& ex)
-            {
-                outText += "=== " + description.filename().u8string() + " ===\n" + description.u8string() + ": error: " + ex.what() + "\nNOT COMPILED\n\n";
+                outText += "=== " + description.filename().u8string() + " ===\n" + description.u8string() + ": error: " + error + "\nNOT COMPILED\n\n";
                 ++failures;
                 continue;
             }
             named.insert(program.sourcePath.lexically_normal().generic_string());
-            DumpProgram(reflector, description.filename().u8string(), program, outText, failures);
+            DumpProgram(reflector, description.filename().u8string(), program, outText, failures, shapes);
         }
 
         for (const std::filesystem::path& source : sources)
@@ -122,7 +133,21 @@ namespace myengine::render::dx12
             }
             ShaderProgramData program;
             program.sourcePath = source;
-            DumpProgram(reflector, source.filename().u8string(), program, outText, failures);
+            DumpProgram(reflector, source.filename().u8string(), program, outText, failures, shapes);
+        }
+
+        // The renderer makes one root signature per shape: programs of the same structure share it
+        outText += "=== Root signature shapes ===\n";
+        for (const auto& shape : shapes)
+        {
+            char hash[32];
+            std::snprintf(hash, sizeof(hash), "%016llx", static_cast<unsigned long long>(shape.first));
+            outText += std::string("  ") + hash + "  shared by " + std::to_string(shape.second.size()) + ": ";
+            for (std::size_t i = 0; i < shape.second.size(); ++i)
+            {
+                outText += (i == 0 ? "" : ", ") + shape.second[i];
+            }
+            outText += "\n";
         }
         return failures;
     }
