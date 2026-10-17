@@ -230,6 +230,27 @@ namespace myengine::ui
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "%d program(s) did not compile", shaderLayoutsFailures_);
             }
             ImGui::Separator();
+
+            // The live programs: the version grows with every successful reload, the error of a failed one is shown until
+            // the next good one (the old version keeps running meanwhile)
+            if (services_.shaderStatus)
+            {
+                const ShaderStatusView status = services_.shaderStatus();
+                ImGui::TextUnformatted(status.summary.c_str());
+                for (const ShaderStatusView::Program& program : status.programs)
+                {
+                    ImGui::BulletText("%s  v%u", program.name.c_str(), program.version);
+                    if (!program.lastError.empty())
+                    {
+                        ImGui::SameLine();
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.35f, 1.0f));
+                        ImGui::TextWrapped("error: %s", program.lastError.c_str());
+                        ImGui::PopStyleColor();
+                    }
+                }
+                ImGui::Separator();
+            }
+
             ImGui::BeginChild("##ShaderLayoutsText", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
             PushFontRole(FontRole::Mono);
             ImGui::TextUnformatted(shaderLayoutsText_.c_str());

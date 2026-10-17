@@ -3,6 +3,9 @@
 #include <myengine/render/ShaderDescriptor.h>
 
 #include <fstream>
+#include <iterator>
+#include <regex>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -65,5 +68,55 @@ namespace myengine::render
             outError = std::string("shader descriptor parse failed: ") + ex.what();
             return false;
         }
+    }
+
+    namespace
+    {
+        constexpr int kMaxIncludeDepth = 8;
+
+        void CollectIncludes(const std::filesystem::path& file, const std::string& text, std::vector<std::filesystem::path>& result, std::set<std::string>& visited, const int depth)
+        {
+            if (depth > kMaxIncludeDepth)
+            {
+                return;
+            }
+            static const std::regex includePattern(R"re(#\s*include\s*"([^"]+)")re");
+            for (std::sregex_iterator it(text.begin(), text.end(), includePattern), end; it != end; ++it)
+            {
+                const std::filesystem::path included = (file.parent_path() / std::filesystem::u8path((*it)[1].str())).lexically_normal();
+                if (!visited.insert(included.generic_string()).second)
+                {
+                    continue;
+                }
+                result.push_back(included);
+
+                std::ifstream stream(included, std::ios::binary);
+                if (!stream.is_open())
+                {
+                    continue; // the compiler reports a missing include
+                }
+                const std::string includedText((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+                CollectIncludes(included, includedText, result, visited, depth + 1);
+            }
+        }
+    }
+
+    std::vector<std::filesystem::path> ScanShaderIncludes(const std::filesystem::path& sourceFile, const std::string& text)
+    {
+        std::vector<std::filesystem::path> result;
+        std::set<std::string> visited;
+        CollectIncludes(sourceFile, text, result, visited, 0);
+        return result;
+    }
+
+    std::vector<std::filesystem::path> ScanShaderIncludes(const std::filesystem::path& sourceFile)
+    {
+        std::ifstream stream(sourceFile, std::ios::binary);
+        if (!stream.is_open())
+        {
+            return {};
+        }
+        const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        return ScanShaderIncludes(sourceFile, text);
     }
 }

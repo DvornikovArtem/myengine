@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include <myengine/render/RenderTypes.h>
 
@@ -19,4 +20,10 @@ namespace myengine::render
     // }
     // `source` is made relative to the folder of the descriptor. false: `outError` says what is wrong.
     bool LoadShaderDescriptor(const std::filesystem::path& descriptorPath, ShaderProgramData& outProgram, std::string& outError);
+
+    // The files that a shader source includes ("#include "x.hlsli"", relative to the including file), the includes of the
+    // includes too, without repeats. A file that does not exist is listed too: creating it must reload the program.
+    // `text` is the content of `sourceFile` when the caller has it already.
+    std::vector<std::filesystem::path> ScanShaderIncludes(const std::filesystem::path& sourceFile, const std::string& text);
+    std::vector<std::filesystem::path> ScanShaderIncludes(const std::filesystem::path& sourceFile);
 }

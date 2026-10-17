@@ -45,6 +45,11 @@ namespace myengine::render::dx12
         bool GetShaderLayout(ShaderHandle shader, ShaderLayout& outLayout, ShaderVariant variant = ShaderVariant::Normal) const override;
         bool GetBuiltinShaderLayout(BuiltinShader shader, ShaderLayout& outLayout) const override;
         std::vector<ShaderDiagnostic> GetLastShaderDiagnostics() const override { return lastShaderDiagnostics_; }
+        void DestroyShader(ShaderHandle shader) override;
+        bool ReloadShaderProgram(ShaderHandle shader, const ShaderProgramData& shaderProgram) override;
+        std::uint32_t GetShaderVersion(ShaderHandle shader) const override;
+        std::vector<ShaderProgramInfo> GetShaderPrograms() const override;
+        ShaderStatistics GetShaderStatistics() const override;
 
         RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) override;
         void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) override;
@@ -187,6 +192,7 @@ namespace myengine::render::dx12
         {
             Microsoft::WRL::ComPtr<ID3D12Resource> resource;
             Microsoft::WRL::ComPtr<ID3D12Resource> secondResource;
+            std::vector<Microsoft::WRL::ComPtr<IUnknown>> objects; // pipeline states, root signatures of a replaced program
             UINT64 fenceValue = 0;
             UINT descriptorIndex = 0;
             bool hasDescriptor = false;
@@ -218,6 +224,9 @@ namespace myengine::render::dx12
 
         struct ShaderRecord
         {
+            std::uint32_t version = 1;                                 // +1 for every successful reload
+            std::string sourceName;                                    // the file of the program
+            std::string lastError;                                     // the first error of the last reload that failed
             Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature; // from the layout, shared by programs of one shape
             std::uint64_t rootSignatureShape = 0;
             ProgramBinding binding;                                    // name -> root parameter
@@ -271,6 +280,9 @@ namespace myengine::render::dx12
         void LogShaderDiagnostics(const std::vector<ShaderDiagnostic>& diagnostics) const;
         // The root signature (from the layout, cached by shape), the pipeline states and the draw slots of a program
         bool BuildProgram(const CompiledShaderProgram& compiled, const ShaderProgramData& data, ProgramKind kind, ShaderRecord& record);
+        bool BuildProgramImpl(const CompiledShaderProgram& compiled, const ShaderProgramData& data, ProgramKind kind, ShaderRecord& record);
+        void RetireShaderRecord(ShaderRecord&& record);
+        void ReleaseRootSignature(std::uint64_t shape, RetiredResource& retired);
         bool GetRootSignature(const RootSignatureDescription& description, Microsoft::WRL::ComPtr<ID3D12RootSignature>& outRootSignature);
         void SetRootSignature(ID3D12RootSignature* rootSignature);
         void SetConstants(const ConstantBufferSlot& slot, SurfaceData& surface);
@@ -289,6 +301,9 @@ namespace myengine::render::dx12
 
         // Root signatures by the shape of the layout: programs with the same structure share one
         std::unordered_map<std::uint64_t, Microsoft::WRL::ComPtr<ID3D12RootSignature>> rootSignatures_;
+        std::unordered_map<std::uint64_t, std::uint32_t> rootSignatureUsers_; // programs that use the root signature of a shape
+        std::uint64_t shaderReloads_ = 0;
+        std::uint64_t shaderReloadFailures_ = 0;
         ID3D12RootSignature* boundRootSignature_ = nullptr; // on the command list now (SetGraphicsRootSignature only when it changes)
         std::vector<std::uint8_t> constantScratch_;         // the bytes of one cbuffer while a draw is prepared
         bool forceRootCbv_ = false;                         // MYENGINE_DX12_ROOT_CBV=1: cbuffers as root CBVs, for checking that path

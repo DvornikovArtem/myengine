@@ -2,6 +2,8 @@
 
 #include "ShaderCompiler.h"
 
+#include <myengine/render/ShaderDescriptor.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
@@ -16,8 +18,6 @@ namespace myengine::render::dx12
 {
     namespace
     {
-        constexpr int kMaxIncludeDepth = 8;
-
         ShaderDiagnostic MakeDiagnostic(const std::string& file, const ShaderStage stage, std::string message)
         {
             ShaderDiagnostic diagnostic;
@@ -25,32 +25,6 @@ namespace myengine::render::dx12
             diagnostic.stage = StageMask(stage);
             diagnostic.message = std::move(message);
             return diagnostic;
-        }
-
-        void HashIncludes(const std::filesystem::path& file, const std::string& text, std::uint64_t& hash, std::set<std::string>& visited, const int depth)
-        {
-            if (depth > kMaxIncludeDepth)
-            {
-                return;
-            }
-            static const std::regex includePattern(R"re(#\s*include\s*"([^"]+)")re");
-            for (std::sregex_iterator it(text.begin(), text.end(), includePattern), end; it != end; ++it)
-            {
-                const std::filesystem::path included = (file.parent_path() / (*it)[1].str()).lexically_normal();
-                const std::string key = included.generic_string();
-                if (!visited.insert(key).second)
-                {
-                    continue;
-                }
-                std::ifstream stream(included, std::ios::binary);
-                if (!stream.is_open())
-                {
-                    continue; // the compiler reports a missing include
-                }
-                const std::string includedText((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-                hash = HashBytes(includedText.data(), includedText.size(), hash);
-                HashIncludes(included, includedText, hash, visited, depth + 1);
-            }
         }
     }
 
@@ -68,8 +42,16 @@ namespace myengine::render::dx12
     std::uint64_t HashShaderSource(const std::filesystem::path& file, const std::string& text)
     {
         std::uint64_t hash = HashBytes(text.data(), text.size());
-        std::set<std::string> visited;
-        HashIncludes(file, text, hash, visited, 0);
+        for (const std::filesystem::path& included : ScanShaderIncludes(file, text))
+        {
+            std::ifstream stream(included, std::ios::binary);
+            if (!stream.is_open())
+            {
+                continue; // the compiler reports a missing include
+            }
+            const std::string includedText((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            hash = HashBytes(includedText.data(), includedText.size(), hash);
+        }
         return hash;
     }
 
