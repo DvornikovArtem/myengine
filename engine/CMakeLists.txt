@@ -58,16 +58,11 @@
   include/myengine/physics/PhysicsWorldState.h
   include/myengine/render/IRenderAdapter.h
   include/myengine/render/RenderTargetPool.h
-  include/myengine/render/ShaderDescriptor.h
-  include/myengine/render/ShaderLayout.h
   include/myengine/render/RenderTypes.h
   include/myengine/render/dx12/Dx12Context.h
   include/myengine/render/GpuCapture.h
   include/myengine/render/GpuStats.h
   include/myengine/render/dx12/Dx12RenderAdapter.h
-  include/myengine/render/dx12/InputLayoutBuilder.h
-  include/myengine/render/dx12/RootSignatureBuilder.h
-  include/myengine/render/dx12/ShaderLayoutDump.h
   include/myengine/resource/ResourceManager.h
   include/myengine/scene/SceneSerializer.h
   include/myengine/scene/SceneEvents.h
@@ -130,18 +125,9 @@ set(ENGINE_SOURCES
   src/render/RenderTargetPool.cpp
   src/render/GpuCapture.cpp
   src/render/GpuStats.cpp
-  src/render/ShaderDescriptor.cpp
-  src/render/ShaderLayout.cpp
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp
-  src/render/dx12/InputLayoutBuilder.cpp
-  src/render/dx12/RootSignatureBuilder.cpp
-  src/render/dx12/ShaderCompiler.cpp
-  src/render/dx12/ShaderCompiler.h
-  src/render/dx12/ShaderLayoutDump.cpp
-  src/render/dx12/ShaderReflector.cpp
-  src/render/dx12/ShaderReflector.h
   src/resource/ResourceManager.cpp
   src/scene/PrefabLibrary.cpp
   src/scene/SceneSerializer.cpp
