@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <myengine/render/RenderTypes.h>
+#include <myengine/render/ShaderDescriptor.h>
 #include <myengine/render/ShaderLayout.h>
 #include <myengine/render/dx12/ShaderLayoutDump.h>
 
@@ -535,6 +536,115 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return position; }
         fs::remove_all(directory, ec);
     }
 
+    // ---- the includes: the list for the dependencies of a program, Invalidate ----
+
+    void WriteFile(const fs::path& path, const std::string& text)
+    {
+        fs::create_directories(path.parent_path());
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream << text;
+    }
+
+    void TestScanShaderIncludes()
+    {
+        const fs::path directory = fs::temp_directory_path() / fs::u8path("myengine_scan_includes_\u0442\u0435\u0441\u0442");
+        fs::remove_all(directory);
+        WriteFile(directory / "main.hlsl",
+            "#include \"a.hlsli\"\n"
+            "# include \"sub/b.hlsli\"\n"
+            "#include \"a.hlsli\"\n"           // a repeat
+            "#include \"missing.hlsli\"\n"     // a file that does not exist
+            "// #include <system.h>\n");         // not a quoted include
+        WriteFile(directory / "a.hlsli", "#include \"sub/b.hlsli\"\nfloat4 gA;\n"); // includes b too
+        WriteFile(directory / "sub" / "b.hlsli", "#include \"c.hlsli\"\n");           // relative to sub/
+        WriteFile(directory / "sub" / "c.hlsli", "#include \"../main.hlsl\"\n");      // a cycle back to the main file
+
+        const std::vector<fs::path> includes = ScanShaderIncludes(directory / "main.hlsl");
+        const auto has = [&includes](const fs::path& path)
+        {
+            for (const fs::path& include : includes)
+            {
+                if (include.lexically_normal() == path.lexically_normal())
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        Check(has(directory / "a.hlsli"), "a.hlsli is an include");
+        Check(has(directory / "sub" / "b.hlsli"), "sub/b.hlsli is an include");
+        Check(has(directory / "sub" / "c.hlsli"), "the include of an include (relative to its own folder) is listed");
+        Check(has(directory / "missing.hlsli"), "a file that does not exist is listed: creating it must reload the program");
+        Check(has(directory / "main.hlsl"), "the cycle reaches the main file once and stops");
+        Check(includes.size() == 5, "a.hlsli, b, c, missing, the main file again: " + std::to_string(includes.size()) + " listed");
+
+        // The text given by the caller is scanned instead of the file
+        const std::vector<fs::path> fromText = ScanShaderIncludes(directory / "other.hlsl", "#include \"x.hlsli\"\n");
+        Check(fromText.size() == 1 && fromText[0].filename() == "x.hlsli" && fromText[0].parent_path().lexically_normal() == directory.lexically_normal(), "the includes of a text are relative to the given file");
+        Check(ScanShaderIncludes(directory / "no_such_file.hlsl").empty(), "a missing source has no includes");
+
+        std::error_code ec;
+        fs::remove_all(directory, ec);
+    }
+
+    void TestInvalidateSeesIncludeEdit()
+    {
+        const fs::path directory = fs::temp_directory_path() / fs::u8path("myengine_invalidate_\u0442\u0435\u0441\u0442");
+        fs::remove_all(directory);
+        const fs::path include = directory / "common.hlsli";
+        const fs::path main = directory / "lit.hlsl";
+        WriteFile(include, "cbuffer Frame : register(b0) { float4 gTint; };\n");
+        WriteFile(main, "#include \"common.hlsli\"\n"
+                        "float4 VSMain(float3 p : POSITION) : SV_POSITION { return float4(p, 1) * gTint; }\n"
+                        "float4 PSMain(float4 p : SV_POSITION) : SV_TARGET { return p; }\n");
+
+        ShaderProgramData program = Entries();
+        program.sourcePath = main;
+        ShaderReflector reflector;
+
+        const ShaderCompileResult first = reflector.CompileProgram(program);
+        std::string firstMessages;
+        for (const ShaderDiagnostic& diagnostic : first.diagnostics)
+        {
+            firstMessages += "\n  " + FormatShaderDiagnostic(diagnostic);
+        }
+        Check(first.ok && !first.fromCache, "the first compile:" + firstMessages);
+        Check(reflector.CompileProgram(program).fromCache, "unchanged: from the cache");
+
+        // Invalidate drops the program of the file: the next call compiles again although nothing changed
+        reflector.Invalidate(main);
+        Check(reflector.CachedProgramCount() == 0, "Invalidate empties the cache of this file");
+        const ShaderCompileResult again = reflector.CompileProgram(program);
+        Check(again.ok && !again.fromCache && again.program != first.program, "after Invalidate the program is compiled again");
+
+        // Only the include changed: Invalidate of the main file and a new compile see the new layout
+        WriteFile(include, "cbuffer Frame : register(b0) { float4 gTint; float gStrength; };\n");
+        reflector.Invalidate(main);
+        const ShaderCompileResult edited = reflector.CompileProgram(program);
+        Check(edited.ok && !edited.fromCache, "a changed include: a new compile");
+        Check(edited.program->layout.FindVariable("gStrength").variable != nullptr, "the new variable of the include is in the layout");
+        Check(again.program->layout.FindVariable("gStrength").variable == nullptr, "the older program is untouched");
+
+        // Invalidate of another file leaves this one in the cache
+        reflector.Invalidate(directory / "other.hlsl");
+        Check(reflector.CompileProgram(program).fromCache, "Invalidate of another file keeps the cache");
+
+        // A broken include: the compile fails with a message that points into the include, the cached good version stays
+        WriteFile(include, "cbuffer Frame : register(b0) { float4 gTint float gStrength; };\n");
+        reflector.Invalidate(main);
+        const ShaderCompileResult broken = reflector.CompileProgram(program);
+        Check(!broken.ok && !broken.diagnostics.empty(), "a broken include fails the compile");
+        bool pointsIntoInclude = false;
+        for (const ShaderDiagnostic& diagnostic : broken.diagnostics)
+        {
+            pointsIntoInclude = pointsIntoInclude || (diagnostic.file.find("common.hlsli") != std::string::npos && diagnostic.line == 1);
+        }
+        Check(pointsIntoInclude, "the message names common.hlsli, line 1");
+
+        std::error_code ec;
+        fs::remove_all(directory, ec);
+    }
+
     // ---- the shaders of the engine ----
 
     fs::path ShadersDirectory();
@@ -629,6 +739,8 @@ int main()
         {"missing entry, include, file", TestMissingEntryAndInclude},
         {"cache", TestCache},
         {"cache follows includes", TestCacheFollowsIncludes},
+        {"scan of includes", TestScanShaderIncludes},
+        {"Invalidate and includes", TestInvalidateSeesIncludeEdit},
         {"engine shaders", TestEngineShaders},
         {"layout dump", TestDump},
     };

@@ -250,6 +250,27 @@ set_property(TARGET myengine_root_signature_tests PROPERTY FOLDER "Tests")
 add_test(NAME root_signature COMMAND myengine_root_signature_tests)
 set_tests_properties(root_signature PROPERTIES TIMEOUT 120)
 
+# A-check (LR3): the input layout builder without a GPU: order, errors, stream tables, the shaders of the engine
+add_executable(myengine_input_layout_tests
+  render/InputLayoutTests.cpp)
+
+target_link_libraries(myengine_input_layout_tests PRIVATE myengine_engine)
+target_include_directories(myengine_input_layout_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_input_layout_tests)
+set_property(TARGET myengine_input_layout_tests PROPERTY FOLDER "Tests")
+add_test(NAME input_layout COMMAND myengine_input_layout_tests)
+set_tests_properties(input_layout PROPERTIES TIMEOUT 120)
+
+# A-check (LR3): shader hot reload in the resource manager on a recording adapter: same handle, errors, fallback, includes
+add_executable(myengine_shader_hot_reload_tests
+  resource/ShaderHotReloadTests.cpp)
+
+target_link_libraries(myengine_shader_hot_reload_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_shader_hot_reload_tests)
+set_property(TARGET myengine_shader_hot_reload_tests PROPERTY FOLDER "Tests")
+add_test(NAME shader_hot_reload COMMAND myengine_shader_hot_reload_tests)
+set_tests_properties(shader_hot_reload PROPERTIES TIMEOUT 120)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)
