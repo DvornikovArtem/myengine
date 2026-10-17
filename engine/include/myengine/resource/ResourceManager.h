@@ -70,8 +70,6 @@ namespace myengine::resource
     {
         render::ShaderProgramData program;
         render::ShaderHandle gpuHandle;
-        std::uint32_t version = 1;  // the version of the program in the renderer: +1 for every successful hot reload
-        bool fallback = false;      // the file did not compile at the first load and the general fallback program stands in
     };
 
     struct MaterialAsset
@@ -206,10 +204,6 @@ namespace myengine::resource
         ResourceHandle<MeshAsset> ReloadMesh(const std::filesystem::path& path);
         ResourceHandle<TextureAsset> ReloadTexture(const std::filesystem::path& path);
         ResourceHandle<ShaderAsset> ReloadShader(const std::filesystem::path& path);
-        // A loaded program is rebuilt on its own handle; an error leaves the old version running
-        ResourceHandle<ShaderAsset> ReloadShaderInPlace(const ResourceHandle<ShaderAsset>& resource, const std::filesystem::path& path);
-        // The descriptor or the source into a program and the files it depends on (the includes too)
-        bool ReadShaderProgram(const std::filesystem::path& path, render::ShaderProgramData& program, std::vector<std::filesystem::path>& dependencies, std::string& error) const;
         ResourceHandle<MaterialAsset> ReloadMaterial(const std::filesystem::path& path);
 
         void PumpAsyncLoads();
