@@ -352,6 +352,7 @@ namespace myengine::render::dx12
 
         ShaderStageSource stageSource;
         stageSource.sourceName = name;
+        stageSource.sourcePath = file;
         stageSource.source = &source;
         stageSource.defines = program.defines;
 

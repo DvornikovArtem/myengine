@@ -21,6 +21,7 @@ namespace myengine::render::dx12
     struct ShaderStageSource
     {
         std::string sourceName;                                      // what the messages call the file (the path)
+        std::filesystem::path sourcePath;                            // the file itself: the includes are found next to it (empty: the working directory)
         const std::string* source = nullptr;                         // the text of the file
         std::string entry;
         std::string profile;                                         // "vs_5_0"

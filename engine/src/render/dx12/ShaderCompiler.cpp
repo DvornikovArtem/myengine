@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <unordered_map>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -18,6 +20,55 @@ namespace myengine::render::dx12
 {
     namespace
     {
+        // #include "file": found relative to the including file and read through std::filesystem. The standard handler of D3D
+        // takes the name of the source as a narrow string of the ANSI code page and cannot open anything next to a file whose
+        // path has letters outside that page (a Cyrillic user folder).
+        class FileInclude final : public ID3DInclude
+        {
+        public:
+            explicit FileInclude(std::filesystem::path baseDirectory) : baseDirectory_(std::move(baseDirectory)) {}
+
+            HRESULT STDMETHODCALLTYPE Open(D3D_INCLUDE_TYPE, LPCSTR fileName, LPCVOID parentData, LPCVOID* data, UINT* bytes) override
+            {
+                std::filesystem::path directory = baseDirectory_;
+                if (parentData != nullptr)
+                {
+                    const auto parent = directories_.find(parentData);
+                    if (parent != directories_.end())
+                    {
+                        directory = parent->second;
+                    }
+                }
+
+                const std::filesystem::path file = (directory / std::filesystem::u8path(fileName)).lexically_normal();
+                std::ifstream stream(file, std::ios::binary);
+                if (!stream.is_open())
+                {
+                    return E_FAIL;
+                }
+
+                auto buffer = std::make_unique<std::string>((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+                const void* key = buffer->data();
+                *data = key;
+                *bytes = static_cast<UINT>(buffer->size());
+                directories_[key] = file.parent_path();
+                buffers_[key] = std::move(buffer);
+                return S_OK;
+            }
+
+            HRESULT STDMETHODCALLTYPE Close(LPCVOID data) override
+            {
+                buffers_.erase(data);
+                directories_.erase(data);
+                return S_OK;
+            }
+
+        private:
+            std::filesystem::path baseDirectory_;
+            std::unordered_map<const void*, std::unique_ptr<std::string>> buffers_;
+            std::unordered_map<const void*, std::filesystem::path> directories_; // the folder of every file that is open: its includes are relative to it
+        };
+
         ShaderDiagnostic MakeDiagnostic(const std::string& file, const ShaderStage stage, std::string message)
         {
             ShaderDiagnostic diagnostic;
@@ -151,13 +202,14 @@ namespace myengine::render::dx12
         }
         macros.push_back({nullptr, nullptr});
 
+        FileInclude include(request.sourcePath.parent_path());
         Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
         const HRESULT hr = D3DCompile(
             request.source->data(),
             request.source->size(),
             request.sourceName.c_str(),
             macros.data(),
-            D3D_COMPILE_STANDARD_FILE_INCLUDE,
+            &include,
             request.entry.c_str(),
             request.profile.c_str(),
             compileFlags,
