@@ -398,9 +398,28 @@ namespace myengine::render::dx12
     }
 
     // The root signature, the pipeline states and the slots of the values that the renderer writes: all from the layout
+    // Builds a program and counts it as a user of its root signature; a failed build leaves no trace
     bool Dx12RenderAdapter::BuildProgram(const CompiledShaderProgram& compiled, const ShaderProgramData& data, const ProgramKind kind, ShaderRecord& record)
     {
+        if (BuildProgramImpl(compiled, data, kind, record))
+        {
+            ++rootSignatureUsers_[record.rootSignatureShape];
+            return true;
+        }
+
+        // The root signature may have been created for this program only: nobody else uses it, the GPU never did
+        if (record.rootSignature != nullptr && rootSignatureUsers_.find(record.rootSignatureShape) == rootSignatureUsers_.end())
+        {
+            rootSignatures_.erase(record.rootSignatureShape);
+        }
+        record = ShaderRecord{};
+        return false;
+    }
+
+    bool Dx12RenderAdapter::BuildProgramImpl(const CompiledShaderProgram& compiled, const ShaderProgramData& data, const ProgramKind kind, ShaderRecord& record)
+    {
         ZoneScopedN("Shader::BuildPipeline");
+        record.sourceName = compiled.sourceName;
 
         RootSignatureOptions options;
         if (forceRootCbv_)
@@ -602,6 +621,177 @@ namespace myengine::render::dx12
             return false;
         }
         return BuildProgram(*compiled.program, program, kind, record);
+    }
+
+    // The programs of one shape share a root signature; the last one that leaves takes it out of the cache (the GPU may still
+    // read it: it is retired by the fence like the pipeline states)
+    void Dx12RenderAdapter::ReleaseRootSignature(const std::uint64_t shape, RetiredResource& retired)
+    {
+        const auto users = rootSignatureUsers_.find(shape);
+        if (users == rootSignatureUsers_.end())
+        {
+            return;
+        }
+        if (users->second > 1)
+        {
+            --users->second;
+            return;
+        }
+        rootSignatureUsers_.erase(users);
+        const auto cached = rootSignatures_.find(shape);
+        if (cached != rootSignatures_.end())
+        {
+            retired.objects.push_back(cached->second);
+            rootSignatures_.erase(cached);
+        }
+    }
+
+    // A program that is replaced or destroyed: its pipeline states (and a root signature that nobody else uses) go to the
+    // fence, the frames in flight may still draw with them
+    void Dx12RenderAdapter::RetireShaderRecord(ShaderRecord&& record)
+    {
+        RetiredResource retired;
+        if (record.pipelineState != nullptr)
+        {
+            retired.objects.push_back(std::move(record.pipelineState));
+        }
+        if (record.wireframePipelineState != nullptr)
+        {
+            retired.objects.push_back(std::move(record.wireframePipelineState));
+        }
+        if (record.rootSignature != nullptr)
+        {
+            ReleaseRootSignature(record.rootSignatureShape, retired);
+            if (boundRootSignature_ == record.rootSignature.Get())
+            {
+                boundRootSignature_ = nullptr;
+            }
+            retired.objects.push_back(std::move(record.rootSignature));
+        }
+        if (!retired.objects.empty())
+        {
+            RetireResources(std::move(retired));
+        }
+    }
+
+    void Dx12RenderAdapter::DestroyShader(const ShaderHandle shader)
+    {
+        const auto it = shaders_.find(shader.value);
+        if (it == shaders_.end())
+        {
+            return;
+        }
+        ShaderRecord record = std::move(it->second);
+        shaders_.erase(it);
+        RetireShaderRecord(std::move(record));
+    }
+
+    // The new version is built beside the old one (compile, reflection, input layout, root signature, every pipeline state);
+    // only when all of it succeeded the record under the same handle is replaced. Any error leaves the old program running.
+    bool Dx12RenderAdapter::ReloadShaderProgram(const ShaderHandle shader, const ShaderProgramData& shaderProgram)
+    {
+        const auto it = shaders_.find(shader.value);
+        if (it == shaders_.end())
+        {
+            return false;
+        }
+
+        const auto fail = [&](const std::string& firstError)
+        {
+            ++shaderReloadFailures_;
+            it->second.lastError = firstError;
+            return false;
+        };
+
+        // The text and the includes may have changed: nothing of the old compile is reused
+        shaderReflector_->Invalidate(shaderProgram.sourcePath);
+        const ShaderCompileResult compiled = shaderReflector_->CompileProgram(shaderProgram);
+        lastShaderDiagnostics_ = compiled.diagnostics;
+        LogShaderDiagnostics(compiled.diagnostics);
+        if (!compiled.ok)
+        {
+            std::string error = "compile failed";
+            for (const ShaderDiagnostic& diagnostic : compiled.diagnostics)
+            {
+                if (!diagnostic.warning)
+                {
+                    error = FormatShaderDiagnostic(diagnostic);
+                    break;
+                }
+            }
+            return fail(error);
+        }
+
+        ShaderRecord next;
+        next.version = it->second.version + 1;
+        next.sourceName = compiled.program->sourceName;
+        const std::size_t diagnosticsBefore = lastShaderDiagnostics_.size();
+        if (!BuildProgram(*compiled.program, shaderProgram, ProgramKind::Scene, next))
+        {
+            std::string error = "the pipeline could not be built";
+            for (std::size_t i = diagnosticsBefore; i < lastShaderDiagnostics_.size(); ++i)
+            {
+                if (!lastShaderDiagnostics_[i].warning)
+                {
+                    error = FormatShaderDiagnostic(lastShaderDiagnostics_[i]);
+                    break;
+                }
+            }
+            return fail(error);
+        }
+
+        ShaderRecord old = std::move(it->second);
+        it->second = std::move(next);
+        ++shaderReloads_;
+        RetireShaderRecord(std::move(old));
+        return true;
+    }
+
+    std::uint32_t Dx12RenderAdapter::GetShaderVersion(const ShaderHandle shader) const
+    {
+        const auto it = shaders_.find(shader.value);
+        return it == shaders_.end() ? 0 : it->second.version;
+    }
+
+    std::vector<ShaderProgramInfo> Dx12RenderAdapter::GetShaderPrograms() const
+    {
+        std::vector<ShaderProgramInfo> programs;
+        programs.reserve(shaders_.size());
+        for (const auto& [id, record] : shaders_)
+        {
+            ShaderProgramInfo info;
+            info.handle = ShaderHandle{id};
+            info.name = record.sourceName;
+            info.version = record.version;
+            info.lastError = record.lastError;
+            programs.push_back(std::move(info));
+        }
+        std::sort(programs.begin(), programs.end(), [](const ShaderProgramInfo& a, const ShaderProgramInfo& b) { return a.handle.value < b.handle.value; });
+        return programs;
+    }
+
+    ShaderStatistics Dx12RenderAdapter::GetShaderStatistics() const
+    {
+        ShaderStatistics statistics;
+        const auto count = [&statistics](const ShaderRecord& record)
+        {
+            ++statistics.programs;
+            statistics.pipelineStates += (record.pipelineState != nullptr ? 1u : 0u) + (record.wireframePipelineState != nullptr ? 1u : 0u);
+        };
+        for (const auto& entry : shaders_)
+        {
+            count(entry.second);
+        }
+        count(debugProgram_);
+        count(uiProgram_);
+        statistics.rootSignatures = static_cast<std::uint32_t>(rootSignatures_.size());
+        for (const RetiredResource& retired : retiredResources_)
+        {
+            statistics.retiredObjects += static_cast<std::uint32_t>(retired.objects.size());
+        }
+        statistics.reloads = shaderReloads_;
+        statistics.reloadFailures = shaderReloadFailures_;
+        return statistics;
     }
 
     bool Dx12RenderAdapter::GetShaderLayout(const ShaderHandle shader, ShaderLayout& outLayout, const ShaderVariant variant) const
@@ -1705,6 +1895,7 @@ namespace myengine::render::dx12
         debugProgram_ = {};
         boundRootSignature_ = nullptr;
         rootSignatures_.clear();
+        rootSignatureUsers_.clear();
         textureSrvHeap_.Reset();
 
         context_.commandList.Reset();
