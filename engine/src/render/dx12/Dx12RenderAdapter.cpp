@@ -1271,6 +1271,11 @@ namespace myengine::render::dx12
                 {
                     put(slot.color, color, sizeof(color)); // a draw item without a material brings its own gColor
                 }
+                else if (!useMaterial)
+                {
+                    const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // parameters of another layout: white, not a black flash
+                    put(slot.color, white, sizeof(white));
+                }
                 put(slot.lightDirection, light, sizeof(light));
                 SetConstants(slot, *surface);
             }

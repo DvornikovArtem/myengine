@@ -302,6 +302,7 @@ namespace
         WriteBmp(files.directory / "white.bmp", 255, 255, 255);
         WriteBmp(files.directory / "red.bmp", 255, 0, 0);
         WriteBmp(files.directory / "green.bmp", 0, 255, 0);
+        WriteBmp(files.directory / "blue.bmp", 0, 0, 255); // used by the live criterion only: it streams in after the material is built
 
         // The new keys: two textures by name, the colour and the constants by name
         WriteText(files.directory / "colour.material.json", Material(R"(
@@ -425,6 +426,199 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return float4(gColor.
         CheckPixel(scene.DrawMaterial(materialPath), 191, 191, 191, "the material is still right after the scan");
     }
 
+
+    // ---- the live criterion of the lab: a constant and a texture are added to a real shader, and a material names them ----
+    // The shader is a copy of assets/shaders/textured_lit.hlsl, edited the way docs/render/b1-material-params.md tells the
+    // teacher to edit it; the reload goes through the file scan of the resource manager (the mtime poll), as in the demo.
+
+    std::size_t CountIn(const std::string& text, const std::string& part)
+    {
+        std::size_t count = 0;
+        for (std::size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + part.size()))
+        {
+            ++count;
+        }
+        return count;
+    }
+
+    // Inserts `text` after the first `anchor` of the source (the files may have LF or CRLF)
+    void InsertAfter(std::string& source, const std::string& anchor, const std::string& text)
+    {
+        const auto at = source.find(anchor);
+        Check(at != std::string::npos, "the shader has no '" + anchor + "'");
+        source.insert(at + anchor.size(), text);
+    }
+
+    const char* const kRoughnessDeclaration = "\n    float gRoughness;";
+    const char* const kRoughnessUse = "\n    lighting *= 1.0f - gRoughness;";
+    const char* const kDetailDeclaration = "\nTexture2D gDetail : register(t1);";
+    const char* const kDetailUse = "\n    texColor *= gDetail.Sample(gSampler, input.UV);";
+
+    std::string LiveShaderSource(const std::string& original, const bool roughness, const bool detail)
+    {
+        std::string source = original;
+        if (roughness)
+        {
+            InsertAfter(source, "float4 gLightDirection;", kRoughnessDeclaration);
+            InsertAfter(source, "float lighting = gLightDirection.w + ndotl * (1.0f - gLightDirection.w);", kRoughnessUse);
+        }
+        if (detail)
+        {
+            InsertAfter(source, "Texture2D gTexture : register(t0);", kDetailDeclaration);
+            InsertAfter(source, "float4 texColor = gTexture.Sample(gSampler, input.UV);", kDetailUse);
+        }
+        return source;
+    }
+
+    // The file scan of the resource manager sees a changed shader after its interval; wait for the new version
+    void WaitForShaderVersion(Scene& scene, const fs::path& shaderJson, const std::uint32_t version)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        for (;;)
+        {
+            scene.Resources().UpdateHotReload();
+            const auto shader = scene.Resources().Load<resource::ShaderAsset>(shaderJson);
+            if (shader != nullptr && shader->asset.version >= version)
+            {
+                Check(!shader->asset.fallback, "the shader is a real program after the reload");
+                return;
+            }
+            Check(std::chrono::steady_clock::now() < deadline, "the scan did not reload the shader");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    void WaitForMaterialReload(Scene& scene, const fs::path& materialPath, const resource::ResourceHandle<resource::MaterialAsset>& before)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        for (;;)
+        {
+            scene.Resources().UpdateHotReload();
+            const auto material = scene.Resources().Load<resource::MaterialAsset>(materialPath);
+            if (material != before) // (the old one is held: a new object cannot take its address)
+            {
+                return;
+            }
+            Check(std::chrono::steady_clock::now() < deadline, "the scan did not reload the material");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    void TestTheLiveCriterion(Scene& scene, const Files& files)
+    {
+        const fs::path live = files.directory / "live";
+        fs::create_directories(live);
+        const fs::path shaderJson = live / "textured_lit.shader.json";
+        const fs::path shaderHlsl = live / "textured_lit.hlsl";
+        fs::copy_file(SourceDirectory() / "assets/shaders/textured_lit.shader.json", shaderJson);
+        fs::copy_file(SourceDirectory() / "assets/shaders/textured_lit.hlsl", shaderHlsl);
+        const std::string original = ReadText(shaderHlsl);
+        const fs::path materialPath = files.directory / "live.material.json";
+        const auto writeMaterial = [&](const json& textures, const json& params)
+        {
+            json material = {{"shader", "live/textured_lit.shader.json"}, {"textures", textures}, {"params", params}};
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            WriteText(materialPath, material.dump(2));
+        };
+        const auto materialObject = [&]() { return scene.Resources().Load<resource::MaterialAsset>(materialPath); };
+        const auto drawLive = [&]() { return scene.DrawMaterial(materialPath); };
+        const auto log = [&scene]() { return scene.LogText(); };
+        const auto edit = [&](const bool roughness, const bool detail, const std::uint32_t version)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            WriteText(shaderHlsl, LiveShaderSource(original, roughness, detail));
+            WaitForShaderVersion(scene, shaderJson, version);
+        };
+        const auto changeMaterial = [&](const json& textures, const json& params)
+        {
+            const auto before = materialObject();
+            writeMaterial(textures, params);
+            WaitForMaterialReload(scene, materialPath, before);
+        };
+        const json white = {{"gTexture", "white.bmp"}};
+        const json whiteColour = {{"gColor", {1.0, 1.0, 1.0, 1.0}}};
+
+        // 0. The shader as it is: a white texture and a white colour; the lit pixel is the reference of the rest
+        writeMaterial(white, whiteColour);
+        const Pixel reference = drawLive();
+        Check(reference.r > 40 && reference.r == reference.g && reference.g == reference.b, "the reference pixel is lit white: " + Describe(reference));
+        const auto scaled = [](const int value, const double factor) { return static_cast<int>(value * factor + 0.5); };
+
+        std::cout << "  live criterion: 4, a constant (gRoughness)\n";
+        // 4. A constant is added to the shader and used: the picture does not change until the material names it
+        edit(true, false, 2);
+        CheckPixel(drawLive(), reference.r, reference.g, reference.b, "gRoughness is in the shader, the material does not set it: zero changes nothing");
+        changeMaterial(white, {{"gColor", {1.0, 1.0, 1.0, 1.0}}, {"gRoughness", 0.4}});
+        CheckPixel(drawLive(), scaled(reference.r, 0.6), scaled(reference.g, 0.6), scaled(reference.b, 0.6), "gRoughness 0.4 from params reaches the frame (the light x 0.6)");
+        Check(CountIn(log(), "'gRoughness' is not in") == 0, "no message while the name is right");
+
+        std::cout << "  live criterion: 5, a texture (gDetail)\n";
+        // 5. A texture is added: the root signature is rebuilt from the reflection; unset, it is the white stub
+        edit(true, true, 3);
+        CheckPixel(drawLive(), scaled(reference.r, 0.6), scaled(reference.g, 0.6), scaled(reference.b, 0.6), "gDetail is in the shader, the material does not set it: the white stub changes nothing");
+        changeMaterial({{"gTexture", "white.bmp"}, {"gDetail", "green.bmp"}}, {{"gColor", {1.0, 1.0, 1.0, 1.0}}, {"gRoughness", 0.4}});
+        CheckPixel(drawLive(), 0, scaled(reference.g, 0.6), 0, "gDetail (green) from textures reaches the frame");
+
+        std::cout << "  live criterion: 6, a removed name\n";
+        // 6. The constant disappears from the shader while the material still names it: one warning, the frame is drawn
+        edit(false, true, 4);
+        const Pixel withoutRoughness = drawLive();
+        CheckPixel(withoutRoughness, 0, reference.g, 0, "gRoughness is gone: ignored, the rest is drawn");
+        for (int frame = 0; frame < 3; ++frame)
+        {
+            drawLive();
+        }
+        const std::string removed = log();
+        Check(CountIn(removed, "'gRoughness' is not in textured_lit.shader.json; names: ") == 1, "exactly one warning about the removed gRoughness, " + std::to_string(CountIn(removed, "'gRoughness' is not in")) + " found");
+        Check(CountIn(removed, "gColor (Float4)") >= 1 && CountIn(removed, "textures: ") >= 1, "the warning lists the names of the shader");
+
+        std::cout << "  live criterion: 7, a typo\n";
+        // 7. A name that the shader never had (a typo): one message with the name and the list, nothing wrong in the frame
+        // (the detail texture is a new file: it arrives after the material was built, and the rebuild must not repeat the message)
+        changeMaterial({{"gTexture", "white.bmp"}, {"gDetail", "blue.bmp"}}, {{"gColor", {1.0, 1.0, 1.0, 1.0}}, {"gNoSuchName", 1}});
+        CheckPixel(drawLive(), 0, 0, reference.b, "an unknown parameter does not spoil the frame");
+        drawLive();
+        Check(CountIn(log(), "'gNoSuchName' is not in textured_lit.shader.json; names: ") == 1, "exactly one message about gNoSuchName");
+
+        std::cout << "  live criterion: 8, a wrong type\n";
+        // 8. A value of the wrong type: an error that says what was expected, the variable stays zero (the picture is black, not garbage)
+        changeMaterial({{"gTexture", "white.bmp"}, {"gDetail", "green.bmp"}}, {{"gColor", 0.5}});
+        CheckPixel(drawLive(), 0, 0, 0, "gColor as a number: gColor stays zero");
+        drawLive();
+        Check(CountIn(log(), "'gColor': expected Float4, got Float") == 1, "exactly one error about the type of gColor");
+
+        std::cout << "  live criterion: a missing texture file\n";
+        // A texture file that is not there: an error, and the fallback texture (magenta and black) instead of white
+        changeMaterial({{"gTexture", "no_such_file.bmp"}}, whiteColour);
+        Pixel fallback = drawLive();
+        for (int frame = 0; frame < 20; ++frame)
+        {
+            scene.Resources().UpdateHotReload(); // the failed load is known some frames later, the material is built again
+            fallback = drawLive();
+        }
+        Check(fallback.r > 20 && fallback.b > 20 && fallback.g * 2 < fallback.r, "the fallback texture is visible (not white, not black): " + Describe(fallback));
+        const std::string missing = log();
+        Check(CountIn(missing, "no_such_file.bmp") >= 1 && CountIn(missing, "could not be loaded: the fallback texture") == 1, "exactly one error about the texture file that cannot be loaded");
+
+        std::cout << "  live criterion: parameters of another layout\n";
+        // Parameters built for another layout (the shader was reloaded, the material has not caught up): white, not a black flash
+        changeMaterial(white, whiteColour);
+        const auto otherMaterial = scene.Resources().Load<resource::MaterialAsset>(files.directory / "colour.material.json");
+        const render::MaterialParams* otherLayout = scene.Resources().GetMaterialParams(otherMaterial);
+        Check(otherLayout != nullptr, "the parameters of a material of the probe shader");
+        const auto liveMaterial = scene.Resources().Load<resource::MaterialAsset>(materialPath);
+        const auto liveShader = scene.Resources().Load<resource::ShaderAsset>(liveMaterial->asset.shaderPath);
+        scene.WaitForTextures(materialPath);
+        render::DrawItem item;
+        item.mesh = scene.Mesh();
+        item.shader = liveShader->asset.gpuHandle;
+        item.material = otherLayout;
+        CheckPixel(scene.Draw(item), reference.r, reference.g, reference.b, "parameters of another layout: a white colour and white textures, no black flash");
+        Check(CountIn(log(), "built for another layout") == 1, "the mismatch is reported once");
+    }
+
     int Run()
     {
         const Files files = MakeFiles();
@@ -438,8 +632,9 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return float4(gColor.
                 TestAMaterialWithoutTextures(scene, files);
                 TestDrawWithoutAMaterial(scene, files);
                 TestAShaderReloadedWithANewConstant(scene, files);
+                TestTheLiveCriterion(scene, files);
             }
-            std::cout << "OK: material parameters reach the frame: gColor, a second texture and constants by name, the old keys, a texture that is not set, a shader without textures, a draw item without a material, a shader reloaded with a new constant\n";
+            std::cout << "OK: material parameters reach the frame: gColor, a second texture and constants by name, the old keys, a texture that is not set, a shader without textures, a draw item without a material, a shader reloaded with a new constant, the live criterion (gRoughness, gDetail, a removed name, a typo, a wrong type, a missing file, a layout mismatch)\n";
         }
         catch (const Skip& skip)
         {

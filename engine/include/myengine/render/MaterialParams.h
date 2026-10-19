@@ -58,9 +58,21 @@ namespace myengine::render
         Error,   // the name or the type does not fit the layout: nothing was written
     };
 
+    // Why a call was not Ok: a material is judged by it (an unknown name is a warning, a wrong type is an error)
+    enum class MaterialParamReason : std::uint8_t
+    {
+        None,
+        UnknownName,    // the shader has no such variable or texture
+        TypeMismatch,   // the value does not fit the type of the variable (or the resource is not a texture)
+        EngineSemantic, // gModel, gViewProjection, gLightDirection
+        Invalid,        // anything else: an array variable, a file that could not be loaded...
+    };
+
     struct MaterialParamResult
     {
         MaterialParamStatus status = MaterialParamStatus::Ok;
+        MaterialParamReason reason = MaterialParamReason::None;
+        std::string name;    // the variable or the texture that the call was about
         std::string message; // empty for Ok
 
         bool IsOk() const { return status == MaterialParamStatus::Ok; }
@@ -143,6 +155,9 @@ namespace myengine::render
 
     // Puts everything a material says into `params`: the new keys by name, the old ones by the rules of the
     // compatibility (texture -> the first texture of the shader, tint -> gColor; a new key wins over the old one).
-    // Returns the messages of everything that did not fit (errors and warnings); the rest is applied.
-    std::vector<MaterialParamResult> ApplyMaterialValues(MaterialParams& params, const MaterialValues& values, const MaterialTextureResolver& resolve);
+    // Returns the messages of everything that did not fit; the rest is applied. The rules for a material that is not right
+    // (docs/render/b1-material-params.md): a name that the shader does not have is one warning ("'gX' is not in <program>; names: ..."),
+    // a value of the wrong type is an error and the variable stays zero, a texture that cannot be loaded is an error (the caller
+    // puts the fallback texture there). `programName`: what the messages call the shader.
+    std::vector<MaterialParamResult> ApplyMaterialValues(MaterialParams& params, const MaterialValues& values, const MaterialTextureResolver& resolve, const std::string& programName = {});
 }

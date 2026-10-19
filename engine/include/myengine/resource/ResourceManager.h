@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -243,8 +244,9 @@ namespace myengine::resource
             std::uint32_t shaderVersion = 0;
             std::uint64_t textureGeneration = 0;                  // textures that finished streaming replace their placeholders
             std::uint64_t checkedTick = ~0ull;                    // the frame of the last check: a material is checked once per frame
+            std::set<std::string> reported;                       // the messages already logged for this state of the material
         };
-        void RebuildMaterialParams(const ResourceHandle<MaterialAsset>& material, const ResourceHandle<ShaderAsset>& shader, std::uint64_t contentHash, bool report, MaterialRuntime& runtime);
+        void RebuildMaterialParams(const ResourceHandle<MaterialAsset>& material, const ResourceHandle<ShaderAsset>& shader, std::uint64_t contentHash, MaterialRuntime& runtime);
         void RevalidateMaterials();
 
         void PumpAsyncLoads();

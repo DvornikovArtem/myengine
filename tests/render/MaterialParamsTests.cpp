@@ -302,9 +302,9 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         CheckOk(params.SetValue("gExtra", MaterialValue::FromMatrix(identity)), "sixteen numbers into Float4x4");
         Check(ReadAt<float>(params, "gExtra", 12) == 5.0f, "the matrix is stored by columns: the element (0, 3) is at 12");
 
-        CheckError(params.SetValue("gColor", MaterialValue::FromNumber(1.0)), {"gColor", "expected Float4", "got a number"}, "a number into Float4");
+        CheckError(params.SetValue("gColor", MaterialValue::FromNumber(1.0)), {"gColor", "expected Float4", "got Float"}, "a number into Float4");
         CheckError(params.SetValue("gColor", MaterialValue::FromVector({1.0, 2.0, 3.0})), {"expected Float4", "got Float3"}, "Float3 into Float4");
-        CheckError(params.SetValue("gRoughness", MaterialValue::FromBool(true)), {"expected Float", "got a bool"}, "a bool into a float");
+        CheckError(params.SetValue("gRoughness", MaterialValue::FromBool(true)), {"expected Float", "got Bool"}, "a bool into a float");
         CheckError(params.SetValue("gMode", MaterialValue::FromNumber(2.5)), {"expected Int"}, "a fraction into an int");
         CheckError(params.SetValue("gCount", MaterialValue::FromNumber(-1)), {"expected UInt"}, "a negative number into a uint");
         CheckError(params.SetValue("gNope", MaterialValue::FromNumber(1)), {"gNope", "gRoughness", "gTexture"}, "an unknown name");
@@ -442,11 +442,11 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         values.params["gColor"] = MaterialValue::FromNumber(1); // a number where Float4 is needed
         values.params["gModel"] = MaterialValue::FromMatrix(std::vector<double>(16, 1.0));
         values.tint = {1.0f, 1.0f, 1.0f, 1.0f};
-        const auto messages = ApplyMaterialValues(params, values, Resolver());
+        const auto messages = ApplyMaterialValues(params, values, Resolver(), "probe.shader.json");
         const std::string text = Joined(messages);
         Check(Contains(text, "missing.bmp"), "a texture that cannot be loaded is named: " + text);
         Check(Contains(text, "gNoSuchTexture") && Contains(text, "gNoSuchName"), "unknown names are named: " + text);
-        Check(Contains(text, "expected Float4, got a number"), "the type error says what was expected and what came: " + text);
+        Check(Contains(text, "expected Float4, got Float"), "the type error says what was expected and what came: " + text);
         Check(Contains(text, "gModel") && Contains(text, "renderer"), "the engine semantic gets its warning: " + text);
         Check(ReadAt<float>(params, "gRoughness") == 0.4f, "what fits is applied nevertheless");
         std::size_t errors = 0;
@@ -454,7 +454,11 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         {
             errors += message.IsError() ? 1 : 0;
         }
-        Check(errors == 4, "four errors (the texture file, two names, the type): " + text);
+        Check(errors == 2, "two errors (the texture file, the type): " + text);
+        // A name that the shader does not have is a warning with the list of the names, the program is named
+        Check(Contains(text, "warning: 'gNoSuchName' is not in probe.shader.json; names: ") && Contains(text, "gRoughness") && Contains(text, "gTexture"),
+            "an unknown name is a warning that names the shader and lists the names: " + text);
+        Check(Contains(text, "warning: 'gNoSuchTexture' is not in probe.shader.json"), "an unknown texture is a warning too: " + text);
     }
 
     // ---- the materials of the project and their files ----

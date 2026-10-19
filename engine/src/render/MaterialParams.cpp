@@ -13,10 +13,12 @@ namespace myengine::render
     {
         const char* const kEngineSemantics[] = {"gModel", "gViewProjection", "gLightDirection"};
 
-        MaterialParamResult Failure(MaterialParamStatus status, std::string message)
+        MaterialParamResult Failure(MaterialParamStatus status, std::string message, MaterialParamReason reason = MaterialParamReason::Invalid, std::string name = {})
         {
             MaterialParamResult result;
             result.status = status;
+            result.reason = reason;
+            result.name = std::move(name);
             result.message = std::move(message);
             return result;
         }
@@ -69,9 +71,9 @@ namespace myengine::render
         switch (value.kind)
         {
             case MaterialValue::Kind::Number:
-                return "a number";
+                return "Float"; // a number: the layout decides whether it is a Float, an Int or a UInt
             case MaterialValue::Kind::Bool:
-                return "a bool";
+                return "Bool";
             case MaterialValue::Kind::Vector:
                 return value.numbers.size() == 2 ? "Float2" : value.numbers.size() == 3 ? "Float3" : value.numbers.size() == 4 ? "Float4"
                                                                                                                              : "a vector of " + std::to_string(value.numbers.size()) + " numbers";
@@ -199,14 +201,14 @@ namespace myengine::render
 
     MaterialParamResult MaterialParams::NoSuchName(const std::string& name, const char* what) const
     {
-        return Failure(MaterialParamStatus::Error, "no " + std::string(what) + " " + Quoted(name) + " in the shader; " + DescribeNames());
+        return Failure(MaterialParamStatus::Error, "no " + std::string(what) + " " + Quoted(name) + " in the shader; " + DescribeNames(), MaterialParamReason::UnknownName, name);
     }
 
     MaterialParamResult MaterialParams::SetVariable(const std::string& name, const ShaderValueType type, const void* data, const std::size_t bytes)
     {
         if (IsEngineSemantic(name))
         {
-            return Failure(MaterialParamStatus::Warning, Quoted(name) + " is set by the renderer: the value from the material is ignored");
+            return Failure(MaterialParamStatus::Warning, Quoted(name) + " is set by the renderer: the value from the material is ignored", MaterialParamReason::EngineSemantic, name);
         }
         const ShaderVariableRef found = layout_.FindVariable(name);
         if (found.variable == nullptr)
@@ -216,11 +218,11 @@ namespace myengine::render
         const ShaderVariable& variable = *found.variable;
         if (variable.type != type)
         {
-            return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected " + ToString(variable.type) + ", got " + ToString(type));
+            return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected " + ToString(variable.type) + ", got " + ToString(type), MaterialParamReason::TypeMismatch, name);
         }
         if (variable.arrayCount > 1)
         {
-            return Failure(MaterialParamStatus::Error, Quoted(name) + ": arrays of " + ToString(variable.type) + " are not supported yet");
+            return Failure(MaterialParamStatus::Error, Quoted(name) + ": arrays of " + ToString(variable.type) + " are not supported yet", MaterialParamReason::Invalid, name);
         }
         const std::size_t index = static_cast<std::size_t>(found.buffer - layout_.constantBuffers.data());
         std::vector<std::uint8_t>& shadow = constantBuffers_[index];
@@ -293,11 +295,11 @@ namespace myengine::render
             const ShaderResource* resource = layout_.FindResourceByName(name);
             if (resource != nullptr)
             {
-                return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected a Texture, but this is a " + ToString(resource->type) + "; " + DescribeNames());
+                return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected a Texture, but this is a " + ToString(resource->type) + "; " + DescribeNames(), MaterialParamReason::TypeMismatch, name);
             }
             if (layout_.FindVariable(name).variable != nullptr)
             {
-                return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected a Texture, but this is a " + ToString(layout_.FindVariable(name).variable->type) + " variable; " + DescribeNames());
+                return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected a Texture, but this is a " + ToString(layout_.FindVariable(name).variable->type) + " variable; " + DescribeNames(), MaterialParamReason::TypeMismatch, name);
             }
             return NoSuchName(name, "texture");
         }
@@ -309,7 +311,7 @@ namespace myengine::render
     {
         if (IsEngineSemantic(name))
         {
-            return Failure(MaterialParamStatus::Warning, Quoted(name) + " is set by the renderer: the value from the material is ignored");
+            return Failure(MaterialParamStatus::Warning, Quoted(name) + " is set by the renderer: the value from the material is ignored", MaterialParamReason::EngineSemantic, name);
         }
         const ShaderVariableRef found = layout_.FindVariable(name);
         if (found.variable == nullptr)
@@ -319,7 +321,7 @@ namespace myengine::render
         const ShaderValueType type = found.variable->type;
         const auto mismatch = [&]()
         {
-            return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected " + ToString(type) + ", got " + DescribeMaterialValue(value));
+            return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected " + ToString(type) + ", got " + DescribeMaterialValue(value), MaterialParamReason::TypeMismatch, name);
         };
         const std::vector<double>& n = value.numbers;
         switch (value.kind)
@@ -337,7 +339,7 @@ namespace myengine::render
                 {
                     if (!IsWholeNumber(n[0]) || n[0] < std::numeric_limits<std::int32_t>::min() || n[0] > std::numeric_limits<std::int32_t>::max())
                     {
-                        return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected Int, got " + std::to_string(n[0]) + " (a whole number in the range of int is needed)");
+                        return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected Int, got " + std::to_string(n[0]) + " (a whole number in the range of int is needed)", MaterialParamReason::TypeMismatch, name);
                     }
                     return SetInt(name, static_cast<std::int32_t>(n[0]));
                 }
@@ -345,7 +347,7 @@ namespace myengine::render
                 {
                     if (!IsWholeNumber(n[0]) || n[0] < 0.0 || n[0] > std::numeric_limits<std::uint32_t>::max())
                     {
-                        return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected UInt, got " + std::to_string(n[0]) + " (a whole number from 0 is needed)");
+                        return Failure(MaterialParamStatus::Error, Quoted(name) + ": expected UInt, got " + std::to_string(n[0]) + " (a whole number from 0 is needed)", MaterialParamReason::TypeMismatch, name);
                     }
                     return SetUInt(name, static_cast<std::uint32_t>(n[0]));
                 }
@@ -389,22 +391,30 @@ namespace myengine::render
         return mismatch();
     }
 
-    std::vector<MaterialParamResult> ApplyMaterialValues(MaterialParams& params, const MaterialValues& values, const MaterialTextureResolver& resolve)
+    std::vector<MaterialParamResult> ApplyMaterialValues(MaterialParams& params, const MaterialValues& values, const MaterialTextureResolver& resolve, const std::string& programName)
     {
         std::vector<MaterialParamResult> messages;
-        const auto note = [&messages](MaterialParamResult result)
+        const auto note = [&](MaterialParamResult result)
         {
-            if (!result.IsOk())
+            if (result.IsOk())
             {
-                messages.push_back(std::move(result));
+                return;
             }
+            if (result.reason == MaterialParamReason::UnknownName)
+            {
+                // A name that the shader does not have (it was removed from the shader, or a typo) is one warning: the
+                // rest of the material is still applied
+                result.status = MaterialParamStatus::Warning;
+                result.message = Quoted(result.name) + " is not in " + (programName.empty() ? std::string("the shader") : programName) + "; names: " + params.DescribeNames();
+            }
+            messages.push_back(std::move(result));
         };
         const auto setTexture = [&](const std::string& name, const std::string& path)
         {
             const TextureHandle handle = resolve ? resolve(path) : TextureHandle{};
             if (!handle.IsValid())
             {
-                note(Failure(MaterialParamStatus::Error, "texture " + Quoted(name) + ": the file " + Quoted(path) + " could not be loaded"));
+                note(Failure(MaterialParamStatus::Error, "texture " + Quoted(name) + ": the file " + Quoted(path) + " could not be loaded", MaterialParamReason::Invalid, name));
                 return;
             }
             note(params.SetTexture(name, handle));
@@ -445,10 +455,12 @@ namespace myengine::render
         {
             // (the same float: the resource manager mirrors gColor into the tint as floats)
             const std::vector<double>& gColor = color->second.numbers;
-            const bool sameColor = color->second.kind == MaterialValue::Kind::Vector && gColor.size() == 4 &&
+            const bool isColor = color->second.kind == MaterialValue::Kind::Vector && gColor.size() == 4;
+            const bool sameColor = isColor &&
                 static_cast<float>(gColor[0]) == values.tint[0] && static_cast<float>(gColor[1]) == values.tint[1] &&
                 static_cast<float>(gColor[2]) == values.tint[2] && static_cast<float>(gColor[3]) == values.tint[3];
-            if (!sameColor)
+            // gColor that is not a colour is an error of its own (below); the tint is not a way round it
+            if (isColor && !sameColor)
             {
                 note(Failure(MaterialParamStatus::Warning, "'tint' is ignored: 'params' sets gColor and the new key wins"));
             }

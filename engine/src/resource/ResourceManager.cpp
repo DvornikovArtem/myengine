@@ -1921,7 +1921,11 @@ namespace myengine::resource
             runtime.shaderHandle != shader->asset.gpuHandle.value || runtime.shaderVersion != shader->asset.version;
         if (changed || runtime.textureGeneration != textureGeneration_)
         {
-            RebuildMaterialParams(material, shader, contentHash, changed, runtime);
+            if (changed)
+            {
+                runtime.reported.clear(); // a new material, shader version or content: its messages are new again
+            }
+            RebuildMaterialParams(material, shader, contentHash, runtime);
         }
         runtime.checkedTick = frameTick_;
         return runtime.params.get();
@@ -1931,7 +1935,6 @@ namespace myengine::resource
         const ResourceHandle<MaterialAsset>& material,
         const ResourceHandle<ShaderAsset>& shader,
         const std::uint64_t contentHash,
-        const bool report,
         MaterialRuntime& runtime)
     {
         ZoneScopedN("ResourceManager::MaterialParams");
@@ -1952,30 +1955,31 @@ namespace myengine::resource
                     }
                     if (LoadFailed(path))
                     {
-                        unreadable.push_back(path);
+                        unreadable.push_back(path); // the handle is the fallback texture (magenta and black): visible, not white
                     }
                     return texture->asset.gpuHandle;
-                });
-            if (report)
+                },
+                std::filesystem::path(material->asset.shaderPath).filename().string());
+
+            // Every message once per material and version: a message that was already given for this state of the material
+            // is not repeated by the next rebuild (a texture that fails to load is known some frames after the first build)
+            const std::string prefix = "ResourceManager: material " + material->key + ": ";
+            const auto say = [&](const bool isError, const std::string& text)
             {
-                const std::string prefix = "ResourceManager: material " + material->key + ": ";
-                for (const render::MaterialParamResult& message : messages)
+                if (runtime.reported.insert(text).second)
                 {
-                    if (message.IsError())
-                    {
-                        logger_.Error(prefix + message.message);
-                    }
-                    else
-                    {
-                        logger_.Warning(prefix + message.message);
-                    }
+                    isError ? logger_.Error(prefix + text) : logger_.Warning(prefix + text);
                 }
-                std::sort(unreadable.begin(), unreadable.end());
-                unreadable.erase(std::unique(unreadable.begin(), unreadable.end()), unreadable.end());
-                for (const std::string& path : unreadable)
-                {
-                    logger_.Warning(prefix + "the texture " + path + " could not be loaded: the fallback texture stands in");
-                }
+            };
+            for (const render::MaterialParamResult& message : messages)
+            {
+                say(message.IsError(), message.message);
+            }
+            std::sort(unreadable.begin(), unreadable.end());
+            unreadable.erase(std::unique(unreadable.begin(), unreadable.end()), unreadable.end());
+            for (const std::string& path : unreadable)
+            {
+                say(true, "the texture " + path + " could not be loaded: the fallback texture (magenta and black) stands in");
             }
             built = std::move(params);
         }
@@ -2341,6 +2345,7 @@ namespace myengine::resource
                 " error=" + ex.what());
             failedKeys_.insert(request.key);
             textureCache_.insert_or_assign(request.key, BuildTexturePlaceholder(request.key, request.path));
+            ++textureGeneration_; // the materials that wait for this texture learn that it failed
         }
 
         pendingTextureLoads_.erase(pendingIt);
