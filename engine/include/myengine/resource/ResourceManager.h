@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -18,6 +19,7 @@
 
 #include <myengine/core/Types.h>
 #include <myengine/jobs/JobSystem.h>
+#include <myengine/render/MaterialParams.h>
 #include <myengine/render/RenderTypes.h>
 
 namespace myengine::core
@@ -74,12 +76,22 @@ namespace myengine::resource
         bool fallback = false;      // the file did not compile at the first load and the general fallback program stands in
     };
 
+    // What a .material.json says. Raw values and paths, nothing of the shader: they are matched with the layout of the
+    // program when it is known (render::ApplyMaterialValues).
     struct MaterialAsset
     {
         std::string shaderPath;
+        // The old keys. "texture": the first texture of the shader; when only "textures" is given, this mirrors the
+        // first of them, so the code that knows one texture only keeps working.
         std::string texturePath;
+        // "tint": the variable gColor. When "params" sets gColor, this mirrors it.
         core::Color tint{1.0f, 1.0f, 1.0f, 1.0f};
+        std::map<std::string, std::string> textures;             // "textures": the name of a shader texture -> path (a normalized key)
+        std::map<std::string, render::MaterialValue> params;     // "params": the name of a shader variable -> raw value
     };
+
+    // The content of a material for render::ApplyMaterialValues
+    render::MaterialValues ToMaterialValues(const MaterialAsset& asset);
 
     struct MeshCpuAsset
     {

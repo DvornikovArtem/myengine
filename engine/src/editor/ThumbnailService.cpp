@@ -637,6 +637,17 @@ namespace myengine::editor
                         out.push_back(Resolve(materialFile.parent_path() / PathFromText(name)));
                     }
                 }
+                // the textures by the name of the shader resource
+                if (const auto textures = descriptor.find("textures"); textures != descriptor.end() && textures->is_object())
+                {
+                    for (const auto& entry : textures->items())
+                    {
+                        if (entry.value().is_string() && !entry.value().get<std::string>().empty())
+                        {
+                            out.push_back(Resolve(materialFile.parent_path() / PathFromText(entry.value().get<std::string>())));
+                        }
+                    }
+                }
             };
 
             switch (entry.kind)

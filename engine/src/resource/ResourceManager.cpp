@@ -1251,6 +1251,68 @@ namespace myengine::resource
             return color;
         }
 
+        // A value of "params": a number, a bool, an array of 2..4 numbers (a vector) or of 16 (a 4x4 matrix, row by row).
+        // false: `error` says what is wrong with it.
+        bool ParseMaterialValue(const json& value, render::MaterialValue& out, std::string& error)
+        {
+            if (value.is_boolean())
+            {
+                out = render::MaterialValue::FromBool(value.get<bool>());
+                return true;
+            }
+            if (value.is_number())
+            {
+                out = render::MaterialValue::FromNumber(value.get<double>());
+                return true;
+            }
+            if (!value.is_array())
+            {
+                error = std::string("a ") + value.type_name() + " is not a number, a bool or an array of numbers";
+                return false;
+            }
+            std::vector<double> numbers;
+            for (const json& item : value)
+            {
+                if (!item.is_number())
+                {
+                    error = "an array must contain numbers only";
+                    return false;
+                }
+                numbers.push_back(item.get<double>());
+            }
+            if (numbers.size() >= 2 && numbers.size() <= 4)
+            {
+                out = render::MaterialValue::FromVector(std::move(numbers));
+                return true;
+            }
+            if (numbers.size() == 16)
+            {
+                out = render::MaterialValue::FromMatrix(std::move(numbers));
+                return true;
+            }
+            error = "an array of " + std::to_string(numbers.size()) + " numbers is not a Float2, Float3, Float4 or a 4x4 matrix (2, 3, 4 or 16 numbers)";
+            return false;
+        }
+
+        json MaterialValueToJson(const render::MaterialValue& value)
+        {
+            using Kind = render::MaterialValue::Kind;
+            if (value.kind == Kind::Bool)
+            {
+                return !value.numbers.empty() && value.numbers[0] != 0.0;
+            }
+            if (value.kind == Kind::Number && value.numbers.size() == 1)
+            {
+                const double number = value.numbers[0];
+                if (std::floor(number) == number && std::fabs(number) < 9.0e15)
+                {
+                    return static_cast<std::int64_t>(number); // a whole number stays whole in the file
+                }
+                return number;
+            }
+            return json(value.numbers);
+        }
+
         template <typename Cache>
         std::vector<std::string> CollectSortedKeys(const Cache& cache)
         {
@@ -1456,24 +1518,60 @@ namespace myengine::resource
 
         json descriptor;
         descriptor["shader"] = makeRelativeAssetPath(asset.shaderPath);
-        descriptor["texture"] = makeRelativeAssetPath(asset.texturePath);
-        descriptor["tint"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+        // The old "texture" is written unless it only mirrors an entry of "textures"
+        const bool textureIsMirror = std::any_of(asset.textures.begin(), asset.textures.end(),
+            [&asset](const auto& entry) { return entry.second == asset.texturePath; });
+        if (asset.textures.empty() || (!asset.texturePath.empty() && !textureIsMirror))
+        {
+            descriptor["texture"] = makeRelativeAssetPath(asset.texturePath);
+        }
+        if (!asset.textures.empty())
+        {
+            json textures = json::object();
+            for (const auto& [name, texturePath] : asset.textures)
+            {
+                textures[name] = makeRelativeAssetPath(texturePath);
+            }
+            descriptor["textures"] = std::move(textures);
+        }
+        // "params" sets gColor: the tint is its mirror, so an edit of the tint edits gColor and no "tint" is written
+        const bool colorInParams = asset.params.count("gColor") > 0;
+        if (!colorInParams)
+        {
+            descriptor["tint"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+        }
+        if (!asset.params.empty())
+        {
+            json params = json::object();
+            for (const auto& [name, value] : asset.params)
+            {
+                params[name] = MaterialValueToJson(value);
+            }
+            if (colorInParams)
+            {
+                params["gColor"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+            }
+            descriptor["params"] = std::move(params);
+        }
 
         try
         {
             std::filesystem::create_directories(materialDirectory);
-            std::ofstream stream(resolvedPath);
-            if (!stream.is_open())
             {
-                logger_.Warning("ResourceManager: material save open failed: " + NarrowText(resolvedPath));
-                return false;
-            }
+                std::ofstream stream(resolvedPath);
+                if (!stream.is_open())
+                {
+                    logger_.Warning("ResourceManager: material save open failed: " + NarrowText(resolvedPath));
+                    return false;
+                }
 
-            stream << descriptor.dump(2);
-            if (!stream.good())
-            {
-                logger_.Warning("ResourceManager: material save write failed: " + NarrowText(resolvedPath));
-                return false;
+                stream << descriptor.dump(2);
+                stream.close(); // the file must be complete on the disk before it is loaded again below
+                if (stream.fail())
+                {
+                    logger_.Warning("ResourceManager: material save write failed: " + NarrowText(resolvedPath));
+                    return false;
+                }
             }
 
             logger_.Info("ResourceManager: material saved " + NarrowText(resolvedPath));
@@ -2236,8 +2334,72 @@ namespace myengine::resource
 
         MaterialAsset asset;
         asset.shaderPath = NormalizeKey(ResolvePath(path.parent_path() / descriptor.value("shader", std::string())));
-        asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / descriptor.value("texture", std::string())));
+        const std::string legacyTexture = descriptor.value("texture", std::string());
+        if (!legacyTexture.empty())
+        {
+            asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / legacyTexture));
+        }
+        const bool hasTint = descriptor.contains("tint");
         asset.tint = ParseColor(descriptor.value("tint", json::array()), asset.tint);
+
+        // The new keys: "textures" {name: path} and "params" {name: value}. What does not read is reported and skipped.
+        if (const auto textures = descriptor.find("textures"); textures != descriptor.end())
+        {
+            if (!textures->is_object())
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'textures' must be an object {name: path}");
+            }
+            else
+            {
+                for (const auto& entry : textures->items())
+                {
+                    if (!entry.value().is_string() || entry.value().get<std::string>().empty())
+                    {
+                        logger_.Warning("ResourceManager: material " + NarrowText(path) + ": texture '" + entry.key() + "' must be a path");
+                        continue;
+                    }
+                    asset.textures[entry.key()] = NormalizeKey(ResolvePath(path.parent_path() / entry.value().get<std::string>()));
+                }
+            }
+        }
+        if (const auto params = descriptor.find("params"); params != descriptor.end())
+        {
+            if (!params->is_object())
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'params' must be an object {name: value}");
+            }
+            else
+            {
+                for (const auto& entry : params->items())
+                {
+                    render::MaterialValue value;
+                    std::string error;
+                    if (!ParseMaterialValue(entry.value(), value, error))
+                    {
+                        logger_.Warning("ResourceManager: material " + NarrowText(path) + ": param '" + entry.key() + "': " + error);
+                        continue;
+                    }
+                    asset.params[entry.key()] = std::move(value);
+                }
+            }
+        }
+
+        // The code that knows one texture and one colour (the editor, the thumbnails) sees the mirror of the new keys
+        if (asset.texturePath.empty() && !asset.textures.empty())
+        {
+            asset.texturePath = asset.textures.begin()->second;
+        }
+        if (const auto color = asset.params.find("gColor"); color != asset.params.end() &&
+            color->second.kind == render::MaterialValue::Kind::Vector && color->second.numbers.size() == 4)
+        {
+            const std::vector<double>& c = color->second.numbers;
+            const core::Color gColor{static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]), static_cast<float>(c[3])};
+            if (hasTint && (gColor.r != asset.tint.r || gColor.g != asset.tint.g || gColor.b != asset.tint.b || gColor.a != asset.tint.a))
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'tint' is ignored, 'params' sets gColor and the new key wins");
+            }
+            asset.tint = gColor;
+        }
 
         if (asset.shaderPath.empty() || asset.texturePath.empty())
         {
@@ -2247,6 +2409,10 @@ namespace myengine::resource
 
         Load<ShaderAsset>(asset.shaderPath);
         Load<TextureAsset>(asset.texturePath);
+        for (const auto& [name, texturePath] : asset.textures)
+        {
+            Load<TextureAsset>(texturePath);
+        }
 
         logger_.Info("ResourceManager: material loaded " + NarrowText(path));
         return CreateResource(key, path, std::move(asset), BuildDependencies({path}));
@@ -2265,6 +2431,16 @@ namespace myengine::resource
         ShaderAsset asset = fallbackShader_ != nullptr ? fallbackShader_->asset : ShaderAsset{};
         asset.fallback = true; // the handle belongs to the general fallback program: a reload makes a program of its own
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
+    }
+
+    render::MaterialValues ToMaterialValues(const MaterialAsset& asset)
+    {
+        render::MaterialValues values;
+        values.params = asset.params;
+        values.textures = asset.textures;
+        values.texture = asset.texturePath;
+        values.tint = {asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a};
+        return values;
     }
 
     ResourceHandle<MaterialAsset> ResourceManager::BuildMaterialFallback(
