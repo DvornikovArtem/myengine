@@ -832,10 +832,37 @@ namespace myengine::ui
             const PickerKind kind,
             const std::string& key,
             editor::ThumbnailService* thumbnails,
-            const std::uint32_t requestSize)
+            const std::uint32_t requestSize,
+            const bool missing = false,
+            const bool emptyIsWhite = false)
         {
             const ImVec2 max(min.x + size, min.y + size);
             drawList->AddRectFilled(min, max, IM_COL32(0x12, 0x12, 0x12, 255), 3.0f);
+            if (missing)
+            {
+                // The checkerboard of the fallback texture (magenta and black), 4 x 4 cells, with an alert on a dark disc
+                const float cell = size / 4.0f;
+                for (int row = 0; row < 4; ++row)
+                {
+                    for (int column = 0; column < 4; ++column)
+                    {
+                        const ImVec2 cellMin(min.x + cell * static_cast<float>(column), min.y + cell * static_cast<float>(row));
+                        drawList->AddRectFilled(
+                            cellMin,
+                            ImVec2(cellMin.x + cell, cellMin.y + cell),
+                            ((row + column) % 2 == 0) ? IM_COL32(0xFF, 0x00, 0xFF, 255) : IM_COL32(0x00, 0x00, 0x00, 255));
+                    }
+                }
+                const ImVec2 center((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+                drawList->AddCircleFilled(center, size * 0.3f, IM_COL32(0x12, 0x12, 0x12, 230));
+                DrawIcon(drawList, size >= 60.0f ? IconSize::Toolbar18 : IconSize::Button16, ICON_TRIANGLE_ALERT, center, style::kWarning);
+                return;
+            }
+            if (emptyIsWhite && key.empty())
+            {
+                drawList->AddRectFilled(min, max, IM_COL32(255, 255, 255, 255), 3.0f);
+                return;
+            }
             if (thumbnails != nullptr && kind != PickerKind::Shader && !key.empty())
             {
                 const editor::Thumbnail thumbnail = thumbnails->Request(key, requestSize);
@@ -910,7 +937,7 @@ namespace myengine::ui
             ImGui::SetNextWindowPos(position);
             ImGui::BeginTooltip();
             const ImVec2 min = ImGui::GetCursorScreenPos();
-            DrawPickerImage(ImGui::GetWindowDrawList(), min, size, info, kind, key, options.thumbnails, 256);
+            DrawPickerImage(ImGui::GetWindowDrawList(), min, size, info, kind, key, options.thumbnails, 256, options.missing);
             ImGui::Dummy(ImVec2(size, size));
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
             PushFontRole(FontRole::Strong);
@@ -920,7 +947,7 @@ namespace myengine::ui
             PopFontRole();
             PushFontRole(FontRole::Secondary);
             ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(style::kTextDim));
-            const std::string meta = options.meta ? options.meta(key) : std::string(info.singular);
+            const std::string meta = options.missing ? std::string("File not found") : (options.meta ? options.meta(key) : std::string(info.singular));
             ImGui::TextUnformatted(meta.c_str());
             ImGui::PushTextWrapPos(size);
             ImGui::TextUnformatted(key.c_str());
@@ -966,7 +993,7 @@ namespace myengine::ui
         drawList->AddRectFilled(min, ImVec2(min.x + 3.0f, max.y), info.color, style::kRounding, ImDrawFlags_RoundCornersLeft);
 
         const ImVec2 thumbMin(min.x + 3.0f + 6.0f, min.y + (kHeight - kThumb) * 0.5f);
-        DrawPickerImage(drawList, thumbMin, kThumb, info, options.kind, current, options.thumbnails, 64);
+        DrawPickerImage(drawList, thumbMin, kThumb, info, options.kind, current, options.thumbnails, 64, options.missing, options.emptyIsWhite);
 
         // Two lines: the name and what it is
         const float textX = thumbMin.x + kThumb + 10.0f;
@@ -975,10 +1002,11 @@ namespace myengine::ui
             float sizePx = 0.0f;
             ImFont* nameFont = RoleFont(FontRole::Strong, sizePx);
             const std::string name = PickerName(current);
-            drawList->AddText(nameFont, sizePx, ImVec2(textX, std::floor(min.y + 7.0f)), current.empty() ? style::kTextDim : style::kTextStrong, name.c_str());
+            drawList->AddText(nameFont, sizePx, ImVec2(textX, std::floor(min.y + 7.0f)), options.missing ? style::kErrorText : (current.empty() ? style::kTextDim : style::kTextStrong), name.c_str());
             float metaPx = 0.0f;
             ImFont* metaFont = RoleFont(FontRole::Tiny, metaPx);
             const std::string meta = current.empty() ? std::string("Nothing assigned")
+                : options.missing                    ? std::string("File not found")
                                                      : (options.meta ? options.meta(current) : std::string(info.singular));
             drawList->AddText(metaFont, metaPx, ImVec2(textX, std::floor(min.y + kHeight - 7.0f - metaPx)), style::kTextDim, meta.c_str());
         }

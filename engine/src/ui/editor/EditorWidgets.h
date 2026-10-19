@@ -163,6 +163,11 @@ namespace myengine::ui
         std::function<std::string(const std::string& key)> meta;
         // The same asset under two keys (resource keys are normalised paths). Null: plain equality
         std::function<bool(const std::string& a, const std::string& b)> samePath;
+        // The file of the assigned asset could not be found: the name is red, the meta line says "File not found", and the picture is
+        // a checkerboard with an alert icon (the renderer draws its fallback texture there, which would pass for the real one)
+        bool missing = false;
+        // Nothing assigned shows a white square instead of the type icon (a texture slot: the shader then gets a white 1x1)
+        bool emptyIsWhite = false;
     };
 
     // `current` is the key of the assigned asset (empty: none), `keys` what can be picked. Returns true when

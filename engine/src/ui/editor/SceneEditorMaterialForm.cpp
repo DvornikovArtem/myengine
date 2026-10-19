@@ -233,6 +233,48 @@ namespace myengine::ui
             ImGui::PopStyleColor();
         }
 
+        // One row of the Textures grid: a picker with the three states of the slot (set, not set, the file is not found)
+        void DrawTextureRow(
+            const editor::MaterialRow& row,
+            RowContext& context,
+            resource::ResourceManager& resources,
+            editor::ThumbnailService* thumbnails,
+            const std::vector<std::string>& keys)
+        {
+            ImGui::PushID(row.name.c_str());
+
+            const bool notSet = !row.hasKey;
+            PropertyLabel(row.label.c_str(), notSet, style::kPickerRowHeight, 0, row.tooltip.c_str(), row.texturePath.c_str());
+
+            AssetPickerOptions options = MakePickerOptions(PickerKind::Texture, resources, thumbnails);
+            options.missing = row.fileMissing;
+            options.emptyIsWhite = true;
+            ImGui::BeginGroup();
+            std::string chosen;
+            if (AssetPicker("##texture", row.texturePath, keys, options, chosen))
+            {
+                editor::SetMaterialTexture(row, chosen, context.asset);
+                if (!chosen.empty())
+                {
+                    resources.Load<resource::TextureAsset>(chosen);
+                }
+                context.discrete("Change Material Texture " + row.label);
+            }
+            ImGui::EndGroup();
+            if (notSet)
+            {
+                Tooltip("No texture: the shader gets a white 1x1.");
+            }
+
+            if (row.hasKey && PropertyReset("Remove the texture: the shader gets a white 1x1"))
+            {
+                editor::ResetMaterialTexture(row, context.asset);
+                context.discrete("Reset Material Texture " + row.label);
+            }
+
+            ImGui::PopID();
+        }
+
         // One row of the Parameters grid
         void DrawParameterRow(const editor::MaterialRow& row, RowContext& context)
         {
@@ -354,8 +396,9 @@ namespace myengine::ui
             EndCategory();
         }
 
-        // ---- Textures: the first texture of the shader as before (the full list comes with the next step) ----
-        if (BeginCategory("Textures"))
+        // ---- Textures: a row for every Texture2D of the shader, in the order of the registers ----
+        const std::string textureCount = std::to_string(model.textures.size());
+        if (BeginCategory("Textures", true, model.textures.empty() ? nullptr : textureCount.c_str()))
         {
             ImGui::BeginDisabled(!editEnabled);
             if (model.textures.empty())
@@ -364,24 +407,11 @@ namespace myengine::ui
             }
             else if (BeginPropertyGrid("##material_textures"))
             {
-                const editor::MaterialRow& row = model.textures.front();
-                PropertyLabel("Texture", false, style::kPickerRowHeight);
                 const auto textureKeys = services_.resourceManager->GetKnownTextureKeys();
-                std::string chosen;
-                if (AssetPicker(
-                        "##texture",
-                        row.texturePath,
-                        textureKeys,
-                        MakePickerOptions(PickerKind::Texture, *services_.resourceManager, services_.thumbnails),
-                        chosen))
+                for (const editor::MaterialRow& row : model.textures)
                 {
-                    editor::SetMaterialTexture(row, chosen, asset);
-                    if (!chosen.empty())
-                    {
-                        services_.resourceManager->Load<resource::TextureAsset>(chosen);
-                    }
+                    DrawTextureRow(row, context, *services_.resourceManager, services_.thumbnails, textureKeys);
                 }
-                CommitMaterialWidgetEdit("Change Material Texture", materialPath, frameStart, asset);
                 EndPropertyGrid();
             }
             ImGui::EndDisabled();
