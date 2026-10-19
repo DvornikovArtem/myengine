@@ -1,11 +1,16 @@
 cbuffer DrawCB : register(b0)
 {
+    // @hidden
     float4x4 gModel;
+    // @hidden
     float4x4 gViewProjection;
+    // @color @label "Tint" @default 1 1 1 1
     float4 gColor;
+    // @hidden
     float4 gLightDirection;
 };
 
+// @label "Texture"
 Texture2D gTexture : register(t0);
 SamplerState gSampler : register(s0);
 

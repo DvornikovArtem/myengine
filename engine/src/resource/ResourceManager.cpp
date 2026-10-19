@@ -2520,6 +2520,7 @@ namespace myengine::resource
             asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / legacyTexture));
         }
         const bool hasTint = descriptor.contains("tint");
+        asset.tintSet = hasTint;
         asset.tint = ParseColor(descriptor.value("tint", json::array()), asset.tint);
 
         // The new keys: "textures" {name: path} and "params" {name: value}. What does not read is reported and skipped.
@@ -2579,6 +2580,7 @@ namespace myengine::resource
                 logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'tint' is ignored, 'params' sets gColor and the new key wins");
             }
             asset.tint = gColor;
+            asset.tintSet = true;
         }
 
         if (asset.shaderPath.empty())
@@ -2638,6 +2640,7 @@ namespace myengine::resource
         values.textures = asset.textures;
         values.texture = asset.texturePath;
         values.tint = {asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a};
+        values.hasTint = asset.tintSet;
         return values;
     }
 

@@ -144,7 +144,7 @@
 | Ситуация | Что в логе | Что в кадре |
 | --- | --- | --- |
 | Имени нет в layout (переменная или текстура: опечатка или имя убрали из шейдера) | Одно предупреждение: `'<имя>' is not in <шейдер>; names: variables: ...; textures: ...` | Остальное применяется, кадр рисуется |
-| Не тот тип | Ошибка: `'gColor': expected Float4, got Float` | Переменная остаётся нулём (для `gColor` объект чёрный) |
+| Не тот тип | Ошибка: `'gColor': expected Float4, got Float` | Переменная остаётся по умолчанию: нулём или значением `@default` шейдера ([B2](b2-shader-metadata.md)); у `gColor` в `textured_lit` это белый |
 | Файл текстуры не найден или не загрузился | Ошибка: `the texture <путь> could not be loaded: the fallback texture (magenta and black) stands in` | В слот идёт запасная текстура `ResourceManager` (шахматка magenta и чёрная), а не белая. Белая - только для текстуры, которую материал вообще не задал |
 | Семантика движка в `params` (`gModel`, `gViewProjection`, `gLightDirection`) | Предупреждение: `'gModel' is set by the renderer: the value from the material is ignored` | Значение игнорируется, пишет рендерер |
 | Конфликт старого и нового ключа | Предупреждение: `'texture' is ignored: ...` или `'tint' is ignored: ...` | Побеждает новый ключ |
@@ -224,7 +224,7 @@
 
    (список `textures` зависит от текущего шейдера: если `gDetail` из шага Б оставлен, он в списке). Кадр рисуется, остальное применено.
 2. **Несуществующее имя.** В `params` записать `{"gNoSuchName": 1}`: такое же сообщение с именем `gNoSuchName`.
-3. **Не тот тип.** `"gColor": 0.5` вместо массива: в логе ошибка `'gColor': expected Float4, got Float`, объект чёрный (`gColor` = 0).
+3. **Не тот тип.** `"gColor": 0.5` вместо массива: в логе ошибка `'gColor': expected Float4, got Float`, значение не принято, `gColor` остаётся по умолчанию: у `textured_lit` это белый `@default 1 1 1 1`, поэтому объект выглядит как без tint. Переменная без `@default` осталась бы нулём.
 4. **Нет файла текстуры.** `"textures": { "gTexture": "нет_файла.bmp" }`: ошибка `the texture <путь> could not be loaded: the fallback texture (magenta and black) stands in` и фиолетово-чёрная шахматка вместо белой.
 
 ### Шаг Г: вернуть всё

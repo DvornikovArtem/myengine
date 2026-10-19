@@ -271,6 +271,18 @@ set_property(TARGET myengine_shader_hot_reload_tests PROPERTY FOLDER "Tests")
 add_test(NAME shader_hot_reload COMMAND myengine_shader_hot_reload_tests)
 set_tests_properties(shader_hot_reload PROPERTIES TIMEOUT 120)
 
+# B2 (LR3): the metadata of the shader parameters (comments "// @label ... @default ...") without a GPU: the tags, every mistake
+# with its file and line, includes, @default in the material parameters, a source that changes
+add_executable(myengine_shader_metadata_tests
+  render/ShaderMetadataTests.cpp)
+
+target_link_libraries(myengine_shader_metadata_tests PRIVATE myengine_engine)
+target_include_directories(myengine_shader_metadata_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_shader_metadata_tests)
+set_property(TARGET myengine_shader_metadata_tests PROPERTY FOLDER "Tests")
+add_test(NAME shader_metadata COMMAND myengine_shader_metadata_tests)
+set_tests_properties(shader_metadata PROPERTIES TIMEOUT 120)
+
 # B1 (LR3): the parameters of a material by the names of the shader layout, without a GPU: setters, bytes, errors,
 # the old keys of a material, the materials of the project, save and load
 add_executable(myengine_material_params_tests
