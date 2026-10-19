@@ -25,6 +25,46 @@ namespace myengine::ui
             std::function<void(const std::string& label)> discrete;  // after a click: the whole change is in this frame
         };
 
+        // The narrowest field that shows -123.45 and 1000.00 whole
+        constexpr float kMinVectorFieldWidth = 56.0f;
+
+        // A slider is a fill: the grab is transparent and the field is painted by hand from the left edge to the value, so that
+        // the number in the middle stays readable. Call before the slider, EndSliderFill after it.
+        void BeginSliderFill(const double fraction, const bool grey)
+        {
+            const ImVec2 min = ImGui::GetCursorScreenPos();
+            const float width = ImGui::CalcItemWidth();
+            const ImVec2 max(min.x + width, min.y + ImGui::GetFrameHeight());
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_FrameBg), style::kRounding);
+            const float filled = min.x + width * static_cast<float>(std::clamp(fraction, 0.0, 1.0));
+            if (filled > min.x)
+            {
+                drawList->AddRectFilled(
+                    min,
+                    ImVec2(filled, max.y),
+                    ImGui::GetColorU32(grey ? style::kControlHover : style::kSelectUnfocused),
+                    style::kRounding,
+                    filled >= max.x - 0.5f ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersLeft);
+            }
+            const ImVec4 clear(0.0f, 0.0f, 0.0f, 0.0f);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, clear);
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, clear);
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, clear);
+            ImGui::PushStyleColor(ImGuiCol_SliderGrab, clear);
+            ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, clear);
+        }
+
+        void EndSliderFill()
+        {
+            ImGui::PopStyleColor(5);
+        }
+
+        double FractionOf(const editor::MaterialRow& row, const double value)
+        {
+            return row.max > row.min ? (value - row.min) / (row.max - row.min) : 0.0;
+        }
+
         std::string FormatOf(const int decimals)
         {
             return "%." + std::to_string(std::clamp(decimals, 0, 6)) + "f";
@@ -67,7 +107,9 @@ namespace myengine::ui
             bool changed = false;
             if (row.slider)
             {
+                BeginSliderFill(FractionOf(row, ValueAt(row, 0)), row.state == editor::MaterialRowState::NotSet || row.state == editor::MaterialRowState::WrongType);
                 changed = ImGui::SliderFloat("##value", &value, ToFloat(row.min), ToFloat(row.max), format.c_str());
+                EndSliderFill();
             }
             else
             {
@@ -96,7 +138,9 @@ namespace myengine::ui
             bool changed = false;
             if (row.slider)
             {
+                BeginSliderFill(FractionOf(row, ValueAt(row, 0)), row.state == editor::MaterialRowState::NotSet || row.state == editor::MaterialRowState::WrongType);
                 changed = ImGui::SliderInt("##value", &value, minValue, maxValue);
+                EndSliderFill();
             }
             else
             {
@@ -129,7 +173,11 @@ namespace myengine::ui
             {
                 values[axis] = ToFloat(ValueAt(row, static_cast<std::size_t>(axis)));
             }
-            const std::string format = FormatOf(row.decimals);
+            // Four fields go in two rows when one row would be narrower than kMinVectorFieldWidth; the other vectors show one digit
+            // less when their fields are that narrow (a step that the shader gives keeps its digits)
+            const float minRowWidth = count == 4 ? kMinVectorFieldWidth : 0.0f;
+            const bool narrow = DragVectorFieldWidth(count, minRowWidth) < kMinVectorFieldWidth;
+            const std::string format = FormatOf(narrow && !row.hasStep ? std::min(row.decimals, 1) : row.decimals);
             const bool clamped = row.hasMin && row.hasMax;
             DragVector(
                 "##value",
@@ -151,7 +199,8 @@ namespace myengine::ui
                     context.gesture(undoLabel);
                 },
                 clamped ? ToFloat(row.min) : 0.0f,
-                clamped ? ToFloat(row.max) : 0.0f);
+                clamped ? ToFloat(row.max) : 0.0f,
+                minRowWidth);
         }
 
         // @color on a Float3 / Float4: a 40 x 24 swatch (the picker opens on click) and the 0-255 values in one row
@@ -244,7 +293,13 @@ namespace myengine::ui
             ImGui::PushID(row.name.c_str());
 
             const bool notSet = !row.hasKey;
-            PropertyLabel(row.label.c_str(), notSet, style::kPickerRowHeight, 0, row.tooltip.c_str(), row.texturePath.c_str());
+            PropertyLabelOptions label;
+            label.dim = notSet;
+            label.rowHeight = style::kPickerRowHeight;
+            label.tooltip = row.tooltip.c_str();
+            label.tooltipDetail = row.texturePath.c_str();
+            label.centered = true;
+            PropertyLabel(row.label.c_str(), label);
 
             AssetPickerOptions options = MakePickerOptions(PickerKind::Texture, resources, thumbnails);
             options.missing = row.fileMissing;
@@ -287,7 +342,13 @@ namespace myengine::ui
             const bool dimLabel = row.state == MaterialRowState::NotSet || row.state == MaterialRowState::Unsupported;
             const std::string tooltip = wrongType ? row.message : row.tooltip;
             std::string detail = wrongType ? row.tooltip : row.detail;
-            PropertyLabel(row.label.c_str(), dimLabel, 0.0f, wrongType ? style::kErrorText : 0, tooltip.c_str(), detail.c_str());
+            PropertyLabelOptions label;
+            label.dim = dimLabel;
+            label.color = wrongType ? style::kErrorText : 0;
+            label.tooltip = tooltip.c_str();
+            label.tooltipDetail = detail.c_str();
+            label.centered = true;
+            PropertyLabel(row.label.c_str(), label);
 
             const std::string changeLabel = "Change Material Param " + row.label;
             const bool grey = IsGrey(row);
@@ -376,7 +437,10 @@ namespace myengine::ui
             ImGui::BeginDisabled(!editEnabled);
             if (BeginPropertyGrid("##material_asset"))
             {
-                PropertyLabel("Shader", false, style::kPickerRowHeight);
+                PropertyLabelOptions shaderLabel;
+                shaderLabel.rowHeight = style::kPickerRowHeight;
+                shaderLabel.centered = true;
+                PropertyLabel("Shader", shaderLabel);
                 const auto shaderKeys = services_.resourceManager->GetKnownShaderKeys();
                 std::string chosen;
                 if (AssetPicker(

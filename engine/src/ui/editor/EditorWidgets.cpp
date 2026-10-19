@@ -655,20 +655,40 @@ namespace myengine::ui
 
     void PropertyLabel(const char* text, const bool dim, const float rowHeight, const ImU32 color, const char* tooltip, const char* tooltipDetail)
     {
-        const float height = std::max(rowHeight, style::kPropRowHeight);
+        PropertyLabelOptions options;
+        options.dim = dim;
+        options.rowHeight = rowHeight;
+        options.color = color;
+        options.tooltip = tooltip;
+        options.tooltipDetail = tooltipDetail;
+        PropertyLabel(text, options);
+    }
+
+    void PropertyLabel(const char* text, const PropertyLabelOptions& options)
+    {
+        const float height = std::max(options.rowHeight, style::kPropRowHeight);
         ImGui::TableNextRow(ImGuiTableRowFlags_None, height);
         ImGui::TableSetColumnIndex(0);
-        if (height > style::kPropRowHeight)
+        if (!options.centered)
         {
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (height - style::kPropRowHeight) * 0.5f);
+            if (height > style::kPropRowHeight)
+            {
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (height - style::kPropRowHeight) * 0.5f);
+            }
+            ImGui::AlignTextToFramePadding();
         }
-        ImGui::AlignTextToFramePadding();
 
         const char* textEnd = ImGui::FindRenderedTextEnd(text);
-        const ImVec2 position = ImGui::GetCursorScreenPos();
+        ImVec2 position = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
         const ImVec2 size = ImGui::CalcTextSize(text, textEnd);
-        const ImU32 textColor = color != 0 ? color : (dim ? style::kTextDim : style::kText);
+        if (options.centered)
+        {
+            const float widgetHeight = height > style::kPropRowHeight ? height - 4.0f : style::kFrameHeight;
+            position.y += std::floor((widgetHeight - size.y) * 0.5f);
+            ImGui::SetCursorScreenPos(position);
+        }
+        const ImU32 textColor = options.color != 0 ? options.color : (options.dim ? style::kTextDim : style::kText);
         auto* drawList = ImGui::GetWindowDrawList();
         if (size.x > width)
         {
@@ -684,9 +704,9 @@ namespace myengine::ui
         ImGui::Dummy(ImVec2(width, size.y));
         if (ImGui::IsItemHovered())
         {
-            if (tooltip != nullptr && tooltip[0] != '\0')
+            if (options.tooltip != nullptr && options.tooltip[0] != '\0')
             {
-                Tooltip(tooltip, nullptr, tooltipDetail != nullptr && tooltipDetail[0] != '\0' ? tooltipDetail : nullptr);
+                Tooltip(options.tooltip, nullptr, options.tooltipDetail != nullptr && options.tooltipDetail[0] != '\0' ? options.tooltipDetail : nullptr);
             }
             else if (size.x > width)
             {
@@ -722,13 +742,16 @@ namespace myengine::ui
         const char* format,
         const std::function<void(int axis)>& afterField,
         const float minValue,
-        const float maxValue)
+        const float maxValue,
+        const float minFieldWidthForOneRow)
     {
         static constexpr ImU32 kAxisColors[4] = {style::kAxisX, style::kAxisY, style::kAxisZ, style::kTextDim};
         const int fields = std::clamp(count, 2, 4);
         const float gap = 4.0f;
         const float available = ImGui::GetContentRegionAvail().x;
-        const float fieldWidth = std::max(std::floor((available - gap * static_cast<float>(fields - 1)) / static_cast<float>(fields)), 24.0f);
+        const float fieldWidth = DragVectorFieldWidth(fields, minFieldWidthForOneRow);
+        const bool twoRows = fields == 4 && minFieldWidthForOneRow > 0.0f && std::floor((available - gap * 3.0f) / 4.0f) < minFieldWidthForOneRow;
+        const int perRow = twoRows ? 2 : fields;
 
         bool changed = false;
         ImGui::PushID(id);
@@ -736,7 +759,7 @@ namespace myengine::ui
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(11.0f, (style::kFrameHeight - FontRoleSize(FontRole::Secondary)) * 0.5f));
         for (int axis = 0; axis < fields; ++axis)
         {
-            if (axis > 0)
+            if (axis % perRow != 0)
             {
                 ImGui::SameLine(0.0f, gap);
             }
@@ -760,6 +783,19 @@ namespace myengine::ui
         PopFontRole();
         ImGui::PopID();
         return changed;
+    }
+
+    float DragVectorFieldWidth(const int count, const float minFieldWidthForOneRow)
+    {
+        const int fields = std::clamp(count, 2, 4);
+        const float gap = 4.0f;
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float oneRow = std::floor((available - gap * static_cast<float>(fields - 1)) / static_cast<float>(fields));
+        if (fields == 4 && minFieldWidthForOneRow > 0.0f && oneRow < minFieldWidthForOneRow)
+        {
+            return std::max(std::floor((available - gap) * 0.5f), 24.0f); // two rows of two
+        }
+        return std::max(oneRow, 24.0f);
     }
 
     bool DragVector3(const char* id, float values[3], const float speed, const char* format, const std::function<void(int axis)>& afterField)

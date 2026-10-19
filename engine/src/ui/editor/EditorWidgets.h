@@ -130,14 +130,31 @@ namespace myengine::ui
     // line) is shown on the label; without it only a label that does not fit has one: its full text.
     void PropertyLabel(const char* text, bool dim = false, float rowHeight = 0.0f, ImU32 color = 0,
                        const char* tooltip = nullptr, const char* tooltipDetail = nullptr);
+
+    struct PropertyLabelOptions
+    {
+        bool dim = false;
+        float rowHeight = 0.0f;
+        ImU32 color = 0;
+        const char* tooltip = nullptr;
+        const char* tooltipDetail = nullptr;
+        // The centre of the text is the centre of the widget of the row (a field of 24 px, a picker of rowHeight - 4). Without it the
+        // label keeps its old place, a few pixels above the centre: the other panels look as they always did.
+        bool centered = false;
+    };
+    void PropertyLabel(const char* text, const PropertyLabelOptions& options);
     // Draws the reset arrow in the third column and returns true when it was clicked
     bool PropertyReset(const char* tooltip = "Reset to the value from the script code");
     void EndPropertyGrid();
 
     // 2..4 drag fields X/Y/(Z)/(W) with coloured axis stripes (W is grey); the same callbacks and the result as DragVector3.
     // `minValue` < `maxValue` clamps every field.
+    // With `minFieldWidthForOneRow` > 0, four fields go in two rows (X Y over Z W) when a field of one row would be narrower than that.
     bool DragVector(const char* id, float* values, int count, float speed = 0.05f, const char* format = "%.3f",
-                    const std::function<void(int axis)>& afterField = {}, float minValue = 0.0f, float maxValue = 0.0f);
+                    const std::function<void(int axis)>& afterField = {}, float minValue = 0.0f, float maxValue = 0.0f,
+                    float minFieldWidthForOneRow = 0.0f);
+    // The width of one field of DragVector with the same arguments, at the current cursor
+    float DragVectorFieldWidth(int count, float minFieldWidthForOneRow = 0.0f);
 
     // Three drag fields X/Y/Z with coloured axis stripes. `afterField(axis)` is called right after each field is
     // submitted, so `IsItemActivated()` / `IsItemDeactivatedAfterEdit()` refer to that field (undo recording).
