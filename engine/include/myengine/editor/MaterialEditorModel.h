@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -169,4 +170,36 @@ namespace myengine::editor
 
     // The shader of the material. What the new shader does not have shows up in "Not in the shader", nothing is lost.
     bool ChangeMaterialShader(resource::MaterialAsset& asset, const std::string& shaderKey);
+
+    // ---- what the panel says besides the rows ----
+
+    // The banner of the shader: the first compile failed (the fallback program is drawn: the panel has no rows then), the last reload
+    // failed (the previous version works: the rows are those of that version), or nothing to say
+    enum class ShaderBannerKind : std::uint8_t
+    {
+        None,
+        Error,
+        Warning,
+    };
+
+    struct ShaderBanner
+    {
+        ShaderBannerKind kind = ShaderBannerKind::None;
+        std::string text;
+    };
+
+    // `fallback`: the shader stands in with the fallback program. `error`: why (the first error, UTF-8), empty when the shader works.
+    ShaderBanner DescribeShaderBanner(bool fallback, const std::string& error);
+
+    // The parameters get a filter field when there are more than this many rows
+    inline constexpr std::size_t kMaterialFilterThreshold = 12;
+    bool MaterialFilterIsShown(const MaterialEditorModel& model);
+
+    // The filter looks at the label and at the name, without the case of the Latin letters; an empty filter matches every row
+    bool MaterialRowMatchesFilter(const MaterialRow& row, const std::string& filter);
+
+    // The texts of an entry "Not in the shader": its name in the list, the value, and the tooltip of the warning
+    std::string MaterialEntryName(const MaterialEntry& entry);
+    std::string MaterialEntryValueText(const MaterialEntry& entry);
+    std::string MaterialEntryTooltip(const MaterialEntry& entry);
 }

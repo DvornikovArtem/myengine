@@ -733,4 +733,112 @@ namespace myengine::editor
         asset.shaderPath = shaderKey;
         return true;
     }
+
+    namespace
+    {
+        std::string FirstLine(const std::string& text)
+        {
+            std::size_t begin = 0;
+            while (begin < text.size() && (text[begin] == '\n' || text[begin] == '\r' || text[begin] == ' ' || text[begin] == '\t'))
+            {
+                ++begin;
+            }
+            std::size_t end = begin;
+            while (end < text.size() && text[end] != '\n' && text[end] != '\r')
+            {
+                ++end;
+            }
+            while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t' || text[end - 1] == '.'))
+            {
+                --end;
+            }
+            return text.substr(begin, end - begin);
+        }
+
+        std::string LowerAscii(std::string text)
+        {
+            for (char& c : text)
+            {
+                if (c >= 'A' && c <= 'Z')
+                {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            return text;
+        }
+    }
+
+    ShaderBanner DescribeShaderBanner(const bool fallback, const std::string& error)
+    {
+        std::string first = FirstLine(error);
+        if (fallback)
+        {
+            if (first.empty())
+            {
+                first = "the shader did not compile";
+            }
+            return {ShaderBannerKind::Error, "Shader error: " + first + ". The fallback shader is drawn. Fix the HLSL: this panel updates after the save."};
+        }
+        if (!first.empty())
+        {
+            return {ShaderBannerKind::Warning, "The last change of the shader did not compile, the previous version is used: " + first};
+        }
+        return {};
+    }
+
+    bool MaterialFilterIsShown(const MaterialEditorModel& model)
+    {
+        return model.parameters.size() > kMaterialFilterThreshold;
+    }
+
+    bool MaterialRowMatchesFilter(const MaterialRow& row, const std::string& filter)
+    {
+        if (filter.empty())
+        {
+            return true;
+        }
+        const std::string needle = LowerAscii(filter);
+        return LowerAscii(row.label).find(needle) != std::string::npos || LowerAscii(row.name).find(needle) != std::string::npos;
+    }
+
+    std::string MaterialEntryName(const MaterialEntry& entry)
+    {
+        switch (entry.kind)
+        {
+            case MaterialEntryKind::OldTint:
+            case MaterialEntryKind::OldTexture:
+                return entry.name + " (old key)";
+            default:
+                return entry.name;
+        }
+    }
+
+    std::string MaterialEntryValueText(const MaterialEntry& entry)
+    {
+        switch (entry.kind)
+        {
+            case MaterialEntryKind::Texture:
+                return "texture \xC2\xB7 " + entry.text;
+            default:
+                return entry.text;
+        }
+    }
+
+    std::string MaterialEntryTooltip(const MaterialEntry& entry)
+    {
+        switch (entry.kind)
+        {
+            case MaterialEntryKind::Param:
+                return "The shader has no variable '" + entry.name + "'. The value stays in the file and is ignored. Put the variable back or remove it.";
+            case MaterialEntryKind::Texture:
+                return "The shader has no texture '" + entry.name + "'. The path stays in the file and is ignored. Put the texture back or remove it.";
+            case MaterialEntryKind::EngineSemantic:
+                return "'" + entry.name + "' is set by the renderer. The value in the material is ignored. Remove it.";
+            case MaterialEntryKind::OldTint:
+                return "The shader has no gColor: the old 'tint' key is ignored. Remove it.";
+            case MaterialEntryKind::OldTexture:
+                return "The shader has no texture: the old 'texture' key is ignored. Remove it.";
+        }
+        return {};
+    }
 }

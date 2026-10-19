@@ -464,6 +464,61 @@ namespace
 
     // ---- the cache ----
 
+    // ---- B3.4: the banner, the filter and the texts of the entries ----
+    void TestBannerFilterAndTexts()
+    {
+        // the banner of the shader
+        const ShaderBanner none = DescribeShaderBanner(false, "");
+        Check(none.kind == ShaderBannerKind::None && none.text.empty(), "a shader that works says nothing");
+        const ShaderBanner error = DescribeShaderBanner(true, "textured_lit.hlsl(27,14): undeclared identifier 'gRoughnes'.\n  second line\nthird");
+        Check(error.kind == ShaderBannerKind::Error, "the first compile failed: an error");
+        Check(error.text == "Shader error: textured_lit.hlsl(27,14): undeclared identifier 'gRoughnes'. The fallback shader is drawn. Fix the HLSL: this panel updates after the save.",
+            "the banner says the first error only, with one full stop: " + error.text);
+        Check(DescribeShaderBanner(true, "").kind == ShaderBannerKind::Error && Contains(DescribeShaderBanner(true, "").text, "did not compile"), "an error without a reason still says that it did not compile");
+        const ShaderBanner warning = DescribeShaderBanner(false, "lit.hlsl(5,2): bad token");
+        Check(warning.kind == ShaderBannerKind::Warning && warning.text == "The last change of the shader did not compile, the previous version is used: lit.hlsl(5,2): bad token",
+            "a reload failed while the old version works: a warning: " + warning.text);
+
+        // the filter shows up above the threshold and looks at the label and the name
+        const ShaderLayout layout = EditorLayout();
+        const MaterialEditorModel model = BuildMaterialEditorModel(layout, MaterialAsset{});
+        Check(!MaterialFilterIsShown(model), "a few rows: no filter");
+        MaterialEditorModel many = model;
+        while (many.parameters.size() <= kMaterialFilterThreshold)
+        {
+            many.parameters.push_back(model.parameters.front());
+        }
+        Check(MaterialFilterIsShown(many), "more than the threshold: the filter is shown");
+        MaterialEditorModel exact = model;
+        while (exact.parameters.size() < kMaterialFilterThreshold)
+        {
+            exact.parameters.push_back(model.parameters.front());
+        }
+        Check(!MaterialFilterIsShown(exact), "exactly the threshold: no filter");
+
+        MaterialRow row;
+        row.name = "gRoughness";
+        row.label = "Roughness";
+        Check(MaterialRowMatchesFilter(row, ""), "an empty filter matches");
+        Check(MaterialRowMatchesFilter(row, "rough") && MaterialRowMatchesFilter(row, "ROUGH"), "the label, without the case");
+        Check(MaterialRowMatchesFilter(row, "gro") && !MaterialRowMatchesFilter(row, "metal"), "the name; what is in neither does not match");
+        row.label = "\xD0\xA8\xD0\xB5\xD1\x80\xD0\xBE\xD1\x85"; // a Cyrillic label is found by its bytes
+        Check(MaterialRowMatchesFilter(row, "\xD0\xB5\xD1\x80") && MaterialRowMatchesFilter(row, "gRough"), "a label in another script, and the name behind it");
+
+        // the texts of the entries
+        MaterialEntry param{MaterialEntryKind::Param, "gOldGain", "0.4"};
+        Check(MaterialEntryName(param) == "gOldGain" && MaterialEntryValueText(param) == "0.4", "a value that the shader does not have");
+        Check(MaterialEntryTooltip(param) == "The shader has no variable 'gOldGain'. The value stays in the file and is ignored. Put the variable back or remove it.", "its tooltip");
+        MaterialEntry texture{MaterialEntryKind::Texture, "gDetail2", "a/b.bmp"};
+        Check(Contains(MaterialEntryValueText(texture), "texture") && Contains(MaterialEntryValueText(texture), "a/b.bmp"), "a texture says its path");
+        MaterialEntry semantic{MaterialEntryKind::EngineSemantic, "gModel", "set by the renderer, the value is ignored"};
+        Check(MaterialEntryValueText(semantic) == "set by the renderer, the value is ignored" && Contains(MaterialEntryTooltip(semantic), "gModel"), "an engine semantic");
+        MaterialEntry oldTint{MaterialEntryKind::OldTint, "tint", "1, 0.5, 0, 1"};
+        MaterialEntry oldTexture{MaterialEntryKind::OldTexture, "texture", "a.bmp"};
+        Check(MaterialEntryName(oldTint) == "tint (old key)" && MaterialEntryName(oldTexture) == "texture (old key)", "the old keys are called so");
+        Check(!MaterialEntryTooltip(oldTint).empty() && !MaterialEntryTooltip(oldTexture).empty(), "and have a tooltip");
+    }
+
     void TestCache()
     {
         ShaderLayout layout = EditorLayout();
@@ -529,6 +584,7 @@ int main()
         run("resets", TestResets);
         run("not in the shader", TestNotInTheShader);
         run("textures", TestTextures);
+        run("banner, filter and texts", TestBannerFilterAndTexts);
         run("cache", TestCache);
         std::cout << "OK: material editor model: rows, states, values of the frame, edits, resets, entries not in the shader, textures, cache\n";
     }

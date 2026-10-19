@@ -161,6 +161,43 @@ namespace myengine::resource
             }
         }
 
+        // The compiler writes in the ANSI code page; the editor shows UTF-8
+        std::string AnsiToUtf8(const std::string& text)
+        {
+            if (text.empty())
+            {
+                return text;
+            }
+            const int wideLength = MultiByteToWideChar(CP_ACP, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+            if (wideLength <= 0)
+            {
+                return text;
+            }
+            std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
+            MultiByteToWideChar(CP_ACP, 0, text.data(), static_cast<int>(text.size()), wide.data(), wideLength);
+            const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLength, nullptr, 0, nullptr, nullptr);
+            if (utf8Length <= 0)
+            {
+                return text;
+            }
+            std::string utf8(static_cast<std::size_t>(utf8Length), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLength, utf8.data(), utf8Length, nullptr, nullptr);
+            return utf8;
+        }
+
+        // The first error of a compile, as the log writes it; "compile failed" when the adapter gave none
+        std::string FirstShaderError(const std::vector<render::ShaderDiagnostic>& diagnostics)
+        {
+            for (const render::ShaderDiagnostic& diagnostic : diagnostics)
+            {
+                if (!diagnostic.warning)
+                {
+                    return AnsiToUtf8(render::FormatShaderDiagnostic(diagnostic));
+                }
+            }
+            return "compile failed";
+        }
+
         std::string GenericNarrowText(const std::filesystem::path& path)
         {
             try
@@ -1594,10 +1631,11 @@ namespace myengine::resource
 
         json descriptor;
         descriptor["shader"] = makeRelativeAssetPath(asset.shaderPath);
-        // The old "texture" is written unless it only mirrors an entry of "textures"
+        // The old "texture" is written unless it only mirrors an entry of "textures", and unless there is none (a material may have
+        // no texture: the shader gets a white 1x1)
         const bool textureIsMirror = std::any_of(asset.textures.begin(), asset.textures.end(),
             [&asset](const auto& entry) { return entry.second == asset.texturePath; });
-        if (asset.textures.empty() || (!asset.texturePath.empty() && !textureIsMirror))
+        if (!asset.texturePath.empty() && !textureIsMirror)
         {
             descriptor["texture"] = makeRelativeAssetPath(asset.texturePath);
         }
@@ -1800,11 +1838,12 @@ namespace myengine::resource
             return it->second;
         }
 
-        auto resource = LoadShaderInternal(request.key, request.path);
+        std::string error;
+        auto resource = LoadShaderInternal(request.key, request.path, error);
         if (resource == nullptr)
         {
             failedKeys_.insert(request.key);
-            resource = BuildShaderFallback(request.key, request.path);
+            resource = BuildShaderFallback(request.key, request.path, {}, error);
         }
 
         shaderCache_.insert_or_assign(request.key, resource);
@@ -2494,7 +2533,8 @@ namespace myengine::resource
 
     ResourceHandle<ShaderAsset> ResourceManager::LoadShaderInternal(
         const std::string& key,
-        const std::filesystem::path& path)
+        const std::filesystem::path& path,
+        std::string& outError)
     {
         render::ShaderProgramData program;
         std::vector<std::filesystem::path> dependencies;
@@ -2502,6 +2542,7 @@ namespace myengine::resource
         if (!ReadShaderProgram(path, program, dependencies, error))
         {
             logger_.Warning("ResourceManager: shader descriptor " + NarrowText(path) + ": " + error);
+            outError = AnsiToUtf8(error);
             return nullptr;
         }
 
@@ -2511,7 +2552,7 @@ namespace myengine::resource
         if (!asset.gpuHandle.IsValid())
         {
             logger_.Warning("ResourceManager: shader compile failed: " + NarrowText(path));
-            return BuildShaderFallback(key, path, dependencies);
+            return BuildShaderFallback(key, path, dependencies, FirstShaderError(renderAdapter_.GetLastShaderDiagnostics()));
         }
         asset.version = renderAdapter_.GetShaderVersion(asset.gpuHandle);
 
@@ -2640,7 +2681,8 @@ namespace myengine::resource
     ResourceHandle<ShaderAsset> ResourceManager::BuildShaderFallback(
         const std::string& key,
         const std::filesystem::path& path,
-        std::vector<std::filesystem::path> dependencies) const
+        std::vector<std::filesystem::path> dependencies,
+        std::string error) const
     {
         if (dependencies.empty())
         {
@@ -2649,6 +2691,7 @@ namespace myengine::resource
 
         ShaderAsset asset = fallbackShader_ != nullptr ? fallbackShader_->asset : ShaderAsset{};
         asset.fallback = true; // the handle belongs to the general fallback program: a reload makes a program of its own
+        asset.error = std::move(error);
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
     }
 
@@ -2789,6 +2832,26 @@ namespace myengine::resource
         asset.gpuHandle = renderAdapter_.CreateTexture(asset.data);
 
         return CreateResource("__fallback_texture__", {}, std::move(asset));
+    }
+
+    std::string ResourceManager::GetShaderError(const ResourceHandle<ShaderAsset>& shader) const
+    {
+        if (shader == nullptr)
+        {
+            return {};
+        }
+        if (shader->asset.fallback)
+        {
+            return shader->asset.error.empty() ? std::string("compile failed") : shader->asset.error;
+        }
+        for (const render::ShaderProgramInfo& program : renderAdapter_.GetShaderPrograms())
+        {
+            if (program.handle.value == shader->asset.gpuHandle.value)
+            {
+                return AnsiToUtf8(program.lastError);
+            }
+        }
+        return {};
     }
 
     render::TextureHandle ResourceManager::GetWhiteTextureHandle()

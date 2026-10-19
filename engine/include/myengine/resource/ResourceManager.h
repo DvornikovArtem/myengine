@@ -75,6 +75,7 @@ namespace myengine::resource
         render::ShaderHandle gpuHandle;
         std::uint32_t version = 1;  // the version of the program in the renderer: +1 for every successful hot reload
         bool fallback = false;      // the file did not compile at the first load and the general fallback program stands in
+        std::string error;          // fallback: the first error of that load (UTF-8, "file(line,column): message"); empty otherwise
     };
 
     // What a .material.json says. Raw values and paths, nothing of the shader: they are matched with the layout of the
@@ -184,6 +185,10 @@ namespace myengine::resource
         // replaced (UpdateHotReload is the clock), so the draw items of a frame never point to freed parameters.
         const render::MaterialParams* GetMaterialParams(const ResourceHandle<MaterialAsset>& material);
 
+        // Why the shader is not what its file says: the first error of the first compile (the fallback program stands in), or the
+        // first error of the last reload that failed while the previous version keeps running. Empty when the shader works. UTF-8.
+        std::string GetShaderError(const ResourceHandle<ShaderAsset>& shader) const;
+
         // A white 1x1 texture: what a material without a texture gets where the old code needs one (a draw item
         // without MaterialParams, a thumbnail). The parameters of a material put it in every texture slot that is not set.
         render::TextureHandle GetWhiteTextureHandle();
@@ -273,9 +278,9 @@ namespace myengine::resource
         ResourceHandle<TextureAsset> BuildTextureResource(const std::string& key, const std::filesystem::path& path, TextureCpuAsset cpuAsset);
         ResourceHandle<MeshAsset> BuildMeshPlaceholder(const std::string& key, const std::filesystem::path& path);
         ResourceHandle<TextureAsset> BuildTexturePlaceholder(const std::string& key, const std::filesystem::path& path);
-        ResourceHandle<ShaderAsset> LoadShaderInternal(const std::string& key, const std::filesystem::path& path);
+        ResourceHandle<ShaderAsset> LoadShaderInternal(const std::string& key, const std::filesystem::path& path, std::string& error);
         ResourceHandle<MaterialAsset> LoadMaterialInternal(const std::string& key, const std::filesystem::path& path);
-        ResourceHandle<ShaderAsset> BuildShaderFallback(const std::string& key, const std::filesystem::path& path, std::vector<std::filesystem::path> dependencies = {}) const;
+        ResourceHandle<ShaderAsset> BuildShaderFallback(const std::string& key, const std::filesystem::path& path, std::vector<std::filesystem::path> dependencies = {}, std::string error = {}) const;
         ResourceHandle<MaterialAsset> BuildMaterialFallback(const std::string& key, const std::filesystem::path& path) const;
 
         template <typename T>

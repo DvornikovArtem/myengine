@@ -408,7 +408,93 @@ namespace myengine::ui
         }
     }
 
-    void SceneEditor::DrawMaterialForm(const std::string& materialPath, const editor::MaterialEditorModel& model, const bool editEnabled)
+    namespace
+    {
+        // A line of text in a cell of the grid, centred on a field of 24 px, cut with an ellipsis at `width`
+        void DrawCellText(const std::string& text, const ImU32 color, const float width, const float indent = 0.0f)
+        {
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+            const ImVec2 position(origin.x + indent, origin.y + std::floor((style::kFrameHeight - size.y) * 0.5f));
+            const float room = std::max(width - indent, 8.0f);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            if (size.x > room)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(color));
+                ImGui::RenderTextEllipsis(drawList, position, ImVec2(position.x + room, position.y + size.y), position.x + room, text.c_str(), nullptr, &size);
+                ImGui::PopStyleColor();
+            }
+            else
+            {
+                drawList->AddText(position, color, text.c_str());
+            }
+            ImGui::Dummy(ImVec2(width, style::kFrameHeight));
+        }
+
+        // One row of "Not in the shader": a warning and the name, the value, the trash button
+        void DrawEntryRow(const editor::MaterialEntry& entry, RowContext& context)
+        {
+            ImGui::PushID(static_cast<int>(entry.kind));
+            ImGui::PushID(entry.name.c_str());
+
+            ImGui::TableNextRow(ImGuiTableRowFlags_None, style::kPropRowHeight);
+            ImGui::TableSetColumnIndex(0);
+            const ImVec2 cell = ImGui::GetCursorScreenPos();
+            DrawIcon(ImGui::GetWindowDrawList(), IconSize::Row14, ICON_TRIANGLE_ALERT, ImVec2(cell.x + 7.0f, cell.y + style::kFrameHeight * 0.5f), style::kWarning);
+            DrawCellText(editor::MaterialEntryName(entry), style::kText, ImGui::GetContentRegionAvail().x, 20.0f);
+            const std::string tooltip = editor::MaterialEntryTooltip(entry);
+            Tooltip(tooltip.c_str());
+
+            ImGui::TableSetColumnIndex(1);
+            float indent = 0.0f;
+            if (entry.kind == editor::MaterialEntryKind::OldTint)
+            {
+                const core::Color tint = context.asset.tint;
+                ImGui::ColorButton("##old_tint", ImVec4(tint.r, tint.g, tint.b, tint.a), ImGuiColorEditFlags_AlphaPreview | ImGuiColorEditFlags_NoTooltip, ImVec2(24.0f, style::kFrameHeight));
+                ImGui::SameLine();
+                indent = 4.0f;
+            }
+            DrawCellText(editor::MaterialEntryValueText(entry), style::kTextDim, ImGui::GetContentRegionAvail().x, indent);
+
+            ImGui::TableSetColumnIndex(2);
+            if (IconButton("##remove", ICON_TRASH_2, "Remove from the material", false, true, 0, 22.0f, nullptr, IconSize::Row14))
+            {
+                editor::RemoveMaterialEntry(entry, context.asset);
+                context.discrete("Remove Material Entry " + entry.name);
+            }
+
+            ImGui::PopID();
+            ImGui::PopID();
+        }
+    }
+
+    void SceneEditor::DrawMaterialWriteBanner(const std::string& materialPath)
+    {
+        if (materialWriteFailures_.count(materialPath) == 0)
+        {
+            return;
+        }
+
+        const std::string file = std::filesystem::path(materialPath).filename().string();
+        const std::string text = "Could not write " + file + " (is the file read-only?). The change is applied in memory only.";
+        Banner(BannerKind::Error, text.c_str());
+        constexpr float kButtonWidth = 96.0f;
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(ImGui::GetContentRegionAvail().x - kButtonWidth - 8.0f, 0.0f));
+        if (Button("Try again", nullptr, true, kButtonWidth))
+        {
+            if (const auto material = services_.resourceManager->Load<resource::MaterialAsset>(materialPath); material != nullptr)
+            {
+                ApplyMaterialAsset(materialPath, material->asset); // the whole asset again; the banner goes out when the write works
+            }
+        }
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    }
+
+    void SceneEditor::DrawMaterialForm(
+        const std::string& materialPath,
+        const editor::MaterialEditorModel* modelPointer,
+        const editor::ShaderBanner& shaderBanner,
+        const bool editEnabled)
     {
         auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(materialPath);
         if (materialResource == nullptr)
@@ -430,6 +516,14 @@ namespace myengine::ui
                 }
             },
         };
+
+        // ---- banners: the shader that did not compile, the file that could not be written ----
+        if (shaderBanner.kind != editor::ShaderBannerKind::None)
+        {
+            Banner(shaderBanner.kind == editor::ShaderBannerKind::Error ? BannerKind::Error : BannerKind::Warning, shaderBanner.text.c_str());
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        }
+        DrawMaterialWriteBanner(materialPath);
 
         // ---- Material: the shader ----
         if (BeginCategory("Material"))
@@ -459,6 +553,13 @@ namespace myengine::ui
             ImGui::EndDisabled();
             EndCategory();
         }
+
+        // A shader that did not compile has no layout that tells anything about this material: nothing below it is shown
+        if (modelPointer == nullptr)
+        {
+            return;
+        }
+        const editor::MaterialEditorModel& model = *modelPointer;
 
         // ---- Textures: a row for every Texture2D of the shader, in the order of the registers ----
         const std::string textureCount = std::to_string(model.textures.size());
@@ -493,11 +594,29 @@ namespace myengine::ui
             }
             else
             {
-                if (BeginPropertyGrid("##material_params"))
+                // A long list gets a filter (by the label and the name); it changes what is shown, never the material
+                const bool filtered = editor::MaterialFilterIsShown(model);
+                if (filtered)
+                {
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 20.0f);
+                    SearchField("##material_param_filter", &materialParamFilter_, "Filter parameters", std::max(ImGui::GetContentRegionAvail().x - 8.0f, 60.0f));
+                    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+                }
+                const std::string filter = filtered ? materialParamFilter_ : std::string();
+                const bool anyShown = std::any_of(model.parameters.begin(), model.parameters.end(),
+                    [&filter](const editor::MaterialRow& row) { return editor::MaterialRowMatchesFilter(row, filter); });
+                if (!anyShown)
+                {
+                    DrawInfoLine("No parameter matches the filter.");
+                }
+                else if (BeginPropertyGrid("##material_params"))
                 {
                     for (const editor::MaterialRow& row : model.parameters)
                     {
-                        DrawParameterRow(row, context);
+                        if (editor::MaterialRowMatchesFilter(row, filter))
+                        {
+                            DrawParameterRow(row, context);
+                        }
                     }
                     EndPropertyGrid();
                 }
@@ -514,6 +633,38 @@ namespace myengine::ui
             }
             ImGui::EndDisabled();
             EndCategory();
+        }
+
+        // ---- Not in the shader: what the material says and the shader does not have (nothing is lost; the value works again when the
+        // variable comes back) ----
+        if (!model.notInShader.empty())
+        {
+            const std::string entryCount = std::to_string(model.notInShader.size());
+            if (BeginCategory("Not in the shader", true, entryCount.c_str(), ICON_TRIANGLE_ALERT, style::kWarning))
+            {
+                ImGui::BeginDisabled(!editEnabled);
+                if (BeginPropertyGrid("##material_entries"))
+                {
+                    for (const editor::MaterialEntry& entry : model.notInShader)
+                    {
+                        DrawEntryRow(entry, context);
+                    }
+                    EndPropertyGrid();
+                }
+                if (model.notInShader.size() > 1)
+                {
+                    const float buttonWidth = 96.0f;
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(ImGui::GetContentRegionAvail().x - buttonWidth - 6.0f, 0.0f));
+                    if (Button("Remove all", nullptr, true, buttonWidth))
+                    {
+                        editor::RemoveAllMaterialEntries(model, asset);
+                        context.discrete("Remove Material Entries");
+                    }
+                    Tooltip("Remove these entries from the material");
+                }
+                ImGui::EndDisabled();
+                EndCategory();
+            }
         }
     }
 }

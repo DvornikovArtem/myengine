@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -33,6 +34,7 @@ namespace myengine::editor
 {
     class MaterialEditorModelCache;
     struct MaterialEditorModel;
+    struct ShaderBanner;
     class LoadingService;
     class EditorCommandHistory;
     class ThumbnailService;
@@ -160,7 +162,12 @@ namespace myengine::ui
         // the old look stays: DrawMaterialCategoryPlain (shader, texture, tint).
         void DrawMaterialCategory(const std::string& materialPath, bool editEnabled);
         void DrawMaterialCategoryPlain(const std::string& materialPath, bool editEnabled);
-        void DrawMaterialForm(const std::string& materialPath, const editor::MaterialEditorModel& model, bool editEnabled); // SceneEditorMaterialForm.cpp
+        // SceneEditorMaterialForm.cpp. `model` is null when the shader did not compile (the first time): only the shader can be chosen then.
+        void DrawMaterialForm(const std::string& materialPath, const editor::MaterialEditorModel* model, const editor::ShaderBanner& shaderBanner, bool editEnabled);
+        // "Could not write the file" with "Try again", while the last write of this material failed
+        void DrawMaterialWriteBanner(const std::string& materialPath);
+        // A gesture on a material widget that lost its widget (the panel was closed, Play started) ends as if the mouse was released
+        void FinishAbandonedMaterialGesture(bool playing);
         // Asset viewers: tabs next to the Viewport (SceneEditorViewers.cpp)
         void OpenAssetViewer(const std::string& assetPath, AssetViewerType type);
         void BuildAssetViewers(const SceneEditorWindowContext& windowContext);
@@ -256,6 +263,10 @@ namespace myengine::ui
         std::vector<std::unique_ptr<AssetViewerTab>> viewers_; // open Texture / Mesh / Material / Prefab viewer tabs
         std::unique_ptr<resource::MaterialAsset> materialEditBefore_; // the material when the current widget interaction began
         std::unordered_map<std::string, std::unique_ptr<editor::MaterialEditorModelCache>> materialModels_; // the rows of the form, per material
+        std::string materialEditPath_;  // the material and the name of the command of the gesture in materialEditBefore_
+        std::string materialEditLabel_;
+        std::string materialParamFilter_; // the filter of the parameters (not kept between runs)
+        mutable std::unordered_set<std::string> materialWriteFailures_; // materials whose last write failed: the change is in memory only
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
     };

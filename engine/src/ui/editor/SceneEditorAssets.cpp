@@ -650,11 +650,16 @@ namespace myengine::ui
             return;
         }
 
-        // The form is built from the layout of the shader that draws the material. A shader that did not compile has none that
-        // says anything about the material, and an adapter may not reflect at all: the old look stays then.
+        // The form is built from the layout of the shader that draws the material. A shader that did not compile (the first time) has
+        // none that says anything about the material: the banner and the choice of the shader are all that is shown. An adapter may
+        // not reflect at all: the old look stays then.
         const auto shader = services_.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
-        const render::MaterialParams* params =
-            shader != nullptr && !shader->asset.fallback ? services_.resourceManager->GetMaterialParams(materialResource) : nullptr;
+        if (shader != nullptr && shader->asset.fallback)
+        {
+            DrawMaterialForm(materialPath, nullptr, editor::DescribeShaderBanner(true, services_.resourceManager->GetShaderError(shader)), editEnabled);
+            return;
+        }
+        const render::MaterialParams* params = shader != nullptr ? services_.resourceManager->GetMaterialParams(materialResource) : nullptr;
         if (params == nullptr)
         {
             DrawMaterialCategoryPlain(materialPath, editEnabled);
@@ -668,7 +673,11 @@ namespace myengine::ui
         }
         editor::MaterialEditorOptions options;
         options.fileMissing = [this](const std::string& textureKey) { return services_.resourceManager->LoadFailed(textureKey); };
-        DrawMaterialForm(materialPath, cache->Get(params->Layout(), materialResource->asset, options), editEnabled);
+        DrawMaterialForm(
+            materialPath,
+            &cache->Get(params->Layout(), materialResource->asset, options),
+            editor::DescribeShaderBanner(false, services_.resourceManager->GetShaderError(shader)),
+            editEnabled);
     }
 
     void SceneEditor::DrawMaterialCategoryPlain(const std::string& materialPath, const bool editEnabled)
@@ -678,6 +687,7 @@ namespace myengine::ui
         {
             return;
         }
+        DrawMaterialWriteBanner(materialPath);
 
         // ---- Material: shader, texture, tint
         if (BeginCategory("Material"))
@@ -790,6 +800,8 @@ namespace myengine::ui
         if (ImGui::IsItemActivated())
         {
             materialEditBefore_ = std::make_unique<resource::MaterialAsset>(CloneMaterialAsset(frameStartAsset));
+            materialEditPath_ = materialPath;
+            materialEditLabel_ = label;
         }
         const bool finished = ImGui::IsItemDeactivatedAfterEdit();
         if (!finished && ImGui::IsItemActive())
@@ -803,11 +815,28 @@ namespace myengine::ui
         {
             PushMaterialAssetCommand(label, materialPath, before, CloneMaterialAsset(current));
         }
-        if (finished)
+        if (finished || ImGui::IsItemDeactivated())
         {
-            materialEditBefore_.reset();
+            materialEditBefore_.reset(); // a click that changed nothing leaves no gesture open either
         }
         frameStartAsset = CloneMaterialAsset(current);
+    }
+
+    void SceneEditor::FinishAbandonedMaterialGesture(const bool playing)
+    {
+        // The gesture is open (a widget was activated and did not report its end) but no widget holds the mouse any more: the
+        // panel was closed or collapsed, or Play started. The change is in the material already; it gets its entry and its file.
+        if (materialEditBefore_ == nullptr || (!playing && ImGui::GetActiveID() != 0))
+        {
+            return;
+        }
+
+        const auto material = services_.resourceManager->Load<resource::MaterialAsset>(materialEditPath_);
+        if (material != nullptr)
+        {
+            PushMaterialAssetCommand(materialEditLabel_.c_str(), materialEditPath_, *materialEditBefore_, CloneMaterialAsset(material->asset));
+        }
+        materialEditBefore_.reset();
     }
 
     void SceneEditor::SpawnRenderableEntity(const core::WindowId windowId, std::string meshPath, std::string materialPath)
@@ -859,7 +888,16 @@ namespace myengine::ui
         {
             services_.resourceManager->Load<resource::TextureAsset>(asset.texturePath);
         }
-        return services_.resourceManager->SaveMaterial(materialPath, material->asset);
+        const bool saved = services_.resourceManager->SaveMaterial(materialPath, material->asset);
+        if (saved)
+        {
+            materialWriteFailures_.erase(materialPath);
+        }
+        else
+        {
+            materialWriteFailures_.insert(materialPath);
+        }
+        return saved;
     }
 
     bool SceneEditor::PushMaterialAssetCommand(
@@ -873,10 +911,13 @@ namespace myengine::ui
             return false;
         }
 
-        if (!ApplyMaterialAsset(materialPath, afterAsset))
+        // A file that could not be written keeps the change in memory (the banner of the panel says so): it is an entry of the history
+        // all the same, so that Undo takes it back, and the write is tried again by Undo, Redo and "Try again"
+        if (services_.resourceManager->Load<resource::MaterialAsset>(materialPath) == nullptr)
         {
             return false;
         }
+        ApplyMaterialAsset(materialPath, afterAsset);
 
         history_->Push(std::make_unique<editor::LambdaEditorCommand>(
             label,

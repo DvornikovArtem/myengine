@@ -118,7 +118,8 @@ namespace myengine::ui
 
     // ---- categories and the property grid ----
     // Neutral full-width header with a chevron. Use like TreeNode: `if (BeginCategory(...)) { ...; EndCategory(); }`.
-    bool BeginCategory(const char* title, bool defaultOpen = true, const char* rightText = nullptr, const char* icon = nullptr);
+    // `iconColor` 0: the dim colour of every category
+    bool BeginCategory(const char* title, bool defaultOpen = true, const char* rightText = nullptr, const char* icon = nullptr, ImU32 iconColor = 0);
     void EndCategory();
 
     // Three columns: label (38% of the width, 110..200), value (stretch), reset (22).

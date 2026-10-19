@@ -701,6 +701,23 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         const auto messages = ApplyMaterialValues(params, resource::ToMaterialValues(material->asset), Resolver());
         Check(messages.empty() && !params.FindTexture("gTexture")->texture.IsValid(), "gTexture is not set: the renderer draws it white");
         Check(ReadAt<float>(params, "gColor", 0) == 1.0f, "and the colour is the @default of the shader, white");
+
+        // Saved as it is: no "texture" key with an empty path, and the file loads again
+        Check(harness.resources.SaveMaterial(directory / "bare" / "saved.material.json", material->asset), "a material without a texture saves");
+        const json saved = ReadJson(directory / "bare" / "saved.material.json");
+        Check(!saved.contains("texture") && !saved.contains("textures") && saved.contains("shader"), "no texture key for no texture: " + saved.dump());
+        const auto again = harness.resources.Load<resource::MaterialAsset>(directory / "bare" / "saved.material.json");
+        Check(again != nullptr && !harness.resources.LoadFailed(directory / "bare" / "saved.material.json") && again->asset.texturePath.empty(),
+            "and it reads back without a texture");
+
+        // The last texture is reset: the material that had one is saved without it
+        const auto warm = harness.resources.Load<resource::MaterialAsset>(SourceDirectory() / "assets/materials/warm.material.json");
+        Check(warm != nullptr && !warm->asset.texturePath.empty(), "warm.material.json has a texture");
+        resource::MaterialAsset reset = warm->asset;
+        reset.texturePath.clear();
+        reset.textures.clear();
+        Check(harness.resources.SaveMaterial(directory / "bare" / "reset.material.json", reset), "a material whose texture was reset saves");
+        Check(!ReadJson(directory / "bare" / "reset.material.json").contains("texture"), "without a texture key");
     }
 
     void TestNewFormatOnlyAndBadEntries(const fs::path& directory)

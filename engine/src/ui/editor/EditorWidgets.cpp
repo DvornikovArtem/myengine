@@ -568,7 +568,7 @@ namespace myengine::ui
 
     // ---- categories and the property grid ----
 
-    bool BeginCategory(const char* title, const bool defaultOpen, const char* rightText, const char* icon)
+    bool BeginCategory(const char* title, const bool defaultOpen, const char* rightText, const char* icon, const ImU32 iconColor)
     {
         ImGuiWindow* window = ImGui::GetCurrentWindow();
         ImGuiStorage* storage = ImGui::GetStateStorage();
@@ -601,7 +601,7 @@ namespace myengine::ui
         float textX = x0 + 30.0f;
         if (icon != nullptr)
         {
-            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(textX + 7.0f, centerY), style::kTextDim);
+            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(textX + 7.0f, centerY), iconColor != 0 ? iconColor : style::kTextDim);
             textX += 22.0f;
         }
         float sizePx = 0.0f;
