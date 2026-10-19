@@ -653,7 +653,7 @@ namespace myengine::ui
         return true;
     }
 
-    void PropertyLabel(const char* text, const bool dim, const float rowHeight)
+    void PropertyLabel(const char* text, const bool dim, const float rowHeight, const ImU32 color, const char* tooltip, const char* tooltipDetail)
     {
         const float height = std::max(rowHeight, style::kPropRowHeight);
         ImGui::TableNextRow(ImGuiTableRowFlags_None, height);
@@ -668,21 +668,30 @@ namespace myengine::ui
         const ImVec2 position = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
         const ImVec2 size = ImGui::CalcTextSize(text, textEnd);
-        const ImU32 color = dim ? style::kTextDim : style::kText;
+        const ImU32 textColor = color != 0 ? color : (dim ? style::kTextDim : style::kText);
         auto* drawList = ImGui::GetWindowDrawList();
         if (size.x > width)
         {
+            // RenderTextEllipsis uses the style text colour
+            ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(textColor));
             ImGui::RenderTextEllipsis(drawList, position, ImVec2(position.x + width, position.y + size.y), position.x + width, text, textEnd, &size);
-            // RenderTextEllipsis uses the style text colour; repaint in the role colour is not needed for the dim case
+            ImGui::PopStyleColor();
         }
         else
         {
-            drawList->AddText(position, color, text, textEnd);
+            drawList->AddText(position, textColor, text, textEnd);
         }
         ImGui::Dummy(ImVec2(width, size.y));
-        if (size.x > width && ImGui::IsItemHovered())
+        if (ImGui::IsItemHovered())
         {
-            Tooltip(text);
+            if (tooltip != nullptr && tooltip[0] != '\0')
+            {
+                Tooltip(tooltip, nullptr, tooltipDetail != nullptr && tooltipDetail[0] != '\0' ? tooltipDetail : nullptr);
+            }
+            else if (size.x > width)
+            {
+                Tooltip(text);
+            }
         }
 
         ImGui::TableSetColumnIndex(1);
@@ -705,18 +714,27 @@ namespace myengine::ui
         ImGui::Unindent(g_gridIndent);
     }
 
-    bool DragVector3(const char* id, float values[3], const float speed, const char* format, const std::function<void(int axis)>& afterField)
+    bool DragVector(
+        const char* id,
+        float* values,
+        const int count,
+        const float speed,
+        const char* format,
+        const std::function<void(int axis)>& afterField,
+        const float minValue,
+        const float maxValue)
     {
-        static constexpr ImU32 kAxisColors[3] = {style::kAxisX, style::kAxisY, style::kAxisZ};
+        static constexpr ImU32 kAxisColors[4] = {style::kAxisX, style::kAxisY, style::kAxisZ, style::kTextDim};
+        const int fields = std::clamp(count, 2, 4);
         const float gap = 4.0f;
         const float available = ImGui::GetContentRegionAvail().x;
-        const float fieldWidth = std::max(std::floor((available - gap * 2.0f) / 3.0f), 24.0f);
+        const float fieldWidth = std::max(std::floor((available - gap * static_cast<float>(fields - 1)) / static_cast<float>(fields)), 24.0f);
 
         bool changed = false;
         ImGui::PushID(id);
         PushFontRole(FontRole::Secondary);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(11.0f, (style::kFrameHeight - FontRoleSize(FontRole::Secondary)) * 0.5f));
-        for (int axis = 0; axis < 3; ++axis)
+        for (int axis = 0; axis < fields; ++axis)
         {
             if (axis > 0)
             {
@@ -724,7 +742,7 @@ namespace myengine::ui
             }
             ImGui::SetNextItemWidth(fieldWidth);
             ImGui::PushID(axis);
-            if (ImGui::DragFloat("##v", &values[axis], speed, 0.0f, 0.0f, format))
+            if (ImGui::DragFloat("##v", &values[axis], speed, minValue, maxValue, format))
             {
                 changed = true;
             }
@@ -742,6 +760,11 @@ namespace myengine::ui
         PopFontRole();
         ImGui::PopID();
         return changed;
+    }
+
+    bool DragVector3(const char* id, float values[3], const float speed, const char* format, const std::function<void(int axis)>& afterField)
+    {
+        return DragVector(id, values, 3, speed, format, afterField);
     }
 
     namespace

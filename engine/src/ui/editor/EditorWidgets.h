@@ -126,10 +126,18 @@ namespace myengine::ui
     bool BeginPropertyGrid(const char* id, float indent = 20.0f);
     // Starts a new row and draws the label in the first column; the value column is current afterwards.
     // `rowHeight` > 26 makes a taller row (asset pickers: 52) with the label centred in it.
-    void PropertyLabel(const char* text, bool dim = false, float rowHeight = 0.0f);
+    // `color` != 0 paints the label with it (the red label of a value of a wrong type). `tooltip` (with a dim `tooltipDetail`
+    // line) is shown on the label; without it only a label that does not fit has one: its full text.
+    void PropertyLabel(const char* text, bool dim = false, float rowHeight = 0.0f, ImU32 color = 0,
+                       const char* tooltip = nullptr, const char* tooltipDetail = nullptr);
     // Draws the reset arrow in the third column and returns true when it was clicked
     bool PropertyReset(const char* tooltip = "Reset to the value from the script code");
     void EndPropertyGrid();
+
+    // 2..4 drag fields X/Y/(Z)/(W) with coloured axis stripes (W is grey); the same callbacks and the result as DragVector3.
+    // `minValue` < `maxValue` clamps every field.
+    bool DragVector(const char* id, float* values, int count, float speed = 0.05f, const char* format = "%.3f",
+                    const std::function<void(int axis)>& afterField = {}, float minValue = 0.0f, float maxValue = 0.0f);
 
     // Three drag fields X/Y/Z with coloured axis stripes. `afterField(axis)` is called right after each field is
     // submitted, so `IsItemActivated()` / `IsItemDeactivatedAfterEdit()` refer to that field (undo recording).

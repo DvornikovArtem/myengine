@@ -1,3 +1,4 @@
+#include <myengine/editor/MaterialEditorModel.h>
 #include <myengine/editor/ThumbnailService.h>
 #include "SceneEditorInternal.h"
 
@@ -27,25 +28,6 @@ namespace myengine::ui
         std::string PickerItem(const char* icon, const std::string& label, const std::string& key)
         {
             return std::string(icon) + "  " + label + "##" + key;
-        }
-
-        // A dim explanatory line with an info icon, wrapped at the panel width
-        void DrawInfoLine(const char* text)
-        {
-            const ImVec2 min = ImGui::GetCursorScreenPos();
-            const float available = ImGui::GetContentRegionAvail().x;
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-            PushFontRole(FontRole::Secondary);
-            ImFont* font = ImGui::GetFont();
-            const float size = ImGui::GetFontSize();
-            const float wrapWidth = std::max(available - 24.0f, 40.0f);
-            const ImVec2 textSize = ImGui::CalcTextSize(text, nullptr, false, wrapWidth);
-            PopFontRole();
-
-            DrawIcon(drawList, IconSize::Row14, ICON_INFO, ImVec2(min.x + 7.0f, min.y + 9.0f), style::kTextDim);
-            drawList->AddText(font, size, ImVec2(min.x + 22.0f, min.y + 2.0f), style::kTextDim, text, nullptr, wrapWidth);
-            ImGui::Dummy(ImVec2(available, std::max(textSize.y + 6.0f, 22.0f)));
         }
     }
 
@@ -661,6 +643,35 @@ namespace myengine::ui
     }
 
     void SceneEditor::DrawMaterialCategory(const std::string& materialPath, const bool editEnabled)
+    {
+        auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(materialPath);
+        if (materialResource == nullptr)
+        {
+            return;
+        }
+
+        // The form is built from the layout of the shader that draws the material. A shader that did not compile has none that
+        // says anything about the material, and an adapter may not reflect at all: the old look stays then.
+        const auto shader = services_.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
+        const render::MaterialParams* params =
+            shader != nullptr && !shader->asset.fallback ? services_.resourceManager->GetMaterialParams(materialResource) : nullptr;
+        if (params == nullptr)
+        {
+            DrawMaterialCategoryPlain(materialPath, editEnabled);
+            return;
+        }
+
+        auto& cache = materialModels_[materialPath];
+        if (cache == nullptr)
+        {
+            cache = std::make_unique<editor::MaterialEditorModelCache>();
+        }
+        editor::MaterialEditorOptions options;
+        options.fileMissing = [this](const std::string& textureKey) { return services_.resourceManager->LoadFailed(textureKey); };
+        DrawMaterialForm(materialPath, cache->Get(params->Layout(), materialResource->asset, options), editEnabled);
+    }
+
+    void SceneEditor::DrawMaterialCategoryPlain(const std::string& materialPath, const bool editEnabled)
     {
         auto materialResource = services_.resourceManager->Load<resource::MaterialAsset>(materialPath);
         if (materialResource == nullptr)

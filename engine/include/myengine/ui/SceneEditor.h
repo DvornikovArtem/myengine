@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -30,6 +31,8 @@ namespace myengine::ecs
 
 namespace myengine::editor
 {
+    class MaterialEditorModelCache;
+    struct MaterialEditorModel;
     class LoadingService;
     class EditorCommandHistory;
     class ThumbnailService;
@@ -152,8 +155,12 @@ namespace myengine::ui
         void OpenMapDialog();
         void BuildProjectDialogs(); // Project Browser and the map dialogs
         void DrawMaterialPreview(const std::string& materialPath, editor::WindowEditorState& windowState);
-        // The Material category (shader, texture, tint): shared by the Material Editor and the Material Viewer
+        // The form of a material (Material, Textures, Parameters): shared by the Material Editor and the Material Viewer. It is built from
+        // the layout of the shader of the material; without a layout (an adapter that cannot reflect, a shader that does not compile)
+        // the old look stays: DrawMaterialCategoryPlain (shader, texture, tint).
         void DrawMaterialCategory(const std::string& materialPath, bool editEnabled);
+        void DrawMaterialCategoryPlain(const std::string& materialPath, bool editEnabled);
+        void DrawMaterialForm(const std::string& materialPath, const editor::MaterialEditorModel& model, bool editEnabled); // SceneEditorMaterialForm.cpp
         // Asset viewers: tabs next to the Viewport (SceneEditorViewers.cpp)
         void OpenAssetViewer(const std::string& assetPath, AssetViewerType type);
         void BuildAssetViewers(const SceneEditorWindowContext& windowContext);
@@ -248,6 +255,7 @@ namespace myengine::ui
         float materialPreviewDistance_ = 3.0f;
         std::vector<std::unique_ptr<AssetViewerTab>> viewers_; // open Texture / Mesh / Material / Prefab viewer tabs
         std::unique_ptr<resource::MaterialAsset> materialEditBefore_; // the material when the current widget interaction began
+        std::unordered_map<std::string, std::unique_ptr<editor::MaterialEditorModelCache>> materialModels_; // the rows of the form, per material
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
     };
