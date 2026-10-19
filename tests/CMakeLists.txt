@@ -283,6 +283,17 @@ set_property(TARGET myengine_material_params_tests PROPERTY FOLDER "Tests")
 add_test(NAME material_params COMMAND myengine_material_params_tests)
 set_tests_properties(material_params PROPERTIES TIMEOUT 120)
 
+# B1.2 (LR3): the parameters of a material reach the frame: a real DX12 device (or WARP), a render target, the pixels read
+# back. Skipped (exit code 77) when there is no device or no desktop to make the window on.
+add_executable(myengine_material_render_tests
+  render/MaterialRenderTests.cpp)
+
+target_link_libraries(myengine_material_render_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_material_render_tests)
+set_property(TARGET myengine_material_render_tests PROPERTY FOLDER "Tests")
+add_test(NAME material_render COMMAND myengine_material_render_tests)
+set_tests_properties(material_render PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)

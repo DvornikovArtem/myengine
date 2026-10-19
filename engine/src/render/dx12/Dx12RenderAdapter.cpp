@@ -15,6 +15,7 @@
 #include <d3dcompiler.h>
 
 #include <myengine/core/Logger.h>
+#include <myengine/render/MaterialParams.h>
 #include <myengine/render/ShaderDescriptor.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 
@@ -440,6 +441,7 @@ namespace myengine::render::dx12
         record.rootSignatureShape = build.description.shapeHash;
         record.binding = build.binding;
         record.layout = compiled.layout;
+        record.materialLayoutHash = MaterialLayoutHash(compiled.layout);
 
         // The values that the renderer writes into the constant buffers are found by name, once
         const auto findVariable = [&](const ShaderConstantBuffer& buffer, const char* name, const ShaderValueType type) -> std::uint32_t
@@ -470,6 +472,7 @@ namespace myengine::render::dx12
                     continue;
                 }
                 ConstantBufferSlot slot;
+                slot.layoutIndex = static_cast<std::uint32_t>(buffer - compiled.layout.constantBuffers.data());
                 slot.rootParameter = binding.rootParameter;
                 slot.rootConstants = binding.rootConstants;
                 slot.sizeBytes = binding.sizeBytes;
@@ -482,9 +485,41 @@ namespace myengine::render::dx12
                 slot.translation = findVariable(*buffer, "translation", ShaderValueType::Float2);
                 record.slots.constantBuffers.push_back(slot);
             }
-            else if (binding.kind == BindingKind::Texture && record.slots.textureParameter == kNoRootParameter)
+            else if (binding.kind == BindingKind::Texture)
             {
-                record.slots.textureParameter = binding.rootParameter;
+                // Every texture of the shader gets its slot now, by the name; a draw only walks this list
+                std::uint32_t materialIndex = 0;
+                bool found = false;
+                for (const ShaderResource& resource : compiled.layout.resources)
+                {
+                    if (resource.type != ShaderResourceType::Texture)
+                    {
+                        continue;
+                    }
+                    if (resource.name == binding.name)
+                    {
+                        found = true;
+                        break;
+                    }
+                    ++materialIndex;
+                }
+                if (found)
+                {
+                    record.slots.textures.push_back({binding.rootParameter, materialIndex});
+                }
+            }
+        }
+        // The first texture is the one with the smallest register, like the old "texture" key of a material means
+        {
+            std::uint32_t firstRegister = 0xFFFFFFFFu;
+            for (const ResourceBinding& binding : build.binding.bindings)
+            {
+                const ShaderResource* resource = binding.kind == BindingKind::Texture ? compiled.layout.FindResourceByName(binding.name) : nullptr;
+                if (resource != nullptr && resource->registerIndex < firstRegister)
+                {
+                    firstRegister = resource->registerIndex;
+                    record.slots.textureParameter = binding.rootParameter;
+                }
             }
         }
 
@@ -1120,22 +1155,40 @@ namespace myengine::render::dx12
         }
 
         const auto meshIt = meshes_.find(drawItem.mesh.value);
-        const auto textureIt = textures_.find(drawItem.texture.value);
         const auto shaderIt = shaders_.find(drawItem.shader.value);
-        if (meshIt == meshes_.end() || textureIt == textures_.end() || shaderIt == shaders_.end())
+        if (meshIt == meshes_.end() || shaderIt == shaders_.end())
         {
             return;
         }
 
         const MeshRecord& mesh = meshIt->second;
-        const TextureRecord& texture = textureIt->second;
         const ShaderRecord& shader = shaderIt->second;
+
+        // The parameters of the material are used when they were built for this layout of the program. Other parameters
+        // (the shader was reloaded and the material has not caught up yet) give zeros and white textures, once a warning.
+        const MaterialParams* material = drawItem.material;
+        bool useMaterial = material != nullptr;
+        if (useMaterial && material->LayoutHash() != shader.materialLayoutHash)
+        {
+            if (!shader.materialMismatchLogged)
+            {
+                shader.materialMismatchLogged = true;
+                logger_.Warning("Draw: the material parameters were built for another layout of " + shader.sourceName +
+                    " (the shader changed?): zeros and white textures are used until the material is checked again");
+            }
+            useMaterial = false;
+        }
+        // A draw item without a material brings its own texture, which must exist
+        if (material == nullptr && textures_.find(drawItem.texture.value) == textures_.end())
+        {
+            return;
+        }
+        const auto whiteIt = textures_.find(defaultWhiteTexture_.value);
 
         EnterAutoGroup(AutoGroup::Scene);
         ID3D12PipelineState* pipelineState =
             wireframe_ && shader.wireframePipelineState != nullptr ? shader.wireframePipelineState.Get() : shader.pipelineState.Get();
         profiler_->NotePipeline(pipelineState);
-        profiler_->NoteTexture(texture.descriptorIndex);
         SetRootSignature(shader.rootSignature.Get());
         context_.commandList->SetPipelineState(pipelineState);
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1145,18 +1198,44 @@ namespace myengine::render::dx12
         ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
         context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-        // The texture of the draw item goes to the first texture of the shader; a shader without one ignores it
-        if (shader.slots.textureParameter != kNoRootParameter)
+        // Every texture of the shader, by the slots found when the program was built. The material gives the texture of
+        // each one by name; one that it did not set (or that is not there) is the white texture. Without a material the
+        // texture of the draw item goes to the first texture of the shader.
+        for (const TextureSlot& slot : shader.slots.textures)
         {
+            TextureHandle slotTexture;
+            if (useMaterial)
+            {
+                const std::vector<MaterialParams::TextureSlot>& materialTextures = material->Textures();
+                if (slot.materialIndex < materialTextures.size())
+                {
+                    slotTexture = materialTextures[slot.materialIndex].texture;
+                }
+            }
+            else if (material == nullptr && slot.rootParameter == shader.slots.textureParameter)
+            {
+                slotTexture = drawItem.texture;
+            }
+            auto textureIt = textures_.find(slotTexture.value);
+            if (textureIt == textures_.end())
+            {
+                textureIt = whiteIt;
+            }
+            if (textureIt == textures_.end())
+            {
+                continue;
+            }
+            profiler_->NoteTexture(textureIt->second.descriptorIndex);
             D3D12_GPU_DESCRIPTOR_HANDLE textureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
-            textureHandle.ptr += static_cast<UINT64>(texture.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
-            context_.commandList->SetGraphicsRootDescriptorTable(shader.slots.textureParameter, textureHandle);
+            textureHandle.ptr += static_cast<UINT64>(textureIt->second.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+            context_.commandList->SetGraphicsRootDescriptorTable(slot.rootParameter, textureHandle);
         }
 
         if (!shader.slots.constantBuffers.empty())
         {
-            // The engine semantics: gModel, gViewProjection, gColor, gLightDirection are written by name where the
-            // shader has them; everything else in the constant buffers stays zero
+            // The constant buffers start as the shadow copies of the material (gColor and every other value are the
+            // material's; without one they are zero), and the renderer writes the engine semantics over them: gModel,
+            // gViewProjection, gLightDirection, found by name once when the program was built
             DirectX::XMFLOAT4X4 model{};
             DirectX::XMFLOAT4X4 viewProjection{};
             DirectX::XMStoreFloat4x4(&model, DirectX::XMMatrixTranspose(MatrixToXm(drawItem.model)));
@@ -1174,6 +1253,11 @@ namespace myengine::render::dx12
             for (const ConstantBufferSlot& slot : shader.slots.constantBuffers)
             {
                 constantScratch_.assign(slot.sizeBytes, 0);
+                if (useMaterial && slot.layoutIndex < material->ConstantBufferCount())
+                {
+                    const std::vector<std::uint8_t>& shadow = material->ConstantBufferBytes(slot.layoutIndex);
+                    std::memcpy(constantScratch_.data(), shadow.data(), (std::min)(shadow.size(), constantScratch_.size()));
+                }
                 const auto put = [this](const std::uint32_t offset, const void* value, const std::size_t size)
                 {
                     if (offset != kNoOffset)
@@ -1183,7 +1267,10 @@ namespace myengine::render::dx12
                 };
                 put(slot.model, &model, sizeof(model));
                 put(slot.viewProjection, &viewProjection, sizeof(viewProjection));
-                put(slot.color, color, sizeof(color));
+                if (material == nullptr)
+                {
+                    put(slot.color, color, sizeof(color)); // a draw item without a material brings its own gColor
+                }
                 put(slot.lightDirection, light, sizeof(light));
                 SetConstants(slot, *surface);
             }

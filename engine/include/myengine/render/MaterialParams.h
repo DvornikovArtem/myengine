@@ -93,6 +93,7 @@ namespace myengine::render
         explicit MaterialParams(ShaderLayout layout);
 
         const ShaderLayout& Layout() const { return layout_; }
+        std::uint64_t LayoutHash() const { return layoutHash_; }
 
         // gModel, gViewProjection, gLightDirection: the renderer writes them, a material cannot
         static bool IsEngineSemantic(const std::string& name);
@@ -129,9 +130,14 @@ namespace myengine::render
         MaterialParamResult NoSuchName(const std::string& name, const char* what) const;
 
         ShaderLayout layout_;
+        std::uint64_t layoutHash_ = 0;
         std::vector<std::vector<std::uint8_t>> constantBuffers_; // parallel to layout_.constantBuffers
         std::vector<TextureSlot> textures_;                      // the Texture resources of the layout
     };
+
+    // A number that changes when the constant buffers (names, sizes, variables with types and offsets) or the textures
+    // (names, registers) of a layout change: the renderer uses the parameters of a material only for the layout they were built for
+    std::uint64_t MaterialLayoutHash(const ShaderLayout& layout);
 
     using MaterialTextureResolver = std::function<TextureHandle(const std::string& path)>;
 

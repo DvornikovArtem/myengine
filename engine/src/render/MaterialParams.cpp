@@ -81,8 +81,52 @@ namespace myengine::render
         return "a value";
     }
 
+    std::uint64_t MaterialLayoutHash(const ShaderLayout& layout)
+    {
+        std::uint64_t hash = 1469598103934665603ull; // FNV-1a
+        const auto mix = [&hash](const void* data, const std::size_t size)
+        {
+            const auto* bytes = static_cast<const std::uint8_t*>(data);
+            for (std::size_t i = 0; i < size; ++i)
+            {
+                hash = (hash ^ bytes[i]) * 1099511628211ull;
+            }
+        };
+        const auto mixText = [&](const std::string& text)
+        {
+            mix(text.data(), text.size());
+            const std::uint8_t end = 0;
+            mix(&end, 1);
+        };
+        const auto mixNumber = [&](const std::uint32_t value) { mix(&value, sizeof(value)); };
+        for (const ShaderConstantBuffer& buffer : layout.constantBuffers)
+        {
+            mixText(buffer.name);
+            mixNumber(buffer.registerIndex);
+            mixNumber(buffer.sizeBytes);
+            for (const ShaderVariable& variable : buffer.variables)
+            {
+                mixText(variable.name);
+                mixNumber(static_cast<std::uint32_t>(variable.type));
+                mixNumber(variable.offset);
+                mixNumber(variable.size);
+                mixNumber(variable.arrayCount);
+            }
+        }
+        for (const ShaderResource& resource : layout.resources)
+        {
+            if (resource.type == ShaderResourceType::Texture)
+            {
+                mixText(resource.name);
+                mixNumber(resource.registerIndex);
+            }
+        }
+        return hash;
+    }
+
     MaterialParams::MaterialParams(ShaderLayout layout)
         : layout_(std::move(layout))
+        , layoutHash_(MaterialLayoutHash(layout_))
     {
         constantBuffers_.reserve(layout_.constantBuffers.size());
         for (const ShaderConstantBuffer& buffer : layout_.constantBuffers)
