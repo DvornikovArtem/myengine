@@ -59,6 +59,7 @@
   include/myengine/render/IRenderAdapter.h
   include/myengine/render/RenderTargetPool.h
   include/myengine/render/ShaderDescriptor.h
+  include/myengine/render/MaterialParams.h
   include/myengine/render/ShaderLayout.h
   include/myengine/render/RenderTypes.h
   include/myengine/render/dx12/Dx12Context.h
@@ -131,6 +132,7 @@ set(ENGINE_SOURCES
   src/render/GpuCapture.cpp
   src/render/GpuStats.cpp
   src/render/ShaderDescriptor.cpp
+  src/render/MaterialParams.cpp
   src/render/ShaderLayout.cpp
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h

@@ -257,7 +257,9 @@ namespace myengine::ui::detail
             lhs.tint.r == rhs.tint.r &&
             lhs.tint.g == rhs.tint.g &&
             lhs.tint.b == rhs.tint.b &&
-            lhs.tint.a == rhs.tint.a;
+            lhs.tint.a == rhs.tint.a &&
+            lhs.textures == rhs.textures &&
+            lhs.params == rhs.params;
     }
 
     inline void DrawSceneVisibilityMask(const editor::ViewportRect& viewportRect)

@@ -6,9 +6,11 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -18,6 +20,7 @@
 
 #include <myengine/core/Types.h>
 #include <myengine/jobs/JobSystem.h>
+#include <myengine/render/MaterialParams.h>
 #include <myengine/render/RenderTypes.h>
 
 namespace myengine::core
@@ -74,12 +77,22 @@ namespace myengine::resource
         bool fallback = false;      // the file did not compile at the first load and the general fallback program stands in
     };
 
+    // What a .material.json says. Raw values and paths, nothing of the shader: they are matched with the layout of the
+    // program when it is known (render::ApplyMaterialValues).
     struct MaterialAsset
     {
         std::string shaderPath;
+        // The old keys. "texture": the first texture of the shader; when only "textures" is given, this mirrors the
+        // first of them, so the code that knows one texture only keeps working.
         std::string texturePath;
+        // "tint": the variable gColor. When "params" sets gColor, this mirrors it.
         core::Color tint{1.0f, 1.0f, 1.0f, 1.0f};
+        std::map<std::string, std::string> textures;             // "textures": the name of a shader texture -> path (a normalized key)
+        std::map<std::string, render::MaterialValue> params;     // "params": the name of a shader variable -> raw value
     };
+
+    // The content of a material for render::ApplyMaterialValues
+    render::MaterialValues ToMaterialValues(const MaterialAsset& asset);
 
     struct MeshCpuAsset
     {
@@ -155,6 +168,15 @@ namespace myengine::resource
         void UpdateHotReload();
         bool SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset);
 
+        // The parameters of a material matched with the layout of its shader, for render::DrawItem::material: the bytes of
+        // the constant buffers and the textures by name. Built on the first use and again when the material (its file or an
+        // edit of it), its shader (a hot reload) or a texture that it waits for has changed. What does not fit the layout
+        // is logged once per material and version ("material <path>: ..."). nullptr when the adapter cannot tell the
+        // layout of the program: the draw item then brings the texture and the colour itself.
+        // The pointer is valid for the frame in which it was returned, and for a few frames after the parameters were
+        // replaced (UpdateHotReload is the clock), so the draw items of a frame never point to freed parameters.
+        const render::MaterialParams* GetMaterialParams(const ResourceHandle<MaterialAsset>& material);
+
         std::filesystem::path ResolvePath(const std::filesystem::path& path) const;
         // True while the mesh or the texture of this path is still streaming: Load() then returns a placeholder
         // (the fallback asset), whose GPU handle is valid but is not the asset's own
@@ -212,6 +234,21 @@ namespace myengine::resource
         bool ReadShaderProgram(const std::filesystem::path& path, render::ShaderProgramData& program, std::vector<std::filesystem::path>& dependencies, std::string& error) const;
         ResourceHandle<MaterialAsset> ReloadMaterial(const std::filesystem::path& path);
 
+        // ---- the parameters of the materials (GetMaterialParams) ----
+        struct MaterialRuntime
+        {
+            std::shared_ptr<const render::MaterialParams> params; // null: the layout of the shader is not known
+            const void* source = nullptr;                         // the Resource<MaterialAsset> the parameters were built from
+            std::uint64_t contentHash = 0;                        // of its asset: an edit in place changes it
+            std::uint32_t shaderHandle = 0;
+            std::uint32_t shaderVersion = 0;
+            std::uint64_t textureGeneration = 0;                  // textures that finished streaming replace their placeholders
+            std::uint64_t checkedTick = ~0ull;                    // the frame of the last check: a material is checked once per frame
+            std::set<std::string> reported;                       // the messages already logged for this state of the material
+        };
+        void RebuildMaterialParams(const ResourceHandle<MaterialAsset>& material, const ResourceHandle<ShaderAsset>& shader, std::uint64_t contentHash, MaterialRuntime& runtime);
+        void RevalidateMaterials();
+
         void PumpAsyncLoads();
         void FinalizeMeshLoad(MeshLoadResult result);
         void FinalizeTextureLoad(TextureLoadResult result);
@@ -268,6 +305,11 @@ namespace myengine::resource
         const ResolvedRequest& ResolveRequest(const std::filesystem::path& path);
 
         std::unordered_map<std::string, ResolvedRequest> resolvedRequests_;
+
+        std::unordered_map<std::string, MaterialRuntime> materialRuntimes_;                                     // by the key of the material
+        std::vector<std::pair<std::uint64_t, std::shared_ptr<const render::MaterialParams>>> retiredMaterialParams_; // replaced, kept for a few frames
+        std::uint64_t frameTick_ = 0;           // counts the calls of UpdateHotReload (one per frame)
+        std::uint64_t textureGeneration_ = 1;   // +1 whenever a texture is (re)loaded
 
         std::unordered_set<std::string> failedKeys_; // assets whose load failed and that are served by a fallback
         ResourceHandle<MeshAsset> fallbackMesh_;

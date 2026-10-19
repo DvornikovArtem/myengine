@@ -1251,6 +1251,105 @@ namespace myengine::resource
             return color;
         }
 
+        // A number that changes with anything a material says: the render keeps the parameters built from it
+        std::uint64_t HashMaterialAsset(const MaterialAsset& asset)
+        {
+            std::uint64_t hash = 1469598103934665603ull; // FNV-1a
+            const auto mix = [&hash](const void* data, const std::size_t size)
+            {
+                const auto* bytes = static_cast<const std::uint8_t*>(data);
+                for (std::size_t i = 0; i < size; ++i)
+                {
+                    hash = (hash ^ bytes[i]) * 1099511628211ull;
+                }
+            };
+            const auto mixText = [&](const std::string& text)
+            {
+                mix(text.data(), text.size());
+                const std::uint8_t end = 0;
+                mix(&end, 1);
+            };
+            mixText(asset.shaderPath);
+            mixText(asset.texturePath);
+            const float tint[4] = {asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a};
+            mix(tint, sizeof(tint));
+            for (const auto& [name, path] : asset.textures)
+            {
+                mixText(name);
+                mixText(path);
+            }
+            for (const auto& [name, value] : asset.params)
+            {
+                mixText(name);
+                const std::uint8_t kind = static_cast<std::uint8_t>(value.kind);
+                mix(&kind, 1);
+                mix(value.numbers.data(), value.numbers.size() * sizeof(double));
+            }
+            return hash;
+        }
+
+        // A value of "params": a number, a bool, an array of 2..4 numbers (a vector) or of 16 (a 4x4 matrix, row by row).
+        // false: `error` says what is wrong with it.
+        bool ParseMaterialValue(const json& value, render::MaterialValue& out, std::string& error)
+        {
+            if (value.is_boolean())
+            {
+                out = render::MaterialValue::FromBool(value.get<bool>());
+                return true;
+            }
+            if (value.is_number())
+            {
+                out = render::MaterialValue::FromNumber(value.get<double>());
+                return true;
+            }
+            if (!value.is_array())
+            {
+                error = std::string("a ") + value.type_name() + " is not a number, a bool or an array of numbers";
+                return false;
+            }
+            std::vector<double> numbers;
+            for (const json& item : value)
+            {
+                if (!item.is_number())
+                {
+                    error = "an array must contain numbers only";
+                    return false;
+                }
+                numbers.push_back(item.get<double>());
+            }
+            if (numbers.size() >= 2 && numbers.size() <= 4)
+            {
+                out = render::MaterialValue::FromVector(std::move(numbers));
+                return true;
+            }
+            if (numbers.size() == 16)
+            {
+                out = render::MaterialValue::FromMatrix(std::move(numbers));
+                return true;
+            }
+            error = "an array of " + std::to_string(numbers.size()) + " numbers is not a Float2, Float3, Float4 or a 4x4 matrix (2, 3, 4 or 16 numbers)";
+            return false;
+        }
+
+        json MaterialValueToJson(const render::MaterialValue& value)
+        {
+            using Kind = render::MaterialValue::Kind;
+            if (value.kind == Kind::Bool)
+            {
+                return !value.numbers.empty() && value.numbers[0] != 0.0;
+            }
+            if (value.kind == Kind::Number && value.numbers.size() == 1)
+            {
+                const double number = value.numbers[0];
+                if (std::floor(number) == number && std::fabs(number) < 9.0e15)
+                {
+                    return static_cast<std::int64_t>(number); // a whole number stays whole in the file
+                }
+                return number;
+            }
+            return json(value.numbers);
+        }
+
         template <typename Cache>
         std::vector<std::string> CollectSortedKeys(const Cache& cache)
         {
@@ -1420,6 +1519,14 @@ namespace myengine::resource
 
     void ResourceManager::UpdateHotReload()
     {
+        // One call per frame: the clock of the material parameters. Parameters that were replaced stay alive for a few
+        // frames, so the draw items of the frame that asked for them never point to freed memory.
+        ++frameTick_;
+        retiredMaterialParams_.erase(
+            std::remove_if(retiredMaterialParams_.begin(), retiredMaterialParams_.end(),
+                [this](const auto& retired) { return retired.first + 4 <= frameTick_; }),
+            retiredMaterialParams_.end());
+
         PumpAsyncLoads();
 
         const auto now = std::chrono::steady_clock::now();
@@ -1456,24 +1563,60 @@ namespace myengine::resource
 
         json descriptor;
         descriptor["shader"] = makeRelativeAssetPath(asset.shaderPath);
-        descriptor["texture"] = makeRelativeAssetPath(asset.texturePath);
-        descriptor["tint"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+        // The old "texture" is written unless it only mirrors an entry of "textures"
+        const bool textureIsMirror = std::any_of(asset.textures.begin(), asset.textures.end(),
+            [&asset](const auto& entry) { return entry.second == asset.texturePath; });
+        if (asset.textures.empty() || (!asset.texturePath.empty() && !textureIsMirror))
+        {
+            descriptor["texture"] = makeRelativeAssetPath(asset.texturePath);
+        }
+        if (!asset.textures.empty())
+        {
+            json textures = json::object();
+            for (const auto& [name, texturePath] : asset.textures)
+            {
+                textures[name] = makeRelativeAssetPath(texturePath);
+            }
+            descriptor["textures"] = std::move(textures);
+        }
+        // "params" sets gColor: the tint is its mirror, so an edit of the tint edits gColor and no "tint" is written
+        const bool colorInParams = asset.params.count("gColor") > 0;
+        if (!colorInParams)
+        {
+            descriptor["tint"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+        }
+        if (!asset.params.empty())
+        {
+            json params = json::object();
+            for (const auto& [name, value] : asset.params)
+            {
+                params[name] = MaterialValueToJson(value);
+            }
+            if (colorInParams)
+            {
+                params["gColor"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+            }
+            descriptor["params"] = std::move(params);
+        }
 
         try
         {
             std::filesystem::create_directories(materialDirectory);
-            std::ofstream stream(resolvedPath);
-            if (!stream.is_open())
             {
-                logger_.Warning("ResourceManager: material save open failed: " + NarrowText(resolvedPath));
-                return false;
-            }
+                std::ofstream stream(resolvedPath);
+                if (!stream.is_open())
+                {
+                    logger_.Warning("ResourceManager: material save open failed: " + NarrowText(resolvedPath));
+                    return false;
+                }
 
-            stream << descriptor.dump(2);
-            if (!stream.good())
-            {
-                logger_.Warning("ResourceManager: material save write failed: " + NarrowText(resolvedPath));
-                return false;
+                stream << descriptor.dump(2);
+                stream.close(); // the file must be complete on the disk before it is loaded again below
+                if (stream.fail())
+                {
+                    logger_.Warning("ResourceManager: material save write failed: " + NarrowText(resolvedPath));
+                    return false;
+                }
             }
 
             logger_.Info("ResourceManager: material saved " + NarrowText(resolvedPath));
@@ -1678,6 +1821,7 @@ namespace myengine::resource
 
         auto placeholder = BuildTexturePlaceholder(key, resolvedPath);
         textureCache_.insert_or_assign(key, placeholder);
+        ++textureGeneration_;
         return placeholder;
     }
 
@@ -1738,7 +1882,135 @@ namespace myengine::resource
         const std::filesystem::path resolvedPath = ResolvePath(path);
         materialCache_.erase(NormalizeKey(resolvedPath));
         failedKeys_.erase(NormalizeKey(resolvedPath));
-        return LoadMaterial(resolvedPath);
+        auto material = LoadMaterial(resolvedPath);
+        if (material != nullptr)
+        {
+            // matched with the shader at once, so the messages come when the file changes and not at the next draw
+            const auto runtime = materialRuntimes_.find(material->key);
+            if (runtime != materialRuntimes_.end())
+            {
+                runtime->second.checkedTick = ~0ull;
+            }
+            GetMaterialParams(material);
+        }
+        return material;
+    }
+
+    const render::MaterialParams* ResourceManager::GetMaterialParams(const ResourceHandle<MaterialAsset>& material)
+    {
+        if (material == nullptr)
+        {
+            return nullptr;
+        }
+
+        // A material is checked once per frame (the first draw); the rest of its draws find the answer at once
+        MaterialRuntime& runtime = materialRuntimes_[material->key];
+        if (frameTick_ != 0 && runtime.checkedTick == frameTick_ && runtime.source == material.get())
+        {
+            return runtime.params.get();
+        }
+
+        const auto shader = Load<ShaderAsset>(material->asset.shaderPath);
+        if (shader == nullptr || !shader->asset.gpuHandle.IsValid())
+        {
+            return nullptr;
+        }
+
+        const std::uint64_t contentHash = HashMaterialAsset(material->asset);
+        const bool changed = runtime.source != material.get() || runtime.contentHash != contentHash ||
+            runtime.shaderHandle != shader->asset.gpuHandle.value || runtime.shaderVersion != shader->asset.version;
+        if (changed || runtime.textureGeneration != textureGeneration_)
+        {
+            if (changed)
+            {
+                runtime.reported.clear(); // a new material, shader version or content: its messages are new again
+            }
+            RebuildMaterialParams(material, shader, contentHash, runtime);
+        }
+        runtime.checkedTick = frameTick_;
+        return runtime.params.get();
+    }
+
+    void ResourceManager::RebuildMaterialParams(
+        const ResourceHandle<MaterialAsset>& material,
+        const ResourceHandle<ShaderAsset>& shader,
+        const std::uint64_t contentHash,
+        MaterialRuntime& runtime)
+    {
+        ZoneScopedN("ResourceManager::MaterialParams");
+
+        std::shared_ptr<const render::MaterialParams> built;
+        render::ShaderLayout layout;
+        if (renderAdapter_.GetShaderLayout(shader->asset.gpuHandle, layout))
+        {
+            auto params = std::make_shared<render::MaterialParams>(std::move(layout));
+            std::vector<std::string> unreadable;
+            const auto messages = render::ApplyMaterialValues(*params, ToMaterialValues(material->asset),
+                [this, &unreadable](const std::string& path) -> render::TextureHandle
+                {
+                    const auto texture = Load<TextureAsset>(path);
+                    if (texture == nullptr)
+                    {
+                        return {};
+                    }
+                    if (LoadFailed(path))
+                    {
+                        unreadable.push_back(path); // the handle is the fallback texture (magenta and black): visible, not white
+                    }
+                    return texture->asset.gpuHandle;
+                },
+                std::filesystem::path(material->asset.shaderPath).filename().string());
+
+            // Every message once per material and version: a message that was already given for this state of the material
+            // is not repeated by the next rebuild (a texture that fails to load is known some frames after the first build)
+            const std::string prefix = "ResourceManager: material " + material->key + ": ";
+            const auto say = [&](const bool isError, const std::string& text)
+            {
+                if (runtime.reported.insert(text).second)
+                {
+                    isError ? logger_.Error(prefix + text) : logger_.Warning(prefix + text);
+                }
+            };
+            for (const render::MaterialParamResult& message : messages)
+            {
+                say(message.IsError(), message.message);
+            }
+            std::sort(unreadable.begin(), unreadable.end());
+            unreadable.erase(std::unique(unreadable.begin(), unreadable.end()), unreadable.end());
+            for (const std::string& path : unreadable)
+            {
+                say(true, "the texture " + path + " could not be loaded: the fallback texture (magenta and black) stands in");
+            }
+            built = std::move(params);
+        }
+
+        if (runtime.params != nullptr)
+        {
+            retiredMaterialParams_.emplace_back(frameTick_, std::move(runtime.params));
+        }
+        runtime.params = std::move(built);
+        runtime.source = material.get();
+        runtime.contentHash = contentHash;
+        runtime.shaderHandle = shader->asset.gpuHandle.value;
+        runtime.shaderVersion = shader->asset.version;
+        runtime.textureGeneration = textureGeneration_;
+    }
+
+    void ResourceManager::RevalidateMaterials()
+    {
+        for (const auto& [key, material] : materialCache_)
+        {
+            if (material == nullptr)
+            {
+                continue;
+            }
+            const auto runtime = materialRuntimes_.find(key);
+            if (runtime != materialRuntimes_.end())
+            {
+                runtime->second.checkedTick = ~0ull;
+            }
+            GetMaterialParams(material);
+        }
     }
 
     void ResourceManager::PumpAsyncLoads()
@@ -1845,6 +2117,10 @@ namespace myengine::resource
         {
             logger_.Info("ResourceManager: hot reload shader " + NarrowText(path));
             Reload<ShaderAsset>(path);
+        }
+        if (!changed.empty())
+        {
+            RevalidateMaterials(); // the layouts may have changed: every material is matched with the new one now, not at its first draw
         }
     }
 
@@ -2059,6 +2335,7 @@ namespace myengine::resource
             textureCache_.insert_or_assign(
                 request.key,
                 resource != nullptr ? resource : BuildTexturePlaceholder(request.key, request.path));
+            ++textureGeneration_;
         }
         catch (const std::exception& ex)
         {
@@ -2068,6 +2345,7 @@ namespace myengine::resource
                 " error=" + ex.what());
             failedKeys_.insert(request.key);
             textureCache_.insert_or_assign(request.key, BuildTexturePlaceholder(request.key, request.path));
+            ++textureGeneration_; // the materials that wait for this texture learn that it failed
         }
 
         pendingTextureLoads_.erase(pendingIt);
@@ -2236,17 +2514,103 @@ namespace myengine::resource
 
         MaterialAsset asset;
         asset.shaderPath = NormalizeKey(ResolvePath(path.parent_path() / descriptor.value("shader", std::string())));
-        asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / descriptor.value("texture", std::string())));
+        const std::string legacyTexture = descriptor.value("texture", std::string());
+        if (!legacyTexture.empty())
+        {
+            asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / legacyTexture));
+        }
+        const bool hasTint = descriptor.contains("tint");
         asset.tint = ParseColor(descriptor.value("tint", json::array()), asset.tint);
 
-        if (asset.shaderPath.empty() || asset.texturePath.empty())
+        // The new keys: "textures" {name: path} and "params" {name: value}. What does not read is reported and skipped.
+        if (const auto textures = descriptor.find("textures"); textures != descriptor.end())
+        {
+            if (!textures->is_object())
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'textures' must be an object {name: path}");
+            }
+            else
+            {
+                for (const auto& entry : textures->items())
+                {
+                    if (!entry.value().is_string() || entry.value().get<std::string>().empty())
+                    {
+                        logger_.Warning("ResourceManager: material " + NarrowText(path) + ": texture '" + entry.key() + "' must be a path");
+                        continue;
+                    }
+                    asset.textures[entry.key()] = NormalizeKey(ResolvePath(path.parent_path() / entry.value().get<std::string>()));
+                }
+            }
+        }
+        if (const auto params = descriptor.find("params"); params != descriptor.end())
+        {
+            if (!params->is_object())
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'params' must be an object {name: value}");
+            }
+            else
+            {
+                for (const auto& entry : params->items())
+                {
+                    render::MaterialValue value;
+                    std::string error;
+                    if (!ParseMaterialValue(entry.value(), value, error))
+                    {
+                        logger_.Warning("ResourceManager: material " + NarrowText(path) + ": param '" + entry.key() + "': " + error);
+                        continue;
+                    }
+                    asset.params[entry.key()] = std::move(value);
+                }
+            }
+        }
+
+        // The code that knows one texture and one colour (the editor, the thumbnails) sees the mirror of the new keys
+        if (asset.texturePath.empty() && !asset.textures.empty())
+        {
+            asset.texturePath = asset.textures.begin()->second;
+        }
+        if (const auto color = asset.params.find("gColor"); color != asset.params.end() &&
+            color->second.kind == render::MaterialValue::Kind::Vector && color->second.numbers.size() == 4)
+        {
+            const std::vector<double>& c = color->second.numbers;
+            const core::Color gColor{static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]), static_cast<float>(c[3])};
+            if (hasTint && (gColor.r != asset.tint.r || gColor.g != asset.tint.g || gColor.b != asset.tint.b || gColor.a != asset.tint.a))
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": 'tint' is ignored, 'params' sets gColor and the new key wins");
+            }
+            asset.tint = gColor;
+        }
+
+        if (asset.shaderPath.empty())
         {
             logger_.Warning("ResourceManager: material descriptor incomplete: " + NarrowText(path));
             return nullptr;
         }
 
-        Load<ShaderAsset>(asset.shaderPath);
-        Load<TextureAsset>(asset.texturePath);
+        // A texture is required only when the shader has a texture to put it in. A shader without textures needs none;
+        // when the layout of the program is not known (the adapter does not reflect), a texture is required as it was.
+        const auto shader = Load<ShaderAsset>(asset.shaderPath);
+        bool needsTexture = true;
+        render::ShaderLayout shaderLayout;
+        if (shader != nullptr && shader->asset.gpuHandle.IsValid() && renderAdapter_.GetShaderLayout(shader->asset.gpuHandle, shaderLayout))
+        {
+            needsTexture = std::any_of(shaderLayout.resources.begin(), shaderLayout.resources.end(),
+                [](const render::ShaderResource& resource) { return resource.type == render::ShaderResourceType::Texture; });
+        }
+        if (asset.texturePath.empty() && asset.textures.empty() && needsTexture)
+        {
+            logger_.Warning("ResourceManager: material descriptor incomplete: " + NarrowText(path) + " (the shader needs a texture)");
+            return nullptr;
+        }
+
+        if (!asset.texturePath.empty())
+        {
+            Load<TextureAsset>(asset.texturePath);
+        }
+        for (const auto& [name, texturePath] : asset.textures)
+        {
+            Load<TextureAsset>(texturePath);
+        }
 
         logger_.Info("ResourceManager: material loaded " + NarrowText(path));
         return CreateResource(key, path, std::move(asset), BuildDependencies({path}));
@@ -2265,6 +2629,16 @@ namespace myengine::resource
         ShaderAsset asset = fallbackShader_ != nullptr ? fallbackShader_->asset : ShaderAsset{};
         asset.fallback = true; // the handle belongs to the general fallback program: a reload makes a program of its own
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
+    }
+
+    render::MaterialValues ToMaterialValues(const MaterialAsset& asset)
+    {
+        render::MaterialValues values;
+        values.params = asset.params;
+        values.textures = asset.textures;
+        values.texture = asset.texturePath;
+        values.tint = {asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a};
+        return values;
     }
 
     ResourceHandle<MaterialAsset> ResourceManager::BuildMaterialFallback(
