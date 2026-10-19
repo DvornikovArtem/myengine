@@ -88,6 +88,9 @@ namespace myengine::render
         std::map<std::string, std::string> textures;        // "textures": name of a texture -> path
         std::string texture;                                // "texture": the first texture of the shader
         std::array<float, 4> tint{1.0f, 1.0f, 1.0f, 1.0f};  // "tint": the variable gColor
+        // The material says its tint (a "tint" key, or a tint that is not the default white). Without it gColor is the
+        // @default of the shader, and white when the shader gives none.
+        bool hasTint = false;
     };
 
     class MaterialParams
@@ -110,6 +113,8 @@ namespace myengine::render
         // gModel, gViewProjection, gLightDirection: the renderer writes them, a material cannot
         static bool IsEngineSemantic(const std::string& name);
 
+        // A variable that the material does not set is zero, or the @default that the shader gives it
+        // (ShaderVariableMetadata::defaultValue, from a comment "// @default ..." in the HLSL).
         // Setters. The name and the type must fit the layout exactly (SetFloat: a Float variable and nothing else).
         // Matrices are given row by row, as XMFLOAT4X4; they are stored the way the renderer stores gModel
         // (transposed: HLSL packs matrices by columns).

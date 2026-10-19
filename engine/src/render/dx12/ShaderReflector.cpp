@@ -6,6 +6,8 @@
 
 #include <d3d11shader.h>
 
+#include <myengine/render/ShaderMetadata.h>
+
 #include <tracy/Tracy.hpp>
 
 #include "ShaderCompiler.h"
@@ -382,6 +384,12 @@ namespace myengine::render::dx12
             }
             result.diagnostics.insert(result.diagnostics.end(), conflicts.begin(), conflicts.end());
             ok = !HasError(conflicts);
+        }
+        if (ok)
+        {
+            // The comments of the source ("// @label ...") say more about the variables and the textures than the reflection
+            // does; a mistake in them is a warning and never fails the build of the program
+            ApplyShaderMetadata(file, source, name, compiled->layout, result.diagnostics);
         }
 
         std::lock_guard<std::mutex> lock(mutex_);

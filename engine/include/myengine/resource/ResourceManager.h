@@ -87,6 +87,9 @@ namespace myengine::resource
         std::string texturePath;
         // "tint": the variable gColor. When "params" sets gColor, this mirrors it.
         core::Color tint{1.0f, 1.0f, 1.0f, 1.0f};
+        // The file says its tint (a "tint" key, or gColor in "params"). A tint that is not set is the @default of gColor of the
+        // shader, or white when the shader gives none.
+        bool tintSet = false;
         std::map<std::string, std::string> textures;             // "textures": the name of a shader texture -> path (a normalized key)
         std::map<std::string, render::MaterialValue> params;     // "params": the name of a shader variable -> raw value
     };

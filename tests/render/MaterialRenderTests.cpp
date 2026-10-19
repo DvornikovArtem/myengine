@@ -583,9 +583,10 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return float4(gColor.
         Check(CountIn(log(), "'gNoSuchName' is not in textured_lit.shader.json; names: ") == 1, "exactly one message about gNoSuchName");
 
         std::cout << "  live criterion: 8, a wrong type\n";
-        // 8. A value of the wrong type: an error that says what was expected, the variable stays zero (the picture is black, not garbage)
+        // 8. A value of the wrong type: an error that says what was expected; the variable stays at its default, which for gColor of
+        // textured_lit is the @default of the shader (white), so the picture is the plain lit one, not garbage
         changeMaterial({{"gTexture", "white.bmp"}, {"gDetail", "green.bmp"}}, {{"gColor", 0.5}});
-        CheckPixel(drawLive(), 0, 0, 0, "gColor as a number: gColor stays zero");
+        CheckPixel(drawLive(), 0, reference.g, 0, "gColor as a number: gColor stays at the @default of the shader (white)");
         drawLive();
         Check(CountIn(log(), "'gColor': expected Float4, got Float") == 1, "exactly one error about the type of gColor");
 

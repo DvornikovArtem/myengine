@@ -53,6 +53,58 @@ namespace myengine::render
             diagnostics.push_back(std::move(diagnostic));
         }
 
+        std::string Number(const double value)
+        {
+            char text[32];
+            std::snprintf(text, sizeof(text), "%g", value);
+            return text;
+        }
+
+        // "label "Tint", color, min 0, max 1, step 0.01, default 1 1 1 1": the metadata of a variable as one line
+        std::string DescribeMetadata(const ShaderVariableMetadata& metadata)
+        {
+            std::vector<std::string> parts;
+            if (!metadata.label.empty())
+            {
+                parts.push_back("label \"" + metadata.label + "\"");
+            }
+            if (metadata.color)
+            {
+                parts.push_back("color");
+            }
+            if (metadata.hidden)
+            {
+                parts.push_back("hidden");
+            }
+            if (metadata.hasMin)
+            {
+                parts.push_back("min " + Number(metadata.min));
+            }
+            if (metadata.hasMax)
+            {
+                parts.push_back("max " + Number(metadata.max));
+            }
+            if (metadata.hasStep)
+            {
+                parts.push_back("step " + Number(metadata.step));
+            }
+            if (!metadata.defaultValue.empty())
+            {
+                std::string text = "default";
+                for (const double component : metadata.defaultValue)
+                {
+                    text += " " + Number(component);
+                }
+                parts.push_back(text);
+            }
+            std::string line;
+            for (std::size_t i = 0; i < parts.size(); ++i)
+            {
+                line += (i > 0 ? ", " : "") + parts[i];
+            }
+            return line;
+        }
+
         std::string Pad(std::string text, const std::size_t width)
         {
             if (text.size() < width)
@@ -100,6 +152,37 @@ namespace myengine::render
             }
         }
         return {};
+    }
+
+    std::uint32_t ValueTypeComponents(const ShaderValueType type)
+    {
+        switch (type)
+        {
+            case ShaderValueType::Bool:
+            case ShaderValueType::Int:
+            case ShaderValueType::UInt:
+            case ShaderValueType::Float:
+                return 1;
+            case ShaderValueType::Int2:
+            case ShaderValueType::UInt2:
+            case ShaderValueType::Float2:
+                return 2;
+            case ShaderValueType::Int3:
+            case ShaderValueType::UInt3:
+            case ShaderValueType::Float3:
+                return 3;
+            case ShaderValueType::Int4:
+            case ShaderValueType::UInt4:
+            case ShaderValueType::Float4:
+                return 4;
+            case ShaderValueType::Float3x3:
+                return 9;
+            case ShaderValueType::Float4x4:
+                return 16;
+            case ShaderValueType::Unknown:
+                break;
+        }
+        return 0;
     }
 
     std::string ToString(const ShaderStage stages)
@@ -310,7 +393,15 @@ namespace myengine::render
                 registerText += "[" + std::to_string(resource.bindCount) + "]";
             }
             text += "  " + Pad(resource.name, 20) + Pad(ToString(resource.type), 16) + Pad(registerText, 10) +
-                ToString(static_cast<ShaderStage>(resource.stages)) + "\n";
+                ToString(static_cast<ShaderStage>(resource.stages));
+            if (!resource.label.empty() || resource.hidden)
+            {
+                ShaderVariableMetadata metadata;
+                metadata.label = resource.label;
+                metadata.hidden = resource.hidden;
+                text += "  | " + DescribeMetadata(metadata);
+            }
+            text += "\n";
         }
 
         text += "Constant buffers (" + std::to_string(layout.constantBuffers.size()) + "):\n";
@@ -326,6 +417,10 @@ namespace myengine::render
                 if (variable.arrayCount != 1)
                 {
                     text += "  [" + std::to_string(variable.arrayCount) + "]";
+                }
+                if (!variable.metadata.Empty())
+                {
+                    text += "  | " + DescribeMetadata(variable.metadata);
                 }
                 text += "\n";
             }

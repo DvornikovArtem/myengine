@@ -145,6 +145,37 @@ namespace myengine::render
                 textures_.push_back(std::move(slot));
             }
         }
+
+        // What the shader says a variable is when the material says nothing: its @default (instead of zero)
+        for (const ShaderConstantBuffer& buffer : layout_.constantBuffers)
+        {
+            for (const ShaderVariable& variable : buffer.variables)
+            {
+                const std::vector<double>& defaults = variable.metadata.defaultValue;
+                if (defaults.empty() || variable.arrayCount != 1 || IsEngineSemantic(variable.name) || defaults.size() != ValueTypeComponents(variable.type))
+                {
+                    continue;
+                }
+                switch (variable.type)
+                {
+                    case ShaderValueType::Float:
+                    case ShaderValueType::Int:
+                    case ShaderValueType::UInt:
+                        SetValue(variable.name, MaterialValue::FromNumber(defaults[0]));
+                        break;
+                    case ShaderValueType::Bool:
+                        SetValue(variable.name, MaterialValue::FromBool(defaults[0] != 0.0));
+                        break;
+                    case ShaderValueType::Float2:
+                    case ShaderValueType::Float3:
+                    case ShaderValueType::Float4:
+                        SetValue(variable.name, MaterialValue::FromVector(defaults));
+                        break;
+                    default:
+                        break; // the other types have no setter yet: they stay zero
+                }
+            }
+        }
     }
 
     bool MaterialParams::IsEngineSemantic(const std::string& name)
@@ -448,8 +479,10 @@ namespace myengine::render
             setTexture(name, path);
         }
 
-        // "tint": the variable gColor. "params" sets gColor itself: it wins.
+        // "tint": the variable gColor. "params" sets gColor itself: it wins. A material that says no tint at all gets the
+        // @default of gColor when the shader gives one, and white (the tint of the old materials) when it does not.
         const bool tintIsWhite = values.tint == std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f};
+        const bool tintGiven = values.hasTint || !tintIsWhite;
         const auto color = values.params.find("gColor");
         if (color != values.params.end())
         {
@@ -472,9 +505,13 @@ namespace myengine::render
                 note(Failure(MaterialParamStatus::Warning, "'tint' is ignored: the shader has no gColor; " + params.DescribeNames()));
             }
         }
-        else
+        else if (tintGiven)
         {
             note(params.SetFloat4("gColor", values.tint[0], values.tint[1], values.tint[2], values.tint[3]));
+        }
+        else if (params.Layout().FindVariable("gColor").variable->metadata.defaultValue.empty())
+        {
+            note(params.SetFloat4("gColor", 1.0f, 1.0f, 1.0f, 1.0f));
         }
 
         for (const auto& [name, value] : values.params)
