@@ -734,6 +734,7 @@ namespace myengine::ui
                         if (ImGui::ColorPicker4("##tint_picker_4", tint, ImGuiColorEditFlags_AlphaBar))
                         {
                             materialResource->asset.tint = {tint[0], tint[1], tint[2], tint[3]};
+                            materialResource->asset.tintSet = true;
                         }
                         commitMaterialChange("Change Material Tint");
                         ImGui::EndPopup();
@@ -755,6 +756,7 @@ namespace myengine::ui
                             static_cast<float>(std::clamp(channels[2], 0, 255)) / 255.0f,
                             static_cast<float>(std::clamp(channels[3], 0, 255)) / 255.0f,
                         };
+                        materialResource->asset.tintSet = true;
                     }
                     FocusOutline();
                     commitMaterialChange("Change Material Tint");
@@ -842,7 +844,10 @@ namespace myengine::ui
 
         material->asset = asset;
         services_.resourceManager->Load<resource::ShaderAsset>(asset.shaderPath);
-        services_.resourceManager->Load<resource::TextureAsset>(asset.texturePath);
+        if (!asset.texturePath.empty())
+        {
+            services_.resourceManager->Load<resource::TextureAsset>(asset.texturePath);
+        }
         return services_.resourceManager->SaveMaterial(materialPath, material->asset);
     }
 

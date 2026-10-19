@@ -327,6 +327,7 @@ namespace myengine::ui
                                     if (ImGui::ColorPicker4("##tint_picker_4", tint, ImGuiColorEditFlags_AlphaBar))
                                     {
                                         materialResource->asset.tint = {tint[0], tint[1], tint[2], tint[3]};
+                                        materialResource->asset.tintSet = true;
                                     }
                                     commitMaterialChange("Change Renderer Tint");
                                     ImGui::EndPopup();
@@ -348,6 +349,7 @@ namespace myengine::ui
                                         static_cast<float>(std::clamp(channels[2], 0, 255)) / 255.0f,
                                         static_cast<float>(std::clamp(channels[3], 0, 255)) / 255.0f,
                                     };
+                                    materialResource->asset.tintSet = true;
                                 }
                                 FocusOutline();
                                 commitMaterialChange("Change Renderer Tint");

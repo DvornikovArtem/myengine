@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -1252,7 +1253,7 @@ namespace myengine::resource
         }
 
         // A number that changes with anything a material says: the render keeps the parameters built from it
-        std::uint64_t HashMaterialAsset(const MaterialAsset& asset)
+        std::uint64_t HashMaterialContent(const MaterialAsset& asset)
         {
             std::uint64_t hash = 1469598103934665603ull; // FNV-1a
             const auto mix = [&hash](const void* data, const std::size_t size)
@@ -1273,6 +1274,8 @@ namespace myengine::resource
             mixText(asset.texturePath);
             const float tint[4] = {asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a};
             mix(tint, sizeof(tint));
+            const std::uint8_t tintSet = asset.tintSet ? 1 : 0; // the same tint is another colour when the shader has a @default for gColor
+            mix(&tintSet, 1);
             for (const auto& [name, path] : asset.textures)
             {
                 mixText(name);
@@ -1331,6 +1334,24 @@ namespace myengine::resource
             return false;
         }
 
+        // A float that was widened to a double (0.4f is 0.4000000059604645) goes into the file in the shortest decimal form that reads
+        // back as the same float: 0.4. A number that is not exactly a float is a double from a file and is already as written.
+        double ShortestFloatValue(const double value)
+        {
+            const float narrowed = static_cast<float>(value);
+            if (!std::isfinite(narrowed) || static_cast<double>(narrowed) != value)
+            {
+                return value;
+            }
+            char text[64];
+            const auto converted = std::to_chars(text, text + sizeof(text), narrowed);
+            if (converted.ec != std::errc())
+            {
+                return value;
+            }
+            return std::strtod(std::string(text, converted.ptr).c_str(), nullptr);
+        }
+
         json MaterialValueToJson(const render::MaterialValue& value)
         {
             using Kind = render::MaterialValue::Kind;
@@ -1345,9 +1366,19 @@ namespace myengine::resource
                 {
                     return static_cast<std::int64_t>(number); // a whole number stays whole in the file
                 }
-                return number;
+                return ShortestFloatValue(number);
             }
-            return json(value.numbers);
+            json components = json::array();
+            for (const double component : value.numbers)
+            {
+                components.push_back(ShortestFloatValue(component));
+            }
+            return components;
+        }
+
+        json TintToJson(const core::Color& tint)
+        {
+            return json::array({ShortestFloatValue(tint.r), ShortestFloatValue(tint.g), ShortestFloatValue(tint.b), ShortestFloatValue(tint.a)});
         }
 
         template <typename Cache>
@@ -1579,11 +1610,12 @@ namespace myengine::resource
             }
             descriptor["textures"] = std::move(textures);
         }
-        // "params" sets gColor: the tint is its mirror, so an edit of the tint edits gColor and no "tint" is written
+        // "params" sets gColor: the tint is its mirror, so an edit of the tint edits gColor and no "tint" is written. A tint that the
+        // material never said (it is the @default of the shader, or white) is not written: reset to the default stays reset.
         const bool colorInParams = asset.params.count("gColor") > 0;
-        if (!colorInParams)
+        if (!colorInParams && asset.tintSet)
         {
-            descriptor["tint"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+            descriptor["tint"] = TintToJson(asset.tint);
         }
         if (!asset.params.empty())
         {
@@ -1594,7 +1626,7 @@ namespace myengine::resource
             }
             if (colorInParams)
             {
-                params["gColor"] = json::array({asset.tint.r, asset.tint.g, asset.tint.b, asset.tint.a});
+                params["gColor"] = TintToJson(asset.tint);
             }
             descriptor["params"] = std::move(params);
         }
@@ -1916,7 +1948,7 @@ namespace myengine::resource
             return nullptr;
         }
 
-        const std::uint64_t contentHash = HashMaterialAsset(material->asset);
+        const std::uint64_t contentHash = HashMaterialContent(material->asset);
         const bool changed = runtime.source != material.get() || runtime.contentHash != contentHash ||
             runtime.shaderHandle != shader->asset.gpuHandle.value || runtime.shaderVersion != shader->asset.version;
         if (changed || runtime.textureGeneration != textureGeneration_)
@@ -2589,21 +2621,8 @@ namespace myengine::resource
             return nullptr;
         }
 
-        // A texture is required only when the shader has a texture to put it in. A shader without textures needs none;
-        // when the layout of the program is not known (the adapter does not reflect), a texture is required as it was.
-        const auto shader = Load<ShaderAsset>(asset.shaderPath);
-        bool needsTexture = true;
-        render::ShaderLayout shaderLayout;
-        if (shader != nullptr && shader->asset.gpuHandle.IsValid() && renderAdapter_.GetShaderLayout(shader->asset.gpuHandle, shaderLayout))
-        {
-            needsTexture = std::any_of(shaderLayout.resources.begin(), shaderLayout.resources.end(),
-                [](const render::ShaderResource& resource) { return resource.type == render::ShaderResourceType::Texture; });
-        }
-        if (asset.texturePath.empty() && asset.textures.empty() && needsTexture)
-        {
-            logger_.Warning("ResourceManager: material descriptor incomplete: " + NarrowText(path) + " (the shader needs a texture)");
-            return nullptr;
-        }
+        // A material needs no texture, whatever its shader has: a texture slot that is not set is the white texture
+        Load<ShaderAsset>(asset.shaderPath);
 
         if (!asset.texturePath.empty())
         {
@@ -2631,6 +2650,11 @@ namespace myengine::resource
         ShaderAsset asset = fallbackShader_ != nullptr ? fallbackShader_->asset : ShaderAsset{};
         asset.fallback = true; // the handle belongs to the general fallback program: a reload makes a program of its own
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
+    }
+
+    std::uint64_t HashMaterialAsset(const MaterialAsset& asset)
+    {
+        return HashMaterialContent(asset);
     }
 
     render::MaterialValues ToMaterialValues(const MaterialAsset& asset)
@@ -2765,6 +2789,22 @@ namespace myengine::resource
         asset.gpuHandle = renderAdapter_.CreateTexture(asset.data);
 
         return CreateResource("__fallback_texture__", {}, std::move(asset));
+    }
+
+    render::TextureHandle ResourceManager::GetWhiteTextureHandle()
+    {
+        if (whiteTexture_ == nullptr)
+        {
+            TextureAsset asset;
+            asset.data.width = 1;
+            asset.data.height = 1;
+            asset.data.channels = 4;
+            asset.data.srgb = true;
+            asset.data.pixelsRgba8 = {255, 255, 255, 255};
+            asset.gpuHandle = renderAdapter_.CreateTexture(asset.data);
+            whiteTexture_ = CreateResource("__white_texture__", {}, std::move(asset));
+        }
+        return whiteTexture_->asset.gpuHandle;
     }
 
     ResourceHandle<ShaderAsset> ResourceManager::CreateFallbackShader()

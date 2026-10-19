@@ -622,6 +622,87 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         Check(editedFile["params"]["gRoughness"] == 0.4 && editedFile["textures"].size() == 2, "and nothing else is lost");
     }
 
+
+    std::string ReadRaw(const fs::path& path)
+    {
+        std::ifstream stream(path, std::ios::binary);
+        Check(stream.is_open(), "cannot read " + path.u8string());
+        return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    }
+
+    // B3.1: a tint that the material never said is not written; a float is written the short way
+    void TestSaveWritesTheTintOnlyWhenItIsSet(const fs::path& directory)
+    {
+        Harness harness;
+        const auto base = harness.resources.Load<resource::MaterialAsset>(SourceDirectory() / "assets/materials/warm.material.json");
+        Check(base != nullptr && base->asset.tintSet, "an old material with a tint in the file: tintSet");
+
+        resource::MaterialAsset asset = base->asset;
+        asset.tintSet = false;
+        asset.tint = {0.5f, 0.5f, 0.5f, 1.0f};
+        Check(harness.resources.SaveMaterial(directory / "tint" / "unset.material.json", asset), "a material with no tint saves");
+        const json unset = ReadJson(directory / "tint" / "unset.material.json");
+        Check(!unset.contains("tint") && unset.contains("texture") && unset.contains("shader"), "tintSet false and no gColor in params: no 'tint' in the file");
+        const auto reloaded = harness.resources.Load<resource::MaterialAsset>(directory / "tint" / "unset.material.json");
+        Check(reloaded != nullptr && !reloaded->asset.tintSet, "and it reads back as not set");
+
+        asset.tintSet = true;
+        Check(harness.resources.SaveMaterial(directory / "tint" / "set.material.json", asset), "a material with a tint saves");
+        Check(ReadJson(directory / "tint" / "set.material.json").contains("tint"), "tintSet: 'tint' is written");
+
+        // An old material that has its tint in the file is saved as it was
+        Check(harness.resources.SaveMaterial(directory / "tint" / "warm.material.json", base->asset), "the old material saves");
+        Check(ReadJson(directory / "tint" / "warm.material.json").contains("tint"), "and keeps its tint");
+    }
+
+    void TestSavedFloatsAreShort(const fs::path& directory)
+    {
+        Harness harness;
+        const auto base = harness.resources.Load<resource::MaterialAsset>(SourceDirectory() / "assets/materials/warm.material.json");
+        Check(base != nullptr, "warm.material.json loads");
+        resource::MaterialAsset asset = base->asset;
+        const float third = 191.0f / 255.0f; // 0.7490196...
+        asset.params["gRoughness"] = MaterialValue::FromNumber(static_cast<double>(0.4f));
+        asset.params["gUvScale"] = MaterialValue::FromVector({static_cast<double>(0.3f), static_cast<double>(third)});
+        asset.params["gHand"] = MaterialValue::FromNumber(0.1); // a double from a file: written as it is
+        asset.tint = {third, 0.1f, 0.25f, 1.0f};
+        asset.tintSet = true;
+        const fs::path path = directory / "short" / "floats.material.json";
+        Check(harness.resources.SaveMaterial(path, asset), "the material saves");
+        const std::string text = ReadRaw(path);
+        Check(Contains(text, "\"gRoughness\": 0.4") && !Contains(text, "0.4000000"), "0.4f is written as 0.4: " + text);
+        Check(Contains(text, "0.3,") || Contains(text, "0.3\n"), "the components of a vector too");
+        Check(Contains(text, "0.7490196") && !Contains(text, "0.74901960"), "a channel of the tint: 0.7490196, not the digits of a double");
+        Check(Contains(text, "\"gHand\": 0.1"), "a double that is not a float stays as it was");
+        // ...and it reads back as the same floats
+        const auto back = harness.resources.Load<resource::MaterialAsset>(path);
+        Check(back != nullptr && static_cast<float>(back->asset.params.at("gRoughness").numbers[0]) == 0.4f && back->asset.tint.r == third, "the same floats come back");
+
+        // gColor in params is written from the tint, the short way too
+        resource::MaterialAsset inParams = asset;
+        inParams.params["gColor"] = MaterialValue::FromVector({0.0, 0.0, 0.0, 1.0});
+        Check(harness.resources.SaveMaterial(directory / "short" / "params.material.json", inParams), "gColor in params saves");
+        const std::string paramsText = ReadRaw(directory / "short" / "params.material.json");
+        Check(Contains(paramsText, "0.7490196") && !Contains(paramsText, "\"tint\""), "gColor of params is the tint, in the short form");
+    }
+
+    // B3.1: a material needs nothing but a shader; the texture that is not set is white
+    void TestAMaterialWithoutTexturesLoads(const fs::path& directory)
+    {
+        const fs::path shader = SourceDirectory() / "assets/shaders/textured_lit.shader.json";
+        json bare = {{"shader", fs::relative(shader, directory / "bare").generic_u8string()}};
+        WriteText(directory / "bare" / "bare.material.json", bare.dump(2));
+        Harness harness;
+        const auto material = harness.resources.Load<resource::MaterialAsset>(directory / "bare" / "bare.material.json");
+        Check(material != nullptr && !harness.resources.LoadFailed(directory / "bare" / "bare.material.json"), "a material with a shader and nothing else loads");
+        Check(material->asset.texturePath.empty() && material->asset.textures.empty() && !material->asset.tintSet, "no texture, no tint");
+        Check(harness.resources.GetWhiteTextureHandle().IsValid(), "the code that needs one texture has the white one");
+        MaterialParams params(TexturedLitLayout());
+        const auto messages = ApplyMaterialValues(params, resource::ToMaterialValues(material->asset), Resolver());
+        Check(messages.empty() && !params.FindTexture("gTexture")->texture.IsValid(), "gTexture is not set: the renderer draws it white");
+        Check(ReadAt<float>(params, "gColor", 0) == 1.0f, "and the colour is the @default of the shader, white");
+    }
+
     void TestNewFormatOnlyAndBadEntries(const fs::path& directory)
     {
         const fs::path shader = SourceDirectory() / "assets/shaders/textured_lit.shader.json";
@@ -684,6 +765,9 @@ int main()
         TestSaveKeepsTheOldFormatAsItWas(directory);
         TestSaveAndLoadKeepTexturesAndParams(directory);
         TestNewFormatOnlyAndBadEntries(directory);
+        TestSaveWritesTheTintOnlyWhenItIsSet(directory);
+        TestSavedFloatsAreShort(directory);
+        TestAMaterialWithoutTexturesLoads(directory);
 
         std::cout << "OK: material params, setters by the names of the layout, the bytes at the offsets, errors, the old keys, the materials of the project, save and load\n";
     }

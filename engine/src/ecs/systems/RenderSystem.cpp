@@ -318,13 +318,21 @@ namespace myengine::ecs::systems
                     drawItem.material = context.resourceManager->GetMaterialParams(materialResource);
                     if (drawItem.material == nullptr)
                     {
-                        // The adapter cannot tell the layout of the program: one texture and one colour, as before
-                        auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
-                        if (textureResource == nullptr || !textureResource->asset.gpuHandle.IsValid())
+                        // The adapter cannot tell the layout of the program: one texture and one colour, as before.
+                        // A material without a texture gets the white one.
+                        if (materialResource->asset.texturePath.empty())
                         {
-                            return;
+                            drawItem.texture = context.resourceManager->GetWhiteTextureHandle();
                         }
-                        drawItem.texture = textureResource->asset.gpuHandle;
+                        else
+                        {
+                            auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
+                            if (textureResource == nullptr || !textureResource->asset.gpuHandle.IsValid())
+                            {
+                                return;
+                            }
+                            drawItem.texture = textureResource->asset.gpuHandle;
+                        }
                         drawItem.color = materialResource->asset.tint;
                     }
                     drawItems.push_back(drawItem);

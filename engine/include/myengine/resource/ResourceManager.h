@@ -97,6 +97,10 @@ namespace myengine::resource
     // The content of a material for render::ApplyMaterialValues
     render::MaterialValues ToMaterialValues(const MaterialAsset& asset);
 
+    // A number that changes with anything a material says (the render keeps the parameters built from it, the editor
+    // keeps its rows)
+    std::uint64_t HashMaterialAsset(const MaterialAsset& asset);
+
     struct MeshCpuAsset
     {
         render::MeshData data;
@@ -179,6 +183,10 @@ namespace myengine::resource
         // The pointer is valid for the frame in which it was returned, and for a few frames after the parameters were
         // replaced (UpdateHotReload is the clock), so the draw items of a frame never point to freed parameters.
         const render::MaterialParams* GetMaterialParams(const ResourceHandle<MaterialAsset>& material);
+
+        // A white 1x1 texture: what a material without a texture gets where the old code needs one (a draw item
+        // without MaterialParams, a thumbnail). The parameters of a material put it in every texture slot that is not set.
+        render::TextureHandle GetWhiteTextureHandle();
 
         std::filesystem::path ResolvePath(const std::filesystem::path& path) const;
         // True while the mesh or the texture of this path is still streaming: Load() then returns a placeholder
@@ -319,6 +327,7 @@ namespace myengine::resource
         ResourceHandle<TextureAsset> fallbackTexture_;
         ResourceHandle<ShaderAsset> fallbackShader_;
         ResourceHandle<MaterialAsset> fallbackMaterial_;
+        ResourceHandle<TextureAsset> whiteTexture_;
         std::chrono::steady_clock::time_point lastHotReloadScanTime_{};
         std::chrono::milliseconds hotReloadInterval_{500};
     };
