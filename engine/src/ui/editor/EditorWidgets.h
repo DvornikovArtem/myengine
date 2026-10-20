@@ -118,7 +118,8 @@ namespace myengine::ui
 
     // ---- categories and the property grid ----
     // Neutral full-width header with a chevron. Use like TreeNode: `if (BeginCategory(...)) { ...; EndCategory(); }`.
-    bool BeginCategory(const char* title, bool defaultOpen = true, const char* rightText = nullptr, const char* icon = nullptr);
+    // `iconColor` 0: the dim colour of every category
+    bool BeginCategory(const char* title, bool defaultOpen = true, const char* rightText = nullptr, const char* icon = nullptr, ImU32 iconColor = 0);
     void EndCategory();
 
     // Three columns: label (38% of the width, 110..200), value (stretch), reset (22).
@@ -126,10 +127,35 @@ namespace myengine::ui
     bool BeginPropertyGrid(const char* id, float indent = 20.0f);
     // Starts a new row and draws the label in the first column; the value column is current afterwards.
     // `rowHeight` > 26 makes a taller row (asset pickers: 52) with the label centred in it.
-    void PropertyLabel(const char* text, bool dim = false, float rowHeight = 0.0f);
+    // `color` != 0 paints the label with it (the red label of a value of a wrong type). `tooltip` (with a dim `tooltipDetail`
+    // line) is shown on the label; without it only a label that does not fit has one: its full text.
+    void PropertyLabel(const char* text, bool dim = false, float rowHeight = 0.0f, ImU32 color = 0,
+                       const char* tooltip = nullptr, const char* tooltipDetail = nullptr);
+
+    struct PropertyLabelOptions
+    {
+        bool dim = false;
+        float rowHeight = 0.0f;
+        ImU32 color = 0;
+        const char* tooltip = nullptr;
+        const char* tooltipDetail = nullptr;
+        // The centre of the text is the centre of the widget of the row (a field of 24 px, a picker of rowHeight - 4). Without it the
+        // label keeps its old place, a few pixels above the centre: the other panels look as they always did.
+        bool centered = false;
+    };
+    void PropertyLabel(const char* text, const PropertyLabelOptions& options);
     // Draws the reset arrow in the third column and returns true when it was clicked
     bool PropertyReset(const char* tooltip = "Reset to the value from the script code");
     void EndPropertyGrid();
+
+    // 2..4 drag fields X/Y/(Z)/(W) with coloured axis stripes (W is grey); the same callbacks and the result as DragVector3.
+    // `minValue` < `maxValue` clamps every field.
+    // With `minFieldWidthForOneRow` > 0, four fields go in two rows (X Y over Z W) when a field of one row would be narrower than that.
+    bool DragVector(const char* id, float* values, int count, float speed = 0.05f, const char* format = "%.3f",
+                    const std::function<void(int axis)>& afterField = {}, float minValue = 0.0f, float maxValue = 0.0f,
+                    float minFieldWidthForOneRow = 0.0f);
+    // The width of one field of DragVector with the same arguments, at the current cursor
+    float DragVectorFieldWidth(int count, float minFieldWidthForOneRow = 0.0f);
 
     // Three drag fields X/Y/Z with coloured axis stripes. `afterField(axis)` is called right after each field is
     // submitted, so `IsItemActivated()` / `IsItemDeactivatedAfterEdit()` refer to that field (undo recording).
@@ -155,6 +181,11 @@ namespace myengine::ui
         std::function<std::string(const std::string& key)> meta;
         // The same asset under two keys (resource keys are normalised paths). Null: plain equality
         std::function<bool(const std::string& a, const std::string& b)> samePath;
+        // The file of the assigned asset could not be found: the name is red, the meta line says "File not found", and the picture is
+        // a checkerboard with an alert icon (the renderer draws its fallback texture there, which would pass for the real one)
+        bool missing = false;
+        // Nothing assigned shows a white square instead of the type icon (a texture slot: the shader then gets a white 1x1)
+        bool emptyIsWhite = false;
     };
 
     // `current` is the key of the assigned asset (empty: none), `keys` what can be picked. Returns true when

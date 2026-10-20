@@ -68,6 +68,7 @@ namespace
             ++createCalls;
             if (!Compiles(program))
             {
+                diagnostics = {BrokenDiagnostic()};
                 return {};
             }
             const std::uint32_t id = nextShader_++;
@@ -88,10 +89,32 @@ namespace
             if (it == versions.end() || !Compiles(program))
             {
                 ++reloadFailures;
+                diagnostics = {BrokenDiagnostic()};
+                lastErrors[shader.value] = render::FormatShaderDiagnostic(BrokenDiagnostic());
                 return false;
             }
             ++it->second;
+            lastErrors.erase(shader.value);
             return true;
+        }
+
+        std::vector<render::ShaderDiagnostic> GetLastShaderDiagnostics() const override { return diagnostics; }
+
+        std::vector<render::ShaderProgramInfo> GetShaderPrograms() const override
+        {
+            std::vector<render::ShaderProgramInfo> programs;
+            for (const auto& [id, version] : versions)
+            {
+                render::ShaderProgramInfo info;
+                info.handle = {id};
+                info.version = version;
+                if (const auto error = lastErrors.find(id); error != lastErrors.end())
+                {
+                    info.lastError = error->second;
+                }
+                programs.push_back(info);
+            }
+            return programs;
         }
 
         std::uint32_t GetShaderVersion(render::ShaderHandle shader) const override
@@ -107,6 +130,18 @@ namespace
         int reloadCalls = 0;
         int reloadFailures = 0;
         std::map<std::uint32_t, std::uint32_t> versions; // live programs and their versions
+        std::map<std::uint32_t, std::string> lastErrors; // programs whose last reload failed
+        std::vector<render::ShaderDiagnostic> diagnostics;
+
+        static render::ShaderDiagnostic BrokenDiagnostic()
+        {
+            render::ShaderDiagnostic diagnostic;
+            diagnostic.file = "lit.hlsl";
+            diagnostic.line = 2;
+            diagnostic.column = 1;
+            diagnostic.message = "BROKEN token";
+            return diagnostic;
+        }
 
     private:
         static bool Compiles(const render::ShaderProgramData& program)
@@ -248,6 +283,39 @@ namespace
         Check(harness.adapter.destroyCalls == 0, "no program is ever left behind");
     }
 
+    // ---- the panel says why a shader is not what its file says ----
+
+    void TestShaderErrorForThePanel(const Files& files)
+    {
+        WriteText(files.source, "#include \"common.hlsli\"\n// BROKEN\n");
+        Harness harness;
+        const auto first = harness.resources.Load<resource::ShaderAsset>(files.descriptor);
+        Check(first != nullptr && first->asset.fallback, "the first compile failed: the fallback");
+        Check(first->asset.error.find("BROKEN token") != std::string::npos && first->asset.error.find("lit.hlsl(2,1)") != std::string::npos,
+            "the fallback keeps the first error with the file and the place: " + first->asset.error);
+        Check(harness.resources.GetShaderError(first) == first->asset.error, "GetShaderError gives it");
+
+        Touch(files.source, "#include \"common.hlsli\"\n// fixed\n");
+        const auto fixed = harness.resources.Reload<resource::ShaderAsset>(files.descriptor);
+        Check(!fixed->asset.fallback && fixed->asset.error.empty() && harness.resources.GetShaderError(fixed).empty(), "a shader that works has no error");
+
+        // A reload that fails while the program works: the error is the program's, the asset is not a fallback
+        Touch(files.source, "#include \"common.hlsli\"\n// BROKEN again\n");
+        const auto kept = harness.resources.Reload<resource::ShaderAsset>(files.descriptor);
+        Check(kept == fixed && !kept->asset.fallback, "the working program stays");
+        Check(harness.resources.GetShaderError(kept).find("BROKEN token") != std::string::npos, "the error of the last reload is told");
+
+        Touch(files.source, "#include \"common.hlsli\"\n// fixed again\n");
+        harness.resources.Reload<resource::ShaderAsset>(files.descriptor);
+        Check(harness.resources.GetShaderError(kept).empty(), "a good reload clears it");
+
+        // A descriptor that cannot be read at the first load is a fallback with its reason (a working program keeps its version)
+        WriteText(files.descriptor, "{ not json");
+        Harness fresh;
+        const auto broken = fresh.resources.Load<resource::ShaderAsset>(files.descriptor);
+        Check(broken != nullptr && broken->asset.fallback && !broken->asset.error.empty(), "an unreadable descriptor: the fallback with a reason");
+    }
+
     // ---- the include is a dependency ----
 
     void TestIncludeIsADependency(const Files& files)
@@ -289,6 +357,7 @@ int main()
         {"reload keeps the handle", TestReloadKeepsTheHandle},
         {"an error keeps the old version", TestErrorKeepsTheOldVersion},
         {"a failed first load piles up nothing", TestFailedFirstLoad},
+        {"the panel gets the error of the shader", TestShaderErrorForThePanel},
         {"the include is a dependency", TestIncludeIsADependency},
     };
 

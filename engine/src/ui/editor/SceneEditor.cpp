@@ -132,6 +132,7 @@ namespace myengine::ui
         }
         wasPlaying_ = playingNow;
 
+        FinishAbandonedMaterialGesture(playingNow);
         HandleKeyboardShortcuts(windowContext);
         BuildDockSpace(windowContext);
         // The order of the Begin calls is the tab order of a freshly docked group

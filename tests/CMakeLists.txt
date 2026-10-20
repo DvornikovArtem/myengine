@@ -271,6 +271,17 @@ set_property(TARGET myengine_shader_hot_reload_tests PROPERTY FOLDER "Tests")
 add_test(NAME shader_hot_reload COMMAND myengine_shader_hot_reload_tests)
 set_tests_properties(shader_hot_reload PROPERTIES TIMEOUT 120)
 
+# B3.1 (LR3): the rows of the Material Editor and the edits of a material, without ImGui and without a GPU
+add_executable(myengine_material_editor_model_tests
+  render/MaterialEditorModelTests.cpp)
+
+target_link_libraries(myengine_material_editor_model_tests PRIVATE myengine_engine)
+target_include_directories(myengine_material_editor_model_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_material_editor_model_tests)
+set_property(TARGET myengine_material_editor_model_tests PROPERTY FOLDER "Tests")
+add_test(NAME material_editor_model COMMAND myengine_material_editor_model_tests)
+set_tests_properties(material_editor_model PROPERTIES TIMEOUT 120)
+
 # B2 (LR3): the metadata of the shader parameters (comments "// @label ... @default ...") without a GPU: the tags, every mistake
 # with its file and line, includes, @default in the material parameters, a source that changes
 add_executable(myengine_shader_metadata_tests

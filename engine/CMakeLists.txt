@@ -24,6 +24,7 @@
   include/myengine/editor/EditorCommandHistory.h
   include/myengine/editor/EditorState.h
   include/myengine/editor/LoadingService.h
+  include/myengine/editor/MaterialEditorModel.h
   include/myengine/editor/ThumbnailService.h
   include/myengine/editor/TransformGizmo.h
   include/myengine/ecs/Component.h
@@ -114,6 +115,7 @@ set(ENGINE_SOURCES
   src/core/Window.cpp
   src/editor/EditorCommandHistory.cpp
   src/editor/LoadingService.cpp
+  src/editor/MaterialEditorModel.cpp
   src/editor/ThumbnailService.cpp
   src/editor/TransformGizmo.cpp
   src/ecs/World.cpp
@@ -179,6 +181,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorEntityKind.h
   src/ui/editor/SceneEditorInternal.h
   src/ui/editor/SceneEditorLoading.cpp
+  src/ui/editor/SceneEditorMaterialForm.cpp
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
   src/ui/editor/SceneEditorProject.cpp

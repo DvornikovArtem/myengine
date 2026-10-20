@@ -568,7 +568,7 @@ namespace myengine::ui
 
     // ---- categories and the property grid ----
 
-    bool BeginCategory(const char* title, const bool defaultOpen, const char* rightText, const char* icon)
+    bool BeginCategory(const char* title, const bool defaultOpen, const char* rightText, const char* icon, const ImU32 iconColor)
     {
         ImGuiWindow* window = ImGui::GetCurrentWindow();
         ImGuiStorage* storage = ImGui::GetStateStorage();
@@ -601,7 +601,7 @@ namespace myengine::ui
         float textX = x0 + 30.0f;
         if (icon != nullptr)
         {
-            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(textX + 7.0f, centerY), style::kTextDim);
+            DrawIcon(drawList, IconSize::Row14, icon, ImVec2(textX + 7.0f, centerY), iconColor != 0 ? iconColor : style::kTextDim);
             textX += 22.0f;
         }
         float sizePx = 0.0f;
@@ -653,36 +653,65 @@ namespace myengine::ui
         return true;
     }
 
-    void PropertyLabel(const char* text, const bool dim, const float rowHeight)
+    void PropertyLabel(const char* text, const bool dim, const float rowHeight, const ImU32 color, const char* tooltip, const char* tooltipDetail)
     {
-        const float height = std::max(rowHeight, style::kPropRowHeight);
+        PropertyLabelOptions options;
+        options.dim = dim;
+        options.rowHeight = rowHeight;
+        options.color = color;
+        options.tooltip = tooltip;
+        options.tooltipDetail = tooltipDetail;
+        PropertyLabel(text, options);
+    }
+
+    void PropertyLabel(const char* text, const PropertyLabelOptions& options)
+    {
+        const float height = std::max(options.rowHeight, style::kPropRowHeight);
         ImGui::TableNextRow(ImGuiTableRowFlags_None, height);
         ImGui::TableSetColumnIndex(0);
-        if (height > style::kPropRowHeight)
+        if (!options.centered)
         {
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (height - style::kPropRowHeight) * 0.5f);
+            if (height > style::kPropRowHeight)
+            {
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (height - style::kPropRowHeight) * 0.5f);
+            }
+            ImGui::AlignTextToFramePadding();
         }
-        ImGui::AlignTextToFramePadding();
 
         const char* textEnd = ImGui::FindRenderedTextEnd(text);
-        const ImVec2 position = ImGui::GetCursorScreenPos();
+        ImVec2 position = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
         const ImVec2 size = ImGui::CalcTextSize(text, textEnd);
-        const ImU32 color = dim ? style::kTextDim : style::kText;
+        if (options.centered)
+        {
+            const float widgetHeight = height > style::kPropRowHeight ? height - 4.0f : style::kFrameHeight;
+            position.y += std::floor((widgetHeight - size.y) * 0.5f);
+            ImGui::SetCursorScreenPos(position);
+        }
+        const ImU32 textColor = options.color != 0 ? options.color : (options.dim ? style::kTextDim : style::kText);
         auto* drawList = ImGui::GetWindowDrawList();
         if (size.x > width)
         {
+            // RenderTextEllipsis uses the style text colour
+            ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(textColor));
             ImGui::RenderTextEllipsis(drawList, position, ImVec2(position.x + width, position.y + size.y), position.x + width, text, textEnd, &size);
-            // RenderTextEllipsis uses the style text colour; repaint in the role colour is not needed for the dim case
+            ImGui::PopStyleColor();
         }
         else
         {
-            drawList->AddText(position, color, text, textEnd);
+            drawList->AddText(position, textColor, text, textEnd);
         }
         ImGui::Dummy(ImVec2(width, size.y));
-        if (size.x > width && ImGui::IsItemHovered())
+        if (ImGui::IsItemHovered())
         {
-            Tooltip(text);
+            if (options.tooltip != nullptr && options.tooltip[0] != '\0')
+            {
+                Tooltip(options.tooltip, nullptr, options.tooltipDetail != nullptr && options.tooltipDetail[0] != '\0' ? options.tooltipDetail : nullptr);
+            }
+            else if (size.x > width)
+            {
+                Tooltip(text);
+            }
         }
 
         ImGui::TableSetColumnIndex(1);
@@ -705,26 +734,38 @@ namespace myengine::ui
         ImGui::Unindent(g_gridIndent);
     }
 
-    bool DragVector3(const char* id, float values[3], const float speed, const char* format, const std::function<void(int axis)>& afterField)
+    bool DragVector(
+        const char* id,
+        float* values,
+        const int count,
+        const float speed,
+        const char* format,
+        const std::function<void(int axis)>& afterField,
+        const float minValue,
+        const float maxValue,
+        const float minFieldWidthForOneRow)
     {
-        static constexpr ImU32 kAxisColors[3] = {style::kAxisX, style::kAxisY, style::kAxisZ};
+        static constexpr ImU32 kAxisColors[4] = {style::kAxisX, style::kAxisY, style::kAxisZ, style::kTextDim};
+        const int fields = std::clamp(count, 2, 4);
         const float gap = 4.0f;
         const float available = ImGui::GetContentRegionAvail().x;
-        const float fieldWidth = std::max(std::floor((available - gap * 2.0f) / 3.0f), 24.0f);
+        const float fieldWidth = DragVectorFieldWidth(fields, minFieldWidthForOneRow);
+        const bool twoRows = fields == 4 && minFieldWidthForOneRow > 0.0f && std::floor((available - gap * 3.0f) / 4.0f) < minFieldWidthForOneRow;
+        const int perRow = twoRows ? 2 : fields;
 
         bool changed = false;
         ImGui::PushID(id);
         PushFontRole(FontRole::Secondary);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(11.0f, (style::kFrameHeight - FontRoleSize(FontRole::Secondary)) * 0.5f));
-        for (int axis = 0; axis < 3; ++axis)
+        for (int axis = 0; axis < fields; ++axis)
         {
-            if (axis > 0)
+            if (axis % perRow != 0)
             {
                 ImGui::SameLine(0.0f, gap);
             }
             ImGui::SetNextItemWidth(fieldWidth);
             ImGui::PushID(axis);
-            if (ImGui::DragFloat("##v", &values[axis], speed, 0.0f, 0.0f, format))
+            if (ImGui::DragFloat("##v", &values[axis], speed, minValue, maxValue, format))
             {
                 changed = true;
             }
@@ -742,6 +783,24 @@ namespace myengine::ui
         PopFontRole();
         ImGui::PopID();
         return changed;
+    }
+
+    float DragVectorFieldWidth(const int count, const float minFieldWidthForOneRow)
+    {
+        const int fields = std::clamp(count, 2, 4);
+        const float gap = 4.0f;
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float oneRow = std::floor((available - gap * static_cast<float>(fields - 1)) / static_cast<float>(fields));
+        if (fields == 4 && minFieldWidthForOneRow > 0.0f && oneRow < minFieldWidthForOneRow)
+        {
+            return std::max(std::floor((available - gap) * 0.5f), 24.0f); // two rows of two
+        }
+        return std::max(oneRow, 24.0f);
+    }
+
+    bool DragVector3(const char* id, float values[3], const float speed, const char* format, const std::function<void(int axis)>& afterField)
+    {
+        return DragVector(id, values, 3, speed, format, afterField);
     }
 
     namespace
@@ -809,10 +868,37 @@ namespace myengine::ui
             const PickerKind kind,
             const std::string& key,
             editor::ThumbnailService* thumbnails,
-            const std::uint32_t requestSize)
+            const std::uint32_t requestSize,
+            const bool missing = false,
+            const bool emptyIsWhite = false)
         {
             const ImVec2 max(min.x + size, min.y + size);
             drawList->AddRectFilled(min, max, IM_COL32(0x12, 0x12, 0x12, 255), 3.0f);
+            if (missing)
+            {
+                // The checkerboard of the fallback texture (magenta and black), 4 x 4 cells, with an alert on a dark disc
+                const float cell = size / 4.0f;
+                for (int row = 0; row < 4; ++row)
+                {
+                    for (int column = 0; column < 4; ++column)
+                    {
+                        const ImVec2 cellMin(min.x + cell * static_cast<float>(column), min.y + cell * static_cast<float>(row));
+                        drawList->AddRectFilled(
+                            cellMin,
+                            ImVec2(cellMin.x + cell, cellMin.y + cell),
+                            ((row + column) % 2 == 0) ? IM_COL32(0xFF, 0x00, 0xFF, 255) : IM_COL32(0x00, 0x00, 0x00, 255));
+                    }
+                }
+                const ImVec2 center((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+                drawList->AddCircleFilled(center, size * 0.3f, IM_COL32(0x12, 0x12, 0x12, 230));
+                DrawIcon(drawList, size >= 60.0f ? IconSize::Toolbar18 : IconSize::Button16, ICON_TRIANGLE_ALERT, center, style::kWarning);
+                return;
+            }
+            if (emptyIsWhite && key.empty())
+            {
+                drawList->AddRectFilled(min, max, IM_COL32(255, 255, 255, 255), 3.0f);
+                return;
+            }
             if (thumbnails != nullptr && kind != PickerKind::Shader && !key.empty())
             {
                 const editor::Thumbnail thumbnail = thumbnails->Request(key, requestSize);
@@ -887,7 +973,7 @@ namespace myengine::ui
             ImGui::SetNextWindowPos(position);
             ImGui::BeginTooltip();
             const ImVec2 min = ImGui::GetCursorScreenPos();
-            DrawPickerImage(ImGui::GetWindowDrawList(), min, size, info, kind, key, options.thumbnails, 256);
+            DrawPickerImage(ImGui::GetWindowDrawList(), min, size, info, kind, key, options.thumbnails, 256, options.missing);
             ImGui::Dummy(ImVec2(size, size));
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
             PushFontRole(FontRole::Strong);
@@ -897,7 +983,7 @@ namespace myengine::ui
             PopFontRole();
             PushFontRole(FontRole::Secondary);
             ImGui::PushStyleColor(ImGuiCol_Text, style::ToVec4(style::kTextDim));
-            const std::string meta = options.meta ? options.meta(key) : std::string(info.singular);
+            const std::string meta = options.missing ? std::string("File not found") : (options.meta ? options.meta(key) : std::string(info.singular));
             ImGui::TextUnformatted(meta.c_str());
             ImGui::PushTextWrapPos(size);
             ImGui::TextUnformatted(key.c_str());
@@ -943,7 +1029,7 @@ namespace myengine::ui
         drawList->AddRectFilled(min, ImVec2(min.x + 3.0f, max.y), info.color, style::kRounding, ImDrawFlags_RoundCornersLeft);
 
         const ImVec2 thumbMin(min.x + 3.0f + 6.0f, min.y + (kHeight - kThumb) * 0.5f);
-        DrawPickerImage(drawList, thumbMin, kThumb, info, options.kind, current, options.thumbnails, 64);
+        DrawPickerImage(drawList, thumbMin, kThumb, info, options.kind, current, options.thumbnails, 64, options.missing, options.emptyIsWhite);
 
         // Two lines: the name and what it is
         const float textX = thumbMin.x + kThumb + 10.0f;
@@ -952,10 +1038,11 @@ namespace myengine::ui
             float sizePx = 0.0f;
             ImFont* nameFont = RoleFont(FontRole::Strong, sizePx);
             const std::string name = PickerName(current);
-            drawList->AddText(nameFont, sizePx, ImVec2(textX, std::floor(min.y + 7.0f)), current.empty() ? style::kTextDim : style::kTextStrong, name.c_str());
+            drawList->AddText(nameFont, sizePx, ImVec2(textX, std::floor(min.y + 7.0f)), options.missing ? style::kErrorText : (current.empty() ? style::kTextDim : style::kTextStrong), name.c_str());
             float metaPx = 0.0f;
             ImFont* metaFont = RoleFont(FontRole::Tiny, metaPx);
             const std::string meta = current.empty() ? std::string("Nothing assigned")
+                : options.missing                    ? std::string("File not found")
                                                      : (options.meta ? options.meta(current) : std::string(info.singular));
             drawList->AddText(metaFont, metaPx, ImVec2(textX, std::floor(min.y + kHeight - 7.0f - metaPx)), style::kTextDim, meta.c_str());
         }

@@ -800,12 +800,19 @@ namespace myengine::editor
             item.material = resources.GetMaterialParams(material);
             if (item.material == nullptr)
             {
-                auto texture = resources.Load<resource::TextureAsset>(PathFromText(material->asset.texturePath));
-                if (texture == nullptr || !texture->asset.gpuHandle.IsValid())
+                if (material->asset.texturePath.empty())
                 {
-                    return Build::Failed;
+                    item.texture = resources.GetWhiteTextureHandle(); // a material without a texture: the white one
                 }
-                item.texture = texture->asset.gpuHandle;
+                else
+                {
+                    auto texture = resources.Load<resource::TextureAsset>(PathFromText(material->asset.texturePath));
+                    if (texture == nullptr || !texture->asset.gpuHandle.IsValid())
+                    {
+                        return Build::Failed;
+                    }
+                    item.texture = texture->asset.gpuHandle;
+                }
                 item.color = material->asset.tint;
             }
             items.push_back(item);
