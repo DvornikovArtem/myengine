@@ -2213,10 +2213,13 @@ namespace myengine::render::dx12
 
         std::vector<AdapterCandidate> candidates;
 
+        // MYENGINE_DX12_WARP=1: the software adapter even when a GPU is there (the render tests: one rasterizer on every machine)
+        const bool forceWarp = IsEnvironmentEnabled("MYENGINE_DX12_WARP");
+
         const auto registerCandidate =
             [&](IDXGIAdapter1* adapter)
         {
-            if (adapter == nullptr)
+            if (adapter == nullptr || forceWarp)
             {
                 return;
             }
@@ -2326,7 +2329,11 @@ namespace myengine::render::dx12
             }
         }
 
-        if (!candidates.empty())
+        if (forceWarp)
+        {
+            logger_.Info("MYENGINE_DX12_WARP: the WARP software rasterizer is used, no hardware adapter is looked for.");
+        }
+        else if (!candidates.empty())
         {
             logger_.Warning("All hardware adapter device creation attempts failed. Falling back to WARP.");
         }

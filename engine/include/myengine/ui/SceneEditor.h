@@ -78,6 +78,13 @@ namespace myengine::ui
             std::string lastError;      // the first error of the last reload that failed; empty when the program works
         };
         std::string summary;            // "programs 4 | PSO 7 | root signatures 3 | reloads 12 ok / 2 failed"
+        // The same numbers as numbers (the Statistics panel)
+        std::uint32_t programCount = 0;
+        std::uint32_t pipelineStates = 0;
+        std::uint32_t rootSignatures = 0;
+        std::uint64_t reloads = 0;
+        std::uint64_t reloadFailures = 0;
+        bool available = false;         // the renderer told its numbers
         std::vector<Program> programs;
     };
 

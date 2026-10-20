@@ -101,6 +101,22 @@ namespace myengine::ui
             DrawStatsGroup("Frame", frame);
             DrawStatsGroup("Scene", scene);
             DrawStatsGroup("Scripts", scripts);
+
+            // The shader programs of the renderer: what must not grow with the reloads (a leak shows here before it shows in the memory)
+            if (services_.shaderStatus)
+            {
+                const ShaderStatusView shaderStatus = services_.shaderStatus();
+                if (shaderStatus.available)
+                {
+                    const std::vector<StatRow> shaders = {
+                        {"Programs", std::to_string(shaderStatus.programCount)},
+                        {"Pipeline states", std::to_string(shaderStatus.pipelineStates)},
+                        {"Root signatures", std::to_string(shaderStatus.rootSignatures)},
+                        {"Reloads", std::to_string(shaderStatus.reloads) + " ok / " + std::to_string(shaderStatus.reloadFailures) + " failed"},
+                    };
+                    DrawStatsGroup("Shaders", shaders);
+                }
+            }
         }
         ImGui::End();
     }
