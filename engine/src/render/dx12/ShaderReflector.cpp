@@ -29,6 +29,30 @@ namespace myengine::render::dx12
             return std::any_of(diagnostics.begin(), diagnostics.end(), [](const ShaderDiagnostic& d) { return !d.warning; });
         }
 
+        // A mistake of the file itself (a missing semicolon, an undeclared name) is found by the compile of the vertex stage and again
+        // by the compile of the pixel stage: it is one message that belongs to both stages, not two
+        void MergeEqualDiagnostics(std::vector<ShaderDiagnostic>& diagnostics)
+        {
+            std::vector<ShaderDiagnostic> merged;
+            for (ShaderDiagnostic& diagnostic : diagnostics)
+            {
+                const auto same = std::find_if(merged.begin(), merged.end(), [&diagnostic](const ShaderDiagnostic& other)
+                {
+                    return other.file == diagnostic.file && other.line == diagnostic.line && other.column == diagnostic.column &&
+                        other.warning == diagnostic.warning && other.code == diagnostic.code && other.message == diagnostic.message;
+                });
+                if (same != merged.end())
+                {
+                    same->stage = static_cast<std::uint8_t>(same->stage | diagnostic.stage);
+                }
+                else
+                {
+                    merged.push_back(std::move(diagnostic));
+                }
+            }
+            diagnostics = std::move(merged);
+        }
+
         ShaderValueType MapValueType(const D3D11_SHADER_TYPE_DESC& type)
         {
             if (type.Class == D3D_SVC_STRUCT || type.Members > 0)
@@ -367,6 +391,7 @@ namespace myengine::render::dx12
         stageSource.profile = program.pixelProfile;
         stageSource.stage = ShaderStage::Pixel;
         const bool pixelCompiled = CompileShaderStage(stageSource, compiled->pixelBlob, result.diagnostics);
+        MergeEqualDiagnostics(result.diagnostics);
 
         bool ok = vertexCompiled && pixelCompiled;
         if (ok)

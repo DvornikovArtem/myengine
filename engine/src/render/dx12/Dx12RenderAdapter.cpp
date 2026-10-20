@@ -1951,6 +1951,16 @@ namespace myengine::render::dx12
         WaitForGpu();
         profiler_->Shutdown();
 
+        // The debug interfaces of the device are taken first: they keep the device itself alive until the report is made, and the
+        // report then lists what else is alive (a leak of the adapter)
+        Microsoft::WRL::ComPtr<ID3D12DebugDevice> debugDevice;
+        Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
+        if (debugLayerEnabled_)
+        {
+            context_.device.As(&debugDevice);
+            context_.device.As(&infoQueue);
+        }
+
         for (auto& [_, surface] : surfaces_)
         {
             for (auto& uploadBuffer : surface.uiVertexUploadBuffers)
@@ -1996,6 +2006,51 @@ namespace myengine::render::dx12
         context_.fence.Reset();
         context_.device.Reset();
         context_.factory.Reset();
+
+        // Everything of the adapter is released: what the device lists now is a leak (its own object is not one)
+        liveObjectReport_ = {};
+        if (debugDevice != nullptr && infoQueue != nullptr)
+        {
+            infoQueue->ClearStoredMessages();
+            debugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL);
+            const UINT64 messageCount = infoQueue->GetNumStoredMessages();
+            for (UINT64 index = 0; index < messageCount; ++index)
+            {
+                SIZE_T length = 0;
+                if (FAILED(infoQueue->GetMessage(index, nullptr, &length)) || length == 0)
+                {
+                    continue;
+                }
+                std::vector<char> buffer(length);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(buffer.data());
+                if (FAILED(infoQueue->GetMessage(index, message, &length)) || message->pDescription == nullptr)
+                {
+                    continue;
+                }
+                // "Live ID3D12Resource at 0x..., Refcount: 1": an object of a device is listed with a leading tab
+                std::string description(message->pDescription);
+                description.erase(0, description.find_first_not_of(" \t"));
+                const bool isLiveObject = description.rfind("Live ", 0) == 0;
+                if (isLiveObject && message->ID != D3D12_MESSAGE_ID_LIVE_DEVICE && message->ID != D3D12_MESSAGE_ID_LIVE_OBJECT_SUMMARY)
+                {
+                    ++liveObjectReport_.liveObjects;
+                    liveObjectReport_.objects.push_back(description);
+                }
+            }
+            liveObjectReport_.checked = true;
+            if (liveObjectReport_.liveObjects == 0)
+            {
+                logger_.Info("DX12 live objects after shutdown: none (the device only)");
+            }
+            else
+            {
+                logger_.Warning("DX12 live objects after shutdown: " + std::to_string(liveObjectReport_.liveObjects) + " (a leak of the adapter)");
+                for (const std::string& object : liveObjectReport_.objects)
+                {
+                    logger_.Warning("  " + object);
+                }
+            }
+        }
 
         if (fenceEvent_ != nullptr)
         {
@@ -2055,6 +2110,7 @@ namespace myengine::render::dx12
             if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(debugController.GetAddressOf()))))
             {
                 debugController->EnableDebugLayer();
+                debugLayerEnabled_ = true;
                 factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
                 logger_.Info("DX12 debug layer enabled (--dx12-debug / MYENGINE_DX12_DEBUG)");
 

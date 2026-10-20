@@ -51,6 +51,19 @@ namespace myengine::render::dx12
         std::vector<ShaderProgramInfo> GetShaderPrograms() const override;
         ShaderStatistics GetShaderStatistics() const override;
 
+        // The debug layer (--dx12-debug / MYENGINE_DX12_DEBUG) is on. The report below exists only with it.
+        bool IsDebugLayerEnabled() const { return debugLayerEnabled_; }
+
+        // What Shutdown found alive in the device when everything of the adapter was released: the objects other than the device
+        // itself. `checked` is false when the debug layer is off (or Shutdown has not run). The objects are also in the log.
+        struct LiveObjectReport
+        {
+            bool checked = false;
+            std::uint32_t liveObjects = 0;
+            std::vector<std::string> objects;   // "Live ID3D12Resource at 0x..., Refcount: 1"
+        };
+        const LiveObjectReport& GetLiveObjectReport() const { return liveObjectReport_; }
+
         RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) override;
         void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) override;
 
@@ -368,6 +381,8 @@ namespace myengine::render::dx12
         std::string pendingTargetLabel_;
         std::string adapterName_;
         bool dredEnabled_ = false;
+        bool debugLayerEnabled_ = false;
+        LiveObjectReport liveObjectReport_;
         bool deviceRemovedLogged_ = false;
         std::uint64_t testRemoveDeviceFrame_ = 0; // MYENGINE_DX12_TEST_REMOVE_DEVICE=<frame>: removes the device on purpose
     };
