@@ -529,6 +529,8 @@ namespace
             Check(errors[0].find(mustMention) != std::string::npos, what + ": the message mentions '" + mustMention + "': " + errors[0]);
         }
         Check(!stage.Resources().GetShaderError(reloaded).empty(), what + ": the resource manager keeps the reason for the panel");
+        // The message as the person reads it, without the temporary folder
+        std::cout << "      " << what << ": Shader error: " << errors[0].substr(errors[0].find("textured_lit")) << "\n";
         CheckPixel(stage.Draw(), drawsBefore, what + ": the old program still draws");
     }
 
