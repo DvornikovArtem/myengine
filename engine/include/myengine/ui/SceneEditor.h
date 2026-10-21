@@ -63,6 +63,19 @@ namespace myengine::ui
     enum class AssetViewerType : std::uint8_t;
     struct AssetViewerTab;
 
+    // The shader programs of the renderer for Help > Developer > Shader Layouts
+    struct ShaderStatusView
+    {
+        struct Program
+        {
+            std::string name;
+            std::uint32_t version = 1;
+            std::string lastError;      // the first error of the last reload that failed; empty when the program works
+        };
+        std::string summary;            // "programs 4 | PSO 7 | root signatures 3 | reloads 12 ok / 2 failed"
+        std::vector<Program> programs;
+    };
+
     struct SceneEditorServices
     {
         ecs::World* world = nullptr;
@@ -96,6 +109,7 @@ namespace myengine::ui
         std::function<bool()> isVSyncEnabled;
         std::function<void(bool)> setVSync;
         std::function<void(bool)> setWireframe;
+        std::function<ShaderStatusView()> shaderStatus; // the live shader programs: version, last error, GPU object counts
         // A small RGBA picture as an ImGui texture (the assistant's attachment chips): the id to give ImGui::AddImage, 0 on
         // failure; the second function releases it. Set by UiManager.
         std::function<std::uint64_t(const unsigned char* rgba, std::uint32_t width, std::uint32_t height)> createUiTexture;
@@ -153,6 +167,7 @@ namespace myengine::ui
         void DrawPrefabCanvas(AssetViewerTab& tab, const ImVec2& canvasMin, const ImVec2& canvasSize);
         void DrawPrefabPanel(AssetViewerTab& tab);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
+        void DrawShaderLayoutsWindow();   // Help > Developer > Shader Layouts (what the reflection reads from the shaders)
         // The loading window of a long operation (SceneEditorLoading.cpp). Also blocks the input while one runs.
         void DrawLoadingUi();
         // The startup splash instead of the editor; true while it is on (nothing else is drawn then)
@@ -225,6 +240,9 @@ namespace myengine::ui
         std::string loadErrorText_;
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
+        bool showShaderLayouts_ = false;   // Help > Developer > Shader Layouts
+        std::string shaderLayoutsText_;    // the table of the window; empty: built at the next frame
+        int shaderLayoutsFailures_ = 0;    // programs that did not compile
         float materialPreviewYaw_ = 0.61f;   // orbit camera of the Material Editor preview (radians)
         float materialPreviewPitch_ = 0.44f;
         float materialPreviewDistance_ = 3.0f;

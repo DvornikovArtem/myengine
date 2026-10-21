@@ -29,6 +29,7 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/LoadingService.h>
 #include <myengine/render/IRenderAdapter.h>
+#include <myengine/render/ShaderDescriptor.h>
 #include <myengine/resource/ResourceManager.h>
 
 #include <tracy/Tracy.hpp>
@@ -1683,9 +1684,53 @@ namespace myengine::resource
     ResourceHandle<ShaderAsset> ResourceManager::ReloadShader(const std::filesystem::path& path)
     {
         const std::filesystem::path resolvedPath = ResolvePath(path);
-        shaderCache_.erase(NormalizeKey(resolvedPath));
-        failedKeys_.erase(NormalizeKey(resolvedPath));
+        const std::string key = NormalizeKey(resolvedPath);
+
+        // A program that works is rebuilt on the same handle and is never replaced by the fallback
+        const auto cached = shaderCache_.find(key);
+        if (cached != shaderCache_.end() && cached->second != nullptr && !cached->second->asset.fallback && cached->second->asset.gpuHandle.IsValid())
+        {
+            return ReloadShaderInPlace(cached->second, resolvedPath);
+        }
+
+        // The first load did not succeed (the fallback stands in) or there is nothing loaded yet: a new try
+        shaderCache_.erase(key);
+        failedKeys_.erase(key);
         return LoadShader(resolvedPath);
+    }
+
+    ResourceHandle<ShaderAsset> ResourceManager::ReloadShaderInPlace(const ResourceHandle<ShaderAsset>& resource, const std::filesystem::path& path)
+    {
+        render::ShaderProgramData program;
+        std::vector<std::filesystem::path> dependencies;
+        std::string error;
+        if (!ReadShaderProgram(path, program, dependencies, error))
+        {
+            // The descriptor is broken: the old version stays; the same files are not tried again until they change
+            logger_.Error("Shader error: " + NarrowText(path) + ": " + error + " (the previous version keeps running)");
+            std::vector<std::filesystem::path> known;
+            for (const ResourceDependency& dependency : resource->dependencies)
+            {
+                known.push_back(dependency.path);
+            }
+            resource->dependencies = BuildDependencies(known);
+            return resource;
+        }
+
+        // The adapter logs the errors with the file and the line ("Shader error: file(line,column): ...")
+        const bool reloaded = renderAdapter_.ReloadShaderProgram(resource->asset.gpuHandle, program);
+        resource->dependencies = BuildDependencies(dependencies);
+        if (reloaded)
+        {
+            resource->asset.program = program;
+            resource->asset.version = renderAdapter_.GetShaderVersion(resource->asset.gpuHandle);
+            logger_.Info("ResourceManager: shader reloaded " + NarrowText(path) + " (version " + std::to_string(resource->asset.version) + ")");
+        }
+        else
+        {
+            logger_.Warning("ResourceManager: shader reload failed, the previous version keeps running: " + NarrowText(path));
+        }
+        return resource;
     }
 
     ResourceHandle<MaterialAsset> ResourceManager::ReloadMaterial(const std::filesystem::path& path)
@@ -2098,40 +2143,23 @@ namespace myengine::resource
         return CreateResource(key, path, std::move(asset), BuildDependencies({path}));
     }
 
-    ResourceHandle<ShaderAsset> ResourceManager::LoadShaderInternal(
-        const std::string& key,
-        const std::filesystem::path& path)
+    bool ResourceManager::ReadShaderProgram(
+        const std::filesystem::path& path,
+        render::ShaderProgramData& program,
+        std::vector<std::filesystem::path>& dependencies,
+        std::string& error) const
     {
-        render::ShaderProgramData program;
-        std::vector<std::filesystem::path> dependencies;
-
         try
         {
             const std::string extension = ToLower(NarrowText(path.extension()));
             if (extension == ".json")
             {
-                std::ifstream stream(path);
-                if (!stream.is_open())
+                if (!render::LoadShaderDescriptor(path, program, error))
                 {
-                    logger_.Warning("ResourceManager: shader descriptor open failed: " + NarrowText(path));
-                    return nullptr;
+                    return false;
                 }
 
-                json descriptor;
-                stream >> descriptor;
-
-                const std::string sourceValue = descriptor.value("source", std::string());
-                if (sourceValue.empty())
-                {
-                    logger_.Warning("ResourceManager: shader descriptor has empty source: " + NarrowText(path));
-                    return nullptr;
-                }
-
-                program.sourcePath = ResolvePath(path.parent_path() / sourceValue);
-                program.vertexEntry = descriptor.value("vertexEntry", program.vertexEntry);
-                program.pixelEntry = descriptor.value("pixelEntry", program.pixelEntry);
-                program.vertexProfile = descriptor.value("vertexProfile", program.vertexProfile);
-                program.pixelProfile = descriptor.value("pixelProfile", program.pixelProfile);
+                program.sourcePath = ResolvePath(program.sourcePath);
                 dependencies = {path, program.sourcePath};
             }
             else
@@ -2139,13 +2167,31 @@ namespace myengine::resource
                 program.sourcePath = path;
                 dependencies = {path};
             }
+
+            // A change in a file that the source includes reloads the program too
+            for (const std::filesystem::path& included : render::ScanShaderIncludes(program.sourcePath))
+            {
+                dependencies.push_back(included);
+            }
+            return true;
         }
         catch (const std::exception& ex)
         {
-            logger_.Warning(
-                "ResourceManager: shader descriptor parse failed: " +
-                NarrowText(path) +
-                " error=" + ex.what());
+            error = std::string("shader descriptor parse failed: ") + ex.what();
+            return false;
+        }
+    }
+
+    ResourceHandle<ShaderAsset> ResourceManager::LoadShaderInternal(
+        const std::string& key,
+        const std::filesystem::path& path)
+    {
+        render::ShaderProgramData program;
+        std::vector<std::filesystem::path> dependencies;
+        std::string error;
+        if (!ReadShaderProgram(path, program, dependencies, error))
+        {
+            logger_.Warning("ResourceManager: shader descriptor " + NarrowText(path) + ": " + error);
             return nullptr;
         }
 
@@ -2157,6 +2203,7 @@ namespace myengine::resource
             logger_.Warning("ResourceManager: shader compile failed: " + NarrowText(path));
             return BuildShaderFallback(key, path, dependencies);
         }
+        asset.version = renderAdapter_.GetShaderVersion(asset.gpuHandle);
 
         logger_.Info("ResourceManager: shader loaded " + NarrowText(path));
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
@@ -2216,6 +2263,7 @@ namespace myengine::resource
         }
 
         ShaderAsset asset = fallbackShader_ != nullptr ? fallbackShader_->asset : ShaderAsset{};
+        asset.fallback = true; // the handle belongs to the general fallback program: a reload makes a program of its own
         return CreateResource(key, path, std::move(asset), BuildDependencies(dependencies));
     }
 

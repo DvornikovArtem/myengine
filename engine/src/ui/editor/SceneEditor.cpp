@@ -4,6 +4,7 @@
 
 #include <myengine/assistant/AssistantTools.h>
 #include <myengine/editor/ThumbnailService.h>
+#include <myengine/render/dx12/ShaderLayoutDump.h>
 
 namespace myengine::ui
 {
@@ -56,6 +57,13 @@ namespace myengine::ui
             if (_dupenv_s(&value, &length, "MYENGINE_THUMBNAILS_WINDOW") == 0 && value != nullptr)
             {
                 showThumbnailsDebug_ = value[0] == '1';
+                std::free(value);
+            }
+            // The same for Help > Developer > Shader Layouts: MYENGINE_SHADER_LAYOUTS_WINDOW=1
+            value = nullptr;
+            if (_dupenv_s(&value, &length, "MYENGINE_SHADER_LAYOUTS_WINDOW") == 0 && value != nullptr)
+            {
+                showShaderLayouts_ = value[0] == '1';
                 std::free(value);
             }
         }
@@ -179,6 +187,77 @@ namespace myengine::ui
         }
         DrawWidgetsGallery(&showWidgetsGallery_);
         DrawThumbnailsDebugWindow();
+        DrawShaderLayoutsWindow();
+    }
+
+    // Developer tool: the layouts that the reflection reads from every shader of assets/shaders (resources, constant
+    // buffers with offsets, vertex inputs) or the errors of the compiler with the file and the line.
+    void SceneEditor::DrawShaderLayoutsWindow()
+    {
+        if (!showShaderLayouts_)
+        {
+            return;
+        }
+
+        const auto rebuild = [this]()
+        {
+            shaderLayoutsFailures_ = render::dx12::DumpShaderLayouts(core::ServiceLocator::GetProjectContext().Root() / "assets/shaders", shaderLayoutsText_);
+        };
+        if (shaderLayoutsText_.empty())
+        {
+            rebuild();
+        }
+
+        ImGui::SetNextWindowSize(ImVec2(640.0f, 480.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Shader Layouts###ShaderLayouts", &showShaderLayouts_))
+        {
+            if (ImGui::Button("Refresh"))
+            {
+                rebuild();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Copy"))
+            {
+                ImGui::SetClipboardText(shaderLayoutsText_.c_str());
+            }
+            ImGui::SameLine();
+            if (shaderLayoutsFailures_ == 0)
+            {
+                ImGui::TextDisabled("All programs compile");
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "%d program(s) did not compile", shaderLayoutsFailures_);
+            }
+            ImGui::Separator();
+
+            // The live programs: the version grows with every successful reload, the error of a failed one is shown until
+            // the next good one (the old version keeps running meanwhile)
+            if (services_.shaderStatus)
+            {
+                const ShaderStatusView status = services_.shaderStatus();
+                ImGui::TextUnformatted(status.summary.c_str());
+                for (const ShaderStatusView::Program& program : status.programs)
+                {
+                    ImGui::BulletText("%s  v%u", program.name.c_str(), program.version);
+                    if (!program.lastError.empty())
+                    {
+                        ImGui::SameLine();
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.35f, 1.0f));
+                        ImGui::TextWrapped("error: %s", program.lastError.c_str());
+                        ImGui::PopStyleColor();
+                    }
+                }
+                ImGui::Separator();
+            }
+
+            ImGui::BeginChild("##ShaderLayoutsText", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+            PushFontRole(FontRole::Mono);
+            ImGui::TextUnformatted(shaderLayoutsText_.c_str());
+            PopFontRole();
+            ImGui::EndChild();
+        }
+        ImGui::End();
     }
 
     // Developer tool: the assets of the engine folder as thumbnails, with the counters of the service.
@@ -379,6 +458,10 @@ namespace myengine::ui
                     ImGui::MenuItem("ImGui Demo", nullptr, &editorState.showImGuiDemo);
                     ImGui::MenuItem("Widgets Gallery", nullptr, &showWidgetsGallery_);
                     ImGui::MenuItem("Thumbnails", nullptr, &showThumbnailsDebug_, services_.thumbnails != nullptr);
+                    if (ImGui::MenuItem("Shader Layouts", nullptr, &showShaderLayouts_))
+                    {
+                        shaderLayoutsText_.clear(); // rebuilt when the window opens
+                    }
                     ImGui::Separator();
                     if (ImGui::MenuItem("Capture GPU Frame", "F12", false, services_.captureGpuFrame != nullptr))
                     {

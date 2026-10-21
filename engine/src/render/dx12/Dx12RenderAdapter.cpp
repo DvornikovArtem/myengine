@@ -15,9 +15,12 @@
 #include <d3dcompiler.h>
 
 #include <myengine/core/Logger.h>
+#include <myengine/render/ShaderDescriptor.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 
 #include "Dx12GpuProfiler.h"
+#include "ShaderCompiler.h"
+#include "ShaderReflector.h"
 
 #include <tracy/Tracy.hpp>
 
@@ -122,6 +125,7 @@ namespace myengine::render::dx12
 
     Dx12RenderAdapter::Dx12RenderAdapter(core::Logger& logger)
         : logger_(logger)
+        , shaderReflector_(std::make_unique<ShaderReflector>())
         , profiler_(std::make_unique<Dx12GpuProfiler>())
     {
     }
@@ -155,9 +159,10 @@ namespace myengine::render::dx12
         {
             logger_.Warning("GPU timestamps are not available: frame statistics have no GPU times");
         }
-        if (!BuildRootSignature())
+        forceRootCbv_ = IsEnvironmentEnabled("MYENGINE_DX12_ROOT_CBV");
+        if (forceRootCbv_)
         {
-            return false;
+            logger_.Info("MYENGINE_DX12_ROOT_CBV: the constant buffers of every program are root CBVs");
         }
         if (!BuildDebugLinePipeline())
         {
@@ -337,58 +342,247 @@ namespace myengine::render::dx12
 
     ShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderProgramData& shaderProgram)
     {
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        if (!CompileShaderBlob(shaderProgram.sourcePath, shaderProgram.vertexEntry, shaderProgram.vertexProfile, vertexShader))
-        {
-            return {};
-        }
-        if (!CompileShaderBlob(shaderProgram.sourcePath, shaderProgram.pixelEntry, shaderProgram.pixelProfile, pixelShader))
+        const ShaderCompileResult compiled = shaderReflector_->CompileProgram(shaderProgram);
+        lastShaderDiagnostics_ = compiled.diagnostics;
+        LogShaderDiagnostics(compiled.diagnostics);
+        if (!compiled.ok)
         {
             return {};
         }
 
-        static constexpr D3D12_INPUT_ELEMENT_DESC inputLayout[] =
+        ShaderRecord record;
+        if (!BuildProgram(*compiled.program, shaderProgram, ProgramKind::Scene, record))
         {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,                       D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, sizeof(float) * 3,       D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, sizeof(float) * (3 + 3), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            return {};
+        }
+
+        const std::uint32_t shaderId = nextShaderId_++;
+        shaders_.insert_or_assign(shaderId, std::move(record));
+        return ShaderHandle{shaderId};
+    }
+
+    bool Dx12RenderAdapter::GetRootSignature(const RootSignatureDescription& description, Microsoft::WRL::ComPtr<ID3D12RootSignature>& outRootSignature)
+    {
+        const auto cached = rootSignatures_.find(description.shapeHash);
+        if (cached != rootSignatures_.end())
+        {
+            outRootSignature = cached->second;
+            return true;
+        }
+
+        Microsoft::WRL::ComPtr<ID3DBlob> serialized;
+        std::string error;
+        if (!SerializeRootSignature(description, serialized, error))
+        {
+            logger_.Error("D3D12SerializeRootSignature failed: " + error);
+            return false;
+        }
+        const HRESULT hr = context_.device->CreateRootSignature(
+            0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(outRootSignature.ReleaseAndGetAddressOf()));
+        if (FAILED(hr))
+        {
+            logger_.Error("CreateRootSignature failed: " + HrToString(hr));
+            return false;
+        }
+        rootSignatures_.emplace(description.shapeHash, outRootSignature);
+        return true;
+    }
+
+    void Dx12RenderAdapter::SetRootSignature(ID3D12RootSignature* rootSignature)
+    {
+        if (rootSignature != boundRootSignature_)
+        {
+            context_.commandList->SetGraphicsRootSignature(rootSignature);
+            boundRootSignature_ = rootSignature;
+        }
+    }
+
+    // The root signature, the pipeline states and the slots of the values that the renderer writes: all from the layout
+    // Builds a program and counts it as a user of its root signature; a failed build leaves no trace
+    bool Dx12RenderAdapter::BuildProgram(const CompiledShaderProgram& compiled, const ShaderProgramData& data, const ProgramKind kind, ShaderRecord& record)
+    {
+        if (BuildProgramImpl(compiled, data, kind, record))
+        {
+            ++rootSignatureUsers_[record.rootSignatureShape];
+            return true;
+        }
+
+        // The root signature may have been created for this program only: nobody else uses it, the GPU never did
+        if (record.rootSignature != nullptr && rootSignatureUsers_.find(record.rootSignatureShape) == rootSignatureUsers_.end())
+        {
+            rootSignatures_.erase(record.rootSignatureShape);
+        }
+        record = ShaderRecord{};
+        return false;
+    }
+
+    bool Dx12RenderAdapter::BuildProgramImpl(const CompiledShaderProgram& compiled, const ShaderProgramData& data, const ProgramKind kind, ShaderRecord& record)
+    {
+        ZoneScopedN("Shader::BuildPipeline");
+        record.sourceName = compiled.sourceName;
+
+        RootSignatureOptions options;
+        if (forceRootCbv_)
+        {
+            options.rootConstantsLimitDwords = 0;
+        }
+        const RootSignatureBuild build = BuildRootSignatureDescription(compiled.layout, data.samplers, compiled.sourceName, options);
+        lastShaderDiagnostics_.insert(lastShaderDiagnostics_.end(), build.diagnostics.begin(), build.diagnostics.end());
+        LogShaderDiagnostics(build.diagnostics);
+        if (!build.ok)
+        {
+            return false;
+        }
+        if (!GetRootSignature(build.description, record.rootSignature))
+        {
+            return false;
+        }
+        record.rootSignatureShape = build.description.shapeHash;
+        record.binding = build.binding;
+        record.layout = compiled.layout;
+
+        // The values that the renderer writes into the constant buffers are found by name, once
+        const auto findVariable = [&](const ShaderConstantBuffer& buffer, const char* name, const ShaderValueType type) -> std::uint32_t
+        {
+            for (const ShaderVariable& variable : buffer.variables)
+            {
+                if (variable.name != name)
+                {
+                    continue;
+                }
+                if (variable.type != type || variable.arrayCount != 1)
+                {
+                    logger_.Warning("Shader " + compiled.sourceName + ": variable '" + name + "' is " + ToString(variable.type) + ", the renderer writes " +
+                        ToString(type) + ": not written");
+                    return kNoOffset;
+                }
+                return variable.offset;
+            }
+            return kNoOffset;
         };
+        for (const ResourceBinding& binding : build.binding.bindings)
+        {
+            if (binding.kind == BindingKind::ConstantBuffer)
+            {
+                const ShaderConstantBuffer* buffer = compiled.layout.FindConstantBuffer(binding.name);
+                if (buffer == nullptr)
+                {
+                    continue;
+                }
+                ConstantBufferSlot slot;
+                slot.rootParameter = binding.rootParameter;
+                slot.rootConstants = binding.rootConstants;
+                slot.sizeBytes = binding.sizeBytes;
+                slot.sizeDwords = binding.sizeDwords;
+                slot.model = findVariable(*buffer, "gModel", ShaderValueType::Float4x4);
+                slot.viewProjection = findVariable(*buffer, "gViewProjection", ShaderValueType::Float4x4);
+                slot.color = findVariable(*buffer, "gColor", ShaderValueType::Float4);
+                slot.lightDirection = findVariable(*buffer, "gLightDirection", ShaderValueType::Float4);
+                slot.screenSize = findVariable(*buffer, "screenSize", ShaderValueType::Float2);
+                slot.translation = findVariable(*buffer, "translation", ShaderValueType::Float2);
+                record.slots.constantBuffers.push_back(slot);
+            }
+            else if (binding.kind == BindingKind::Texture && record.slots.textureParameter == kNoRootParameter)
+            {
+                record.slots.textureParameter = binding.rootParameter;
+            }
+        }
+
+        // The input layout: the inputs of the vertex shader against the table of the vertex stream the program reads
+        const VertexStreamDesc* stream = FindVertexStream(data.vertexStream);
+        if (stream == nullptr)
+        {
+            ShaderDiagnostic diagnostic;
+            diagnostic.file = compiled.sourceName;
+            diagnostic.message = "unknown vertex stream '" + data.vertexStream + "' (mesh, debug_lines, ui)";
+            lastShaderDiagnostics_.push_back(diagnostic);
+            LogShaderDiagnostics({diagnostic});
+            return false;
+        }
+        const InputLayoutBuild inputLayout = BuildInputLayout(compiled.layout, *stream, compiled.sourceName);
+        lastShaderDiagnostics_.insert(lastShaderDiagnostics_.end(), inputLayout.diagnostics.begin(), inputLayout.diagnostics.end());
+        LogShaderDiagnostics(inputLayout.diagnostics);
+        if (!inputLayout.ok)
+        {
+            return false;
+        }
+        const std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements = ToD3D12Elements(inputLayout);
+
+        const Microsoft::WRL::ComPtr<ID3DBlob>& vertexShader = compiled.vertexBlob;
+        const Microsoft::WRL::ComPtr<ID3DBlob>& pixelShader = compiled.pixelBlob;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc{};
-        pipelineDesc.pRootSignature = rootSignature_.Get();
+        pipelineDesc.pRootSignature = record.rootSignature.Get();
         pipelineDesc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
         pipelineDesc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
         pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         pipelineDesc.SampleMask = UINT_MAX;
         pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
         pipelineDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        pipelineDesc.InputLayout = {inputLayout, static_cast<UINT>(std::size(inputLayout))};
         pipelineDesc.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
         pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pipelineDesc.NumRenderTargets = 1;
         pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
         pipelineDesc.DSVFormat = kDepthFormat;
         pipelineDesc.SampleDesc.Count = 1;
+        pipelineDesc.InputLayout = {inputElements.data(), static_cast<UINT>(inputElements.size())};
 
-        ShaderRecord shaderRecord;
-        const HRESULT hr = context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(shaderRecord.pipelineState.GetAddressOf()));
+        switch (kind)
+        {
+            case ProgramKind::Scene:
+                break;
+            case ProgramKind::DebugLines:
+                pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+                break;
+            case ProgramKind::Ui:
+            {
+                // Alpha blending, no culling, no depth: the UI is drawn over the frame
+                D3D12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+                blendDesc.RenderTarget[0].BlendEnable = TRUE;
+                blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+                blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+                blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+                blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+                blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+                blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+                blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+                pipelineDesc.BlendState = blendDesc;
+                pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+                pipelineDesc.DepthStencilState.DepthEnable = FALSE;
+                pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+                break;
+            }
+        }
+
+        const HRESULT hr = context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(record.pipelineState.GetAddressOf()));
         if (FAILED(hr))
         {
-            logger_.Error("CreateGraphicsPipelineState failed: " + HrToString(hr));
-            return {};
+            logger_.Error("CreateGraphicsPipelineState failed for " + compiled.sourceName + ": " + HrToString(hr));
+            return false;
+        }
+
+        if (kind != ProgramKind::Scene)
+        {
+            return true;
         }
 
         // The wireframe view mode: the same vertex shader, a constant light pixel shader (lines of the texture colour
         // vanish on a dark background), wireframe fill. Without this variant the mode is simply not drawn.
         if (wireframePixelShader_ == nullptr)
         {
-            static constexpr char kWireframePixelShader[] = "float4 main() : SV_Target { return float4(0.753, 0.753, 0.753, 1.0); }";
-            Microsoft::WRL::ComPtr<ID3DBlob> wireframeErrors;
-            if (FAILED(D3DCompile(kWireframePixelShader, sizeof(kWireframePixelShader) - 1, "wireframe_ps", nullptr, nullptr, "main", "ps_5_0",
-                    D3DCOMPILE_ENABLE_STRICTNESS, 0, wireframePixelShader_.GetAddressOf(), wireframeErrors.GetAddressOf())))
+            static const std::string kWireframePixelShader = "float4 main() : SV_Target { return float4(0.753, 0.753, 0.753, 1.0); }";
+            ShaderStageSource wireframeSource;
+            wireframeSource.sourceName = "wireframe_ps";
+            wireframeSource.source = &kWireframePixelShader;
+            wireframeSource.entry = "main";
+            wireframeSource.profile = "ps_5_0";
+            wireframeSource.stage = ShaderStage::Pixel;
+            std::vector<ShaderDiagnostic> wireframeDiagnostics;
+            if (!CompileShaderStage(wireframeSource, wireframePixelShader_, wireframeDiagnostics) ||
+                !ReflectShader(wireframePixelShader_->GetBufferPointer(), wireframePixelShader_->GetBufferSize(), ShaderStage::Pixel, wireframePixelLayout_, wireframeDiagnostics))
             {
                 wireframePixelShader_.Reset();
+                LogShaderDiagnostics(wireframeDiagnostics);
             }
         }
         if (wireframePixelShader_ != nullptr)
@@ -397,14 +591,251 @@ namespace myengine::render::dx12
         }
         pipelineDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
         pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-        if (FAILED(context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(shaderRecord.wireframePipelineState.GetAddressOf()))))
+        if (FAILED(context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(record.wireframePipelineState.GetAddressOf()))))
         {
             logger_.Warning("CreateGraphicsPipelineState (wireframe) failed; the shader has no wireframe variant");
         }
+        if (wireframePixelShader_ != nullptr)
+        {
+            std::vector<ShaderDiagnostic> wireframeConflicts;
+            record.wireframeLayout = MergeShaderLayouts(compiled.vertexLayout, wireframePixelLayout_, wireframeConflicts);
+        }
+        return true;
+    }
 
-        const std::uint32_t shaderId = nextShaderId_++;
-        shaders_.insert_or_assign(shaderId, std::move(shaderRecord));
-        return ShaderHandle{shaderId};
+    bool Dx12RenderAdapter::BuildBuiltinProgram(const char* relativeDescriptorPath, const ProgramKind kind, ShaderRecord& record)
+    {
+        const std::filesystem::path descriptorPath = ResolveSourcePath(relativeDescriptorPath);
+        ShaderProgramData program;
+        std::string error;
+        if (!LoadShaderDescriptor(descriptorPath, program, error))
+        {
+            logger_.Error("Shader error: " + descriptorPath.string() + ": " + error);
+            return false;
+        }
+
+        const ShaderCompileResult compiled = shaderReflector_->CompileProgram(program);
+        LogShaderDiagnostics(compiled.diagnostics);
+        if (!compiled.ok)
+        {
+            return false;
+        }
+        return BuildProgram(*compiled.program, program, kind, record);
+    }
+
+    // The programs of one shape share a root signature; the last one that leaves takes it out of the cache (the GPU may still
+    // read it: it is retired by the fence like the pipeline states)
+    void Dx12RenderAdapter::ReleaseRootSignature(const std::uint64_t shape, RetiredResource& retired)
+    {
+        const auto users = rootSignatureUsers_.find(shape);
+        if (users == rootSignatureUsers_.end())
+        {
+            return;
+        }
+        if (users->second > 1)
+        {
+            --users->second;
+            return;
+        }
+        rootSignatureUsers_.erase(users);
+        const auto cached = rootSignatures_.find(shape);
+        if (cached != rootSignatures_.end())
+        {
+            retired.objects.push_back(cached->second);
+            rootSignatures_.erase(cached);
+        }
+    }
+
+    // A program that is replaced or destroyed: its pipeline states (and a root signature that nobody else uses) go to the
+    // fence, the frames in flight may still draw with them
+    void Dx12RenderAdapter::RetireShaderRecord(ShaderRecord&& record)
+    {
+        RetiredResource retired;
+        if (record.pipelineState != nullptr)
+        {
+            retired.objects.push_back(std::move(record.pipelineState));
+        }
+        if (record.wireframePipelineState != nullptr)
+        {
+            retired.objects.push_back(std::move(record.wireframePipelineState));
+        }
+        if (record.rootSignature != nullptr)
+        {
+            ReleaseRootSignature(record.rootSignatureShape, retired);
+            if (boundRootSignature_ == record.rootSignature.Get())
+            {
+                boundRootSignature_ = nullptr;
+            }
+            retired.objects.push_back(std::move(record.rootSignature));
+        }
+        if (!retired.objects.empty())
+        {
+            RetireResources(std::move(retired));
+        }
+    }
+
+    void Dx12RenderAdapter::DestroyShader(const ShaderHandle shader)
+    {
+        const auto it = shaders_.find(shader.value);
+        if (it == shaders_.end())
+        {
+            return;
+        }
+        ShaderRecord record = std::move(it->second);
+        shaders_.erase(it);
+        RetireShaderRecord(std::move(record));
+    }
+
+    // The new version is built beside the old one (compile, reflection, input layout, root signature, every pipeline state);
+    // only when all of it succeeded the record under the same handle is replaced. Any error leaves the old program running.
+    bool Dx12RenderAdapter::ReloadShaderProgram(const ShaderHandle shader, const ShaderProgramData& shaderProgram)
+    {
+        const auto it = shaders_.find(shader.value);
+        if (it == shaders_.end())
+        {
+            return false;
+        }
+
+        const auto fail = [&](const std::string& firstError)
+        {
+            ++shaderReloadFailures_;
+            it->second.lastError = firstError;
+            return false;
+        };
+
+        // The text and the includes may have changed: nothing of the old compile is reused
+        shaderReflector_->Invalidate(shaderProgram.sourcePath);
+        const ShaderCompileResult compiled = shaderReflector_->CompileProgram(shaderProgram);
+        lastShaderDiagnostics_ = compiled.diagnostics;
+        LogShaderDiagnostics(compiled.diagnostics);
+        if (!compiled.ok)
+        {
+            std::string error = "compile failed";
+            for (const ShaderDiagnostic& diagnostic : compiled.diagnostics)
+            {
+                if (!diagnostic.warning)
+                {
+                    error = FormatShaderDiagnostic(diagnostic);
+                    break;
+                }
+            }
+            return fail(error);
+        }
+
+        ShaderRecord next;
+        next.version = it->second.version + 1;
+        next.sourceName = compiled.program->sourceName;
+        const std::size_t diagnosticsBefore = lastShaderDiagnostics_.size();
+        if (!BuildProgram(*compiled.program, shaderProgram, ProgramKind::Scene, next))
+        {
+            std::string error = "the pipeline could not be built";
+            for (std::size_t i = diagnosticsBefore; i < lastShaderDiagnostics_.size(); ++i)
+            {
+                if (!lastShaderDiagnostics_[i].warning)
+                {
+                    error = FormatShaderDiagnostic(lastShaderDiagnostics_[i]);
+                    break;
+                }
+            }
+            return fail(error);
+        }
+
+        ShaderRecord old = std::move(it->second);
+        it->second = std::move(next);
+        ++shaderReloads_;
+        RetireShaderRecord(std::move(old));
+        return true;
+    }
+
+    std::uint32_t Dx12RenderAdapter::GetShaderVersion(const ShaderHandle shader) const
+    {
+        const auto it = shaders_.find(shader.value);
+        return it == shaders_.end() ? 0 : it->second.version;
+    }
+
+    std::vector<ShaderProgramInfo> Dx12RenderAdapter::GetShaderPrograms() const
+    {
+        std::vector<ShaderProgramInfo> programs;
+        programs.reserve(shaders_.size());
+        for (const auto& [id, record] : shaders_)
+        {
+            ShaderProgramInfo info;
+            info.handle = ShaderHandle{id};
+            info.name = record.sourceName;
+            info.version = record.version;
+            info.lastError = record.lastError;
+            programs.push_back(std::move(info));
+        }
+        std::sort(programs.begin(), programs.end(), [](const ShaderProgramInfo& a, const ShaderProgramInfo& b) { return a.handle.value < b.handle.value; });
+        return programs;
+    }
+
+    ShaderStatistics Dx12RenderAdapter::GetShaderStatistics() const
+    {
+        ShaderStatistics statistics;
+        const auto count = [&statistics](const ShaderRecord& record)
+        {
+            ++statistics.programs;
+            statistics.pipelineStates += (record.pipelineState != nullptr ? 1u : 0u) + (record.wireframePipelineState != nullptr ? 1u : 0u);
+        };
+        for (const auto& entry : shaders_)
+        {
+            count(entry.second);
+        }
+        count(debugProgram_);
+        count(uiProgram_);
+        statistics.rootSignatures = static_cast<std::uint32_t>(rootSignatures_.size());
+        for (const RetiredResource& retired : retiredResources_)
+        {
+            statistics.retiredObjects += static_cast<std::uint32_t>(retired.objects.size());
+        }
+        statistics.reloads = shaderReloads_;
+        statistics.reloadFailures = shaderReloadFailures_;
+        return statistics;
+    }
+
+    bool Dx12RenderAdapter::GetShaderLayout(const ShaderHandle shader, ShaderLayout& outLayout, const ShaderVariant variant) const
+    {
+        outLayout = {};
+        const auto it = shaders_.find(shader.value);
+        if (it == shaders_.end())
+        {
+            return false;
+        }
+        if (variant == ShaderVariant::Wireframe)
+        {
+            if (it->second.wireframePipelineState == nullptr)
+            {
+                return false;
+            }
+            outLayout = it->second.wireframeLayout;
+            return true;
+        }
+        outLayout = it->second.layout;
+        return true;
+    }
+
+    bool Dx12RenderAdapter::GetBuiltinShaderLayout(const BuiltinShader shader, ShaderLayout& outLayout) const
+    {
+        const ShaderLayout& layout = shader == BuiltinShader::DebugLines ? debugProgram_.layout : uiProgram_.layout;
+        outLayout = layout;
+        return !layout.Empty();
+    }
+
+    void Dx12RenderAdapter::LogShaderDiagnostics(const std::vector<ShaderDiagnostic>& diagnostics) const
+    {
+        for (const ShaderDiagnostic& diagnostic : diagnostics)
+        {
+            const std::string text = "Shader " + std::string(diagnostic.warning ? "warning: " : "error: ") + FormatShaderDiagnostic(diagnostic);
+            if (diagnostic.warning)
+            {
+                logger_.Warning(text);
+            }
+            else
+            {
+                logger_.Error(text);
+            }
+        }
     }
 
     RenderSurfaceHandle Dx12RenderAdapter::CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height)
@@ -574,6 +1005,8 @@ namespace myengine::render::dx12
         surface->uiVertexUploadBuffers[backBufferIndex].used = 0;
         surface->uiIndexUploadBuffers[backBufferIndex].used = 0;
         surface->debugVertexUploadBuffers[backBufferIndex].used = 0;
+        surface->constantUploadBuffers[backBufferIndex].used = 0;
+        boundRootSignature_ = nullptr; // a new command list has no root signature
 
         ID3D12Resource* backBuffer = surface->backBuffers[backBufferIndex].Get();
 
@@ -595,7 +1028,6 @@ namespace myengine::render::dx12
         context_.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
         context_.commandList->ClearRenderTargetView(rtvHandle, color, 0, nullptr);
         context_.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
         profiler_->EndPass(context_.commandList.Get());
 
         activeSurface_ = surface;
@@ -704,6 +1136,7 @@ namespace myengine::render::dx12
             wireframe_ && shader.wireframePipelineState != nullptr ? shader.wireframePipelineState.Get() : shader.pipelineState.Get();
         profiler_->NotePipeline(pipelineState);
         profiler_->NoteTexture(texture.descriptorIndex);
+        SetRootSignature(shader.rootSignature.Get());
         context_.commandList->SetPipelineState(pipelineState);
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
@@ -712,52 +1145,72 @@ namespace myengine::render::dx12
         ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
         context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-        D3D12_GPU_DESCRIPTOR_HANDLE textureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
-        textureHandle.ptr += static_cast<UINT64>(texture.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
-        context_.commandList->SetGraphicsRootDescriptorTable(1, textureHandle);
-
-        struct DrawConstants
+        // The texture of the draw item goes to the first texture of the shader; a shader without one ignores it
+        if (shader.slots.textureParameter != kNoRootParameter)
         {
-            DirectX::XMFLOAT4X4 model;
-            DirectX::XMFLOAT4X4 viewProjection;
-            float color[4];
-            float lightDirection[4];
-        } constants{};
-
-        const DirectX::XMMATRIX modelMatrix = MatrixToXm(drawItem.model);
-        const DirectX::XMMATRIX viewProjectionMatrix = MatrixToXm(CurrentViewProjection(*surface));
-
-        DirectX::XMStoreFloat4x4(&constants.model, DirectX::XMMatrixTranspose(modelMatrix));
-        DirectX::XMStoreFloat4x4(&constants.viewProjection, DirectX::XMMatrixTranspose(viewProjectionMatrix));
-
-        constants.color[0] = drawItem.color.r;
-        constants.color[1] = drawItem.color.g;
-        constants.color[2] = drawItem.color.b;
-        constants.color[3] = drawItem.color.a;
-
-        if (activeTarget_ != nullptr)
-        {
-            constants.lightDirection[0] = targetLightDirection_.x;
-            constants.lightDirection[1] = targetLightDirection_.y;
-            constants.lightDirection[2] = targetLightDirection_.z;
-            constants.lightDirection[3] = targetAmbient_;
-        }
-        else
-        {
-            constants.lightDirection[0] = 0.35f;
-            constants.lightDirection[1] = -1.0f;
-            constants.lightDirection[2] = 0.25f;
-            constants.lightDirection[3] = 0.25f;
+            D3D12_GPU_DESCRIPTOR_HANDLE textureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
+            textureHandle.ptr += static_cast<UINT64>(texture.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+            context_.commandList->SetGraphicsRootDescriptorTable(shader.slots.textureParameter, textureHandle);
         }
 
-        context_.commandList->SetGraphicsRoot32BitConstants(0, 40, &constants, 0);
+        if (!shader.slots.constantBuffers.empty())
+        {
+            // The engine semantics: gModel, gViewProjection, gColor, gLightDirection are written by name where the
+            // shader has them; everything else in the constant buffers stays zero
+            DirectX::XMFLOAT4X4 model{};
+            DirectX::XMFLOAT4X4 viewProjection{};
+            DirectX::XMStoreFloat4x4(&model, DirectX::XMMatrixTranspose(MatrixToXm(drawItem.model)));
+            DirectX::XMStoreFloat4x4(&viewProjection, DirectX::XMMatrixTranspose(MatrixToXm(CurrentViewProjection(*surface))));
+            const float color[4] = {drawItem.color.r, drawItem.color.g, drawItem.color.b, drawItem.color.a};
+            float light[4] = {0.35f, -1.0f, 0.25f, 0.25f};
+            if (activeTarget_ != nullptr)
+            {
+                light[0] = targetLightDirection_.x;
+                light[1] = targetLightDirection_.y;
+                light[2] = targetLightDirection_.z;
+                light[3] = targetAmbient_;
+            }
+
+            for (const ConstantBufferSlot& slot : shader.slots.constantBuffers)
+            {
+                constantScratch_.assign(slot.sizeBytes, 0);
+                const auto put = [this](const std::uint32_t offset, const void* value, const std::size_t size)
+                {
+                    if (offset != kNoOffset)
+                    {
+                        std::memcpy(constantScratch_.data() + offset, value, size);
+                    }
+                };
+                put(slot.model, &model, sizeof(model));
+                put(slot.viewProjection, &viewProjection, sizeof(viewProjection));
+                put(slot.color, color, sizeof(color));
+                put(slot.lightDirection, light, sizeof(light));
+                SetConstants(slot, *surface);
+            }
+        }
         context_.commandList->DrawIndexedInstanced(mesh.indexCount, 1, 0, 0, 0);
         profiler_->NoteDraw(mesh.indexCount / 3);
     }
 
+    // Sends the bytes of constantScratch_ to the cbuffer: root constants, or a root CBV with the data in the frame upload buffer
+    void Dx12RenderAdapter::SetConstants(const ConstantBufferSlot& slot, SurfaceData& surface)
+    {
+        if (slot.rootConstants)
+        {
+            context_.commandList->SetGraphicsRoot32BitConstants(slot.rootParameter, slot.sizeDwords, constantScratch_.data(), 0);
+            return;
+        }
+
+        D3D12_GPU_VIRTUAL_ADDRESS address = 0;
+        if (AllocateFrameUploadData(surface.constantUploadBuffers[surface.currentBackBuffer], constantScratch_.data(), slot.sizeBytes, 256, address))
+        {
+            context_.commandList->SetGraphicsRootConstantBufferView(slot.rootParameter, address);
+        }
+    }
+
     void Dx12RenderAdapter::DrawDebugLines(const RenderSurfaceHandle handle, const std::vector<DebugLine>& lines)
     {
-        if (activeSurface_ == nullptr || debugLinePipelineState_ == nullptr || debugRootSignature_ == nullptr || lines.empty())
+        if (activeSurface_ == nullptr || debugProgram_.pipelineState == nullptr || lines.empty())
         {
             return;
         }
@@ -808,22 +1261,20 @@ namespace myengine::render::dx12
         vertexBufferView.SizeInBytes = static_cast<UINT>(vertexBufferSize);
 
         EnterAutoGroup(AutoGroup::DebugLines);
-        profiler_->NotePipeline(debugLinePipelineState_.Get());
-        context_.commandList->SetGraphicsRootSignature(debugRootSignature_.Get());
-        context_.commandList->SetPipelineState(debugLinePipelineState_.Get());
+        profiler_->NotePipeline(debugProgram_.pipelineState.Get());
+        SetRootSignature(debugProgram_.rootSignature.Get());
+        context_.commandList->SetPipelineState(debugProgram_.pipelineState.Get());
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
         context_.commandList->DrawInstanced(static_cast<UINT>(vertices.size()), 1, 0, 0);
         profiler_->NoteDraw(0, lines.size());
-
-        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
     }
 
     void Dx12RenderAdapter::DrawUiGeometry(const RenderSurfaceHandle handle, const UiDrawData& drawData)
     {
         ZoneScoped;
 
-        if (activeSurface_ == nullptr || uiPipelineState_ == nullptr || uiRootSignature_ == nullptr || activeTarget_ != nullptr)
+        if (activeSurface_ == nullptr || uiProgram_.pipelineState == nullptr || activeTarget_ != nullptr)
         {
             return;
         }
@@ -881,34 +1332,49 @@ namespace myengine::render::dx12
         }
 
         EnterAutoGroup(AutoGroup::Ui);
-        profiler_->NotePipeline(uiPipelineState_.Get());
+        profiler_->NotePipeline(uiProgram_.pipelineState.Get());
         profiler_->NoteTexture(textureIt->second.descriptorIndex);
         ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
         context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
-        context_.commandList->SetGraphicsRootSignature(uiRootSignature_.Get());
-        context_.commandList->SetPipelineState(uiPipelineState_.Get());
+        SetRootSignature(uiProgram_.rootSignature.Get());
+        context_.commandList->SetPipelineState(uiProgram_.pipelineState.Get());
         context_.commandList->RSSetScissorRects(1, &scissorRect);
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
         context_.commandList->IASetIndexBuffer(&indexBufferView);
 
-        const float uiConstants[4] =
+        // The engine semantics of the UI: screenSize and translation by name, the texture into the first texture slot
+        const float screenSize[2] =
         {
             std::max(1.0f, static_cast<float>(surface->width)),
             std::max(1.0f, static_cast<float>(surface->height)),
-            drawData.translationX,
-            drawData.translationY,
         };
-        context_.commandList->SetGraphicsRoot32BitConstants(0, 4, uiConstants, 0);
+        const float translation[2] = {drawData.translationX, drawData.translationY};
+        for (const ConstantBufferSlot& slot : uiProgram_.slots.constantBuffers)
+        {
+            constantScratch_.assign(slot.sizeBytes, 0);
+            const auto put = [this](const std::uint32_t offset, const void* value, const std::size_t size)
+            {
+                if (offset != kNoOffset)
+                {
+                    std::memcpy(constantScratch_.data() + offset, value, size);
+                }
+            };
+            put(slot.screenSize, screenSize, sizeof(screenSize));
+            put(slot.translation, translation, sizeof(translation));
+            SetConstants(slot, *surface);
+        }
 
-        D3D12_GPU_DESCRIPTOR_HANDLE gpuTextureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
-        gpuTextureHandle.ptr += static_cast<UINT64>(textureIt->second.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
-        context_.commandList->SetGraphicsRootDescriptorTable(1, gpuTextureHandle);
+        if (uiProgram_.slots.textureParameter != kNoRootParameter)
+        {
+            D3D12_GPU_DESCRIPTOR_HANDLE gpuTextureHandle = textureSrvHeap_->GetGPUDescriptorHandleForHeapStart();
+            gpuTextureHandle.ptr += static_cast<UINT64>(textureIt->second.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+            context_.commandList->SetGraphicsRootDescriptorTable(uiProgram_.slots.textureParameter, gpuTextureHandle);
+        }
         context_.commandList->DrawIndexedInstanced(static_cast<UINT>(drawData.indexCount), 1, 0, 0, 0);
         profiler_->NoteDraw(drawData.indexCount / 3);
 
         context_.commandList->RSSetScissorRects(1, &fullScissorRect);
-        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
     }
 
     void Dx12RenderAdapter::EndFrame(const RenderSurfaceHandle handle)
@@ -1181,7 +1647,6 @@ namespace myengine::render::dx12
         context_.commandList->RSSetScissorRects(1, &scissor);
         context_.commandList->ClearRenderTargetView(rtvHandle, color, 0, nullptr);
         context_.commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        context_.commandList->SetGraphicsRootSignature(rootSignature_.Get());
 
         record.viewProjection = Matrix4::Identity();
         activeTarget_ = &record;
@@ -1408,6 +1873,10 @@ namespace myengine::render::dx12
             {
                 ReleaseFrameUploadBuffer(uploadBuffer);
             }
+            for (auto& uploadBuffer : surface.constantUploadBuffers)
+            {
+                ReleaseFrameUploadBuffer(uploadBuffer);
+            }
         }
 
         surfaces_.clear();
@@ -1422,12 +1891,12 @@ namespace myengine::render::dx12
         textures_.clear();
         shaders_.clear();
 
-        uiPipelineState_.Reset();
-        uiRootSignature_.Reset();
-        debugLinePipelineState_.Reset();
-        debugRootSignature_.Reset();
+        uiProgram_ = {};
+        debugProgram_ = {};
+        boundRootSignature_ = nullptr;
+        rootSignatures_.clear();
+        rootSignatureUsers_.clear();
         textureSrvHeap_.Reset();
-        rootSignature_.Reset();
 
         context_.commandList.Reset();
         context_.commandAllocator.Reset();
@@ -1787,117 +2256,9 @@ namespace myengine::render::dx12
         return true;
     }
 
-    bool Dx12RenderAdapter::BuildRootSignature()
-    {
-        CD3DX12_DESCRIPTOR_RANGE descriptorRange;
-        descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-
-        CD3DX12_ROOT_PARAMETER rootParameters[2];
-        rootParameters[0].InitAsConstants(40, 0);
-        rootParameters[1].InitAsDescriptorTable(1, &descriptorRange, D3D12_SHADER_VISIBILITY_PIXEL);
-
-        CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
-            0,
-            D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-            D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-            D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-            D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-
-        CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init(
-            static_cast<UINT>(std::size(rootParameters)),
-            rootParameters,
-            1,
-            &samplerDesc,
-            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-        HRESULT hr = D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, serializedRootSignature.GetAddressOf(), errorBlob.GetAddressOf());
-        if (FAILED(hr))
-        {
-            const char* errorText = errorBlob != nullptr ? static_cast<const char*>(errorBlob->GetBufferPointer()) : "unknown root signature error";
-            logger_.Error("D3D12SerializeRootSignature failed: " + std::string(errorText));
-            return false;
-        }
-
-        hr = context_.device->CreateRootSignature(0, serializedRootSignature->GetBufferPointer(), serializedRootSignature->GetBufferSize(), IID_PPV_ARGS(rootSignature_.GetAddressOf()));
-        if (FAILED(hr))
-        {
-            logger_.Error("CreateRootSignature failed: " + HrToString(hr));
-            return false;
-        }
-
-        return true;
-    }
-
     bool Dx12RenderAdapter::BuildDebugLinePipeline()
     {
-        CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-        HRESULT hr = D3D12SerializeRootSignature(
-            &rootSignatureDesc,
-            D3D_ROOT_SIGNATURE_VERSION_1,
-            serializedRootSignature.GetAddressOf(),
-            errorBlob.GetAddressOf());
-        if (FAILED(hr))
-        {
-            const char* errorText = errorBlob != nullptr ? static_cast<const char*>(errorBlob->GetBufferPointer()) : "unknown debug root signature error";
-            logger_.Error("D3D12SerializeRootSignature(debug) failed: " + std::string(errorText));
-            return false;
-        }
-
-        hr = context_.device->CreateRootSignature(
-            0,
-            serializedRootSignature->GetBufferPointer(),
-            serializedRootSignature->GetBufferSize(),
-            IID_PPV_ARGS(debugRootSignature_.GetAddressOf()));
-        if (FAILED(hr))
-        {
-            logger_.Error("CreateRootSignature(debug) failed: " + HrToString(hr));
-            return false;
-        }
-
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        if (!CompileShaderBlob(ResolveSourcePath("assets/shaders/debug_line.hlsl"), "VSMain", "vs_5_0", vertexShader) ||
-            !CompileShaderBlob(ResolveSourcePath("assets/shaders/debug_line.hlsl"), "PSMain", "ps_5_0", pixelShader))
-        {
-            return false;
-        }
-
-        static constexpr D3D12_INPUT_ELEMENT_DESC inputLayout[] =
-        {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, sizeof(float) * 4, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
-
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc{};
-        pipelineDesc.pRootSignature = debugRootSignature_.Get();
-        pipelineDesc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
-        pipelineDesc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
-        pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        pipelineDesc.SampleMask = UINT_MAX;
-        pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        pipelineDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        pipelineDesc.InputLayout = {inputLayout, static_cast<UINT>(std::size(inputLayout))};
-        pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
-        pipelineDesc.NumRenderTargets = 1;
-        pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-        pipelineDesc.DSVFormat = kDepthFormat;
-        pipelineDesc.SampleDesc.Count = 1;
-
-        hr = context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(debugLinePipelineState_.GetAddressOf()));
-        if (FAILED(hr))
-        {
-            logger_.Error("CreateGraphicsPipelineState(debug) failed: " + HrToString(hr));
-            return false;
-        }
-
-        return true;
+        return BuildBuiltinProgram("assets/shaders/debug_line.shader.json", ProgramKind::DebugLines, debugProgram_);
     }
 
     bool Dx12RenderAdapter::BuildTextureDescriptorHeap()
@@ -1921,109 +2282,7 @@ namespace myengine::render::dx12
 
     bool Dx12RenderAdapter::BuildUiPipeline()
     {
-        CD3DX12_DESCRIPTOR_RANGE descriptorRange;
-        descriptorRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-
-        CD3DX12_ROOT_PARAMETER rootParameters[2];
-        rootParameters[0].InitAsConstants(4, 0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
-        rootParameters[1].InitAsDescriptorTable(1, &descriptorRange, D3D12_SHADER_VISIBILITY_PIXEL);
-
-        CD3DX12_STATIC_SAMPLER_DESC samplerDesc(
-            0,
-            D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-            D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
-        CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init(
-            static_cast<UINT>(std::size(rootParameters)),
-            rootParameters,
-            1,
-            &samplerDesc,
-            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        Microsoft::WRL::ComPtr<ID3DBlob> serializedRootSignature;
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-        HRESULT hr = D3D12SerializeRootSignature(
-            &rootSignatureDesc,
-            D3D_ROOT_SIGNATURE_VERSION_1,
-            serializedRootSignature.GetAddressOf(),
-            errorBlob.GetAddressOf());
-        if (FAILED(hr))
-        {
-            const char* errorText = errorBlob != nullptr ? static_cast<const char*>(errorBlob->GetBufferPointer()) : "unknown ui root signature error";
-            logger_.Error("D3D12SerializeRootSignature(ui) failed: " + std::string(errorText));
-            return false;
-        }
-
-        hr = context_.device->CreateRootSignature(
-            0,
-            serializedRootSignature->GetBufferPointer(),
-            serializedRootSignature->GetBufferSize(),
-            IID_PPV_ARGS(uiRootSignature_.GetAddressOf()));
-        if (FAILED(hr))
-        {
-            logger_.Error("CreateRootSignature(ui) failed: " + HrToString(hr));
-            return false;
-        }
-
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        if (!CompileShaderBlob(ResolveSourcePath("assets/shaders/ui_overlay.hlsl"), "VSMain", "vs_5_0", vertexShader) ||
-            !CompileShaderBlob(ResolveSourcePath("assets/shaders/ui_overlay.hlsl"), "PSMain", "ps_5_0", pixelShader))
-        {
-            return false;
-        }
-
-        static constexpr D3D12_INPUT_ELEMENT_DESC inputLayout[] =
-        {
-            {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, sizeof(float) * 2, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, sizeof(float) * 2 + sizeof(std::uint8_t) * 4, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        };
-
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc{};
-        pipelineDesc.pRootSignature = uiRootSignature_.Get();
-        pipelineDesc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
-        pipelineDesc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
-
-        D3D12_BLEND_DESC blendDesc = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        blendDesc.RenderTarget[0].BlendEnable = TRUE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-        blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-        pipelineDesc.BlendState = blendDesc;
-
-        D3D12_RASTERIZER_DESC rasterizerDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;
-        pipelineDesc.RasterizerState = rasterizerDesc;
-
-        D3D12_DEPTH_STENCIL_DESC depthStencilDesc = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        depthStencilDesc.DepthEnable = FALSE;
-        depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        pipelineDesc.DepthStencilState = depthStencilDesc;
-
-        pipelineDesc.SampleMask = UINT_MAX;
-        pipelineDesc.InputLayout = {inputLayout, static_cast<UINT>(std::size(inputLayout))};
-        pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        pipelineDesc.NumRenderTargets = 1;
-        pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-        pipelineDesc.DSVFormat = kDepthFormat;
-        pipelineDesc.SampleDesc.Count = 1;
-
-        hr = context_.device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(uiPipelineState_.GetAddressOf()));
-        if (FAILED(hr))
-        {
-            logger_.Error("CreateGraphicsPipelineState(ui) failed: " + HrToString(hr));
-            return false;
-        }
-
-        return true;
+        return BuildBuiltinProgram("assets/shaders/ui_overlay.shader.json", ProgramKind::Ui, uiProgram_);
     }
 
     bool Dx12RenderAdapter::ResetCommandList()
@@ -2040,6 +2299,7 @@ namespace myengine::render::dx12
             return false;
         }
 
+        boundRootSignature_ = nullptr;
         return true;
     }
 
@@ -2323,61 +2583,6 @@ namespace myengine::render::dx12
         context_.commandList->ResourceBarrier(1, &barrier);
 
         return ExecuteCommandListAndWait("texture upload");
-    }
-
-    bool Dx12RenderAdapter::CompileShaderBlob(const std::filesystem::path& sourcePath, const std::string& entryPoint, const std::string& profile, Microsoft::WRL::ComPtr<ID3DBlob>& outBlob) const
-    {
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-
-        std::ifstream sourceFile(sourcePath, std::ios::binary);
-        if (!sourceFile.is_open())
-        {
-            logger_.Error("Shader source file could not be opened: " + sourcePath.string());
-            return false;
-        }
-
-        const std::string source(
-            (std::istreambuf_iterator<char>(sourceFile)),
-            std::istreambuf_iterator<char>());
-        if (source.empty())
-        {
-            logger_.Error("Shader source file is empty: " + sourcePath.string());
-            return false;
-        }
-
-        UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
-#if defined(_DEBUG)
-        compileFlags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-
-        const HRESULT hr = D3DCompile(
-            source.data(),
-            source.size(),
-            sourcePath.string().c_str(),
-            nullptr,
-            D3D_COMPILE_STANDARD_FILE_INCLUDE,
-            entryPoint.c_str(),
-            profile.c_str(),
-            compileFlags,
-            0,
-            outBlob.GetAddressOf(),
-            errorBlob.GetAddressOf());
-        if (FAILED(hr))
-        {
-            const char* errorText = errorBlob != nullptr
-                ? static_cast<const char*>(errorBlob->GetBufferPointer())
-                : "unknown shader compilation error";
-            logger_.Error(
-                "D3DCompileFromFile failed for " +
-                sourcePath.string() +
-                " entry=" + entryPoint +
-                " profile=" + profile +
-                " hr=" + HrToString(hr) +
-                " error=" + errorText);
-            return false;
-        }
-
-        return true;
     }
 
     void Dx12RenderAdapter::RebuildSurfaceBuffers(SurfaceData& surface)

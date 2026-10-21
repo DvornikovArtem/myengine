@@ -376,6 +376,42 @@ namespace myengine::core
                 renderAdapter_->SetWireframe(enabled);
             }
         };
+        sceneEditorServices.shaderStatus = [this]()
+        {
+            ui::ShaderStatusView view;
+            const auto ansiToUtf8 = [](const std::string& text)
+            {
+                if (text.empty())
+                {
+                    return text;
+                }
+                const int wideLength = MultiByteToWideChar(CP_ACP, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+                if (wideLength <= 0)
+                {
+                    return text;
+                }
+                std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
+                MultiByteToWideChar(CP_ACP, 0, text.data(), static_cast<int>(text.size()), wide.data(), wideLength);
+                const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLength, nullptr, 0, nullptr, nullptr);
+                std::string utf8(static_cast<std::size_t>(std::max(utf8Length, 0)), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLength, utf8.data(), utf8Length, nullptr, nullptr);
+                return utf8;
+            };
+            if (renderAdapter_ == nullptr)
+            {
+                return view;
+            }
+            const render::ShaderStatistics statistics = renderAdapter_->GetShaderStatistics();
+            view.summary = "programs " + std::to_string(statistics.programs) + " | PSO " + std::to_string(statistics.pipelineStates) +
+                " | root signatures " + std::to_string(statistics.rootSignatures) + " | waiting for the GPU " + std::to_string(statistics.retiredObjects) +
+                " | reloads " + std::to_string(statistics.reloads) + " ok / " + std::to_string(statistics.reloadFailures) + " failed";
+            for (const render::ShaderProgramInfo& program : renderAdapter_->GetShaderPrograms())
+            {
+                // The renderer's names are in the ANSI code page (they come from the paths of the compiler); the editor shows UTF-8
+                view.programs.push_back({std::filesystem::path(program.name).filename().u8string(), program.version, ansiToUtf8(program.lastError)});
+            }
+            return view;
+        };
         sceneEditorServices.captureGpuFrame = [this](std::string& message) { return RequestGpuCapture(message); };
         sceneEditorServices.reloadScripts = [this]()
         {
