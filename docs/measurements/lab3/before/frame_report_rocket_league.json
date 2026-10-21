@@ -1,0 +1,146 @@
+{
+  "capture": "Saved/Captures/rocket_league_20261016_172807_frame600.rdc",
+  "api": "D3D12",
+  "eventCount": 781,
+  "apiCalls": {
+    "IDXGISwapChain::GetBuffer": 1,
+    "ID3D12GraphicsCommandList::Reset": 1,
+    "ID3D12GraphicsCommandList::BeginEvent": 5,
+    "ID3D12GraphicsCommandList::EndQuery": 10,
+    "ID3D12GraphicsCommandList::ResourceBarrier": 2,
+    "ID3D12GraphicsCommandList::RSSetViewports": 3,
+    "ID3D12GraphicsCommandList::RSSetScissorRects": 59,
+    "ID3D12GraphicsCommandList::OMSetRenderTargets": 1,
+    "ID3D12GraphicsCommandList::ClearRenderTargetView": 1,
+    "ID3D12GraphicsCommandList::ClearDepthStencilView": 1,
+    "ID3D12GraphicsCommandList::SetGraphicsRootSignature": 57,
+    "ID3D12GraphicsCommandList::EndEvent": 5,
+    "ID3D12GraphicsCommandList::SetPipelineState": 79,
+    "ID3D12GraphicsCommandList::IASetPrimitiveTopology": 79,
+    "ID3D12GraphicsCommandList::IASetVertexBuffers": 79,
+    "ID3D12GraphicsCommandList::IASetIndexBuffer": 79,
+    "ID3D12GraphicsCommandList::SetDescriptorHeaps": 79,
+    "ID3D12GraphicsCommandList::SetGraphicsRootDescriptorTable": 79,
+    "ID3D12GraphicsCommandList::SetGraphicsRoot32BitConstants": 79,
+    "ID3D12GraphicsCommandList::DrawIndexedInstanced": 79,
+    "ID3D12GraphicsCommandList::ResolveQueryData": 1,
+    "ID3D12GraphicsCommandList::Close": 1,
+    "IDXGISwapChain::Present": 1
+  },
+  "pipelines": [
+    "pipeline 326",
+    "pipeline 295"
+  ],
+  "shaders": [],
+  "root": {
+    "name": "Frame",
+    "depth": 0,
+    "draws": 0,
+    "dispatches": 0,
+    "clears": 0,
+    "copies": 0,
+    "triangles": 0,
+    "pipelines": [],
+    "shaders": [],
+    "renderTargets": [],
+    "children": [
+      {
+        "name": "Clear Back Buffer",
+        "depth": 1,
+        "draws": 0,
+        "dispatches": 0,
+        "clears": 2,
+        "copies": 0,
+        "triangles": 0,
+        "pipelines": [],
+        "shaders": [],
+        "renderTargets": [],
+        "children": [],
+        "totals": {
+          "draws": 0,
+          "dispatches": 0,
+          "clears": 2,
+          "copies": 0,
+          "triangles": 0
+        }
+      },
+      {
+        "name": "Scene",
+        "depth": 1,
+        "draws": 51,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 6684,
+        "pipelines": [
+          "pipeline 326"
+        ],
+        "shaders": [],
+        "renderTargets": [
+          "viewport 856x345"
+        ],
+        "children": [],
+        "totals": {
+          "draws": 51,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 6684
+        }
+      },
+      {
+        "name": "UI",
+        "depth": 1,
+        "draws": 28,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 2396,
+        "pipelines": [
+          "pipeline 295"
+        ],
+        "shaders": [],
+        "renderTargets": [
+          "viewport 1280x720"
+        ],
+        "children": [],
+        "totals": {
+          "draws": 28,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 2396
+        }
+      },
+      {
+        "name": "Present Transition",
+        "depth": 1,
+        "draws": 0,
+        "dispatches": 0,
+        "clears": 0,
+        "copies": 0,
+        "triangles": 0,
+        "pipelines": [],
+        "shaders": [],
+        "renderTargets": [],
+        "children": [],
+        "totals": {
+          "draws": 0,
+          "dispatches": 0,
+          "clears": 0,
+          "copies": 0,
+          "triangles": 0
+        }
+      }
+    ],
+    "totals": {
+      "draws": 79,
+      "dispatches": 0,
+      "clears": 2,
+      "copies": 0,
+      "triangles": 9080
+    }
+  },
+  "source": "renderdoccmd convert -c xml (the API calls of the capture; no shader or texture data)",
+  "warnings": []
+}

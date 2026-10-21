@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <myengine/core/Types.h>
@@ -145,12 +146,27 @@ namespace myengine::render
         std::string pixelEntry = "PSMain";
         std::string vertexProfile = "vs_5_0";
         std::string pixelProfile = "ps_5_0";
+        std::vector<std::pair<std::string, std::string>> defines; // #define name value for both entry points
+        // The states of the static samplers, by the name of the sampler in the shader: "gSampler" -> "linear_wrap".
+        // A sampler that is not named here is linear, wrap.
+        std::vector<std::pair<std::string, std::string>> samplers;
+        // The vertex stream that the program reads: the table of the formats and offsets of the vertex buffer it is drawn
+        // with ("mesh", "debug_lines", "ui"). The input layout is built from it and from the inputs of the vertex shader.
+        std::string vertexStream = "mesh";
     };
+
+    class MaterialParams;
 
     struct DrawItem
     {
         MeshHandle mesh;
         ShaderHandle shader;
+        // The parameters of the material: the bytes of the constant buffers and all the textures of the shader by name
+        // (gColor and the other values of the material come from here). Not owned: the resource manager keeps it alive
+        // for the frame that asked for it (ResourceManager::GetMaterialParams). The renderer writes the engine
+        // semantics (gModel, gViewProjection, gLightDirection) over it.
+        const MaterialParams* material = nullptr;
+        // Without a `material` only: the texture of the first texture slot of the shader and the value of gColor
         TextureHandle texture;
         Matrix4 model = Matrix4::Identity();
         core::Color color{1.0f, 1.0f, 1.0f, 1.0f};

@@ -229,6 +229,119 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME gpu_frame_report_selftest COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/tools/gpu/frame_report.py" --self-test)
 endif()
 
+# A1 (LR3): shader reflection without a GPU: layouts, messages with file and line, cache, the shaders of the engine
+add_executable(myengine_shader_reflection_tests
+  render/ShaderReflectionTests.cpp)
+
+target_link_libraries(myengine_shader_reflection_tests PRIVATE myengine_engine)
+target_include_directories(myengine_shader_reflection_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_shader_reflection_tests)
+set_property(TARGET myengine_shader_reflection_tests PROPERTY FOLDER "Tests")
+add_test(NAME shader_reflection COMMAND myengine_shader_reflection_tests)
+set_tests_properties(shader_reflection PROPERTIES TIMEOUT 120)
+
+# A2 (LR3): the root signature builder without a GPU: root constants / CBV, tables, visibility, samplers, shape hash
+add_executable(myengine_root_signature_tests
+  render/RootSignatureTests.cpp)
+
+target_link_libraries(myengine_root_signature_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_root_signature_tests)
+set_property(TARGET myengine_root_signature_tests PROPERTY FOLDER "Tests")
+add_test(NAME root_signature COMMAND myengine_root_signature_tests)
+set_tests_properties(root_signature PROPERTIES TIMEOUT 120)
+
+# A-check (LR3): the input layout builder without a GPU: order, errors, stream tables, the shaders of the engine
+add_executable(myengine_input_layout_tests
+  render/InputLayoutTests.cpp)
+
+target_link_libraries(myengine_input_layout_tests PRIVATE myengine_engine)
+target_include_directories(myengine_input_layout_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_input_layout_tests)
+set_property(TARGET myengine_input_layout_tests PROPERTY FOLDER "Tests")
+add_test(NAME input_layout COMMAND myengine_input_layout_tests)
+set_tests_properties(input_layout PROPERTIES TIMEOUT 120)
+
+# A-check (LR3): shader hot reload in the resource manager on a recording adapter: same handle, errors, fallback, includes
+add_executable(myengine_shader_hot_reload_tests
+  resource/ShaderHotReloadTests.cpp)
+
+target_link_libraries(myengine_shader_hot_reload_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_shader_hot_reload_tests)
+set_property(TARGET myengine_shader_hot_reload_tests PROPERTY FOLDER "Tests")
+add_test(NAME shader_hot_reload COMMAND myengine_shader_hot_reload_tests)
+set_tests_properties(shader_hot_reload PROPERTIES TIMEOUT 120)
+
+# B3.1 (LR3): the rows of the Material Editor and the edits of a material, without ImGui and without a GPU
+add_executable(myengine_material_editor_model_tests
+  render/MaterialEditorModelTests.cpp)
+
+target_link_libraries(myengine_material_editor_model_tests PRIVATE myengine_engine)
+target_include_directories(myengine_material_editor_model_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_material_editor_model_tests)
+set_property(TARGET myengine_material_editor_model_tests PROPERTY FOLDER "Tests")
+add_test(NAME material_editor_model COMMAND myengine_material_editor_model_tests)
+set_tests_properties(material_editor_model PROPERTIES TIMEOUT 120)
+
+# B2 (LR3): the metadata of the shader parameters (comments "// @label ... @default ...") without a GPU: the tags, every mistake
+# with its file and line, includes, @default in the material parameters, a source that changes
+add_executable(myengine_shader_metadata_tests
+  render/ShaderMetadataTests.cpp)
+
+target_link_libraries(myengine_shader_metadata_tests PRIVATE myengine_engine)
+target_include_directories(myengine_shader_metadata_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_shader_metadata_tests)
+set_property(TARGET myengine_shader_metadata_tests PROPERTY FOLDER "Tests")
+add_test(NAME shader_metadata COMMAND myengine_shader_metadata_tests)
+set_tests_properties(shader_metadata PROPERTIES TIMEOUT 120)
+
+# B1 (LR3): the parameters of a material by the names of the shader layout, without a GPU: setters, bytes, errors,
+# the old keys of a material, the materials of the project, save and load
+add_executable(myengine_material_params_tests
+  render/MaterialParamsTests.cpp)
+
+target_link_libraries(myengine_material_params_tests PRIVATE myengine_engine)
+target_include_directories(myengine_material_params_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_material_params_tests)
+set_property(TARGET myengine_material_params_tests PROPERTY FOLDER "Tests")
+add_test(NAME material_params COMMAND myengine_material_params_tests)
+set_tests_properties(material_params PROPERTIES TIMEOUT 120)
+
+# B1.2 (LR3): the parameters of a material reach the frame: a real DX12 device (or WARP), a render target, the pixels read
+# back. Skipped (exit code 77) when there is no device or no desktop to make the window on.
+add_executable(myengine_material_render_tests
+  render/MaterialRenderTests.cpp)
+
+target_link_libraries(myengine_material_render_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_material_render_tests)
+set_property(TARGET myengine_material_render_tests PROPERTY FOLDER "Tests")
+add_test(NAME material_render COMMAND myengine_material_render_tests)
+set_tests_properties(material_render PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+# B4.1 (LR3): the scenarios of stability of the lab (a shader with an error, a series of reloads, a file that is gone, a reload while
+# a render target is drawn, a long session, an exit in a dirty state) on a real DX12 device (or WARP) with the debug layer; after
+# Shutdown no object of the device may be alive. Skipped (exit code 77) when there is no device or no desktop to make the window on.
+add_executable(myengine_render_stability_tests
+  render/RenderStabilityTests.cpp)
+
+target_link_libraries(myengine_render_stability_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_render_stability_tests)
+set_property(TARGET myengine_render_stability_tests PROPERTY FOLDER "Tests")
+add_test(NAME render_stability COMMAND myengine_render_stability_tests)
+set_tests_properties(render_stability PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# B4.2 (LR3): the picture of a fixed scene is compared with the reference tests/render/reference/scene_256.png. The scene is drawn on the
+# WARP adapter (the same rasterizer on every machine). The reference is changed only on purpose: --update-reference. Skipped (exit code
+# 77) when WARP or a desktop to make the window on is not there.
+add_executable(myengine_render_reference_tests
+  render/RenderReferenceTests.cpp)
+
+target_link_libraries(myengine_render_reference_tests PRIVATE myengine_engine)
+target_compile_definitions(myengine_render_reference_tests PRIVATE MYENGINE_REFERENCE_OUTPUT_DIR="${CMAKE_BINARY_DIR}/render_reference")
+myengine_apply_compiler_options(myengine_render_reference_tests)
+set_property(TARGET myengine_render_reference_tests PROPERTY FOLDER "Tests")
+add_test(NAME render_reference COMMAND myengine_render_reference_tests)
+set_tests_properties(render_reference PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)

@@ -106,6 +106,7 @@ myengine.exe --scene assets/scenes/coin_guard_demo.json --play --frame-stats 120
 | `--dx12-debug` / `MYENGINE_DX12_DEBUG=1` | debug layer (в любой конфигурации) + DRED |
 | `--dx12-dred` / `MYENGINE_DX12_DRED=1` | только DRED: auto-breadcrumbs и page fault |
 | `--dx12-gbv` / `MYENGINE_DX12_GBV=1` | GPU-based validation (кадр в разы медленнее; нужен Graphics Tools) |
+| `MYENGINE_DX12_ROOT_CBV=1` | константные буферы всех шейдерных программ идут как root CBV вместо root constants: проверка пути для cbuffer'ов больше 64 DWORD (картинка не меняется) |
 
 Когда `GetDeviceRemovedReason` вернул ошибку (на `Present` или в начале кадра), в лог пишется причина, номер кадра и данные DRED:
 

@@ -1,0 +1,82 @@
+{
+  "adapter": "NVIDIA GeForce RTX 3060 Laptop GPU",
+  "frame": 900,
+  "gpuMs": 3.4437119999999997,
+  "map": "benchmark",
+  "passes": [
+    {
+      "barriers": 0,
+      "depth": 0,
+      "draws": 0,
+      "gpuMs": 3.4437119999999997,
+      "lines": 0,
+      "name": "Frame",
+      "psoSwitches": 0,
+      "textureSwitches": 0,
+      "triangles": 0
+    },
+    {
+      "barriers": 1,
+      "depth": 1,
+      "draws": 0,
+      "gpuMs": 0.12287999999999999,
+      "lines": 0,
+      "name": "Clear Back Buffer",
+      "psoSwitches": 0,
+      "textureSwitches": 0,
+      "triangles": 0
+    },
+    {
+      "barriers": 0,
+      "depth": 1,
+      "draws": 968,
+      "gpuMs": 2.655232,
+      "lines": 0,
+      "name": "Scene",
+      "psoSwitches": 1,
+      "textureSwitches": 432,
+      "triangles": 827752
+    },
+    {
+      "barriers": 0,
+      "depth": 1,
+      "draws": 1,
+      "gpuMs": 0.596992,
+      "lines": 30491,
+      "name": "Debug Lines",
+      "psoSwitches": 1,
+      "textureSwitches": 0,
+      "triangles": 0
+    },
+    {
+      "barriers": 0,
+      "depth": 1,
+      "draws": 28,
+      "gpuMs": 0.068608,
+      "lines": 0,
+      "name": "UI",
+      "psoSwitches": 1,
+      "textureSwitches": 1,
+      "triangles": 1902
+    },
+    {
+      "barriers": 1,
+      "depth": 1,
+      "draws": 0,
+      "gpuMs": 0.0,
+      "lines": 0,
+      "name": "Present Transition",
+      "psoSwitches": 0,
+      "textureSwitches": 0,
+      "triangles": 0
+    }
+  ],
+  "totals": {
+    "barriers": 2,
+    "draws": 997,
+    "psoSwitches": 3,
+    "renderTargetPasses": 0,
+    "textureSwitches": 433,
+    "triangles": 829654
+  }
+}

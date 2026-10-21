@@ -7,6 +7,7 @@
 #include <myengine/core/Types.h>
 #include <myengine/render/GpuStats.h>
 #include <myengine/render/RenderTypes.h>
+#include <myengine/render/ShaderLayout.h>
 
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
 #ifndef WIN32_LEAN_AND_MEAN
@@ -16,6 +17,26 @@
 
 namespace myengine::render
 {
+    // One shader program as the renderer knows it now (the Shader Layouts window)
+    struct ShaderProgramInfo
+    {
+        ShaderHandle handle;
+        std::string name;               // the file of the program
+        std::uint32_t version = 1;      // 1 at the creation, +1 for every successful reload
+        std::string lastError;          // the first error of the last reload that failed; empty after a good one
+    };
+
+    // How many GPU objects the shaders hold: they must not grow with the number of reloads
+    struct ShaderStatistics
+    {
+        std::uint32_t programs = 0;          // live programs, the renderer's own (debug lines, UI) included
+        std::uint32_t pipelineStates = 0;    // live PSOs (a scene program has a normal and a wireframe one)
+        std::uint32_t rootSignatures = 0;    // root signatures in the cache
+        std::uint32_t retiredObjects = 0;    // replaced PSOs / root signatures that wait for the fence
+        std::uint64_t reloads = 0;           // successful reloads
+        std::uint64_t reloadFailures = 0;    // reloads that left the old program
+    };
+
     class IRenderAdapter
     {
     public:
@@ -27,6 +48,48 @@ namespace myengine::render
         virtual TextureHandle CreateTexture(const TextureData& textureData) = 0;
         virtual void DestroyTexture(TextureHandle texture) = 0;
         virtual ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) = 0;
+
+        // ---- shader reflection ----
+        // What the program expects (resources, constant buffers with offsets, vertex inputs), read from the compiled
+        // shaders. false: no such program, or the adapter does not reflect.
+        virtual bool GetShaderLayout(ShaderHandle shader, ShaderLayout& outLayout, ShaderVariant variant = ShaderVariant::Normal) const
+        {
+            (void)shader;
+            (void)variant;
+            outLayout = {};
+            return false;
+        }
+        // The same for the programs that the renderer builds for itself (debug lines, the UI)
+        virtual bool GetBuiltinShaderLayout(BuiltinShader shader, ShaderLayout& outLayout) const
+        {
+            (void)shader;
+            outLayout = {};
+            return false;
+        }
+        // The errors and warnings (file, line, column) of the last CreateShaderProgram / ReloadShaderProgram call; empty when
+        // it succeeded without messages
+        virtual std::vector<ShaderDiagnostic> GetLastShaderDiagnostics() const { return {}; }
+
+        // ---- shader reload ----
+        // Frees the program. Its pipeline states stay until the GPU has finished the frames that may use them.
+        virtual void DestroyShader(ShaderHandle shader) { (void)shader; }
+        // Builds a new version of the program beside the old one and replaces it under the same handle only when all of it
+        // succeeded (compile, reflection, root signature, input layout, pipeline states). false: the old program keeps
+        // running as it is, GetLastShaderDiagnostics says why.
+        virtual bool ReloadShaderProgram(ShaderHandle shader, const ShaderProgramData& shaderProgram)
+        {
+            (void)shader;
+            (void)shaderProgram;
+            return false;
+        }
+        // 1 after the creation, +1 for every successful reload (materials re-check themselves against a new layout); 0: no such program
+        virtual std::uint32_t GetShaderVersion(ShaderHandle shader) const
+        {
+            (void)shader;
+            return 0;
+        }
+        virtual std::vector<ShaderProgramInfo> GetShaderPrograms() const { return {}; }
+        virtual ShaderStatistics GetShaderStatistics() const { return {}; }
 
         virtual RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) = 0;
         virtual void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) = 0;

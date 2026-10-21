@@ -1,0 +1,8 @@
+{
+  "source": "debug_line.hlsl",
+  "vertexEntry": "VSMain",
+  "pixelEntry": "PSMain",
+  "vertexProfile": "vs_5_0",
+  "pixelProfile": "ps_5_0",
+  "vertexStream": "debug_lines"
+}
