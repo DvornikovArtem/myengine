@@ -29,7 +29,7 @@
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
-#include <myengine/ecs/systems/RlSandboxSystem.h>
+#include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
@@ -449,9 +449,9 @@ namespace myengine::core
                     lines.push_back(line.second);
                 }
             }
-            if (rlSandboxSystem_ != nullptr)
+            if (rlGameSystem_ != nullptr)
             {
-                for (auto& line : rlSandboxSystem_->HudLines())
+                for (auto& line : rlGameSystem_->HudLines())
                 {
                     lines.push_back(std::move(line));
                 }
@@ -502,10 +502,10 @@ namespace myengine::core
         world_.AddUpdateSystem(std::make_unique<ecs::systems::CameraControlSystem>(input_, inputOwnerWindowId_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
         {
-            // the sandbox of the Rocket League physics (G3): does nothing unless the scene has an RlArena
-            auto rlSandbox = std::make_unique<ecs::systems::RlSandboxSystem>(input_);
-            rlSandboxSystem_ = rlSandbox.get();
-            world_.AddUpdateSystem(std::move(rlSandbox));
+            // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena
+            auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
+            rlGameSystem_ = rlGame.get();
+            world_.AddUpdateSystem(std::move(rlGame));
         }
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());

@@ -113,6 +113,20 @@ namespace rl
             v.Float("boostAccelAir", t.car.boostAccelAir);
             v.Float("respawnDelay", t.car.respawnDelay);
             v.End();
+
+            v.Begin("match");
+            v.Float("matchSeconds", t.match.matchSeconds);
+            v.Float("countdownSeconds", t.match.countdownSeconds);
+            v.Float("goalSeconds", t.match.goalSeconds);
+            v.Float("goalLineMargin", t.match.goalLineMargin);
+            v.Float("padBigBoost", t.match.padBigBoost);
+            v.Float("padBigRespawn", t.match.padBigRespawn);
+            v.Float("padBigRadius", t.match.padBigRadius);
+            v.Float("padSmallBoost", t.match.padSmallBoost);
+            v.Float("padSmallRespawn", t.match.padSmallRespawn);
+            v.Float("padSmallRadius", t.match.padSmallRadius);
+            v.Float("padMaxHeight", t.match.padMaxHeight);
+            v.End();
         }
 
         struct Reader

@@ -111,5 +111,18 @@
     "boostAccelGround": 9.92,
     "boostAccelAir": 10.58,
     "respawnDelay": 3.0
+  },
+  "match": {
+    "matchSeconds": 300.0,
+    "countdownSeconds": 3.0,
+    "goalSeconds": 3.0,
+    "goalLineMargin": 0.0,
+    "padBigBoost": 100.0,
+    "padBigRespawn": 10.0,
+    "padBigRadius": 2.08,
+    "padSmallBoost": 12.0,
+    "padSmallRespawn": 4.0,
+    "padSmallRadius": 1.65,
+    "padMaxHeight": 1.7
   }
 }

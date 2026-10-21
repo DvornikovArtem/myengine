@@ -118,12 +118,28 @@ namespace rl
         float respawnDelay = 3.0f;
     };
 
+    struct RlMatchTuning
+    {
+        float matchSeconds = 300.0f;
+        float countdownSeconds = 3.0f;
+        float goalSeconds = 3.0f;
+        float goalLineMargin = 0.0f;       // extra metres the ball centre must be past (goal line + ball radius)
+        float padBigBoost = 100.0f;
+        float padBigRespawn = 10.0f;
+        float padBigRadius = 2.08f;
+        float padSmallBoost = 12.0f;
+        float padSmallRespawn = 4.0f;
+        float padSmallRadius = 1.65f;
+        float padMaxHeight = 1.7f;         // a car whose centre is higher does not pick the pad up
+    };
+
     struct RlTuning
     {
         float gravity = 6.5f;
         RlArenaTuning arena;
         RlBallTuning ball;
         RlCarTuning car;
+        RlMatchTuning match;
 
         // Reads the json file; keys that are missing keep the defaults. Returns false (and fills error) if the file is
         // missing or is not json.

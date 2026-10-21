@@ -860,7 +860,8 @@ namespace
         std::printf("assets/models/rl_arena.obj is the arena of the tuning\n");
         std::ifstream file(std::filesystem::u8path(RL_ARENA_OBJ), std::ios::binary);
         CHECK(static_cast<bool>(file));
-        const std::string onDisk((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        std::string onDisk((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        onDisk.erase(std::remove(onDisk.begin(), onDisk.end(), '\r'), onDisk.end());  // git may check the file out with CRLF
         CHECK(onDisk == RlArena(g_tuning.arena).ToRenderObj());
     }
 

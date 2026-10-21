@@ -520,25 +520,18 @@ namespace
         Harness harness({}, 4, 2);
         std::vector<editor::PrefabEntityInfo> entities;
 
-        // A prefab of the project: a car (the root with the physics) with a chassis, a body, a cabin and four wheels
-        Check(harness.service->ReadPrefab("assets/prefabs/rl_car.prefab.json", entities), "The car prefab must be readable");
-        Check(entities.size() == 19 && entities[0].name == "RlCar" && entities[1].name == "RlCarChassis" && entities[2].name == "RlCarBody"
-                && entities[3].name == "RlCarCabin" && entities[4].name == "RlWheelFL" && entities[7].name == "RlWheelRR",
-            "The car has a chassis, a body, a cabin, four wheels and eleven details");
-        // the details (bumpers, lights, spoiler, nozzle) hang on the chassis; the boost flame is hidden until the script shows it
-        Check(entities[8].name == "RlCarBumperF" && entities[8].parent == entities[1].id && entities[18].name == "RlCarFlame"
-                && entities[18].parent == entities[1].id && !entities[18].visible && entities[17].visible,
-            "The details are on the chassis and the flame is hidden");
-        Check(!entities[0].hasMesh && entities[0].hasRigidbody && entities[0].collider.rfind("Box", 0) == 0 && entities[2].hasMesh && entities[4].hasMesh,
-            "The car root has a rigidbody and a box, the body and the wheels have meshes");
-        Check(entities[0].parent == -1 && entities[1].parent == entities[0].id && entities[2].parent == entities[1].id
-                && entities[3].parent == entities[1].id && entities[4].parent == entities[0].id,
-            "The body and the cabin are on the chassis, the wheels are on the root");
-        Check(entities[0].rigidbody == "Gravity on \xC2\xB7 mass 3", "The rigidbody is summarised");
-        Check(entities[0].collider == "Box \xC2\xB7 0.7 0.3 1.2", "The collider is summarised");
-        // cabin translation (0, 0.5, -0.25) through the unscaled chassis and the root position (0, 0.5, 0)
-        Check(std::abs(entities[3].world.data[13] - 1.0f) < 1e-4f && std::abs(entities[3].world.data[14] + 0.25f) < 1e-4f,
-            "The world matrix of a child includes its parent");
+        // A prefab of the project: a coin (the root) with a glow child
+        Check(harness.service->ReadPrefab("assets/prefabs/coin.prefab.json", entities), "The coin prefab must be readable");
+        Check(entities.size() == 2 && entities[0].name == "Coin" && entities[1].name == "CoinGlow", "The coin has a glow child");
+        Check(entities[0].parent == -1 && entities[1].parent == entities[0].id && entities[0].hasMesh && entities[1].hasMesh && !entities[0].hasRigidbody,
+            "The glow hangs on the coin, both have meshes, the coin has no rigidbody");
+        // glow translation (0, 0, 0) through the coin at (0, 0.5, 0)
+        Check(std::abs(entities[1].world.data[13] - 0.5f) < 1e-4f && std::abs(entities[1].world.data[14]) < 1e-4f, "The world matrix of a child includes its parent");
+
+        // A prefab with physics: the rigidbody and the collider are summarised
+        Check(harness.service->ReadPrefab("assets/prefabs/chaser.prefab.json", entities), "The chaser prefab must be readable");
+        Check(entities.size() == 1 && entities[0].hasRigidbody && entities[0].rigidbody == "Gravity on \xC2\xB7 mass 1", "The rigidbody is summarised");
+        Check(entities[0].collider == "Box \xC2\xB7 0.5 0.5 0.5", "The collider is summarised");
 
         // A made-up one: invisible mesh, a sphere collider, a script, a parent that is not in the file
         const fs::path file = workDirectory / "viewer.prefab.json";
