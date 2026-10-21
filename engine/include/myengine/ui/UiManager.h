@@ -42,6 +42,7 @@ namespace myengine::ui
         void SetStateLabel(std::string stateLabel);
         bool WantsMouseCapture(core::WindowId windowId) const;
         bool WantsKeyboardCapture(core::WindowId windowId) const;
+        bool WantsTextInput(core::WindowId windowId) const; // a text field is being edited (not just an ImGui item held by the mouse)
         bool CanStartSceneNavigation(core::WindowId windowId, float mouseX, float mouseY) const;
 
     private:

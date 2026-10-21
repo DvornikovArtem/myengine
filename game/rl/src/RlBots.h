@@ -40,6 +40,7 @@ namespace rl
         float flipWait = 0.0f;
         float patrolSide = 1.0f;     // -1/+1: the side a waiting bot shifts to, so it does not stand for ever
         float standTimer = 0.0f;
+        float arriveTimer = 0.0f;    // > 0: the ball is in the air and lands in this many seconds; the car times its arrival
         float dodgeCooldown = 0.0f;
         uint8_t jumpPrev = 0;
         uint8_t pad[3] = {};

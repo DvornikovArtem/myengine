@@ -1,6 +1,7 @@
 // RlCarController.h
-// What a Rocket League car does in one tick: four suspension rays, grip, throttle, steering, sticking to walls, jump, double jump,
+// What a Rocket League car does in one tick: four suspension rays, grip, throttle, steering, the pull into the surface, jump, double jump,
 // dodge, air control and boost. Everything is a force or a velocity change on the Jolt body; nothing sets the pose.
+// The model (air control, jump, dodge, suspension, sticky force) follows RocketSim by ZealanL (MIT), see docs/game/rl-physics.md.
 
 #pragma once
 
@@ -17,16 +18,19 @@ namespace rl::detail
     {
         float boost = 0.0f;
         float respawnTimer = 0.0f;
-        float airTime = 0.0f;       // seconds since the first jump or since the wheels left the ground
-        float sinceJump = 1000.0f;  // seconds since the last first jump
-        float jumpHold = 0.0f;      // seconds of the jump-hold push that are left
-        float dodgeSpinLeft = 0.0f; // seconds the flip spin still runs
-        float dodgeLock = 0.0f;     // seconds the air control is still off
-        float dodgeSpinX = 0.0f;    // local angular velocity of the flip (rad/s) about the car's X
-        float dodgeSpinZ = 0.0f;    // and about its Z
-        float jumpDirX = 0.0f;      // where the jump hold pushes (the car's up when the jump was made)
-        float jumpDirY = 1.0f;
-        float jumpDirZ = 0.0f;
+        float airTime = 0.0f;       // seconds since the push of the first jump ended (or since the car left the ground without a jump)
+        float jumpTime = 1000.0f;   // seconds since the first jump started
+        float flipTime = 0.0f;      // seconds since the dodge started
+        float flipPitch = 0.0f;     // direction of the flip: about the car's X (+ = nose down, a front flip) ...
+        float flipRoll = 0.0f;      // ... and about its Z (+ = rolls left)
+        float rightSpinLeft = 0.0f; // seconds the turn of a car lying on its roof or side still runs
+        float rightSpinX = 0.0f;    // its local angular velocity (rad/s)
+        float rightSpinZ = 0.0f;
+        float bodyNormalX = 0.0f;   // normal of the surface the hitbox touches (towards the car), valid while bodyContact
+        float bodyNormalY = 1.0f;
+        float bodyNormalZ = 0.0f;
+        float gripScale = 1.0f;     // grip of the rear tyres: drops with the powerslide, comes back over handbrakeRecoverTime
+        float landingTimer = 0.0f;  // seconds the landing grip is still stronger
         float spawnX = 0.0f;
         float spawnY = 0.0f;
         float spawnZ = 0.0f;
@@ -35,11 +39,15 @@ namespace rl::detail
         int32_t ballHitCooldown = 0;
         uint8_t demolished = 0;
         uint8_t jumpPrev = 0;
-        uint8_t jumpUsed = 0;       // the first jump was made, or the car left the ground
-        uint8_t secondUsed = 0;     // the double jump / dodge was made
+        uint8_t jumpUsed = 0;       // the first jump was made
+        uint8_t secondUsed = 0;     // the double jump or the dodge was made
+        uint8_t isJumping = 0;      // the push of the first jump still runs
+        uint8_t flipped = 0;        // a dodge was made (the pitch stick stays off a little after it)
+        uint8_t dodging = 0;        // the flip spin is being driven
         uint8_t bodyContact = 0;    // the hitbox touched the arena in the last tick
-        uint8_t dodging = 0;
-        uint8_t pad[2] = {};  // keeps the struct free of unnamed padding
+        uint8_t slideLatch = 0;     // the powerslide button was held in the air: it is the air roll until it is let go
+        uint8_t wasOnSurface = 0;
+        uint8_t selfRight = 0;      // the turn of a car lying on its roof or side runs
     };
 
     struct CarContext

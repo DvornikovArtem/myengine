@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "padDeadzone": 0.2,
+  "axes": {
+    "throttle": [
+      "W",
+      "-S",
+      "PadRT",
+      "-PadLT"
+    ],
+    "steer": [
+      "D",
+      "-A",
+      "PadLeftX"
+    ],
+    "pitch": [
+      "-W",
+      "S",
+      "-PadLeftY"
+    ],
+    "roll": [
+      "E",
+      "-Q",
+      "PadRB",
+      "-PadLB"
+    ]
+  },
+  "buttons": {
+    "boost": [
+      "MouseLeft",
+      "PadB"
+    ],
+    "jump": [
+      "MouseRight",
+      "PadA"
+    ],
+    "ballCam": [
+      "Space",
+      "PadY"
+    ],
+    "powerslide": [
+      "Shift",
+      "PadX"
+    ],
+    "scoreboard": [
+      "Tab",
+      "PadBack"
+    ],
+    "menu": [
+      "M",
+      "PadStart"
+    ]
+  }
+}

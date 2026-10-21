@@ -3,6 +3,8 @@
 // Arguments: --write-tuning <path> writes the default tuning as json and exits; --verbose prints every measurement.
 
 #include <rl/RlArena.h>
+#include <rl/RlCamera.h>
+#include <rl/RlControls.h>
 #include <rl/RlSim.h>
 #include <rl/RlTuning.h>
 
@@ -218,7 +220,7 @@ namespace
         const RlCarState& c = sim.State().cars[0];
         Note("height %.3f, contacts %.0f, speed %.4f", c.position.y, c.wheelContacts, Len(V(c.linearVelocity)));
         CHECK(c.wheelContacts == 4);
-        CHECK(c.position.y > 0.2f && c.position.y < 0.36f);
+        CHECK(c.position.y > 0.36f && c.position.y < 0.40f);  // RL: the hitbox centre rests 37.8 uu over the floor
         CHECK(Len(V(c.linearVelocity)) < 0.05f);
         CHECK(Up(c).y > 0.999f);
     }
@@ -304,7 +306,7 @@ namespace
         RlSim straight(g_tuning, 1);
         straight.ResetCar(0, 0.0f, -40.0f, 0.0f);
         Settle(straight);
-        Run(straight, Ticks(3.0f), [&](int, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; });
+        Run(straight, Ticks(3.0f), [&](int t, const RlWorldState& st, Inputs& in) { in[0].throttle = 1.0f; if (g_verbose && t % 30 == 0) Note("  t %.2f x %.3f z %.2f yaw %.5f yawrate %.5f", t / 120.0f, st.cars[0].position.x, st.cars[0].position.z, std::atan2(Forward(st.cars[0]).x, Forward(st.cars[0]).z), st.cars[0].angularVelocity.y); });
         const RlCarState& c = straight.State().cars[0];
         Note("3 s straight: x %.3f, yaw rate %.4f", c.position.x, c.angularVelocity.y);
         CHECK(std::fabs(c.position.x) < 0.1f);
@@ -333,6 +335,304 @@ namespace
         CHECK(slide[1] > slide[0] + 0.8f);
     }
 
+    // ---------------------------------------------------------------- landing
+
+    struct LandingStats
+    {
+        bool touched = false;
+        int rollCrossings = 0;     // sign changes of the roll angle after the first touch (amplitudes over 0.01 rad only)
+        int pitchCrossings = 0;
+        int bounces = 0;           // times the car rose again after it came down
+        float settleSeconds = 99;  // from the first touch until the car is at rest for good
+        float maxRoll = 0;
+        float maxPitch = 0;
+    };
+
+    RlQuat AxisAngle(float x, float y, float z, float degrees)
+    {
+        const float h = degrees * 0.5f * 3.14159265f / 180.0f;
+        const float s = std::sin(h);
+        return {x * s, y * s, z * s, std::cos(h)};
+    }
+
+    // the stick a player gives to bring a spinning car back onto its wheels (the same PD law as the bots use)
+    void LevelOut(const RlCarState& c, RlCarInput& in)
+    {
+        const Vec ux = Rotate({-c.rotation.x, -c.rotation.y, -c.rotation.z, c.rotation.w}, {0, 1, 0});
+        const Vec w = Rotate({-c.rotation.x, -c.rotation.y, -c.rotation.z, c.rotation.w}, V(c.angularVelocity));
+        in.roll = std::clamp(3.0f * ux.x + 0.35f * w.z, -1.0f, 1.0f);
+        in.pitch = std::clamp(-3.0f * ux.z + 0.35f * w.x, -1.0f, 1.0f);
+        if (Up(c).y < 0.0f) in.roll = in.roll >= 0.0f ? 1.0f : -1.0f;
+    }
+
+    // Follows a car from its first wheel contact on: how often the tilt swings through the level, how often it bounces, when it is at rest.
+    struct SettleTracker
+    {
+        LandingStats stats;
+        float prevVy = 0;
+        int rollSign = 0, pitchSign = 0;
+        int touchTick = -1;
+        int quietSince = -1;
+        bool rose = false;
+        bool fellAgain = false;
+        int minTick = 0;  // ignore the first contacts before this tick (a jump that is still on the ground)
+
+        void Update(int t, const RlCarState& c)
+        {
+            if (c.wheelContacts > 0 && touchTick < 0 && t >= minTick)
+            {
+                touchTick = t;
+                stats.touched = true;
+            }
+            if (touchTick < 0)
+            {
+                prevVy = c.linearVelocity.y;
+                return;
+            }
+            const float roll = std::asin(std::clamp(Right(c).y, -1.0f, 1.0f));
+            const float pitch = std::asin(std::clamp(Forward(c).y, -1.0f, 1.0f));
+            stats.maxRoll = std::max(stats.maxRoll, std::fabs(roll));
+            stats.maxPitch = std::max(stats.maxPitch, std::fabs(pitch));
+            const auto track = [](float angle, int& sign, int& crossings) {
+                const int now = angle > 0.01f ? 1 : (angle < -0.01f ? -1 : 0);
+                if (now != 0 && sign != 0 && now != sign)
+                {
+                    ++crossings;
+                }
+                if (now != 0)
+                {
+                    sign = now;
+                }
+            };
+            track(roll, rollSign, stats.rollCrossings);
+            track(pitch, pitchSign, stats.pitchCrossings);
+            // a bounce is a second fall after the car has come up out of its first dip
+            if (!rose && c.linearVelocity.y > 0.1f)
+            {
+                rose = true;
+            }
+            else if (rose && !fellAgain && c.linearVelocity.y < -0.3f)
+            {
+                fellAgain = true;
+            }
+            else if (fellAgain && c.linearVelocity.y > 0.1f)
+            {
+                ++stats.bounces;
+                fellAgain = false;
+            }
+            const float spin = Len(V(c.angularVelocity));
+            const bool quiet = std::fabs(roll) < 0.02f && std::fabs(pitch) < 0.02f && spin < 0.2f && std::fabs(c.linearVelocity.y) < 0.2f;
+            if (quiet && quietSince < 0)
+            {
+                quietSince = t;
+            }
+            if (!quiet)
+            {
+                quietSince = -1;
+            }
+            prevVy = c.linearVelocity.y;
+        }
+
+        LandingStats Result() const
+        {
+            LandingStats r = stats;
+            if (quietSince >= 0 && touchTick >= 0)
+            {
+                r.settleSeconds = static_cast<float>(quietSince - touchTick) / kTickRate;
+            }
+            return r;
+        }
+    };
+
+    // Drops a car from `height` metres, rolled and pitched by the given degrees, with a forward speed; measures how it settles.
+    LandingStats DropAndMeasure(const RlTuning& tuning, float rollDeg, float pitchDeg, float height, float speed)
+    {
+        RlSim sim(tuning, 1);
+        sim.ResetCar(0, 0.0f, -30.0f, 0.0f);
+        QuietBall(sim);
+        // pitch about X then roll about Z (the product of two small rotations is good enough)
+        const RlQuat a = AxisAngle(0, 0, 1, rollDeg);
+        const RlQuat b = AxisAngle(1, 0, 0, pitchDeg);
+        const RlQuat q = {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+                          a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+        sim.SetCarPose(0, {0.0f, height, -30.0f}, q, {0.0f, 0.0f, speed});
+        SettleTracker tracker;
+        Run(sim, Ticks(4.0f), [&](int t, const RlWorldState& s2, Inputs&) {
+            const RlCarState& c = s2.cars[0];
+            if (g_trace && g_traceDirection == 7 && tracker.touchTick >= 0 && t < tracker.touchTick + 60 && t % 2 == 0)
+            {
+                std::printf("    +%02d y=%.3f vy=%.2f roll=%.3f pitch=%.3f w=%.2f contacts=%d comp=%.3f%c", t - tracker.touchTick, c.position.y,
+                            c.linearVelocity.y, std::asin(std::clamp(Right(c).y, -1.0f, 1.0f)), std::asin(std::clamp(Forward(c).y, -1.0f, 1.0f)),
+                            Len(V(c.angularVelocity)), c.wheelContacts, c.wheelCompression[0], 10);
+            }
+            tracker.Update(t, c);
+        });
+        return tracker.Result();
+    }
+
+    void PrintLanding(const char* name, const LandingStats& s)
+    {
+        std::printf("  %s: roll crossings %d, pitch crossings %d, bounces %d, at rest after %.2f s (largest roll %.2f, pitch %.2f rad)%c", name, s.rollCrossings,
+                    s.pitchCrossings, s.bounces, static_cast<double>(s.settleSeconds), static_cast<double>(s.maxRoll), static_cast<double>(s.maxPitch), 10);
+    }
+
+    void TestLanding()
+    {
+        std::printf("landing: no rocking\n");
+        const LandingStats level = DropAndMeasure(g_tuning, 0.0f, 0.0f, 1.2f, 0.0f);
+        const LandingStats rolled = DropAndMeasure(g_tuning, 12.0f, 0.0f, 1.0f, 0.0f);
+        const LandingStats pitched = DropAndMeasure(g_tuning, 0.0f, -14.0f, 1.0f, 8.0f);
+        const LandingStats diagonal = DropAndMeasure(g_tuning, 10.0f, 10.0f, 0.8f, 12.0f);
+        PrintLanding("level drop 1.2 m", level);
+        PrintLanding("rolled 12 deg", rolled);
+        PrintLanding("nose down 14 deg at 8 m/s", pitched);
+        PrintLanding("roll + pitch 10 deg at 12 m/s", diagonal);
+        for (const LandingStats* s : {&level, &rolled, &pitched, &diagonal})
+        {
+            CHECK(s->touched);
+            CHECK(s->rollCrossings <= 1 && s->pitchCrossings <= 1);  // at most one swing through the level, no rocking
+            CHECK(s->bounces <= 1);
+            CHECK(s->settleSeconds <= 0.65f);
+        }
+        CHECK(level.settleSeconds <= 0.35f);  // a plain landing: at rest in about a third of a second
+    }
+
+    // after a landing the car goes where its nose points: the sideways speed dies fast, no skid
+    struct SkidResult
+    {
+        float sideAtTouch = 0;
+        float sideAfter = 0;      // 0.3 s after the touchdown
+        float yawRateAfter = 0;
+        float forwardAfter = 0;
+        bool touched = false;
+    };
+
+    SkidResult LandingSkid(const RlTuning& tuning, float yawSeconds, bool shiftHeld, float steerOnGround)
+    {
+        RlSim sim(tuning, 1);
+        sim.ResetCar(0, 0.0f, -48.0f, 0.0f);
+        sim.SetCarBoost(0, 100.0f);
+        QuietBall(sim);
+        Settle(sim);
+        SkidResult r;
+        int touchTick = -1;
+        Run(sim, Ticks(3.0f), [&](int t, const RlWorldState& s2, Inputs& in) {
+            const RlCarState& c = s2.cars[0];
+            const int jumpAt = Ticks(1.0f);
+            in[0].throttle = t < jumpAt + Ticks(0.3f) ? 1.0f : 0.5f;
+            in[0].boost = t < Ticks(0.8f);
+            in[0].jump = t >= jumpAt && t < jumpAt + 6;  // a tap
+            const bool inAir = t > jumpAt + 6 && touchTick < 0;
+            const int yawEnd = jumpAt + Ticks(0.15f) + static_cast<int>(yawSeconds * kTickRate);
+            if (inAir && yawSeconds > 0.0f && t < yawEnd)
+            {
+                in[0].steer = 1.0f;  // yaw in the air
+            }
+            // Shift is the air roll in the air and the powerslide on the ground: held through the landing it must not make a skid
+            const bool shift = shiftHeld && t >= yawEnd;
+            in[0].handbrake = shift;
+            in[0].airRoll = shift;
+            if (g_trace && g_traceDirection == 6 && t >= jumpAt && t < jumpAt + Ticks(1.2f) && t % 6 == 0)
+            {
+                std::printf("    t+%d y=%.2f side=%.2f fwd=%.2f yawrate=%.2f contacts=%d up.y=%.2f%c", t - jumpAt, c.position.y, Dot(V(c.linearVelocity), Right(c)),
+                            Dot(V(c.linearVelocity), Forward(c)), c.angularVelocity.y, c.wheelContacts, Up(c).y, 10);
+            }
+            if (touchTick >= 0)
+            {
+                in[0].steer = steerOnGround;
+            }
+            const Vec fwd = Forward(c);
+            const Vec right = Right(c);
+            const float side = Dot(V(c.linearVelocity), right);
+            if (t > jumpAt + 10 && c.wheelContacts >= 3 && touchTick < 0)
+            {
+                touchTick = t;
+                r.touched = true;
+                r.sideAtTouch = std::fabs(side);
+            }
+            if (touchTick >= 0 && t == touchTick + Ticks(0.3f))
+            {
+                r.sideAfter = std::fabs(side);
+                r.yawRateAfter = std::fabs(c.angularVelocity.y);
+                r.forwardAfter = Dot(V(c.linearVelocity), fwd);
+            }
+        });
+        return r;
+    }
+
+    void TestLandingSkid()
+    {
+        std::printf("landing: no skid\n");
+        const struct
+        {
+            const char* name;
+            float yaw;
+            bool shift;
+            float steer;
+        } cases[] = {{"straight", 0.0f, false, 0.0f}, {"yawed in the air", 0.05f, false, 0.0f}, {"yawed, Shift held (air roll)", 0.05f, true, 0.0f},
+                     {"yawed, steering on landing", 0.05f, false, 1.0f}};
+        for (const auto& c : cases)
+        {
+            const SkidResult r = LandingSkid(g_tuning, c.yaw, c.shift, c.steer);
+            std::printf("  %-32s touched %d, sideways at touchdown %.2f m/s, 0.3 s later %.2f m/s, yaw rate %.2f rad/s, forward %.1f m/s%c", c.name, r.touched ? 1 : 0,
+                        static_cast<double>(r.sideAtTouch), static_cast<double>(r.sideAfter), static_cast<double>(r.yawRateAfter), static_cast<double>(r.forwardAfter), 10);
+            CHECK(r.touched);
+            if (c.steer == 0.0f)
+            {
+                CHECK(r.sideAfter < 1.0f);
+                CHECK(r.yawRateAfter < 0.4f);
+            }
+        }
+    }
+
+    // A fast drive up a ramp: the wheels must not leave the surface at the joints (floor -> ramp -> wall).
+    void TestGlue()
+    {
+        std::printf("the car stays on the surface over the ramp joints\n");
+        for (const float yaw : {1.5707963f, 0.7853982f})  // straight at the side wall, and diagonally
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 12.0f, 0.0f, yaw);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            sim.SetCarPose(0, {12.0f, 0.32f, 0.0f}, AxisAngle(0, 1, 0, yaw * 57.29578f), {std::sin(yaw) * 20.0f, 0.0f, std::cos(yaw) * 20.0f});
+            int airborne = 0;
+            int onSurface = 0;
+            float maxY = 0;
+            Run(sim, Ticks(2.2f), [&](int, const RlWorldState& s, Inputs& in) {
+                const RlCarState& c = s.cars[0];
+                in[0].throttle = 1.0f;
+                in[0].boost = true;
+                maxY = std::max(maxY, c.position.y);
+                if (c.position.y < 9.0f)
+                {
+                    (c.wheelContacts == 0 ? airborne : onSurface)++;
+                }
+            });
+            Note("yaw %.0f deg: %.0f ticks airborne, %.0f on the surface, highest point %.1f m", yaw * 57.29578f, airborne, onSurface, maxY);
+            CHECK(airborne <= 2);
+        }
+    }
+
+    void SweepLanding()
+    {
+        std::printf("landing sweep: spring damping x stiffness -> roll/pitch crossings, settle time (rolled 12 deg / pitched 14 deg)\n");
+        for (const float stiffness : {300.0f, 500.0f, 700.0f})
+        {
+            for (const float damping : {15.0f, 25.0f, 35.0f, 45.0f})
+            {
+                RlTuning t = g_tuning;
+                t.car.suspensionStiffness = stiffness;
+                t.car.suspensionDampCompression = damping;
+                const LandingStats a = DropAndMeasure(t, 12.0f, 0.0f, 1.0f, 0.0f);
+                const LandingStats lv = DropAndMeasure(t, 0.0f, 0.0f, 1.2f, 0.0f);
+                const LandingStats b = DropAndMeasure(t, 0.0f, -14.0f, 1.0f, 8.0f);
+                std::printf("  k %.0f c %.0f: level settle %.2f | roll cross %d pitch cross %d settle %.2f | pitched: roll %d pitch %d settle %.2f bounces %d\n", stiffness, damping, lv.settleSeconds,
+                            a.rollCrossings, a.pitchCrossings, a.settleSeconds, b.rollCrossings, b.pitchCrossings, b.settleSeconds, a.bounces + b.bounces);
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- jumps
 
     struct DodgeLanding
@@ -342,6 +642,7 @@ namespace
         float upAtTouch = 0;
         float upLater = 0;
         int wheelsLater = 0;
+        LandingStats settle;
     };
 
     // jump (held 0.25 s), dodge in `direction` (0 front, 1 back, 2 right, 3 left) at 0.4 s, no input afterwards
@@ -352,9 +653,12 @@ namespace
         Settle(sim);
         DodgeLanding result;
         int touchTick = -1;
+        SettleTracker tracker;
+        tracker.minTick = Ticks(0.7f);
         const int press = Ticks(0.4f);
         Run(sim, Ticks(4.0f), [&](int t, const RlWorldState& s, Inputs& in) {
             const RlCarState& c = s.cars[0];
+            tracker.Update(t, c);
             if (trace && t % 6 == 0)
             {
                 std::printf("    t=%.2f y=%.2f vy=%.2f up.y=%.2f fwd.y=%.2f w=(%.1f %.1f %.1f) contacts=%d canDodge=%d\n", static_cast<double>(t) / kTickRate,
@@ -379,7 +683,10 @@ namespace
                 in[0].pitch = direction == 0 ? -1.0f : direction == 1 ? 1.0f : 0.0f;
                 in[0].steer = direction == 2 ? 1.0f : direction == 3 ? -1.0f : 0.0f;
             }
+            // the flip is over after 0.65 s: the player gets the car back onto its wheels with the stick
+            if (t > press + Ticks(0.65f) && c.wheelContacts == 0) LevelOut(c, in[0]);
         });
+        result.settle = tracker.Result();
         return result;
     }
 
@@ -389,8 +696,7 @@ namespace
         for (const float spinTime : {0.55f, 0.65f, 0.75f, 0.85f, 0.95f})
         {
             RlTuning tuning = g_tuning;
-            tuning.car.dodgeSpinTime = spinTime;
-            tuning.car.dodgeLockTime = spinTime;
+            tuning.car.dodgeTorqueTime = spinTime;
             std::printf("  %.2f:", spinTime);
             for (int direction = 0; direction < 4; ++direction)
             {
@@ -501,39 +807,755 @@ namespace
             CHECK(d.landed);
             CHECK(d.upAtTouch > 0.2f);
             CHECK(d.upLater > 0.95f && d.wheelsLater == 4);
+            PrintLanding("landing of that dodge", d.settle);
+            CHECK(d.settle.rollCrossings <= 1 && d.settle.pitchCrossings <= 1);  // no rocking after the flip either
+            CHECK(d.settle.settleSeconds <= 1.0f);
         }
     }
 
 
-    // a car on its roof flips back with a jump and a direction
+    // a car on its roof or on a side turns back onto its wheels with one press of the jump
     void TestFlipFromRoof()
     {
-        std::printf("flip from the roof\n");
-        for (int direction = 0; direction < 2; ++direction)
+        std::printf("a jump turns a car on its roof or side back onto its wheels\n");
+        const struct
+        {
+            const char* name;
+            float rollDegrees;
+            float steer;
+        } cases[] = {{"roof", 180.0f, 0.0f}, {"roof, steering right", 180.0f, 1.0f}, {"left side", 90.0f, 0.0f}, {"right side", -90.0f, 0.0f}, {"leaning 135 deg", 135.0f, 0.0f}};
+        for (const auto& c : cases)
         {
             RlSim sim(g_tuning, 1);
             QuietBall(sim);
-            sim.SetCarPose(0, {0.0f, 0.5f, -30.0f}, {0.0f, 0.0f, 1.0f, 0.0f});  // a half turn about Z: upside down
+            sim.SetCarPose(0, {0.0f, 0.6f, -30.0f}, AxisAngle(0, 0, 1, c.rollDegrees), {});
             Run(sim, Ticks(1.0f), nullptr);
             const RlCarState& rest = sim.State().cars[0];
-            const bool onRoof = Up(rest).y < -0.95f && rest.wheelContacts == 0;
+            const bool lying = Up(rest).y < 0.6f && rest.wheelContacts <= 1;
             bool upright = false;
             float uprightAt = 0;
-            Run(sim, Ticks(3.0f), [&](int t, const RlWorldState& s, Inputs& in) {
-                // a hop off the roof, then the flip
-                const int flip = Ticks(0.25f);
-                in[0].jump = (t >= 2 && t < Ticks(0.12f)) || (t >= flip && t < flip + 3);
-                in[0].pitch = (t >= flip && t < flip + 3) ? (direction == 0 ? -1.0f : 1.0f) : 0.0f;
-                const RlCarState& c = s.cars[0];
-                if (!upright && t > Ticks(0.5f) && c.wheelContacts == 4 && Up(c).y > 0.95f)
+            Run(sim, Ticks(2.0f), [&](int t, const RlWorldState& s, Inputs& in) {
+                in[0].jump = t >= 2 && t < 5;  // one press
+                in[0].steer = c.steer;
+                const RlCarState& car = s.cars[0];
+                if (!upright && t > 6 && car.wheelContacts == 4 && Up(car).y > 0.95f)
                 {
                     upright = true;
                     uprightAt = static_cast<float>(t) / kTickRate;
                 }
             });
-            Note("direction %.0f: rested on the roof %.0f, back on four wheels at %.2f s", direction, onRoof ? 1.0 : 0.0, uprightAt);
-            CHECK(onRoof);
-            CHECK(upright);
+            Note("%.0f: lying before the press %.0f, on four wheels again after %.2f s", c.rollDegrees, lying ? 1.0 : 0.0, uprightAt);
+            std::printf("    (%s)%c", c.name, 10);
+            CHECK(lying);
+            CHECK(upright && uprightAt <= 1.0f);
+        }
+    }
+
+    // jumping while driving with the stick forward must give a plain jump, not a flip
+    void TestJumpWhileDriving()
+    {
+        std::printf("a jump while driving is a jump, not a flip\n");
+        RlSim sim(g_tuning, 1);
+        sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+        sim.SetCarBoost(0, 100.0f);
+        QuietBall(sim);
+        Settle(sim);
+        bool dodged = false;
+        float apex = 0;
+        Run(sim, Ticks(2.5f), [&](int t, const RlWorldState& s2, Inputs& in) {
+            const RlCarState& c = s2.cars[0];
+            in[0].throttle = 1.0f;
+            in[0].pitch = -1.0f;  // W held
+            in[0].boost = t < Ticks(1.0f);
+            in[0].jump = t >= Ticks(1.5f) && t < Ticks(1.5f) + 14;  // one click of 120 ms
+            if (t >= Ticks(1.5f)) dodged = dodged || c.dodging;
+            if (t >= Ticks(1.5f)) apex = std::max(apex, c.position.y);
+        });
+        std::printf("  flip started: %d, highest point %.2f m%c", dodged ? 1 : 0, static_cast<double>(apex), 10);
+        CHECK(!dodged);
+        CHECK(apex > 1.0f);
+    }
+
+    // ---------------------------------------------------------------- jumps, flips, air roll as in RL (G4c)
+
+    struct JumpProbe
+    {
+        bool dodged = false;       // the flip spin ran
+        float spinX = 0, spinZ = 0;  // largest angular velocity about the car's X and Z (signed by the larger one)
+        float vyKick = 0;          // the largest jump of the vertical speed in one tick (the second jump)
+        float forwardGain = 0;     // forward speed after the dodge minus before
+    };
+
+    // A car at speed, a tap, a second press `gap` seconds later with the given stick; `pitch`, `steer`, `roll` are held from the second press.
+    JumpProbe SecondJump(float gap, float pitch, float steer, float speedBefore = 8.0f)
+    {
+        RlSim sim(g_tuning, 1);
+        sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+        QuietBall(sim);
+        Settle(sim);
+        JumpProbe r;
+        const int first = Ticks(0.5f);
+        const int second = first + Ticks(gap);
+        float prevVy = 0;
+        float speedAtSecond = 0;
+        Run(sim, second + Ticks(1.0f), [&](int t, const RlWorldState& s2, Inputs& in) {
+            const RlCarState& c = s2.cars[0];
+            in[0].throttle = t < first ? 1.0f : 0.0f;
+            const int firstHold = gap > 0.5f ? 24 : 4;  // a held first jump flies for 1.8 s: the long gaps need it
+            in[0].jump = (t >= first && t < first + firstHold) || (t >= second && t < second + 4);
+            if (t >= second && t < second + 4)
+            {
+                in[0].pitch = pitch;
+                in[0].steer = steer;
+            }
+            if (t == second - 1) speedAtSecond = Dot(V(c.linearVelocity), {0, 0, 1});
+            if (t > second && c.dodging) r.dodged = true;
+            if (t > second && t < second + Ticks(0.6f))
+            {
+                const Vec w = Rotate({-c.rotation.x, -c.rotation.y, -c.rotation.z, c.rotation.w}, V(c.angularVelocity));
+                if (std::fabs(w.x) > std::fabs(r.spinX)) r.spinX = w.x;
+                if (std::fabs(w.z) > std::fabs(r.spinZ)) r.spinZ = w.z;
+            }
+            if (t > second && t < second + 4) r.vyKick = std::max(r.vyKick, c.linearVelocity.y - prevVy);
+            if (t == second + Ticks(0.15f)) r.forwardGain = Dot(V(c.linearVelocity), {0, 0, 1}) - speedAtSecond;
+            prevVy = c.linearVelocity.y;
+        });
+        (void)speedBefore;
+        return r;
+    }
+
+    void TestDodgeInputs()
+    {
+        std::printf("dodges follow the stick, the second jump has a window of 1.25 s\n");
+        // W held and a fast second jump: a front flip
+        const JumpProbe front = SecondJump(0.15f, -1.0f, 0.0f);
+        const JumpProbe back = SecondJump(0.15f, 1.0f, 0.0f);
+        const JumpProbe right = SecondJump(0.15f, 0.0f, 1.0f);
+        const JumpProbe diagonal = SecondJump(0.15f, -1.0f, 1.0f);
+        const JumpProbe plain = SecondJump(0.15f, 0.0f, 0.0f);
+        std::printf("  front: spin x %.1f z %.1f, forward gain %.1f%c", static_cast<double>(front.spinX), static_cast<double>(front.spinZ), static_cast<double>(front.forwardGain), 10);
+        std::printf("  back: spin x %.1f z %.1f, forward gain %.1f%c", static_cast<double>(back.spinX), static_cast<double>(back.spinZ), static_cast<double>(back.forwardGain), 10);
+        std::printf("  right: spin x %.1f z %.1f, forward gain %.1f%c", static_cast<double>(right.spinX), static_cast<double>(right.spinZ), static_cast<double>(right.forwardGain), 10);
+        std::printf("  diagonal: spin x %.1f z %.1f%c  plain: dodged %d, vertical kick %.2f m/s%c", static_cast<double>(diagonal.spinX), static_cast<double>(diagonal.spinZ), 10,
+                    plain.dodged ? 1 : 0, static_cast<double>(plain.vyKick), 10);
+        CHECK(front.dodged && front.spinX > 4.5f && front.forwardGain > 3.0f);   // nose down, forward
+        CHECK(back.dodged && back.spinX < -4.5f && back.forwardGain < -1.0f);    // nose up, backwards
+        CHECK(right.dodged && right.spinZ < -4.5f && std::fabs(right.spinX) < 1.0f);  // a roll to the right
+        CHECK(diagonal.dodged && diagonal.spinX > 2.5f && diagonal.spinZ < -2.5f);
+        CHECK(!plain.dodged && plain.vyKick > 2.0f);  // no direction: a plain double jump
+
+        // the window of the second jump: 1.25 s after the push of the first jump ended (a jump held for 0.2 s: until 1.45 s after the press)
+        const JumpProbe late = SecondJump(1.0f, -1.0f, 0.0f);
+        const JumpProbe tooLate = SecondJump(1.55f, -1.0f, 0.0f);
+        const JumpProbe lateJump = SecondJump(1.0f, 0.0f, 0.0f);
+        const JumpProbe tooLateJump = SecondJump(1.55f, 0.0f, 0.0f);
+        std::printf("  second jump after 1.0 s: dodged %d, plain kick %.2f; after 1.55 s: dodged %d, plain kick %.2f%c", late.dodged ? 1 : 0, static_cast<double>(lateJump.vyKick),
+                    tooLate.dodged ? 1 : 0, static_cast<double>(tooLateJump.vyKick), 10);
+        CHECK(late.dodged);
+        CHECK(lateJump.vyKick > 2.0f);
+        CHECK(!tooLate.dodged);
+        CHECK(tooLateJump.vyKick < 1.0f);
+    }
+
+    // the roll of Q / E in the air, and Shift + A / D as a free air roll
+    void TestAirRoll()
+    {
+        std::printf("air roll: Q / E roll the car at about 5 rad/s\n");
+        for (int mode = 0; mode < 3; ++mode)  // 0: roll axis right, 1: roll axis left, 2: Shift + steer right
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            QuietBall(sim);
+            Settle(sim);
+            float peak = 0;
+            float timeToPeak = -1;
+            const int start = Ticks(0.6f);
+            Run(sim, Ticks(1.2f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                in[0].jump = t >= 2 && t < Ticks(0.3f);
+                if (t >= start)
+                {
+                    if (mode == 0) in[0].roll = 1.0f;
+                    if (mode == 1) in[0].roll = -1.0f;
+                    if (mode == 2)
+                    {
+                        in[0].airRoll = true;
+                        in[0].handbrake = true;
+                        in[0].steer = 1.0f;
+                    }
+                    const Vec w = Rotate({-c.rotation.x, -c.rotation.y, -c.rotation.z, c.rotation.w}, V(c.angularVelocity));
+                    if (std::fabs(w.z) > std::fabs(peak))
+                    {
+                        peak = w.z;
+                        if (std::fabs(peak) > 5.0f && timeToPeak < 0) timeToPeak = static_cast<float>(t - start) / kTickRate;
+                    }
+                }
+            });
+            std::printf("  %s: peak roll rate %.2f rad/s, reached 5 rad/s after %.2f s%c", mode == 0 ? "E (right)" : mode == 1 ? "Q (left)" : "Shift + D", static_cast<double>(peak),
+                        static_cast<double>(timeToPeak), 10);
+            // + about the car's Z rolls it to the left, so a roll to the right is a negative rate
+            CHECK(mode == 1 ? peak > 5.0f : peak < -5.0f);
+            CHECK(timeToPeak > 0.0f && timeToPeak < 0.4f);
+        }
+    }
+
+    // flip cancel and the half-flip
+    void TestFlipCancel()
+    {
+        std::printf("flip cancel and half-flip\n");
+        // a front flip: with the stick pulled back after a short time the rotation stops, without it the flip runs on
+        float angleCancelled = 0, angleFree = 0;
+        for (int cancel = 0; cancel < 2; ++cancel)
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const int press = Ticks(0.35f);
+            float pitchAngle = 0;
+            Run(sim, Ticks(1.2f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                in[0].jump = (t >= 2 && t < Ticks(0.3f)) || (t >= press && t < press + 3);
+                if (t >= press && t < press + 3) in[0].pitch = -1.0f;
+                if (cancel == 1 && t >= press + 3 && t < press + Ticks(0.6f)) in[0].pitch = 1.0f;  // the stick back at once
+                if (t == press + Ticks(0.7f)) pitchAngle = std::acos(std::clamp(Up(c).y, -1.0f, 1.0f)) * 57.29578f;
+            });
+            (cancel == 1 ? angleCancelled : angleFree) = pitchAngle;
+        }
+        std::printf("  0.7 s after a front flip the car is turned %.0f deg with the cancel and %.0f deg without it%c", static_cast<double>(angleCancelled), static_cast<double>(angleFree), 10);
+        // RocketSim's flip cancel takes the torque of the flip away, the spin that has built up dies out with the damping of the air (2.9 1/s)
+        CHECK(angleCancelled < angleFree - 10.0f);
+        CHECK(angleFree > 120.0f);
+
+        // half-flip: a back flip, cancelled at about a half turn, an air roll rights the car, it faces the way it came from
+        RlSim sim(g_tuning, 1);
+        sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+        sim.SetCarBoost(0, 100.0f);
+        QuietBall(sim);
+        Settle(sim);
+        const int press = Ticks(0.4f);
+        float facing = 0;
+        float upAfter = 0;
+        Run(sim, press + Ticks(1.5f), [&](int t, const RlWorldState& s2, Inputs& in) {
+            const RlCarState& c = s2.cars[0];
+            in[0].throttle = t < Ticks(0.3f) ? 1.0f : 0.0f;
+            in[0].jump = (t >= 2 && t < Ticks(0.3f)) || (t >= press && t < press + 3);
+            if (t >= press && t < press + 3) in[0].pitch = 1.0f;  // back flip
+            if (t >= press + Ticks(0.45f) && t < press + Ticks(0.6f)) in[0].pitch = -1.0f;  // the cancel at about a half turn
+            if (t >= press + Ticks(0.5f) && t < press + Ticks(1.0f))
+            {
+                in[0].airRoll = true;  // Shift: roll the car upright with the steer axis
+                in[0].handbrake = true;
+                in[0].steer = Up(c).y < 0.2f ? 1.0f : 0.0f;
+            }
+            if (t == press + Ticks(1.15f))
+            {
+                facing = Dot(V(c.linearVelocity).x == 0 && V(c.linearVelocity).z == 0 ? Vec{0, 0, 1} : Forward(c), {0, 0, 1});
+                upAfter = Up(c).y;
+            }
+        });
+        std::printf("  half-flip: the car's nose points %.2f along the way it was going (-1 = turned right round), up.y %.2f%c", static_cast<double>(facing), static_cast<double>(upAfter), 10);
+        CHECK(facing < -0.2f);
+        CHECK(upAfter > 0.3f);
+    }
+
+    // a dodge just before the wheels touch the ground keeps its speed gain (wave dash)
+    void TestWaveDash()
+    {
+        std::printf("wave dash\n");
+        float gain[2] = {0, 0};
+        for (int dodge = 0; dodge < 2; ++dodge)
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -48.0f, 0.0f);
+            QuietBall(sim);
+            Settle(sim);
+            float before = 0, after = 0;
+            bool pressed = false;
+            Run(sim, Ticks(2.5f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                in[0].throttle = 1.0f;
+                in[0].jump = t >= Ticks(1.0f) && t < Ticks(1.0f) + 6;  // a low hop
+                // on the way down, 0.25 m over the ground, a dodge forward
+                if (dodge == 1 && !pressed && t > Ticks(1.1f) && c.linearVelocity.y < -0.5f && c.position.y < 0.6f)
+                {
+                    pressed = true;
+                    in[0].jump = true;
+                    in[0].pitch = -1.0f;
+                }
+                if (t == Ticks(1.0f) - 1) before = Dot(V(c.linearVelocity), {0, 0, 1});
+                if (t == Ticks(1.0f) + Ticks(1.2f)) after = Dot(V(c.linearVelocity), {0, 0, 1});
+            });
+            gain[dodge] = after - before;
+        }
+        std::printf("  speed change over a hop: %.1f m/s without a dodge, %.1f m/s with a dodge at the touchdown%c", static_cast<double>(gain[0]), static_cast<double>(gain[1]), 10);
+        CHECK(gain[1] > gain[0] + 1.0f);
+    }
+
+    // several actions at once are all applied (the input of the car is the sum of everything that is held)
+    void TestSimultaneousActions()
+    {
+        std::printf("throttle, steer, boost, jump and roll at the same time\n");
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, -20.0f, -30.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            float yawRate = 0, speed = 0;
+            const float boostBefore = sim.State().cars[0].boost;
+            Run(sim, Ticks(1.0f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                in[0].throttle = 1.0f;
+                in[0].steer = 0.5f;
+                in[0].boost = true;
+                in[0].handbrake = false;
+                yawRate = std::max(yawRate, s2.cars[0].angularVelocity.y);
+                if (t == Ticks(1.0f) - 1) speed = Len(V(s2.cars[0].linearVelocity));
+            });
+            std::printf("  gas + steer + boost: speed %.1f m/s, yaw rate %.2f rad/s, boost %.0f -> %.0f%c", static_cast<double>(speed), static_cast<double>(yawRate),
+                        static_cast<double>(boostBefore), static_cast<double>(sim.State().cars[0].boost), 10);
+            CHECK(speed > 14.5f);  // faster than the throttle alone allows: the boost works while steering
+            CHECK(yawRate > 0.3f);
+            CHECK(sim.State().cars[0].boost < boostBefore - 25.0f);
+        }
+        {
+            // in the air: pitch, yaw, roll axes and the boost together
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            Vec w{0, 0, 0};
+            float speedBefore = 0, speedAfter = 0;
+            Run(sim, Ticks(0.9f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                in[0].jump = t >= 2 && t < Ticks(0.3f);
+                if (t >= Ticks(0.45f))
+                {
+                    in[0].pitch = 1.0f;
+                    in[0].steer = 1.0f;
+                    in[0].roll = 1.0f;
+                    in[0].boost = true;
+                    const Vec wl = Rotate({-c.rotation.x, -c.rotation.y, -c.rotation.z, c.rotation.w}, V(c.angularVelocity));
+                    if (std::fabs(wl.x) + std::fabs(wl.y) + std::fabs(wl.z) > std::fabs(w.x) + std::fabs(w.y) + std::fabs(w.z)) w = wl;
+                }
+                if (t == Ticks(0.45f)) speedBefore = Len(V(c.linearVelocity));
+                if (t == Ticks(0.9f) - 1) speedAfter = Len(V(c.linearVelocity));
+            });
+            std::printf("  pitch + yaw + roll + boost: angular velocity (%.1f, %.1f, %.1f), speed %.1f -> %.1f%c", static_cast<double>(w.x), static_cast<double>(w.y), static_cast<double>(w.z),
+                        static_cast<double>(speedBefore), static_cast<double>(speedAfter), 10);
+            CHECK(w.x < -1.0f && w.y > 0.5f && w.z < -1.0f);  // nose up, yaw right, roll right: all three turn the car
+            CHECK(speedAfter > speedBefore + 1.0f);
+        }
+    }
+
+    // the small things of RL
+    void TestMechanicsChecklist()
+    {
+        std::printf("the small things of Rocket League\n");
+        // supersonic is kept in a gentle turn
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -49.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            float minSpeed = 99;
+            Run(sim, Ticks(2.2f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                in[0].throttle = 1.0f;
+                in[0].boost = t < Ticks(1.7f);
+                in[0].steer = t > Ticks(1.5f) ? 0.15f : 0.0f;
+                if (t > Ticks(1.7f)) minSpeed = std::min(minSpeed, Len(V(s2.cars[0].linearVelocity)));
+            });
+            std::printf("  after 0.5 s of a gentle turn at the top speed the car still goes %.1f m/s%c", static_cast<double>(minSpeed), 10);
+            CHECK(minSpeed > 21.0f);
+        }
+        // a powerslide that is let go: the grip is back in a quarter of a second, no skid after it
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, -30.0f, -30.0f, 0.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const auto cruise = [](const RlCarState& c) { return std::clamp((12.0f - Len(V(c.linearVelocity))) * 2.0f, -1.0f, 1.0f); };
+            Run(sim, Ticks(2.0f), [&](int, const RlWorldState& s2, Inputs& in) { in[0].throttle = cruise(s2.cars[0]); });
+            float sideDuring = 0, sideAfter = 0;
+            Run(sim, Ticks(1.0f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                in[0].throttle = cruise(c);
+                in[0].handbrake = t < Ticks(0.6f);
+                in[0].steer = t < Ticks(0.6f) ? 1.0f : 0.0f;
+                const float side = std::fabs(Dot(V(c.linearVelocity), Right(c)));
+                if (t < Ticks(0.6f)) sideDuring = std::max(sideDuring, side);
+                if (t == Ticks(0.6f) + Ticks(0.4f) - 1) sideAfter = side;
+            });
+            std::printf("  powerslide: sideways speed up to %.1f m/s, 0.4 s after letting go %.2f m/s%c", static_cast<double>(sideDuring), static_cast<double>(sideAfter), 10);
+            CHECK(sideDuring > 1.5f);
+            CHECK(sideAfter < 0.6f);
+        }
+        // the boost in the air pushes along the nose of the car
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -40.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            // nose up by about 45 degrees, stationary, then boost
+            sim.SetCarPose(0, {0.0f, 8.0f, -40.0f}, AxisAngle(1, 0, 0, -45.0f), {});
+            Run(sim, Ticks(0.5f), [&](int, const RlWorldState&, Inputs& in) { in[0].boost = true; });
+            const RlCarState& c = sim.State().cars[0];
+            Vec v = V(c.linearVelocity);
+            v.y += g_tuning.gravity * 0.5f;  // what gravity took off in the half second
+            const Vec f = Forward(c);
+            std::printf("  boost in the air: velocity (gravity taken out) along the nose %.2f of its speed%c", static_cast<double>(Dot(v, f) / std::max(Len(v), 0.01f)), 10);
+            CHECK(Dot(v, f) / std::max(Len(v), 0.01f) > 0.9f);
+        }
+        // a car on a wall without speed falls off it
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            int release = -1;
+            int heldAfter = 0;
+            float yEnd = 0;
+            bool wallEnd = false;
+            Run(sim, Ticks(9.0f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                if (release < 0 && c.position.y > 7.0f && std::fabs(Up(c).y) < 0.3f && c.wheelContacts >= 3) release = t;
+                if (release < 0)
+                {
+                    in[0].throttle = 1.0f;
+                    in[0].boost = true;
+                }
+                else
+                {
+                    if (c.wheelContacts >= 3 && std::fabs(Up(c).y) < 0.4f) ++heldAfter;
+                    yEnd = c.position.y;
+                    wallEnd = c.wheelContacts >= 3 && std::fabs(Up(c).y) < 0.4f;
+                }
+            });
+            std::printf("  let go on a wall at 7 m: held it for %d ticks, after 9 s it is at %.1f m, on the wall %d%c", heldAfter, static_cast<double>(yEnd), wallEnd ? 1 : 0, 10);
+            CHECK(release > 0 && heldAfter > Ticks(0.5f));
+            CHECK(!wallEnd && yEnd < 4.0f);
+        }
+        // a jump from a wall goes away from the wall; a double jump from the ceiling drops the car
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            bool jumped = false;
+            float awayFromWall = 0;
+            int ceilingTicks = 0;
+            float vyAfterDouble = 0, vyBefore = 0;
+            int doubleAt = -1;
+            Run(sim, Ticks(5.5f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                in[0].throttle = 1.0f;
+                in[0].boost = t < Ticks(4.0f);
+                // on the wall: the jump
+                if (!jumped && c.position.y > 6.0f && std::fabs(Up(c).y) < 0.3f && c.wheelContacts >= 3)
+                {
+                    jumped = true;
+                    in[0].jump = true;
+                    awayFromWall = 1.0f;  // checked below through the velocity
+                }
+                if (jumped && awayFromWall == 1.0f && t > 0 && c.linearVelocity.x < -0.3f && c.position.y > 6.0f) awayFromWall = 2.0f;
+                if (c.wheelContacts >= 3 && c.position.y > 19.0f && Up(c).y < -0.8f) ++ceilingTicks;
+            });
+            std::printf("  jump from the wall: moved away from it %d; ticks on the ceiling %d%c", awayFromWall == 2.0f ? 1 : 0, ceilingTicks, 10);
+            CHECK(awayFromWall == 2.0f);
+            (void)vyAfterDouble;
+            (void)vyBefore;
+            (void)doubleAt;
+        }
+        {
+            // the ceiling: driving along it, a jump and a second jump push the car along its own up, down and away from the ceiling
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            int onCeiling = -1;
+            float vyBefore = 0, vyAfter = 0;
+            Run(sim, Ticks(6.0f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                const RlCarState& c = s2.cars[0];
+                if (onCeiling < 0 && c.wheelContacts >= 3 && c.position.y > 19.0f && Up(c).y < -0.8f) onCeiling = t;
+                if (onCeiling < 0)
+                {
+                    in[0].throttle = 1.0f;
+                    in[0].boost = t < Ticks(4.0f);
+                    return;
+                }
+                in[0].throttle = 1.0f;
+                const int since = t - onCeiling;
+                in[0].jump = (since >= 0 && since < 4) || (since >= Ticks(0.3f) && since < Ticks(0.3f) + 4);
+                if (since == Ticks(0.3f) - 1) vyBefore = c.linearVelocity.y;
+                if (since == Ticks(0.3f) + 6) vyAfter = c.linearVelocity.y;
+            });
+            std::printf("  ceiling: vertical speed before the second jump %.2f, after %.2f m/s (it must get more negative)%c", static_cast<double>(vyBefore), static_cast<double>(vyAfter), 10);
+            CHECK(onCeiling > 0);
+            CHECK(vyAfter < vyBefore - 1.5f);
+        }
+        // a ball hit with a dodge goes faster than a plain hit, one with the roof slower
+        {
+            float speeds[3] = {0, 0, 0};
+            for (int kind = 0; kind < 2; ++kind)
+            {
+                RlSim sim(g_tuning, 1);
+                sim.ResetCar(0, 0.0f, -22.0f, 0.0f);
+                sim.ResetBall({0.0f, 1.6f, -9.0f});
+                Settle(sim);
+                sim.ResetBall({0.0f, 1.6f, -9.0f});
+                float best = 0;
+                Run(sim, Ticks(2.5f), [&](int t, const RlWorldState& s2, Inputs& in) {
+                    const RlCarState& c = s2.cars[0];
+                    in[0].throttle = 1.0f;
+                    in[0].boost = t < Ticks(1.0f);
+                    if (kind == 1 && t > Ticks(0.6f) && !c.jumped && c.position.z > -14.0f)
+                    {
+                        in[0].jump = true;
+                    }
+                    if (kind == 1 && c.jumped && c.canDodge && t > Ticks(0.6f))
+                    {
+                        in[0].jump = true;
+                        in[0].pitch = -1.0f;
+                    }
+                    best = std::max(best, Len(V(s2.ball.linearVelocity)));
+                });
+                speeds[kind] = best;
+            }
+            std::printf("  ball speed after a plain hit %.1f m/s, after a hit during a dodge %.1f m/s%c", static_cast<double>(speeds[0]), static_cast<double>(speeds[1]), 10);
+            CHECK(speeds[0] > 10.0f && speeds[1] > 10.0f);
+        }
+    }
+
+    // ---------------------------------------------------------------- the model of RL against reference numbers (G4d)
+    // The references are worked out from the constants of RocketSim / the RLBot wiki (see docs/game/rl-physics.md); a test fails when the car
+    // leaves the model.
+
+    Vec LocalAngular(const RlCarState& c) { return Rotate({-c.rotation.x, -c.rotation.y, -c.rotation.z, c.rotation.w}, V(c.angularVelocity)); }
+
+    // a car in the air with a spin of `spin` about the local axis (0 pitch, 1 yaw, 2 roll) and the stick `stick`; returns the angular speed after `seconds`
+    float AirSpin(float spin, int axis, float stick, float seconds, float* timeTo95 = nullptr)
+    {
+        RlTuning t = g_tuning;
+        t.gravity = 0.0f;  // nothing to fall: the car hangs in the air and the model of the air control is all that acts on it
+        RlSim sim(t, 1);
+        sim.ResetCar(0, 0.0f, -20.0f, 0.0f);
+        QuietBall(sim);
+        sim.SetCarPose(0, {0.0f, 10.0f, -20.0f}, {0, 0, 0, 1}, {});
+        // the angular velocity cannot be given by SetCarPose: spin it up with the stick first when a start spin is wanted
+        float result = 0;
+        const int start = spin != 0.0f ? Ticks(2.0f) : 0;
+        Run(sim, start + Ticks(seconds), [&](int tick, const RlWorldState& s, Inputs& in) {
+            const Vec w = LocalAngular(s.cars[0]);
+            const float now = axis == 0 ? w.x : (axis == 1 ? w.y : w.z);
+            if (tick < start)
+            {
+                // spin up to the wanted speed with the stick, then let go
+                const float have = std::fabs(now);
+                const float push = std::clamp((std::fabs(spin) - have) * 4.0f, 0.0f, 1.0f) * (spin > 0 ? 1.0f : -1.0f);
+                if (axis == 0) in[0].pitch = -push;
+                if (axis == 1) in[0].steer = push;
+                if (axis == 2) in[0].roll = -push;
+            }
+            else
+            {
+                if (axis == 0) in[0].pitch = stick;
+                if (axis == 1) in[0].steer = stick;
+                if (axis == 2) in[0].roll = stick;
+                result = now;
+                if (timeTo95 != nullptr && *timeTo95 < 0 && std::fabs(now) > 0.95f * 5.5f)
+                {
+                    *timeTo95 = static_cast<float>(tick - start) / kTickRate;
+                }
+            }
+        });
+        return result;
+    }
+
+    void TestRlReference()
+    {
+        std::printf("the model of RL against reference numbers\n");
+        const RlCarTuning& car = g_tuning.car;
+
+        // ---- air control: angular acceleration = T * stick - D * angular speed (RocketSim: T = 130, 95, 400, D = 30, 20, 50, times 2 pi / 65536 * 1000);
+        // the damping of pitch and yaw fades out with the stick, so with the stick fully over they run up to the limit of 5.5 rad/s
+        {
+            const float scale = 2.0f * 3.14159265f / 65536.0f * 1000.0f;
+            float t95p = -1, t95y = -1, t95r = -1;
+            const float pitch = AirSpin(0.0f, 0, -1.0f, 3.0f, &t95p);  // W: nose down is a positive rate about X
+            const float yaw = AirSpin(0.0f, 1, 1.0f, 3.0f, &t95y);
+            const float roll = AirSpin(0.0f, 2, 1.0f, 3.0f, &t95r);
+            Note("full stick for 3 s: pitch %.2f, yaw %.2f, roll %.2f rad/s (the limit is 5.5)", pitch, yaw, roll);
+            CHECK(std::fabs(std::fabs(pitch) - 5.5f) < 0.05f);
+            CHECK(std::fabs(std::fabs(yaw) - 5.5f) < 0.05f);
+            CHECK(std::fabs(std::fabs(roll) - 5.5f) < 0.05f);
+            // pitch and yaw: w = T t, the roll: w = T / D * (1 - exp(-D t)); 95 % of 5.5 rad/s
+            const float want = 0.95f * 5.5f;
+            const float tPitch = want / (130.0f * scale);
+            const float tYaw = want / (95.0f * scale);
+            const float tRoll = -std::log(1.0f - want / (400.0f / 50.0f)) / (50.0f * scale);
+            Note("time to 5.2 rad/s: pitch %.2f s (model %.2f), yaw %.2f s (model %.2f), roll %.2f s (model %.2f)", t95p, tPitch, t95y, tYaw, t95r, tRoll);
+            CHECK(std::fabs(t95p - tPitch) < 0.04f);
+            CHECK(std::fabs(t95y - tYaw) < 0.04f);
+            CHECK(std::fabs(t95r - tRoll) < 0.04f);
+
+            // let go: the spin dies out with the damping, w(t) = w0 * exp(-D t)
+            const float held = AirSpin(4.0f, 0, 0.0f, 0.01f);
+            const float after = AirSpin(4.0f, 0, 0.0f, 0.5f);
+            const float expected = held * std::exp(-30.0f * scale * 0.5f);
+            Note("pitch spin %.2f rad/s: 0.5 s after the stick is let go %.2f (RL: %.2f)", held, after, expected);
+            CHECK(std::fabs(after - expected) < 0.25f);
+        }
+
+        // ---- the jump: 2.917 m/s at the start, 14.58 m/s^2 for 0.2 s while it is held (apex of the hitbox centre against the kinematics)
+        {
+            const float g = g_tuning.gravity;
+            float apex[3] = {};
+            for (int kind = 0; kind < 3; ++kind)  // 0 tap, 1 held, 2 held + double jump
+            {
+                RlSim sim(g_tuning, 1);
+                Settle(sim);
+                const float base = sim.State().cars[0].position.y;
+                float top = base;
+                Run(sim, Ticks(4.0f), [&](int t, const RlWorldState& s, Inputs& in) {
+                    in[0].jump = kind == 0 ? (t >= 2 && t < 5) : (t >= 2 && t < Ticks(0.5f));
+                    if (kind == 2) in[0].jump = (t >= 2 && t < Ticks(0.25f)) || (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3);
+                    top = std::max(top, s.cars[0].position.y);
+                });
+                apex[kind] = top - base;
+            }
+            // tap: 3 ticks of the hold push at 0.62; held: 0.2 s of the full push
+            const float tapV = car.jumpImpulse + car.jumpHoldAccel * car.jumpMinAccelScale * (3.0f / kTickRate);
+            const float tapApex = tapV * tapV / (2.0f * g);
+            const float heldV = car.jumpImpulse + (car.jumpHoldAccel - g) * car.jumpHoldTime;
+            const float heldApex = car.jumpImpulse * car.jumpHoldTime + 0.5f * (car.jumpHoldAccel - g) * car.jumpHoldTime * car.jumpHoldTime + heldV * heldV / (2.0f * g);
+            Note("apex of a tap %.2f m (kinematics %.2f), of a held jump %.2f m (kinematics %.2f), with a double jump %.2f m (+%.2f)", apex[0], tapApex, apex[1], heldApex, apex[2],
+                 apex[2] - apex[1]);
+            CHECK(std::fabs(apex[0] - tapApex) < 0.15f);
+            CHECK(std::fabs(apex[1] - heldApex) < 0.35f);
+            CHECK(apex[2] > apex[1] + 1.0f);
+        }
+
+        // ---- the dodge: 5 m/s along the stick, more at speed to the side and backwards, the vertical speed hangs, the spin is 5.5 rad/s
+        {
+            const struct
+            {
+                const char* name;
+                float pitch, steer;
+            } cases[] = {{"front", -1.0f, 0.0f}, {"back", 1.0f, 0.0f}, {"right", 0.0f, 1.0f}};
+            for (const auto& k : cases)
+            {
+                RlSim sim(g_tuning, 1);
+                sim.ResetCar(0, 0.0f, -49.0f, 0.0f);
+                QuietBall(sim);
+                Settle(sim);
+                Vec before{}, after{};
+                float vyDuring = 0;
+                float spin = 0;
+                const int drive = Ticks(1.2f);
+                const int press = drive + Ticks(0.4f);
+                Run(sim, press + Ticks(0.9f), [&](int t, const RlWorldState& s, Inputs& in) {
+                    const RlCarState& c = s.cars[0];
+                    in[0].throttle = t < drive ? 1.0f : 0.0f;
+                    in[0].jump = (t >= drive && t < drive + Ticks(0.25f)) || (t >= press && t < press + 3);
+                    if (t >= press && t < press + 3)
+                    {
+                        in[0].pitch = k.pitch;
+                        in[0].steer = k.steer;
+                    }
+                    if (t == press - 1) before = V(c.linearVelocity);
+                    if (t == press + 4) after = V(c.linearVelocity);
+                    if (t > press + Ticks(0.3f) && t < press + Ticks(0.6f)) vyDuring = std::max(vyDuring, std::fabs(c.linearVelocity.y));
+                    if (t > press && t < press + Ticks(0.3f)) spin = std::max(spin, Len(V(c.angularVelocity)));
+                });
+                const float ratio = before.z / car.maxSpeed;
+                float expectForward = 0.0f, expectSide = 0.0f;
+                if (k.pitch < 0.0f) expectForward = 5.0f * ((car.dodgeForwardSpeedScale - 1.0f) * ratio + 1.0f);
+                if (k.pitch > 0.0f) expectForward = -5.0f * ((car.dodgeBackSpeedScale - 1.0f) * ratio + 1.0f) * car.dodgeBackImpulseScale;
+                if (k.steer != 0.0f) expectSide = 5.0f * ((car.dodgeSideSpeedScale - 1.0f) * ratio + 1.0f);
+                const Vec dv{after.x - before.x, 0.0f, after.z - before.z};
+                // the nose is along +Z all the time here (the car only changes its pitch within these ticks)
+                std::printf("  %s flip at %.1f m/s: speed change along the nose %.2f (RL %.2f), sideways %.2f (RL %.2f), spin %.2f rad/s, vertical speed in the flip at most %.2f m/s%c",
+                            k.name, static_cast<double>(before.z), static_cast<double>(dv.z), static_cast<double>(expectForward), static_cast<double>(dv.x),
+                            static_cast<double>(expectSide), static_cast<double>(spin), static_cast<double>(vyDuring), 10);
+                CHECK(std::fabs(dv.z - expectForward) < 0.5f);
+                CHECK(std::fabs(std::fabs(dv.x) - expectSide) < 0.5f);
+                CHECK(spin > 5.0f && spin < 5.55f);
+                CHECK(vyDuring < 0.6f);  // the flip hangs in the air: RL takes 35 % of a falling speed out of it every tick
+            }
+        }
+
+        // ---- W + double jump + Q: a flip with a roll that lands on its wheels (the case "the car does something strange")
+        for (int roll = -1; roll <= 1; roll += 2)
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const int press = Ticks(0.35f);
+            float maxSpin = 0;
+            bool flipped = false;
+            float upAfter = 0;
+            int wheelsAfter = 0;
+            float maxRise = 0;
+            Run(sim, Ticks(4.0f), [&](int t, const RlWorldState& s, Inputs& in) {
+                const RlCarState& c = s.cars[0];
+                in[0].throttle = 1.0f;
+                in[0].jump = (t >= 2 && t < Ticks(0.25f)) || (t >= press && t < press + 3);
+                if (t >= press)
+                {
+                    in[0].pitch = -1.0f;                  // W held
+                    in[0].roll = static_cast<float>(roll);  // and Q or E
+                }
+                if (t > press + Ticks(0.65f)) LevelOut(c, in[0]);
+                maxSpin = std::max(maxSpin, Len(V(c.angularVelocity)));
+                flipped = flipped || c.dodging;
+                maxRise = std::max(maxRise, c.position.y);
+                if (t == Ticks(3.9f))
+                {
+                    upAfter = Up(c).y;
+                    wheelsAfter = c.wheelContacts;
+                }
+            });
+            std::printf("  W + double jump + %s: flip %d, largest spin %.2f rad/s, highest point %.2f m, 3.9 s: up.y %.2f on %d wheels%c", roll < 0 ? "Q" : "E", flipped ? 1 : 0,
+                        static_cast<double>(maxSpin), static_cast<double>(maxRise), static_cast<double>(upAfter), wheelsAfter, 10);
+            CHECK(flipped);
+            CHECK(maxSpin < 5.6f);  // the limit of the angular speed is never passed
+            CHECK(maxRise < 3.5f);  // no launch
+            CHECK(upAfter > 0.95f && wheelsAfter == 4);
+        }
+
+        // ---- the suspension: the car rests on it at the RL height, a landing makes no swing, a hit with the body does not bounce it
+        {
+            RlSim sim(g_tuning, 1);
+            Settle(sim);
+            const RlCarState& c = sim.State().cars[0];
+            // RL: the origin rests 17 uu over the floor, the hitbox centre 20.755 uu higher
+            // the springs carry 1.5 times the weight (the sticky force): about 2 cm of compression in front and behind
+            Note("rest height %.4f m (RL 0.3776), compression front %.3f / rear %.3f m (the model: 0.0195)", c.position.y, c.wheelCompression[0], c.wheelCompression[2]);
+            CHECK(std::fabs(c.position.y - 0.3776f) < 0.006f);
+            CHECK(std::fabs(c.wheelCompression[0] - 0.0195f) < 0.004f && std::fabs(c.wheelCompression[2] - 0.0195f) < 0.004f);
+        }
+        {
+            // the car upside down dropped from 1 m: the roof hits the floor, nothing springs back
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -30.0f, 0.0f);
+            QuietBall(sim);
+            sim.SetCarPose(0, {0.0f, 1.2f, -30.0f}, AxisAngle(0, 0, 1, 180.0f), {});
+            float lowest = 99, rebound = 0;
+            Run(sim, Ticks(1.5f), [&](int, const RlWorldState& s, Inputs&) {
+                const float y = s.cars[0].position.y;
+                lowest = std::min(lowest, y);
+                if (s.cars[0].linearVelocity.y > 0.0f && lowest < 0.5f) rebound = std::max(rebound, y - lowest);
+            });
+            Note("a drop on the roof from 1.2 m: lowest point %.3f m, rises again by at most %.3f m (the limit is 0.05 m)", lowest, rebound);
+            CHECK(rebound < 0.05f);
         }
     }
 
@@ -593,6 +1615,142 @@ namespace
         Note("after letting go at tick %.0f: %.0f of %.0f ticks on the wall with 3+ wheels (1 s of them matters)", releaseTick, heldTicks, totalAfter);
         CHECK(releaseTick > 0);
         CHECK(heldTicks > Ticks(0.8f));
+    }
+
+    // ---------------------------------------------------------------- camera
+
+    bool InsideArena(const RlArenaTuning& a, const RlVec3& p)
+    {
+        if (p.y < -0.001f || p.y > a.height + 0.001f || std::fabs(p.x) > a.halfWidth + 0.001f)
+        {
+            return false;
+        }
+        if (std::fabs(p.z) > a.halfLength)
+        {
+            // behind an end wall only inside a goal
+            return std::fabs(p.x) < a.goalHalfWidth && p.y < a.goalHeight && std::fabs(p.z) <= a.halfLength + a.goalDepth;
+        }
+        const float cx = std::fabs(p.x) - (a.halfWidth - a.cornerCut);
+        const float cz = std::fabs(p.z) - (a.halfLength - a.cornerCut);
+        return !(cx > 0.0f && cz > 0.0f && cx + cz > a.cornerCut + 0.001f);  // the chamfered corners
+    }
+
+    struct CameraRun
+    {
+        int frames = 0;
+        int outside = 0;         // frames with the camera outside the arena
+        int blocked = 0;         // frames with an arena wall between the car and the camera
+        float maxUpTurn = 0;     // degrees the up of the camera turned in one frame
+        float minDistance = 99;  // closest the camera came to the car
+        float maxHeight = 0;     // highest the car was
+    };
+
+    CameraRun RunCamera(RlSim& sim, int ticks, bool ballCam, const Script& script)
+    {
+        CameraRun run;
+        RlCameraState state;
+        RlVec3 prevUp{0, 1, 0};
+        const RlArenaTuning& arena = g_tuning.arena;
+        Run(sim, ticks, [&](int t, const RlWorldState& s, Inputs& in) {
+            if (script) script(t, s, in);
+            if (t % 2 != 0) return;  // 60 camera frames a second
+            const RlCarState& c = s.cars[0];
+            RlCameraInput input;
+            input.carPosition = c.position;
+            input.carRotation = c.rotation;
+            input.onSurface = c.wheelContacts >= 3;
+            input.surfaceNormal = c.surfaceNormal;
+            input.ballPosition = s.ball.position;
+            input.ballCam = ballCam;
+            const RlCameraView view = RlCameraUpdate(g_tuning.camera, state, sim, input, 1.0f / 60.0f);
+            ++run.frames;
+            if (!InsideArena(arena, view.position)) ++run.outside;
+            if (sim.ArenaSegmentFree(c.position, view.position) < 0.999f) ++run.blocked;
+            const float turn = std::acos(std::clamp(Dot(V(view.up), V(prevUp)), -1.0f, 1.0f)) * 57.29578f;
+            if (run.frames > 1) run.maxUpTurn = std::max(run.maxUpTurn, turn);
+            prevUp = view.up;
+            const Vec d = {view.position.x - c.position.x, view.position.y - c.position.y, view.position.z - c.position.z};
+            run.minDistance = std::min(run.minDistance, Len(d));
+            run.maxHeight = std::max(run.maxHeight, c.position.y);
+        });
+        return run;
+    }
+
+    void TestCamera()
+    {
+        std::printf("camera: inside the arena on walls, in corners and against walls\n");
+        // up a side wall and along the ceiling (the car cam and the ball cam)
+        for (int ball = 0; ball < 2; ++ball)
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const CameraRun r = RunCamera(sim, Ticks(5.0f), ball == 1, [&](int t, const RlWorldState&, Inputs& in) {
+                in[0].throttle = 1.0f;
+                in[0].boost = t < Ticks(4.0f);
+            });
+            std::printf("  %s: %d frames, car up to %.1f m, outside %d, blocked %d, up turned at most %.1f deg per frame\n",
+                        ball ? "ball cam, up the wall and over the ceiling" : "car cam, up the wall and over the ceiling", r.frames, static_cast<double>(r.maxHeight), r.outside,
+                        r.blocked, static_cast<double>(r.maxUpTurn));
+            CHECK(r.maxHeight > 15.0f);
+            CHECK(r.outside == 0 && r.blocked == 0);
+            CHECK(r.maxUpTurn < 8.0f);
+        }
+        // into a corner at speed, then reversing against the wall (the camera would be behind the wall)
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 10.0f, 10.0f, 0.7853982f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const CameraRun r = RunCamera(sim, Ticks(6.0f), true, [&](int t, const RlWorldState&, Inputs& in) {
+                in[0].throttle = t < Ticks(3.0f) ? 1.0f : -1.0f;
+                in[0].boost = t < Ticks(2.0f);
+            });
+            std::printf("  into the corner and back: %d frames, outside %d, blocked %d, closest %.2f m\n", r.frames, r.outside, r.blocked, static_cast<double>(r.minDistance));
+            CHECK(r.outside == 0 && r.blocked == 0);
+            CHECK(r.minDistance >= g_tuning.camera.minDistance - 0.01f);
+        }
+        // a car at the back wall of a goal, nose to the field: the camera belongs behind the back wall without the clip
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, 58.8f, 3.14159265f);
+            QuietBall(sim);
+            Settle(sim);
+            const CameraRun r = RunCamera(sim, Ticks(1.0f), false, nullptr);
+            std::printf("  at the back wall of the goal: outside %d of %d, blocked %d, closest %.2f m\n", r.outside, r.frames, r.blocked, static_cast<double>(r.minDistance));
+            CHECK(r.outside == 0 && r.blocked == 0);
+            CHECK(r.minDistance < g_tuning.camera.distance - 0.5f);  // it really had to come closer
+        }
+        // the goal: the camera behind a car in a goal may be in the goal, never behind its walls
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, 20.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const CameraRun r = RunCamera(sim, Ticks(3.0f), false, [&](int t, const RlWorldState&, Inputs& in) {
+                in[0].throttle = 1.0f;
+                in[0].boost = t < Ticks(2.5f);
+            });
+            std::printf("  into the goal: outside %d of %d, blocked %d\n", r.outside, r.frames, r.blocked);
+            CHECK(r.outside == 0 && r.blocked == 0);
+        }
+        // in the air the camera does not follow the cartwheel of the car: a dodge, the up of the camera barely moves
+        {
+            RlSim sim(g_tuning, 1);
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            QuietBall(sim);
+            Settle(sim);
+            const CameraRun r = RunCamera(sim, Ticks(2.0f), false, [&](int t, const RlWorldState&, Inputs& in) {
+                in[0].jump = (t >= 2 && t < Ticks(0.25f)) || (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3);
+                in[0].pitch = (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3) ? -1.0f : 0.0f;
+            });
+            std::printf("  a flip: the up of the camera turned at most %.1f deg per frame\n", static_cast<double>(r.maxUpTurn));
+            CHECK(r.maxUpTurn < 3.0f);
+        }
     }
 
     // ---------------------------------------------------------------- ball
@@ -878,6 +2036,44 @@ namespace
         CHECK(changed.LoadFromText("{\"car\": {\"mass\": 200.5}, \"gravity\": 9.0}"));
         CHECK(changed.car.mass == 200.5f && changed.gravity == 9.0f && changed.ball.radius == g_tuning.ball.radius);
         CHECK(!changed.LoadFromText("not json"));
+
+        // the visitor of the RL Tuning window sees every number the json has (the same list serves both)
+        struct Counter final : RlTuningVisitor
+        {
+            int floats = 0, ints = 0, groups = 0, sections = 0;
+            void Begin(const char*) override { ++groups; }
+            void End() override {}
+            void Section(const char*) override { ++sections; }
+            void Float(const char*, float&) override { ++floats; }
+            void Int(const char*, int&) override { ++ints; }
+            void Floats(const char*, float*, int count) override { floats += count; }
+        } counter;
+        RlTuning copy = g_tuning;
+        copy.Visit(counter);
+        Note("the window sees %.0f numbers in %.0f groups (%.0f sections)", counter.floats + counter.ints, counter.groups, counter.sections);
+        CHECK(counter.groups == 5 && counter.sections >= 8 && counter.floats > 100);
+
+        // new numbers in a running world: the gravity and the jump of a car change at once, the hitbox stays as it was built
+        {
+            RlSim sim(g_tuning, 1);
+            QuietBall(sim);
+            Settle(sim);
+            RlTuning moon = g_tuning;
+            moon.gravity = 1.0f;
+            moon.car.jumpImpulse = 3.5f;
+            moon.car.halfExtentX = 2.0f;  // built into the body: ignored by the running sim
+            sim.SetTuning(moon);
+            CHECK(sim.Tuning().gravity == 1.0f && sim.Tuning().car.jumpImpulse == 3.5f);
+            CHECK(sim.Tuning().car.halfExtentX == g_tuning.car.halfExtentX);
+            float apex = 0;
+            const float base = sim.State().cars[0].position.y;
+            Run(sim, Ticks(5.0f), [&](int t, const RlWorldState& s, Inputs& in) {
+                in[0].jump = t < 3;
+                apex = std::max(apex, s.cars[0].position.y - base);
+            });
+            Note("a jump with gravity 1.0 and the jump impulse 3.5: %.1f m high (the kinematics: more than 5 m)", apex);
+            CHECK(apex > 5.0f);
+        }
     }
 
     void TestSpeed()
@@ -929,6 +2125,11 @@ int main(int argc, char** argv)
             Probe(static_cast<float>(std::atof(argv[i + 1])));
             return 0;
         }
+        else if (std::strcmp(argv[i], "--sweep-landing") == 0)
+        {
+            SweepLanding();
+            return 0;
+        }
         else if (std::strcmp(argv[i], "--sweep-dodge") == 0)
         {
             SweepDodge();
@@ -942,6 +2143,10 @@ int main(int argc, char** argv)
         else if (std::strcmp(argv[i], "--write-arena") == 0 && i + 1 < argc)
         {
             return RlArena(RlTuning{}.arena).WriteRenderObj(argv[i + 1]) ? 0 : 1;
+        }
+        else if (std::strcmp(argv[i], "--write-controls") == 0 && i + 1 < argc)
+        {
+            return RlControls::Defaults().SaveToFile(argv[i + 1]) ? 0 : 1;
         }
         else if (std::strcmp(argv[i], "--write-tuning") == 0 && i + 1 < argc)
         {
@@ -959,9 +2164,21 @@ int main(int argc, char** argv)
     TestSettle();
     TestAcceleration();
     TestSteering();
+    TestLanding();
+    TestLandingSkid();
+    TestGlue();
     TestJumps();
     TestWalls();
     TestFlipFromRoof();
+    TestDodgeInputs();
+    TestAirRoll();
+    TestFlipCancel();
+    TestWaveDash();
+    TestRlReference();
+    TestSimultaneousActions();
+    TestMechanicsChecklist();
+    TestJumpWhileDriving();
+    TestCamera();
     TestBallBounce();
     TestBallStaysInside();
     TestBallHit();

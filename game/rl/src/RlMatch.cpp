@@ -209,6 +209,10 @@ namespace rl
             }
             sim->Step(effective);
             events = sim->LastEvents();
+            if (events.ballHits > 0 && sim->State().lastBallToucher >= 0)
+            {
+                ++m.touches[sim->State().lastBallToucher];
+            }
 
             // a car that was just demolished comes back at one of the respawn spots of its team
             const RlWorldState& now = sim->State();
@@ -317,6 +321,10 @@ namespace rl
                 m.lastGoalTeam = team;
                 m.lastGoalScorer = state.lastBallToucher;
                 m.lastGoalOwn = (state.lastBallToucher >= 0 && TeamOf(state.lastBallToucher) != team) ? 1 : 0;
+                if (state.lastBallToucher >= 0 && m.lastGoalOwn == 0)
+                {
+                    ++m.goals[state.lastBallToucher];
+                }
                 m.phase = RlMatchPhase::GoalScored;
                 m.phaseTimer = tuning.match.goalSeconds;
                 return true;
@@ -414,6 +422,12 @@ namespace rl
     int RlMatch::Team(int slot) const { return impl_->TeamOf(slot); }
     bool RlMatch::IsBot(int slot) const { return impl_->IsBot(slot); }
     const RlTuning& RlMatch::Tuning() const { return impl_->tuning; }
+
+    void RlMatch::SetTuning(const RlTuning& tuning)
+    {
+        impl_->sim->SetTuning(tuning);
+        impl_->tuning = impl_->sim->Tuning();  // with the numbers that stay fixed put back
+    }
     const RlSim& RlMatch::Sim() const { return *impl_->sim; }
     RlSim& RlMatch::MutableSim() { return *impl_->sim; }
     void RlMatch::Step(const RlCarInput* inputs) { impl_->Step(inputs); }

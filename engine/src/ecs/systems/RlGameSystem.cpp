@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 
 #include <DirectXMath.h>
 
@@ -17,6 +19,8 @@
 #include <myengine/editor/EditorState.h>
 #include <myengine/input/InputManager.h>
 
+#include <rl/RlCamera.h>
+#include <rl/RlControls.h>
 #include <rl/RlMatch.h>
 
 #include <tracy/Tracy.hpp>
@@ -124,20 +128,27 @@ namespace myengine::ecs::systems
         float accumulator = 0.0f;
         bool jumpLatched = false;
         bool ballCam = true;
-        bool cameraReady = false;
-        Vec3 cameraForward{0.0f, 0.0f, 1.0f};
-        Vec3 cameraUp{0.0f, 1.0f, 0.0f};
-        float cameraFov = 95.0f;
+        rl::RlCameraState cameraState;
         components::CameraComponent cameraHome;
         bool haveCameraHome = false;
+
+        rl::RlControls controls = rl::RlControls::Defaults();
+        bool previousDown[static_cast<int>(rl::RlButtonAction::Count)] = {};
+        bool scoreboard = false;
 
         // XInput: an unplugged pad is looked for once a second, polling it every frame is slow
         bool padConnected = false;
         float padRetry = 0.0f;
-        bool padYPrev = false;
         bool padInUse = false;
 
         std::vector<std::string> hud;
+        rl::RlCarInput lastPlayer;  // what the player holds, shown in the overlay
+
+        // rl_tuning.json is read again when it changes on disk (and the RL Tuning window edits the same numbers and writes them back)
+        std::filesystem::path tuningPath;
+        std::filesystem::file_time_type tuningStamp{};
+        float tuningPoll = 0.0f;
+        std::string tuningMessage;
 
         explicit Impl(input::InputManager& inputManager)
             : input(inputManager)
@@ -210,10 +221,70 @@ namespace myengine::ecs::systems
             status.clear();
             hud.clear();
             accumulator = 0.0f;
-            cameraReady = false;
-            cameraUp = {0.0f, 1.0f, 0.0f};
+            cameraState = rl::RlCameraState{};
             jumpLatched = false;
             haveCameraHome = false;
+            core::ServiceLocator::GetEditorRuntimeState().gameCapturesMouse = false;
+        }
+
+        std::filesystem::file_time_type FileStamp() const
+        {
+            std::error_code ec;
+            const auto stamp = std::filesystem::last_write_time(tuningPath, ec);
+            return ec ? std::filesystem::file_time_type{} : stamp;
+        }
+
+        // The numbers changed (by the window or by the file): the running match takes them at once.
+        void ApplyTuning()
+        {
+            if (match != nullptr)
+            {
+                match->SetTuning(tuning);
+                tuning = match->Tuning();  // what stays fixed in a running match is put back
+            }
+        }
+
+        std::string ReloadTuning()
+        {
+            std::string error;
+            rl::RlTuning loaded;
+            if (!loaded.LoadFromFile(tuningPath.generic_u8string(), &error))
+            {
+                return error;
+            }
+            tuning = loaded;
+            tuningStamp = FileStamp();
+            ApplyTuning();
+            return "rl_tuning.json read again";
+        }
+
+        std::string SaveTuning()
+        {
+            std::ofstream file(tuningPath, std::ios::binary | std::ios::trunc);
+            const std::string text = tuning.ToJson() + '\n';
+            file.write(text.data(), static_cast<std::streamsize>(text.size()));
+            file.close();
+            if (!file)
+            {
+                return "cannot write " + tuningPath.generic_u8string();
+            }
+            tuningStamp = FileStamp();  // our own write is not a change to read back
+            return "saved to " + tuningPath.generic_u8string();
+        }
+
+        void PollTuningFile(const float deltaTime)
+        {
+            tuningPoll += deltaTime;
+            if (tuningPoll < 0.5f)
+            {
+                return;
+            }
+            tuningPoll = 0.0f;
+            const auto stamp = FileStamp();
+            if (stamp != tuningStamp && stamp != std::filesystem::file_time_type{})
+            {
+                tuningMessage = ReloadTuning();
+            }
         }
 
         bool Scan(World& world)
@@ -245,17 +316,20 @@ namespace myengine::ecs::systems
             }
 
             std::string error;
-            const auto tuningPath = core::ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/rl_tuning.json");
+            tuningPath = core::ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/rl_tuning.json");
+            tuning = rl::RlTuning{};
             if (!tuning.LoadFromFile(tuningPath.generic_u8string(), &error))
             {
                 status = "rl_tuning.json: " + error + " (defaults)";
             }
+            tuningStamp = FileStamp();
+            tuningMessage.clear();
             if (const auto* cam = camera != kInvalidEntity ? world.TryGet<components::CameraComponent>(camera) : nullptr)
             {
-                cameraFov = cam->fovYDeg;
                 cameraHome = *cam;
                 haveCameraHome = true;
             }
+            LoadControls();
             active = true;
             HideEverything(world);
             return true;
@@ -273,7 +347,7 @@ namespace myengine::ecs::systems
             match = std::make_unique<rl::RlMatch>(tuning, config);
             mode = Mode::Match;
             accumulator = 0.0f;
-            cameraReady = false;
+            cameraState = rl::RlCameraState{};
             HideEverything(world);
             const int teamSize = std::max(menuMode, 1);
             for (int t = 0; t < (menuMode == 0 ? 1 : 2); ++t)
@@ -318,10 +392,50 @@ namespace myengine::ecs::systems
             }
         }
 
-        void PollPad(const float deltaTime, rl::RlCarInput& pad, bool& ballCamPressed)
+        // the shipped bindings, then the file of the player (%APPDATA%/myengine/rl_controls.json)
+        void LoadControls()
         {
+            std::string error;
+            const std::string shipped = core::ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/rl_controls.json").generic_u8string();
+            std::string user;
+            wchar_t buffer[MAX_PATH]{};
+            const DWORD length = GetEnvironmentVariableW(L"APPDATA", buffer, static_cast<DWORD>(std::size(buffer)));
+            if (length > 0 && length < std::size(buffer))
+            {
+                user = (std::filesystem::path(buffer) / L"myengine" / L"rl_controls.json").generic_u8string();
+            }
+            rl::RlControls loaded;
+            if (loaded.LoadLayered(shipped, user, &error))
+            {
+                controls = loaded;
+            }
+            else
+            {
+                controls = rl::RlControls::Defaults();
+                status = error + " (default controls)";
+            }
+        }
+
+        // The devices of this frame: the keys and buttons that are down, and (second snapshot) the ones that went down since the last frame,
+        // which is how a click shorter than a frame is not lost.
+        void BuildRaw(const float deltaTime, const bool windowActive, rl::RlRawInput& raw, rl::RlRawInput& pressed)
+        {
+            if (windowActive)
+            {
+                for (int code = 0; code < 256; ++code)
+                {
+                    raw.keys[code] = input.IsKeyDown(static_cast<std::uint32_t>(code));
+                    pressed.keys[code] = input.WasKeyPressed(static_cast<std::uint32_t>(code));
+                }
+                const core::MouseButton buttons[3] = {core::MouseButton::Left, core::MouseButton::Right, core::MouseButton::Middle};
+                for (int i = 0; i < 3; ++i)
+                {
+                    raw.mouse[i] = input.IsMouseDown(buttons[i]);
+                    pressed.mouse[i] = input.WasMousePressed(buttons[i]);
+                }
+            }
+
             padInUse = false;
-            ballCamPressed = false;
             if (!padConnected)
             {
                 padRetry -= deltaTime;
@@ -338,44 +452,41 @@ namespace myengine::ecs::systems
                 return;
             }
             padConnected = true;
+            raw.padConnected = true;
             const XINPUT_GAMEPAD& g = state.Gamepad;
-            const float lx = Deadzone(static_cast<float>(g.sThumbLX) / 32767.0f, 0.2f);
-            const float ly = Deadzone(static_cast<float>(g.sThumbLY) / 32767.0f, 0.2f);
-            pad.throttle = static_cast<float>(g.bRightTrigger) / 255.0f - static_cast<float>(g.bLeftTrigger) / 255.0f;
-            pad.steer = lx;
-            pad.pitch = -ly;  // stick forward pitches the nose down
-            pad.jump = (g.wButtons & XINPUT_GAMEPAD_A) != 0;
-            pad.boost = (g.wButtons & XINPUT_GAMEPAD_B) != 0;
-            pad.handbrake = (g.wButtons & XINPUT_GAMEPAD_X) != 0;
-            pad.airRoll = (g.wButtons & XINPUT_GAMEPAD_X) != 0;
-            const bool leftBumper = (g.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0;
-            const bool rightBumper = (g.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
-            pad.roll = (rightBumper ? 1.0f : 0.0f) - (leftBumper ? 1.0f : 0.0f);
-            const bool y = (g.wButtons & XINPUT_GAMEPAD_Y) != 0;
-            ballCamPressed = y && !padYPrev;
-            padYPrev = y;
-            padInUse = std::fabs(pad.throttle) > 0.05f || std::fabs(pad.steer) > 0.0f || std::fabs(pad.pitch) > 0.0f || pad.jump || pad.boost ||
-                       pad.handbrake || leftBumper || rightBumper;
-        }
-
-        rl::RlCarInput KeyboardInput()
-        {
-            rl::RlCarInput in;
-            const float forward = (input.IsKeyDown('W') ? 1.0f : 0.0f) - (input.IsKeyDown('S') ? 1.0f : 0.0f);
-            const float right = (input.IsKeyDown('D') ? 1.0f : 0.0f) - (input.IsKeyDown('A') ? 1.0f : 0.0f);
-            in.throttle = forward;
-            in.steer = right;
-            in.pitch = -forward;  // W pitches the nose down in the air, like the stick forward
-            in.roll = (input.IsKeyDown('E') ? 1.0f : 0.0f) - (input.IsKeyDown('Q') ? 1.0f : 0.0f);
-            in.jump = input.IsKeyDown(VK_SPACE);
-            in.boost = input.IsKeyDown(VK_SHIFT);
-            in.handbrake = input.IsKeyDown(VK_CONTROL);
-            in.airRoll = input.IsKeyDown(VK_CONTROL);
-            if (input.WasKeyPressed(VK_SPACE))
+            raw.padAxes[rl::PadLeftX] = static_cast<float>(g.sThumbLX) / 32767.0f;
+            raw.padAxes[rl::PadLeftY] = static_cast<float>(g.sThumbLY) / 32767.0f;
+            raw.padAxes[rl::PadRightX] = static_cast<float>(g.sThumbRX) / 32767.0f;
+            raw.padAxes[rl::PadRightY] = static_cast<float>(g.sThumbRY) / 32767.0f;
+            raw.padAxes[rl::PadLeftTrigger] = static_cast<float>(g.bLeftTrigger) / 255.0f;
+            raw.padAxes[rl::PadRightTrigger] = static_cast<float>(g.bRightTrigger) / 255.0f;
+            const struct
             {
-                jumpLatched = true;
+                WORD mask;
+                rl::RlPadButton button;
+            } map[] = {{XINPUT_GAMEPAD_A, rl::PadA},
+                       {XINPUT_GAMEPAD_B, rl::PadB},
+                       {XINPUT_GAMEPAD_X, rl::PadX},
+                       {XINPUT_GAMEPAD_Y, rl::PadY},
+                       {XINPUT_GAMEPAD_LEFT_SHOULDER, rl::PadLB},
+                       {XINPUT_GAMEPAD_RIGHT_SHOULDER, rl::PadRB},
+                       {XINPUT_GAMEPAD_BACK, rl::PadBack},
+                       {XINPUT_GAMEPAD_START, rl::PadStart},
+                       {XINPUT_GAMEPAD_LEFT_THUMB, rl::PadLeftStick},
+                       {XINPUT_GAMEPAD_RIGHT_THUMB, rl::PadRightStick},
+                       {XINPUT_GAMEPAD_DPAD_UP, rl::PadDpadUp},
+                       {XINPUT_GAMEPAD_DPAD_DOWN, rl::PadDpadDown},
+                       {XINPUT_GAMEPAD_DPAD_LEFT, rl::PadDpadLeft},
+                       {XINPUT_GAMEPAD_DPAD_RIGHT, rl::PadDpadRight}};
+            for (const auto& m : map)
+            {
+                if ((g.wButtons & m.mask) != 0)
+                {
+                    raw.padButtons |= 1u << m.button;
+                }
             }
-            return in;
+            padInUse = g.wButtons != 0 || g.bLeftTrigger > 12 || g.bRightTrigger > 12 || std::abs(static_cast<int>(g.sThumbLX)) > 6500 ||
+                       std::abs(static_cast<int>(g.sThumbLY)) > 6500;
         }
 
         void Update(World& world, const float deltaTime)
@@ -388,8 +499,28 @@ namespace myengine::ecs::systems
             {
                 return;
             }
+            core::ServiceLocator::GetEditorRuntimeState().gameCapturesMouse = true;
+            PollTuningFile(deltaTime);
 
             const bool windowActive = input.GetActiveWindowId() != 0;
+            rl::RlRawInput raw;
+            rl::RlRawInput pressed;
+            BuildRaw(deltaTime, windowActive, raw, pressed);
+            const rl::RlControlState state = controls.Evaluate(raw);
+            const rl::RlControlState justPressed = controls.Evaluate(pressed);
+            const auto edge = [&](rl::RlButtonAction action)
+            {
+                const int i = static_cast<int>(action);
+                const bool now = state.buttons[i] || justPressed.buttons[i];
+                const bool fired = now && !previousDown[i];
+                previousDown[i] = state.buttons[i];
+                return fired;
+            };
+            const bool ballCamPressed = edge(rl::RlButtonAction::BallCam);
+            const bool menuPressed = edge(rl::RlButtonAction::Menu);
+            edge(rl::RlButtonAction::Scoreboard);
+            scoreboard = state.Down(rl::RlButtonAction::Scoreboard);
+
             if (mode == Mode::Menu)
             {
                 if (windowActive)
@@ -409,7 +540,7 @@ namespace myengine::ecs::systems
                     {
                         botLevel = (botLevel + 1) % 3;
                     }
-                    if (input.WasKeyPressed(VK_RETURN))
+                    if (input.WasKeyPressed(VK_RETURN) || (padConnected && (raw.padButtons & (1u << rl::PadA)) != 0 && windowActive))
                     {
                         StartMatch(world);
                         return;
@@ -419,36 +550,22 @@ namespace myengine::ecs::systems
                 return;
             }
 
-            // ---- input of the player car
-            rl::RlCarInput keyboard;
-            bool ballCamPressed = false;
-            bool toMenu = false;
-            bool enter = false;
-            if (windowActive)
-            {
-                keyboard = KeyboardInput();
-                ballCamPressed = input.WasKeyPressed('C');
-                toMenu = input.WasKeyPressed('M');
-                enter = input.WasKeyPressed(VK_RETURN);
-            }
-            rl::RlCarInput pad;
-            bool padBallCam = false;
-            PollPad(deltaTime, pad, padBallCam);
-            ballCamPressed = ballCamPressed || padBallCam;
             if (ballCamPressed)
             {
                 ballCam = !ballCam;
             }
-            if (toMenu || (enter && match->World().match.phase == rl::RlMatchPhase::Finished))
+            const bool enter = windowActive && input.WasKeyPressed(VK_RETURN);
+            if (menuPressed || (enter && match->World().match.phase == rl::RlMatchPhase::Finished))
             {
                 ToMenu(world);
                 BuildMenuHud();
                 return;
             }
-            rl::RlCarInput player = padInUse ? pad : keyboard;
-            if (padInUse)
+            rl::RlCarInput player = state.car;
+            lastPlayer = player;
+            if (justPressed.car.jump)
             {
-                player.roll = std::clamp(pad.roll + keyboard.roll, -1.0f, 1.0f);
+                jumpLatched = true;  // a click shorter than a frame still jumps
             }
 
             // ---- fixed ticks
@@ -513,12 +630,13 @@ namespace myengine::ecs::systems
                     {
                         continue;
                     }
+                    const bool frontWheel = w < 2;
                     const float side = (w & 1) ? 1.0f : -1.0f;
-                    const float z = (w < 2) ? t.car.wheelFrontZ : t.car.wheelRearZ;
-                    const float radius = 0.2f;
-                    // the wheel hangs under its mount by the free suspension travel
-                    const float drop = std::max(t.car.suspensionRest - radius - b.wheelCompression[w], 0.0f);
-                    const dx::XMVECTOR local = dx::XMVectorSet(side * t.car.wheelMountX, t.car.wheelMountYOffset - drop, z, 0.0f);
+                    const float z = frontWheel ? t.car.wheelFrontZ : t.car.wheelRearZ;
+                    const float radius = frontWheel ? t.car.wheelRadiusFront : t.car.wheelRadiusRear;
+                    // the wheel hangs under its mount by the length of the spring
+                    const float drop = (frontWheel ? t.car.suspensionRestFront : t.car.suspensionRestRear) - b.wheelCompression[w];
+                    const dx::XMVECTOR local = dx::XMVectorSet(side * (frontWheel ? t.car.wheelMountXFront : t.car.wheelMountXRear), t.car.wheelMountYOffset - drop, z, 0.0f);
                     wheel->position = ToVec3(dx::XMVectorAdd(position, dx::XMVector3Rotate(local, rotation)));
                     wheel->rotationDeg = EulerDegrees(rotation);
                     wheel->scale = {0.16f, radius, radius};
@@ -558,8 +676,8 @@ namespace myengine::ecs::systems
             UpdateCamera(world, deltaTime, now.cars[0], playerPosition, playerRotation, ballPosition);
         }
 
-        // Behind the car looking over it at the ball (ball cam), or along the car's heading (chase cam). On a wall or the ceiling the
-        // camera takes the surface as its floor.
+        // The camera of Rocket League (game/rl RlCamera): behind the car, over it at the ball (ball cam), the up follows the surface, and it
+        // is pulled in so that it stays inside the arena.
         void UpdateCamera(World& world, const float deltaTime, const rl::RlCarState& car, dx::FXMVECTOR carPosition, dx::FXMVECTOR carRotation,
                           dx::FXMVECTOR ballPosition)
         {
@@ -572,77 +690,49 @@ namespace myengine::ecs::systems
             {
                 return;
             }
+            rl::RlCameraInput in;
+            const Vec3 p = ToVec3(carPosition);
+            in.carPosition = {p.x, p.y, p.z};
+            dx::XMFLOAT4 q;
+            dx::XMStoreFloat4(&q, carRotation);
+            in.carRotation = {q.x, q.y, q.z, q.w};
+            in.onSurface = car.wheelContacts >= 3;
+            in.surfaceNormal = car.surfaceNormal;
+            const Vec3 b = ToVec3(ballPosition);
+            in.ballPosition = {b.x, b.y, b.z};
+            in.ballCam = ballCam;
+            const rl::RlCameraTuning& cameraTuning = match->Tuning().camera;
+            const rl::RlCameraView view = rl::RlCameraUpdate(cameraTuning, cameraState, match->Sim(), in, std::min(deltaTime, 0.1f));
 
-            const dx::XMVECTOR worldUp = dx::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-            const bool onSurface = car.wheelContacts >= 3;
-            const dx::XMVECTOR targetUp = onSurface ? dx::XMVector3Normalize(P(car.surfaceNormal)) : worldUp;
-            dx::XMVECTOR up = dx::XMVectorSet(cameraUp.x, cameraUp.y, cameraUp.z, 0.0f);
-            const dx::XMVECTOR carForward = dx::XMVector3Rotate(dx::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), carRotation);
-            const float kUp = 1.0f - std::exp(-deltaTime * 4.0f);
-            const float kAim = 1.0f - std::exp(-deltaTime * (ballCam ? 9.0f : 6.0f));
-            const auto onPlane = [](dx::FXMVECTOR v, dx::FXMVECTOR normal)
-            {
-                return dx::XMVectorSubtract(v, dx::XMVectorScale(normal, dx::XMVectorGetX(dx::XMVector3Dot(v, normal))));
-            };
-
-            if (!cameraReady)
-            {
-                up = targetUp;
-            }
-            else
-            {
-                up = dx::XMVector3Normalize(dx::XMVectorLerp(up, targetUp, kUp));
-            }
-
-            dx::XMVECTOR aim = onPlane(carForward, up);
-            if (dx::XMVectorGetX(dx::XMVector3LengthSq(aim)) < 0.05f)
-            {
-                aim = dx::XMVectorSet(cameraForward.x, cameraForward.y, cameraForward.z, 0.0f);  // nose straight up or down: keep the heading
-            }
-            // the ball cam only makes sense with the car on a floor
-            if (ballCam && dx::XMVectorGetY(up) > 0.8f)
-            {
-                const dx::XMVECTOR toBall = onPlane(dx::XMVectorSubtract(ballPosition, carPosition), up);
-                if (dx::XMVectorGetX(dx::XMVector3LengthSq(toBall)) > 0.25f)
-                {
-                    aim = toBall;
-                }
-            }
-            aim = dx::XMVector3Normalize(aim);
-
-            dx::XMVECTOR forward = aim;
-            if (cameraReady)
-            {
-                forward = dx::XMVectorSet(cameraForward.x, cameraForward.y, cameraForward.z, 0.0f);
-                forward = dx::XMVector3Normalize(dx::XMVectorLerp(forward, aim, kAim));
-            }
-            forward = dx::XMVector3Normalize(onPlane(forward, up));
-            cameraReady = true;
-            cameraForward = ToVec3(forward);
-            cameraUp = ToVec3(up);
-
-            const float distance = 4.6f;
-            const float height = 1.55f;
-            dx::XMVECTOR eye = dx::XMVectorAdd(dx::XMVectorSubtract(carPosition, dx::XMVectorScale(forward, distance)), dx::XMVectorScale(up, height));
-            eye = dx::XMVectorSetY(eye, std::clamp(dx::XMVectorGetY(eye), 0.4f, match->Tuning().arena.height - 0.4f));
-            dx::XMVECTOR lookAt = dx::XMVectorAdd(carPosition, dx::XMVectorAdd(dx::XMVectorScale(forward, 6.0f), dx::XMVectorScale(up, 0.7f)));
-            if (ballCam && dx::XMVectorGetY(up) > 0.8f)
-            {
-                // aim between the front of the car and the ball
-                lookAt = dx::XMVectorLerp(lookAt, ballPosition, 0.7f);
-            }
-            const dx::XMVECTOR view = dx::XMVector3Normalize(dx::XMVectorSubtract(lookAt, eye));
-            const dx::XMVECTOR right = dx::XMVector3Normalize(dx::XMVector3Cross(up, view));
-            const dx::XMVECTOR cameraUpAxis = dx::XMVector3Cross(view, right);
             dx::XMMATRIX basis;
-            basis.r[0] = right;
-            basis.r[1] = cameraUpAxis;
-            basis.r[2] = view;
+            basis.r[0] = dx::XMVectorSet(view.right.x, view.right.y, view.right.z, 0.0f);
+            basis.r[1] = dx::XMVectorSet(view.up.x, view.up.y, view.up.z, 0.0f);
+            basis.r[2] = dx::XMVectorSet(view.forward.x, view.forward.y, view.forward.z, 0.0f);
             basis.r[3] = dx::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
-            cam->position = ToVec3(eye);
+            cam->position = {view.position.x, view.position.y, view.position.z};
             cam->rotationDeg = EulerDegrees(dx::XMQuaternionRotationMatrix(basis));
-            cam->fovYDeg = cameraFov;
+            // RL's field of view is the horizontal one; the camera component takes the vertical one (16:9 assumed)
+            constexpr float kAspect = 16.0f / 9.0f;
+            cam->fovYDeg = 2.0f * std::atan(std::tan(cameraTuning.fov * 0.5f / kRadToDeg) / kAspect) * kRadToDeg;
             cam->isPrimary = true;
+        }
+
+        // one line with the main bindings, from the loaded controls
+        std::string Describe() const
+        {
+            const auto join = [](const std::vector<std::string>& tokens)
+            {
+                std::string out;
+                for (size_t i = 0; i < tokens.size() && i < 2; ++i)
+                {
+                    out += (i > 0 ? "/" : "") + tokens[i];
+                }
+                return out;
+            };
+            return "boost " + join(controls.ButtonTokens(rl::RlButtonAction::Boost)) + "   jump " + join(controls.ButtonTokens(rl::RlButtonAction::Jump)) +
+                   "   ball cam " + join(controls.ButtonTokens(rl::RlButtonAction::BallCam)) + "   powerslide/air roll " +
+                   join(controls.ButtonTokens(rl::RlButtonAction::Powerslide)) + "   scores " + join(controls.ButtonTokens(rl::RlButtonAction::Scoreboard)) +
+                   "   menu " + join(controls.ButtonTokens(rl::RlButtonAction::Menu));
         }
 
         void BuildMenuHud()
@@ -653,9 +743,9 @@ namespace myengine::ecs::systems
             hud.push_back(Format("mode: %s   (1-4 = players per team, P = practice)", names[menuMode]));
             const char* levels[3] = {"easy", "normal", "hard"};
             hud.push_back(Format("bots: %s   (L = change)", levels[botLevel]));
-            hud.push_back("Enter - start      M - back to this menu      Esc - stop Play");
-            hud.push_back("W/S gas+pitch  A/D steer  Q/E roll  Space jump (x2 + direction = dodge)  Shift boost  Ctrl drift/air roll  C camera");
-            hud.push_back("pad: RT/LT gas  stick  A jump  B boost  X drift/air roll  LB/RB roll  Y camera");
+            hud.push_back("Enter - start      M - back to this menu      Esc - stop Play      (the controls are in assets/data/rl_controls.json)");
+            hud.push_back("W/S gas (pitch in the air)  A/D steer (yaw)  Q/E roll  jump twice + direction = dodge");
+            hud.push_back(Describe());
             if (!status.empty())
             {
                 hud.push_back(status);
@@ -715,7 +805,22 @@ namespace myengine::ecs::systems
                                      ballCam ? "ball cam" : "chase"));
             }
             hud.push_back(padConnected ? (padInUse ? "gamepad: in use" : "gamepad: connected") : "gamepad: not found");
-            hud.push_back("You = the blue car with the gold marker.   M menu   C camera");
+            hud.push_back(Format("input: gas %.1f steer %.1f pitch %.1f roll %.1f %s%s%s%s", lastPlayer.throttle, lastPlayer.steer, lastPlayer.pitch, lastPlayer.roll,
+                                 lastPlayer.boost ? " BOOST" : "", lastPlayer.jump ? " JUMP" : "", lastPlayer.handbrake ? " POWERSLIDE" : "", lastPlayer.airRoll ? " AIRROLL" : ""));
+            hud.push_back(Describe());
+            if (scoreboard)
+            {
+                hud.push_back("--- SCOREBOARD ---");
+                for (int slot = 0; slot < match->SlotCount(); ++slot)
+                {
+                    hud.push_back(Format("%-6s %s %d   goals %d   hits %d", teamName[match->Team(slot)], slot == 0 ? "you   " : "bot   ", slot % std::max(menuMode, 1) + 1,
+                                         m.goals[slot], m.touches[slot]));
+                }
+            }
+            if (!status.empty())
+            {
+                hud.push_back(status);
+            }
         }
     };
 
@@ -749,5 +854,26 @@ namespace myengine::ecs::systems
     std::vector<std::string> RlGameSystem::HudLines() const
     {
         return impl_->hud;
+    }
+
+    rl::RlTuning* RlGameSystem::EditableTuning()
+    {
+        return impl_->active ? &impl_->tuning : nullptr;
+    }
+
+    void RlGameSystem::TuningEdited()
+    {
+        impl_->ApplyTuning();
+    }
+
+    std::string RlGameSystem::SaveTuning()
+    {
+        return impl_->SaveTuning();
+    }
+
+    std::string RlGameSystem::ReloadTuning()
+    {
+        impl_->tuningMessage = impl_->ReloadTuning();
+        return impl_->tuningMessage;
     }
 }

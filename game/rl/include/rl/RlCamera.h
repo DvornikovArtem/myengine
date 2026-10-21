@@ -1,0 +1,42 @@
+// RlCamera.h
+// The camera of Rocket League without a renderer: it follows a car (car cam) or looks over it at the ball (ball cam), its up follows
+// the surface under the car so that walls and the ceiling feel like a floor, it swings round smoothly, and it never leaves the arena:
+// the way from the car to the camera is cast against the arena mesh and the camera is pulled in.
+
+#pragma once
+
+#include <rl/RlSim.h>
+#include <rl/RlTuning.h>
+#include <rl/RlTypes.h>
+
+namespace rl
+{
+    struct RlCameraState
+    {
+        RlVec3 heading{0.0f, 0.0f, 1.0f};  // the horizontal direction (in the plane of `up`) the camera looks along
+        RlVec3 up{0.0f, 1.0f, 0.0f};
+        float ballBlend = 0.0f;            // 0 car cam, 1 ball cam
+        bool ready = false;
+    };
+
+    struct RlCameraInput
+    {
+        RlVec3 carPosition;
+        RlQuat carRotation;
+        bool onSurface = false;            // three or more wheels touch a surface
+        RlVec3 surfaceNormal{0.0f, 1.0f, 0.0f};
+        RlVec3 ballPosition;
+        bool ballCam = false;
+    };
+
+    struct RlCameraView
+    {
+        RlVec3 position;
+        RlVec3 forward;  // unit vectors: the camera's own axes
+        RlVec3 up;
+        RlVec3 right;
+    };
+
+    // One camera step of `dt` seconds. `sim` is used for the arena ray only.
+    RlCameraView RlCameraUpdate(const RlCameraTuning& tuning, RlCameraState& state, const RlSim& sim, const RlCameraInput& input, float dt);
+}

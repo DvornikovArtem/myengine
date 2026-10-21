@@ -55,6 +55,7 @@ namespace rl
         int Team(int slot) const;  // 0 blue, 1 orange
         bool IsBot(int slot) const;
         const RlTuning& Tuning() const;
+        void SetTuning(const RlTuning& tuning);  // see RlSim::SetTuning
         const RlSim& Sim() const;
         RlSim& MutableSim();       // the tests set up odd situations through it
 

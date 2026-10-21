@@ -356,6 +356,7 @@ namespace myengine::ui
         std::vector<std::uint32_t> scratchCommandIndices;
         bool wantMouseCapture = false;
         bool wantKeyboardCapture = false;
+        bool wantTextInput = false;
         // ImGui counts a double click from the time of its own frames, one button event per frame: on slow frames
         // (a map is loading) two quick clicks end up too far apart. Windows has already decided (WM_*BUTTONDBLCLK),
         // so every press that ImGui will process carries that answer, in the order ImGui processes them.
@@ -722,6 +723,7 @@ namespace myengine::ui
             const bool gizmoCapture = editorWindowState != nullptr && (editorWindowState->gizmoHovered || editorWindowState->gizmoActive);
             windowContext.wantMouseCapture = io.WantCaptureMouse || gizmoCapture;
             windowContext.wantKeyboardCapture = io.WantCaptureKeyboard || io.WantTextInput;
+            windowContext.wantTextInput = io.WantTextInput;
             ImGui::Render();
         }
     }
@@ -881,6 +883,12 @@ namespace myengine::ui
     {
         const auto it = windows_.find(windowId);
         return it != windows_.end() && it->second != nullptr ? it->second->wantMouseCapture : false;
+    }
+
+    bool UiManager::WantsTextInput(const core::WindowId windowId) const
+    {
+        const auto it = windows_.find(windowId);
+        return it != windows_.end() && it->second != nullptr ? it->second->wantTextInput : false;
     }
 
     bool UiManager::WantsKeyboardCapture(const core::WindowId windowId) const
