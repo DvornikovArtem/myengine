@@ -458,6 +458,16 @@ namespace myengine::core
             }
             return lines;
         };
+        sceneEditorServices.rlTuning = [this]() { return rlGameSystem_ != nullptr ? rlGameSystem_->EditableTuning() : nullptr; };
+        sceneEditorServices.rlTuningEdited = [this]()
+        {
+            if (rlGameSystem_ != nullptr)
+            {
+                rlGameSystem_->TuningEdited();
+            }
+        };
+        sceneEditorServices.rlTuningSave = [this]() { return rlGameSystem_ != nullptr ? rlGameSystem_->SaveTuning() : std::string(); };
+        sceneEditorServices.rlTuningReload = [this]() { return rlGameSystem_ != nullptr ? rlGameSystem_->ReloadTuning() : std::string(); };
         sceneEditorServices.scriptConsole.execute = [this](const std::string& source)
         {
             return scriptSystem_ != nullptr ? scriptSystem_->ExecuteConsole(source) : scripting::ScriptConsoleResult{};
@@ -1032,10 +1042,22 @@ namespace myengine::core
         const float mouseClientY = hasMouseClientPosition
             ? static_cast<float>(static_cast<short>(HIWORD(lparam)))
             : 0.0f;
+        // A running game that uses the mouse buttons (the Rocket League game): over the viewport the clicks are its controls. They never go
+        // through ImGui: a button that ImGui sees as held makes an item "active", and then it claims the keyboard (WantCaptureKeyboard)
+        // and every key pressed while the button is held (steer while boosting with the left button) would be lost.
+        const editor::EditorRuntimeState& runtimeState = core::ServiceLocator::GetEditorRuntimeState();
+        const editor::WindowEditorState* windowEditorState = runtimeState.FindWindowState(window.Id());
+        const bool gameMouseMode = runtimeState.mode == editor::RuntimeMode::Play && runtimeState.gameCapturesMouse;
+        const bool gameMouse = gameMouseMode && windowEditorState != nullptr && windowEditorState->viewportHovered;
+        const bool gameClick =
+            ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) && gameMouse) ||
+            (msg == WM_LBUTTONUP && gameMouseMode && input_.IsMouseDown(MouseButton::Left)) ||
+            (msg == WM_RBUTTONUP && gameMouseMode && !cameraControlActive_ && input_.IsMouseDown(MouseButton::Right));
         const bool startSceneNavigationNow =
-            (msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) &&
+            (msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) && !gameClick &&
             uiManager_.CanStartSceneNavigation(window.Id(), mouseClientX, mouseClientY);
         const bool bypassUiForCamera =
+            gameClick ||
             startSceneNavigationNow ||
             cameraControlActive_ &&
             (msg == WM_RBUTTONDOWN ||
@@ -1055,6 +1077,8 @@ namespace myengine::core
         const bool uiAllowsSceneNavigation =
             startSceneNavigationNow ||
             uiManager_.CanStartSceneNavigation(window.Id(), mouseClientX, mouseClientY);
+        // the keys of a running game: only a text field that is being edited takes them from it (an ImGui item held by the mouse does not)
+        const bool uiBlocksKeys = uiWantsKeyboardCapture && !(gameMouseMode && !uiManager_.WantsTextInput(window.Id()));
 
         switch (msg)
         {
@@ -1120,6 +1144,14 @@ namespace myengine::core
                 if (input_.GetActiveWindowId() == window.Id())
                 {
                     input_.ReleaseAllInputs();
+                    if (runtimeState.gameCapturesMouse)
+                    {
+                        input_.OnMouseUp(MouseButton::Left);
+                        if (!cameraControlActive_)
+                        {
+                            input_.OnMouseUp(MouseButton::Right);
+                        }
+                    }
                 }
                 if (inputOwnerWindowId_ == window.Id())
                 {
@@ -1164,7 +1196,7 @@ namespace myengine::core
             {
                 const auto key = static_cast<std::uint32_t>(wparam);
 
-                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3 && key != VK_F5)
+                if (uiBlocksKeys && !cameraConsumesKeyboard && key != VK_F3 && key != VK_F5)
                 {
                     return 0;
                 }
@@ -1198,7 +1230,7 @@ namespace myengine::core
             {
                 // Release even if an editor widget captured the keyboard after our key-down.
                 input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
-                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard)
+                if (uiBlocksKeys && !cameraConsumesKeyboard)
                 {
                     return 0;
                 }
@@ -1217,6 +1249,14 @@ namespace myengine::core
                 // and ImGui keeps the button held until the next click
                 AcquireMouseCapture(window, kCaptureLeftButton);
 
+                if (gameMouse)
+                {
+                    // a running game that uses the mouse (the buttons over its viewport are its controls)
+                    input_.SetActiveWindow(window.Id());
+                    input_.OnMouseDown(MouseButton::Left);
+                    return 0;
+                }
+
                 if (uiWantsMouseCapture)
                 {
                     return 0;
@@ -1234,6 +1274,12 @@ namespace myengine::core
             {
                 ReleaseMouseCapture(kCaptureLeftButton);
 
+                if (gameMouseMode && input_.IsMouseDown(MouseButton::Left))
+                {
+                    input_.OnMouseUp(MouseButton::Left);  // the release of a click that went to the game
+                    return 0;
+                }
+
                 if (uiWantsMouseCapture)
                 {
                     return 0;
@@ -1249,6 +1295,15 @@ namespace myengine::core
 
             case WM_RBUTTONDOWN:
             {
+                if (gameMouse)
+                {
+                    // the game's right button (jump): no fly camera, no hidden cursor
+                    input_.SetActiveWindow(window.Id());
+                    AcquireMouseCapture(window, kCaptureRightButton);
+                    input_.OnMouseDown(MouseButton::Right);
+                    return 0;
+                }
+
                 if (!uiAllowsSceneNavigation)
                 {
                     return 0;
@@ -1271,6 +1326,11 @@ namespace myengine::core
             {
                 if (!cameraControlActive_)
                 {
+                    if (gameMouseMode && input_.IsMouseDown(MouseButton::Right))
+                    {
+                        ReleaseMouseCapture(kCaptureRightButton);
+                        input_.OnMouseUp(MouseButton::Right);
+                    }
                     return 0;
                 }
 

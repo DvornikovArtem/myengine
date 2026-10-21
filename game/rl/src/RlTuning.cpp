@@ -50,14 +50,19 @@ namespace rl
             v.Float("hitNormalYScale", t.ball.hitNormalYScale);
             v.Floats("hitSpeed", t.ball.hitSpeed, 4);
             v.Floats("hitScale", t.ball.hitScale, 4);
+            v.Float("dodgeHitScale", t.ball.dodgeHitScale);
+            v.Float("roofHitScale", t.ball.roofHitScale);
             v.Int("hitCooldownTicks", t.ball.hitCooldownTicks);
             v.End();
 
             v.Begin("car");
+            v.Section("Body");
             v.Float("mass", t.car.mass);
             v.Float("halfExtentX", t.car.halfExtentX);
             v.Float("halfExtentY", t.car.halfExtentY);
             v.Float("halfExtentZ", t.car.halfExtentZ);
+            v.Float("comOffsetY", t.car.comOffsetY);
+            v.Float("comOffsetZ", t.car.comOffsetZ);
             v.Float("inertiaMultiplier", t.car.inertiaMultiplier);
             v.Float("friction", t.car.friction);
             v.Float("restitution", t.car.restitution);
@@ -65,14 +70,25 @@ namespace rl
             v.Float("maxAngularSpeed", t.car.maxAngularSpeed);
             v.Float("supersonicSpeed", t.car.supersonicSpeed);
             v.Float("throttleMaxSpeed", t.car.throttleMaxSpeed);
-            v.Float("wheelMountX", t.car.wheelMountX);
+            v.Section("Suspension");
+            v.Float("wheelMountXFront", t.car.wheelMountXFront);
+            v.Float("wheelMountXRear", t.car.wheelMountXRear);
             v.Float("wheelMountYOffset", t.car.wheelMountYOffset);
             v.Float("wheelFrontZ", t.car.wheelFrontZ);
             v.Float("wheelRearZ", t.car.wheelRearZ);
-            v.Float("suspensionRest", t.car.suspensionRest);
-            v.Float("suspensionContactMargin", t.car.suspensionContactMargin);
-            v.Float("springStiffness", t.car.springStiffness);
-            v.Float("springDamping", t.car.springDamping);
+            v.Float("wheelRadiusFront", t.car.wheelRadiusFront);
+            v.Float("wheelRadiusRear", t.car.wheelRadiusRear);
+            v.Float("suspensionRestFront", t.car.suspensionRestFront);
+            v.Float("suspensionRestRear", t.car.suspensionRestRear);
+            v.Float("suspensionTravel", t.car.suspensionTravel);
+            v.Float("suspensionSubtraction", t.car.suspensionSubtraction);
+            v.Float("suspensionStiffness", t.car.suspensionStiffness);
+            v.Float("suspensionDampCompression", t.car.suspensionDampCompression);
+            v.Float("suspensionDampRelaxation", t.car.suspensionDampRelaxation);
+            v.Float("suspensionScaleFront", t.car.suspensionScaleFront);
+            v.Float("suspensionScaleRear", t.car.suspensionScaleRear);
+            v.Float("spawnHeight", t.car.spawnHeight);
+            v.Section("Ground");
             v.Float("throttleAccel", t.car.throttleAccel);
             v.Float("throttleAccelAtMax", t.car.throttleAccelAtMax);
             v.Float("brakeAccel", t.car.brakeAccel);
@@ -80,38 +96,74 @@ namespace rl
             v.Float("lateralAccel", t.car.lateralAccel);
             v.Float("lateralGain", t.car.lateralGain);
             v.Float("handbrakeLateralScale", t.car.handbrakeLateralScale);
+            v.Float("handbrakeRecoverTime", t.car.handbrakeRecoverTime);
+            v.Float("landingGripTime", t.car.landingGripTime);
+            v.Float("landingLateralScale", t.car.landingLateralScale);
+            v.Float("landingYawDamping", t.car.landingYawDamping);
             v.Float("handbrakeSteerScale", t.car.handbrakeSteerScale);
             v.Float("maxSteerAngle", t.car.maxSteerAngle);
             v.Floats("curvatureSpeed", t.car.curvatureSpeed, 6);
             v.Floats("curvatureValue", t.car.curvatureValue, 6);
             v.Float("groundAngularDamping", t.car.groundAngularDamping);
-            v.Float("stickAccel", t.car.stickAccel);
-            v.Float("stickMinContacts", t.car.stickMinContacts);
-            v.Float("jumpStickGrace", t.car.jumpStickGrace);
+            v.Section("Pull into the surface");
+            v.Float("stickBase", t.car.stickBase);
+            v.Float("stickSteep", t.car.stickSteep);
+            v.Float("stickStopSpeed", t.car.stickStopSpeed);
+            v.Section("Jump and dodge");
             v.Float("jumpImpulse", t.car.jumpImpulse);
             v.Float("jumpHoldAccel", t.car.jumpHoldAccel);
+            v.Float("jumpMinTime", t.car.jumpMinTime);
+            v.Float("jumpMinAccelScale", t.car.jumpMinAccelScale);
             v.Float("jumpHoldTime", t.car.jumpHoldTime);
             v.Float("doubleJumpImpulse", t.car.doubleJumpImpulse);
             v.Float("dodgeWindow", t.car.dodgeWindow);
             v.Float("dodgeDeadzone", t.car.dodgeDeadzone);
             v.Float("dodgeImpulse", t.car.dodgeImpulse);
-            v.Float("dodgeForwardSpeedBonus", t.car.dodgeForwardSpeedBonus);
-            v.Float("dodgeVerticalCancel", t.car.dodgeVerticalCancel);
-            v.Float("dodgeSpin", t.car.dodgeSpin);
-            v.Float("dodgeSpinTime", t.car.dodgeSpinTime);
-            v.Float("dodgeLockTime", t.car.dodgeLockTime);
+            v.Float("dodgeForwardSpeedScale", t.car.dodgeForwardSpeedScale);
+            v.Float("dodgeSideSpeedScale", t.car.dodgeSideSpeedScale);
+            v.Float("dodgeBackSpeedScale", t.car.dodgeBackSpeedScale);
+            v.Float("dodgeBackImpulseScale", t.car.dodgeBackImpulseScale);
+            v.Float("dodgeZDamp", t.car.dodgeZDamp);
+            v.Float("dodgeZDampStart", t.car.dodgeZDampStart);
+            v.Float("dodgeZDampEnd", t.car.dodgeZDampEnd);
+            v.Float("dodgeTorqueTime", t.car.dodgeTorqueTime);
+            v.Float("dodgeTorquePitch", t.car.dodgeTorquePitch);
+            v.Float("dodgeTorqueRoll", t.car.dodgeTorqueRoll);
+            v.Float("dodgePitchLockExtra", t.car.dodgePitchLockExtra);
+            v.Float("selfRightHop", t.car.selfRightHop);
+            v.Float("selfRightSpin", t.car.selfRightSpin);
+            v.Section("Air control");
             v.Float("airPitchTorque", t.car.airPitchTorque);
             v.Float("airYawTorque", t.car.airYawTorque);
             v.Float("airRollTorque", t.car.airRollTorque);
             v.Float("airPitchDamping", t.car.airPitchDamping);
             v.Float("airYawDamping", t.car.airYawDamping);
             v.Float("airRollDamping", t.car.airRollDamping);
+            v.Float("airThrottleAccel", t.car.airThrottleAccel);
+            v.Section("Boost");
             v.Float("boostStart", t.car.boostStart);
             v.Float("boostMax", t.car.boostMax);
             v.Float("boostUsePerSecond", t.car.boostUsePerSecond);
             v.Float("boostAccelGround", t.car.boostAccelGround);
             v.Float("boostAccelAir", t.car.boostAccelAir);
+            v.Section("Demolish");
             v.Float("respawnDelay", t.car.respawnDelay);
+            v.End();
+
+            v.Begin("camera");
+            v.Float("fov", t.camera.fov);
+            v.Float("distance", t.camera.distance);
+            v.Float("height", t.camera.height);
+            v.Float("pitchDegrees", t.camera.pitchDegrees);
+            v.Float("stiffness", t.camera.stiffness);
+            v.Float("swivelSpeed", t.camera.swivelSpeed);
+            v.Float("transitionSpeed", t.camera.transitionSpeed);
+            v.Float("upFollow", t.camera.upFollow);
+            v.Float("airUpFollow", t.camera.airUpFollow);
+            v.Float("airSwivelScale", t.camera.airSwivelScale);
+            v.Float("minDistance", t.camera.minDistance);
+            v.Float("wallMargin", t.camera.wallMargin);
+            v.Float("ballCamMaxPitch", t.camera.ballCamMaxPitch);
             v.End();
 
             v.Begin("match");
@@ -150,6 +202,7 @@ namespace rl
                 node = stack.back();
                 stack.pop_back();
             }
+            void Section(const char*) const {}
             void Float(const char* name, float& value) const
             {
                 const auto it = node->find(name);
@@ -209,6 +262,7 @@ namespace rl
                 node = stack.back();
                 stack.pop_back();
             }
+            void Section(const char*) {}
             void Float(const char* name, float& value) { (*node)[name] = Short(value); }
             void Int(const char* name, int& value) { (*node)[name] = value; }
             void Floats(const char* name, float* values, int count)
@@ -221,6 +275,27 @@ namespace rl
                 (*node)[name] = array;
             }
         };
+    }
+
+    namespace
+    {
+        // adapts the abstract visitor of the header to the compile-time visitor of Reflect
+        struct VisitorAdapter
+        {
+            RlTuningVisitor& target;
+            void Begin(const char* name) { target.Begin(name); }
+            void End() { target.End(); }
+            void Section(const char* title) { target.Section(title); }
+            void Float(const char* name, float& value) { target.Float(name, value); }
+            void Int(const char* name, int& value) { target.Int(name, value); }
+            void Floats(const char* name, float* values, int count) { target.Floats(name, values, count); }
+        };
+    }
+
+    void RlTuning::Visit(RlTuningVisitor& visitor)
+    {
+        VisitorAdapter adapter{visitor};
+        Reflect(*this, adapter);
     }
 
     bool RlTuning::LoadFromText(const std::string& text, std::string* error)

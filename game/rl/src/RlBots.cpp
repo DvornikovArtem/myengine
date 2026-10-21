@@ -111,6 +111,27 @@ namespace rl
         return {p.x, p.y, p.z};
     }
 
+    namespace
+    {
+        // where and when a ball that is up in the air comes down to the height of a car (simple flight and bounces, no cars)
+        bool LandingSpot(const RlTuning& tuning, const RlBallState& ball, V3& spot, float& seconds)
+        {
+            constexpr float kStep = 1.0f / 30.0f;
+            for (float t = kStep; t <= 3.0f; t += kStep)
+            {
+                const RlVec3 p = RlPredictBall(tuning, ball, t);
+                const RlVec3 q = RlPredictBall(tuning, ball, t - kStep);
+                if (p.y < 2.2f && q.y >= p.y)
+                {
+                    spot = {p.x, p.y, p.z};
+                    seconds = t;
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     void RlBotsAssignRoles(const RlTuning& tuning, const RlWorldState& world, int team, int teamSize, RlBotMemory* memories)
     {
         const int first = team * teamSize;
@@ -144,6 +165,15 @@ namespace rl
             if (cost[k] < cost[attacker])
             {
                 attacker = k;
+            }
+        }
+        // the car that attacks now keeps the role unless another one is clearly (4 m) closer: no ping-pong between two cars that chase the same ball
+        for (int k = 0; k < count; ++k)
+        {
+            if (k != attacker && memories[alive[k]].activeRole == BotAttacker && memories[alive[k]].role == BotAttacker && cost[k] <= cost[attacker] + 4.0f)
+            {
+                attacker = k;
+                break;
             }
         }
         memories[alive[attacker]].role = BotAttacker;
@@ -204,6 +234,7 @@ namespace rl
         const bool grounded = car.wheelContacts > 0;
 
         mem.dodgeCooldown = std::max(mem.dodgeCooldown - dt, 0.0f);
+        mem.arriveTimer = std::max(mem.arriveTimer - dt, 0.0f);
 
         // ---- the decision: role, target, aim error, flip intent
         mem.decisionTimer -= dt;
@@ -213,7 +244,12 @@ namespace rl
             mem.aimError = level.aimError * rng.Signed();
             mem.flipIntent = rng.Float01() < 0.12f ? 1 : 0;
 
-            const float t = Clamp(ballDist / 25.0f, 0.0f, 1.2f) * level.predict;
+            // when the car can be at the ball: its distance over the speed it will have, found with two forecasts
+            const float carSpeed = Clamp(speed + 7.0f, 12.0f, tuning.car.maxSpeed);
+            float t = Clamp(ballDist / carSpeed, 0.0f, 2.0f);
+            RlVec3 first = RlPredictBall(tuning, world.ball, t);
+            const float second = FlatLen({first.x - pos.x, 0.0f, first.z - pos.z}) / carSpeed;
+            t = Clamp(second, 0.0f, 2.0f) * level.predict;
             RlVec3 predicted = RlPredictBall(tuning, world.ball, t);
             predicted.x = Clamp(predicted.x, -hx + 1.5f, hx - 1.5f);
             predicted.z = Clamp(predicted.z, -hz + 1.0f, hz - 1.0f);
@@ -232,12 +268,23 @@ namespace rl
             {
                 role = BotBoost;
             }
+            if (role == BotAttacker && car.boost < 25.0f && ballDist > 38.0f && !danger)
+            {
+                role = BotBoost;
+            }
 
             mem.stopAtTarget = 0;
+            mem.arriveTimer = 0.0f;
             if (role == BotAttacker)
             {
-                const float gx = 0.0f - predicted.x;
-                const float gz = enemyZ - predicted.z;
+                float gx = 0.0f - predicted.x;
+                float gz = enemyZ - predicted.z;
+                if ((predicted.z - ownZ) * sign < 22.0f)
+                {
+                    // in front of the own goal: clear it to the side, away from the goal
+                    gx = predicted.x >= 0.0f ? 14.0f : -14.0f;
+                    gz = 22.0f * sign;
+                }
                 const float gl = std::max(std::sqrt(gx * gx + gz * gz), 0.01f);
                 const float toGoalX = gx / gl;
                 const float toGoalZ = gz / gl;
@@ -250,9 +297,51 @@ namespace rl
                 }
                 else
                 {
-                    const float back = ballDist < 8.0f ? 0.6f : 2.5f;
+                    const float back = ballDist < 8.0f ? 0.0f : 1.0f;
                     mem.targetX = predicted.x - toGoalX * back;
                     mem.targetZ = predicted.z - toGoalZ * back;
+                }
+                // a ball in the air: wait for it where it comes down and arrive when it does, not before
+                mem.arriveTimer = 0.0f;
+                V3 landing;
+                float landingTime = 0.0f;
+                if ((ball.y > 3.0f || ballVel.y > 4.0f) && LandingSpot(tuning, world.ball, landing, landingTime) && landingTime > 0.35f)
+                {
+                    mem.targetX = Clamp(landing.x - toGoalX * 1.0f, -hx + 1.5f, hx - 1.5f);
+                    mem.targetZ = Clamp(landing.z - toGoalZ * 1.0f, -hz + 1.0f, hz - 1.0f);
+                    mem.arriveTimer = landingTime;
+                }
+                // short of boost: a pad that lies on the way is taken
+                if (car.boost < 30.0f && !danger && mem.arriveTimer <= 0.0f)
+                {
+                    const float tx = mem.targetX - pos.x;
+                    const float tz = mem.targetZ - pos.z;
+                    const float tl = std::max(std::sqrt(tx * tx + tz * tz), 0.01f);
+                    float bestScore = 1e9f;
+                    for (int i = 0; i < kPadCount; ++i)
+                    {
+                        float px;
+                        float pz;
+                        const bool big = RlPadSpot(i, px, pz);
+                        if (world.match.pads[i].respawnLeft > 0.0f)
+                        {
+                            continue;
+                        }
+                        const float dx = px - pos.x;
+                        const float dz = pz - pos.z;
+                        const float dl = std::sqrt(dx * dx + dz * dz);
+                        if (dl < 2.0f || dl > 15.0f || dl > 0.7f * tl || (dx * tx + dz * tz) / (dl * tl) < 0.6f)
+                        {
+                            continue;
+                        }
+                        const float score = dl - (big ? 6.0f : 0.0f);
+                        if (score < bestScore)
+                        {
+                            bestScore = score;
+                            mem.targetX = px;
+                            mem.targetZ = pz;
+                        }
+                    }
                 }
             }
             else if (role == BotDefender)
@@ -332,13 +421,25 @@ namespace rl
             mem.stuckTimer = 1.0f;
         }
 
-        // ---- the roof: an upside-down car that lies still hops and flips back
-        const bool lyingOnRoof = !grounded && up.y < -0.3f && car.position.y < 0.9f && speed < 2.5f;
-        if (lyingOnRoof && mem.recoverStage != 2)
+        // ---- lying on the roof or a side: one press of the jump turns the car back onto its wheels
+        const bool lying = car.wheelContacts <= 1 && up.y < 0.5f && car.position.y < 1.0f && speed < 2.5f;
+        if (lying)
         {
-            mem.recoverStage = 2;
-            mem.recoverTimer = 0.0f;
-            mem.flipWait = 0.0f;
+            mem.flipWait += dt;
+            if (mem.flipWait > 0.15f && mem.jumpPrev == 0 && mem.flipWait < 0.25f + 1.2f)
+            {
+                in.jump = true;
+            }
+            if (mem.flipWait > 1.4f)
+            {
+                mem.flipWait = 0.0f;  // it did not work: again
+            }
+            mem.jumpPrev = in.jump ? 1 : 0;
+            return in;
+        }
+        if (mem.recoverStage == 2)
+        {
+            mem.recoverStage = 0;
         }
 
         const bool wantsJumpEdge = mem.jumpPrev == 0;
@@ -347,29 +448,6 @@ namespace rl
         if (!grounded)
         {
             // ---------------- air
-            if (mem.recoverStage == 2)
-            {
-                mem.flipWait += dt;
-                if (mem.flipWait < 0.05f && wantsJumpEdge)
-                {
-                    in.jump = true;  // the hop
-                }
-                else if (mem.flipWait > 0.3f && mem.flipWait < 0.34f && wantsJumpEdge)
-                {
-                    in.jump = true;  // then the flip
-                    in.pitch = -1.0f;
-                }
-                else if (mem.flipWait >= 0.34f && !car.canDodge && !lyingOnRoof)
-                {
-                    mem.recoverStage = 0;
-                }
-                if (mem.flipWait > 2.0f)
-                {
-                    mem.recoverStage = 0;
-                }
-                mem.jumpPrev = in.jump ? 1 : 0;
-                return in;
-            }
             if (mem.recoverStage == 4)
             {
                 // the flip after the hop: sideways, then the car levels out by itself
@@ -446,10 +524,6 @@ namespace rl
         }
 
         // ---------------- on a surface
-        if (mem.recoverStage == 2)
-        {
-            mem.recoverStage = 0;
-        }
         const V3 targetLocal = RotateInverse(car.rotation, {mem.targetX - pos.x, 0.0f, mem.targetZ - pos.z});
         float distance = std::sqrt(targetLocal.x * targetLocal.x + targetLocal.z * targetLocal.z);
         if (up.y < 0.7f)
@@ -488,6 +562,13 @@ namespace rl
             const V3 ballLocal = RotateInverse(car.rotation, ball - pos);
             in.steer = Clamp(WrapPi(std::atan2(ballLocal.x, ballLocal.z)) / 0.44f, -1.0f, 1.0f);
         }
+        else if (mem.arriveTimer > 0.05f)
+        {
+            // the ball is still in the air: be at the spot when it lands, with speed to spare for the hit
+            mem.standTimer = 0.0f;
+            const float wanted = Clamp(distance / mem.arriveTimer + 3.0f, 3.0f, tuning.car.maxSpeed);
+            in.throttle = Clamp((wanted - forwardSpeed) * 0.6f, -1.0f, 1.0f);
+        }
         else if (mem.stopAtTarget != 0)
         {
             mem.standTimer = 0.0f;
@@ -515,7 +596,7 @@ namespace rl
         }
 
         in.boost = car.boost > 0.0f && std::fabs(diff) < 0.26f &&
-                   (distance > 12.0f || (attackerLike && ballDist < 10.0f)) && (level.boostFreely || distance > 25.0f);
+                   (distance > 12.0f || (attackerLike && ballDist < 10.0f)) && (level.boostFreely || distance > 25.0f) && mem.arriveTimer <= 0.05f;
         in.handbrake = std::fabs(diff) > 1.3f && distance > 4.0f && speed > 6.0f;
 
         // ---- jumps off the ground: a high ball in reach, or a flip into a ball that rolls

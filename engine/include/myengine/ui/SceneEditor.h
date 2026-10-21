@@ -16,6 +16,11 @@
 #include <myengine/scripting/ScriptRuntime.h>
 #include <myengine/ui/ScriptConsole.h>
 
+namespace rl
+{
+    struct RlTuning;
+}
+
 namespace myengine::core
 {
     class Logger;
@@ -116,6 +121,12 @@ namespace myengine::ui
         std::function<std::string(ecs::EntityId entity, std::size_t scriptIndex)> scriptStatus;
         std::function<nlohmann::json(ecs::EntityId entity, std::size_t scriptIndex)> liveScriptFields;
         std::function<std::vector<std::string>()> scriptHudLines;
+        // The RL Tuning window (Play, Rocket League game): the numbers of the running game, null when there is none. rlTuningEdited tells
+        // the game they changed; Save writes assets/data/rl_tuning.json, Reload reads it again; both return a message for the window.
+        std::function<rl::RlTuning*()> rlTuning;
+        std::function<void()> rlTuningEdited;
+        std::function<std::string()> rlTuningSave;
+        std::function<std::string()> rlTuningReload;
         ScriptConsoleServices scriptConsole;
         // Viewport toolbar > Graphics / Lit: renderer switches
         std::function<bool()> isVSyncEnabled;
@@ -189,6 +200,7 @@ namespace myengine::ui
         void DrawPrefabPanel(AssetViewerTab& tab);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void DrawShaderLayoutsWindow();   // Help > Developer > Shader Layouts (what the reflection reads from the shaders)
+        void DrawRlTuningWindow();        // Window > RL Tuning: the sliders of the Rocket League numbers (SceneEditorRlTuning.cpp)
         // The loading window of a long operation (SceneEditorLoading.cpp). Also blocks the input while one runs.
         void DrawLoadingUi();
         // The startup splash instead of the editor; true while it is on (nothing else is drawn then)
@@ -262,6 +274,8 @@ namespace myengine::ui
         bool showWidgetsGallery_ = false; // Help > Developer > Widgets Gallery
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
         bool showShaderLayouts_ = false;   // Help > Developer > Shader Layouts
+        bool showRlTuning_ = true;         // Window > RL Tuning (drawn while a Rocket League match runs)
+        std::string rlTuningMessage_;      // what the window last did
         std::string shaderLayoutsText_;    // the table of the window; empty: built at the next frame
         int shaderLayoutsFailures_ = 0;    // programs that did not compile
         float materialPreviewYaw_ = 0.61f;   // orbit camera of the Material Editor preview (radians)

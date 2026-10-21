@@ -99,6 +99,8 @@ namespace rl
         int32_t lastGoalOwn = 0;
         int32_t winner = -1;            // 0 blue, 1 orange once the match is Finished
         uint32_t kickoffs = 0;
+        int32_t goals[kMaxCars] = {};     // per slot: goals scored (own goals not counted)
+        int32_t touches[kMaxCars] = {};   // per slot: hits of the ball
         RlPadState pads[kPadCount];
     };
 

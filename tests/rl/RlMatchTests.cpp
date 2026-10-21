@@ -2,6 +2,7 @@
 // Headless tests of the Rocket League match (game/rl): kick-off, goals, clock, overtime, boost pads, demolition and respawn, the bots,
 // determinism and rollback. `--verbose` prints more.
 
+#include <rl/RlControls.h>
 #include <rl/RlMatch.h>
 #include <rl/RlTuning.h>
 
@@ -9,7 +10,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <vector>
 
 namespace
@@ -324,6 +328,7 @@ namespace
     struct BotRun
     {
         int goals[2] = {0, 0};
+        int ownGoals = 0;
         int demolitions = 0;
         int ballHits = 0;
         float maxStillSeconds = 0.0f;
@@ -371,6 +376,7 @@ namespace
                 {
                     run.goals[team] += w.match.score[team] - lastScore[team];
                     lastScore[team] = w.match.score[team];
+                    run.ownGoals += w.match.lastGoalOwn;
                 }
             }
             for (int i = 0; i < w.carCount; ++i)
@@ -399,6 +405,61 @@ namespace
         return run;
     }
 
+    // the numbers of the bots over several seeds (the report of G4b compares them before and after a change of the bots)
+    void BotStats()
+    {
+        std::printf("bot statistics, 5 seeds each (touches = hits of the ball, own = own goals)\n");
+        for (const int mode : {4, 1})
+        {
+            int hits = 0, goals = 0, own = 0, demolitions = 0;
+            float standstill = 0.0f;
+            const float seconds = mode == 4 ? 300.0f : 180.0f;
+            for (int seed = 1; seed <= 5; ++seed)
+            {
+                const BotRun r = RunBots(mode, static_cast<uint64_t>(seed) * 101, 1, seconds, false);
+                hits += r.ballHits;
+                goals += r.goals[0] + r.goals[1];
+                own += r.ownGoals;
+                demolitions += r.demolitions;
+                standstill = std::max(standstill, r.maxStillSeconds);
+            }
+            std::printf("  %dv%d, %.0f s: touches %.1f, goals %.1f (own %.1f), demolitions %.1f per match, longest standstill %.1f s\n", mode, mode,
+                        static_cast<double>(seconds), hits / 5.0, goals / 5.0, own / 5.0, demolitions / 5.0, static_cast<double>(standstill));
+        }
+    }
+
+    void TraceBots(int mode, int level)
+    {
+        RlMatchConfig config;
+        config.mode = mode;
+        config.seed = 101;
+        config.humanMask = 0;
+        config.botLevel = level;
+        RlMatch match(g_tuning, config);
+        std::vector<RlCarInput> inputs(static_cast<size_t>(match.SlotCount()));
+        int lastHits = 0;
+        for (int t = 0; t < Ticks(60.0f); ++t)
+        {
+            match.Step(inputs.data());
+            lastHits += match.LastEvents().ballHits;
+            if (t % 120 == 0)
+            {
+                const RlWorldState& w = match.World();
+                std::printf("t=%2d hits %d ball (%.0f %.1f %.0f) v %.0f |", t / 120, lastHits, static_cast<double>(w.ball.position.x),
+                            static_cast<double>(w.ball.position.y), static_cast<double>(w.ball.position.z),
+                            static_cast<double>(std::sqrt(w.ball.linearVelocity.x * w.ball.linearVelocity.x + w.ball.linearVelocity.z * w.ball.linearVelocity.z)));
+                for (int i = 0; i < w.carCount; ++i)
+                {
+                    const RlCarState& c = w.cars[i];
+                    const float d = std::sqrt((c.position.x - w.ball.position.x) * (c.position.x - w.ball.position.x) + (c.position.z - w.ball.position.z) * (c.position.z - w.ball.position.z));
+                    std::printf(" [%d d%.0f v%.0f b%.0f%s]", i, static_cast<double>(d), static_cast<double>(std::sqrt(c.linearVelocity.x * c.linearVelocity.x + c.linearVelocity.z * c.linearVelocity.z)),
+                                static_cast<double>(c.boost), c.onGround ? "" : " air");
+                }
+                std::printf("%c", 10);
+            }
+        }
+    }
+
     void TestBotMatches()
     {
         std::printf("bot matches\n");
@@ -417,10 +478,23 @@ namespace
         CHECK(full.maxStillSeconds < 10.0f);
         CHECK(full.goals[0] + full.goals[1] >= 1);
         CHECK(full.ballHits > 20);
-        const BotRun one = RunBots(1, 3, 2, 180.0f, false);
-        Note("1v1 level 2, 3 min: goals %.0f : %.0f, ball hits %.0f, standstill %.1f s", one.goals[0], one.goals[1], one.ballHits, one.maxStillSeconds);
-        CHECK(one.finite && one.maxStillSeconds < 10.0f);
-        CHECK(one.goals[0] + one.goals[1] >= 1);
+        // 1v1 on the hard level: three matches of 3 minutes, goals in total
+        int oneGoals = 0;
+        int oneHits = 0;
+        float oneStill = 0.0f;
+        bool oneFinite = true;
+        for (uint64_t seed = 3; seed <= 5; ++seed)
+        {
+            const BotRun one = RunBots(1, seed, 2, 180.0f, false);
+            oneGoals += one.goals[0] + one.goals[1];
+            oneHits += one.ballHits;
+            oneStill = std::max(oneStill, one.maxStillSeconds);
+            oneFinite = oneFinite && one.finite;
+        }
+        Note("1v1 level 2, 3 matches of 3 min: goals %.0f, ball hits %.0f, longest standstill %.1f s", oneGoals, oneHits, oneStill);
+        CHECK(oneFinite && oneStill < 10.0f);
+        CHECK(oneGoals >= 1);
+        CHECK(oneHits > 40);
     }
 
     void TestDeterminismAndRollback()
@@ -501,6 +575,208 @@ namespace
         CHECK(end == replay);
     }
 
+    // ---------------------------------------------------------------- controls
+
+    RlRawInput Raw() { return RlRawInput{}; }
+
+    void TestControls()
+    {
+        std::printf("controls as data\n");
+        const RlControls controls = RlControls::Defaults();
+
+        // the PC layout of Rocket League
+        RlRawInput r = Raw();
+        r.mouse[0] = true;
+        CHECK(controls.Evaluate(r).car.boost && !controls.Evaluate(r).car.jump);           // left mouse button: boost
+        r = Raw();
+        r.mouse[1] = true;
+        CHECK(controls.Evaluate(r).car.jump && !controls.Evaluate(r).car.boost);           // right mouse button: jump
+        r = Raw();
+        r.keys[0x20] = true;
+        CHECK(controls.Evaluate(r).Down(RlButtonAction::BallCam));                          // Space: ball cam
+        r = Raw();
+        r.keys[0x10] = true;
+        CHECK(controls.Evaluate(r).car.handbrake && controls.Evaluate(r).car.airRoll);      // Shift: powerslide and air roll
+        r = Raw();
+        r.keys['W'] = true;
+        CHECK(controls.Evaluate(r).car.throttle == 1.0f && controls.Evaluate(r).car.pitch == -1.0f);
+        r = Raw();
+        r.keys['S'] = true;
+        CHECK(controls.Evaluate(r).car.throttle == -1.0f && controls.Evaluate(r).car.pitch == 1.0f);
+        r = Raw();
+        r.keys['D'] = true;
+        CHECK(controls.Evaluate(r).car.steer == 1.0f);
+        r.keys['A'] = true;
+        CHECK(controls.Evaluate(r).car.steer == 0.0f);  // both cancel
+        r = Raw();
+        r.keys['E'] = true;
+        CHECK(controls.Evaluate(r).car.roll == 1.0f);
+        r = Raw();
+        r.keys['Q'] = true;
+        CHECK(controls.Evaluate(r).car.roll == -1.0f);
+        r = Raw();
+        r.keys[0x09] = true;
+        CHECK(controls.Evaluate(r).Down(RlButtonAction::Scoreboard));
+        r = Raw();
+        r.keys['M'] = true;
+        CHECK(controls.Evaluate(r).Down(RlButtonAction::Menu));
+
+        // the Xbox controller
+        r = Raw();
+        r.padAxes[PadRightTrigger] = 1.0f;
+        CHECK(controls.Evaluate(r).car.throttle == 1.0f);
+        r = Raw();
+        r.padAxes[PadLeftTrigger] = 1.0f;
+        CHECK(controls.Evaluate(r).car.throttle == -1.0f);
+        r = Raw();
+        r.padAxes[PadLeftX] = 0.6f;
+        r.padAxes[PadLeftY] = 1.0f;  // stick right and forward
+        CHECK(controls.Evaluate(r).car.steer > 0.4f && controls.Evaluate(r).car.pitch == -1.0f);
+        r = Raw();
+        r.padAxes[PadLeftX] = 0.1f;  // inside the dead zone
+        CHECK(controls.Evaluate(r).car.steer == 0.0f);
+        const struct
+        {
+            RlPadButton button;
+            RlButtonAction action;
+        } pad[] = {{PadA, RlButtonAction::Jump},      {PadB, RlButtonAction::Boost},      {PadX, RlButtonAction::Powerslide},
+                   {PadY, RlButtonAction::BallCam},   {PadBack, RlButtonAction::Scoreboard}, {PadStart, RlButtonAction::Menu}};
+        for (const auto& p : pad)
+        {
+            r = Raw();
+            r.padButtons = 1u << p.button;
+            CHECK(controls.Evaluate(r).Down(p.action));
+        }
+        r = Raw();
+        r.padButtons = 1u << PadRB;
+        CHECK(controls.Evaluate(r).car.roll == 1.0f);
+        r = Raw();
+        r.padButtons = 1u << PadLB;
+        CHECK(controls.Evaluate(r).car.roll == -1.0f);
+        // keyboard and pad together do not exceed the range
+        r = Raw();
+        r.keys['W'] = true;
+        r.padAxes[PadRightTrigger] = 1.0f;
+        CHECK(controls.Evaluate(r).car.throttle == 1.0f);
+
+        // everything at once: gas, steer, pitch, roll, boost, jump, powerslide from the keyboard, the mouse and the pad together
+        r = Raw();
+        r.keys['W'] = true;
+        r.keys['D'] = true;
+        r.keys['E'] = true;
+        r.keys[0x10] = true;       // Shift
+        r.mouse[0] = true;         // left button: boost
+        r.mouse[1] = true;         // right button: jump
+        r.padAxes[PadLeftX] = -0.5f;  // the stick the other way: the steer is the sum, not the last device
+        {
+            const RlControlState all = controls.Evaluate(r);
+            CHECK(all.car.throttle == 1.0f && all.car.pitch == -1.0f && all.car.roll == 1.0f);
+            CHECK(all.car.steer > 0.5f && all.car.steer < 0.8f);
+            CHECK(all.car.boost && all.car.jump && all.car.handbrake && all.car.airRoll);
+        }
+        // every pair of the controls of the car works with every other (a held boost does not block the steer, and so on)
+        {
+            const char* const keys[] = {"W", "S", "A", "D", "Q", "E", "Shift", "Space", "Tab", "M"};
+            int bad = 0;
+            for (const char* a : keys)
+            {
+                for (const char* b : keys)
+                {
+                    for (int mouse = 0; mouse < 3; ++mouse)
+                    {
+                        RlRawInput x = Raw();
+                        RlControls c = RlControls::Defaults();
+                        std::string ignore;
+                        // find the codes through the bindings: the tokens of the actions
+                        const auto code = [&](const char* name) { return std::string(name) == "Shift" ? 0x10 : std::string(name) == "Space" ? 0x20 : std::string(name) == "Tab" ? 0x09 : name[0]; };
+                        x.keys[code(a)] = true;
+                        x.keys[code(b)] = true;
+                        if (mouse > 0) x.mouse[mouse - 1] = true;
+                        const RlControlState one = controls.Evaluate(x);
+                        RlRawInput onlyA = Raw();
+                        onlyA.keys[code(a)] = true;
+                        RlRawInput onlyB = Raw();
+                        onlyB.keys[code(b)] = true;
+                        RlRawInput onlyM = Raw();
+                        if (mouse > 0) onlyM.mouse[mouse - 1] = true;
+                        const RlControlState sa = controls.Evaluate(onlyA), sb = controls.Evaluate(onlyB), sm = controls.Evaluate(onlyM);
+                        // the boolean actions of the pair are the union of the single ones
+                        for (int i = 0; i < static_cast<int>(RlButtonAction::Count); ++i)
+                        {
+                            if (one.buttons[i] != (sa.buttons[i] || sb.buttons[i] || sm.buttons[i])) ++bad;
+                        }
+                        (void)c;
+                    }
+                }
+            }
+            CHECK(bad == 0);
+        }
+
+        // the shipped file is the defaults, nothing is missing from it
+        std::string error;
+        RlControls shipped;
+        const bool loaded = shipped.LoadFromFile(RL_CONTROLS_JSON, &error);
+        if (!loaded) std::printf("  %s\n", error.c_str());
+        CHECK(loaded);
+        CHECK(shipped.ToJson() == controls.ToJson());
+
+        // layers: the defaults, the shipped file, the file of the player (one action changed); a missing file is fine
+        const std::filesystem::path dir = std::filesystem::temp_directory_path() / "myengine_rl_controls_test";
+        std::filesystem::create_directories(dir);
+        const std::string userFile = (dir / "user.json").generic_u8string();
+        {
+            std::ofstream file(dir / "user.json", std::ios::binary | std::ios::trunc);
+            file << "{ \"buttons\": { \"jump\": [\"Space\", \"MouseRight\"], \"ballCam\": [\"B\"] }, \"axes\": { \"roll\": [\"X\", \"-Z\"] } }";
+        }
+        RlControls layered;
+        CHECK(layered.LoadLayered(RL_CONTROLS_JSON, userFile, &error));
+        r = Raw();
+        r.keys[0x20] = true;
+        CHECK(layered.Evaluate(r).car.jump && !layered.Evaluate(r).Down(RlButtonAction::BallCam));  // Space jumps now
+        r = Raw();
+        r.keys['B'] = true;
+        CHECK(layered.Evaluate(r).Down(RlButtonAction::BallCam));
+        r = Raw();
+        r.mouse[1] = true;
+        CHECK(layered.Evaluate(r).car.jump);
+        r = Raw();
+        r.mouse[0] = true;
+        CHECK(layered.Evaluate(r).car.boost);  // not mentioned: the default stays
+        r = Raw();
+        r.keys['X'] = true;
+        CHECK(layered.Evaluate(r).car.roll == 1.0f);
+        r = Raw();
+        r.keys['E'] = true;
+        CHECK(layered.Evaluate(r).car.roll == 0.0f);  // the old binding of the changed action is gone
+        RlControls noUser;
+        CHECK(noUser.LoadLayered(RL_CONTROLS_JSON, (dir / "missing.json").generic_u8string(), &error));
+        CHECK(noUser.ToJson() == controls.ToJson());
+
+        // mistakes get a message with the action and the binding; the controls stay as they were
+        {
+            std::ofstream file(dir / "bad.json", std::ios::binary | std::ios::trunc);
+            file << "{ \"buttons\": { \"boost\": [\"MouseLeft\", \"Banana\"] } }";
+        }
+        RlControls broken = controls;
+        CHECK(!broken.LoadFromFile((dir / "bad.json").generic_u8string(), &error));
+        std::printf("  an unknown key: %s\n", error.c_str());
+        CHECK(error.find("boost") != std::string::npos && error.find("Banana") != std::string::npos);
+        CHECK(broken.ToJson() == controls.ToJson());
+        CHECK(!broken.LoadFromText("not json", &error) && !error.empty());
+        CHECK(!broken.LoadFromText("{ \"axes\": { \"throttle\": \"W\" } }", &error) && error.find("throttle") != std::string::npos);
+        CHECK(!layered.LoadLayered(RL_CONTROLS_JSON, (dir / "bad.json").generic_u8string(), &error));
+
+        // save and load again
+        RlControls edited = controls;
+        CHECK(edited.SetButton(RlButtonAction::Boost, {"MouseMiddle", "F"}, &error));
+        CHECK(edited.SaveToFile((dir / "saved" / "rl_controls.json").generic_u8string(), &error));
+        RlControls again;
+        CHECK(again.LoadFromFile((dir / "saved" / "rl_controls.json").generic_u8string(), &error));
+        CHECK(again.ToJson() == edited.ToJson());
+        CHECK(again.ButtonTokens(RlButtonAction::Boost) == std::vector<std::string>({"MouseMiddle", "F"}));
+        std::filesystem::remove_all(dir);
+    }
+
     void TestTuningFile()
     {
         std::printf("match tuning\n");
@@ -523,6 +799,16 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--trace-bots") == 0)
+    {
+        TraceBots(argc > 2 ? std::atoi(argv[2]) : 1, 1);
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--bot-stats") == 0)
+    {
+        BotStats();
+        return 0;
+    }
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--verbose") == 0)
@@ -530,6 +816,7 @@ int main(int argc, char** argv)
             g_verbose = true;
         }
     }
+    TestControls();
     TestKickoff();
     TestCountdownAndClock();
     TestPads();

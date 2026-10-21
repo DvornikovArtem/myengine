@@ -367,6 +367,7 @@ add_executable(myengine_rl_match_tests
   rl/RlMatchTests.cpp)
 
 target_link_libraries(myengine_rl_match_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_match_tests PRIVATE RL_CONTROLS_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_controls.json")
 myengine_apply_compiler_options(myengine_rl_match_tests)
 set_property(TARGET myengine_rl_match_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_match COMMAND myengine_rl_match_tests)

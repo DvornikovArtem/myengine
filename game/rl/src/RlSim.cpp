@@ -66,6 +66,7 @@ namespace rl
                 JPH::Vec3 velocityB = JPH::Vec3::sZero();
                 JPH::Vec3 positionA = JPH::Vec3::sZero();
                 JPH::Vec3 positionB = JPH::Vec3::sZero();
+                JPH::Quat carRotation = JPH::Quat::sIdentity();  // of the car in a BallCar event
             };
 
             void Clear()
@@ -73,6 +74,7 @@ namespace rl
                 std::lock_guard<std::mutex> lock(mutex_);
                 events_.clear();
                 arenaTouch_.fill(false);
+                arenaNormal_.fill(JPH::Vec3::sZero());
             }
 
             void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings&) override
@@ -85,10 +87,11 @@ namespace rl
                 Record(b1, b2, manifold, false);
             }
 
-            std::vector<Event> TakeEvents(std::array<bool, kMaxCars>& arenaTouch)
+            std::vector<Event> TakeEvents(std::array<bool, kMaxCars>& arenaTouch, std::array<JPH::Vec3, kMaxCars>& arenaNormal)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 arenaTouch = arenaTouch_;
+                arenaNormal = arenaNormal_;
                 std::vector<Event> sorted = events_;
                 // insertion sort: the lists are a handful of entries and std::sort differs between standard libraries
                 for (size_t i = 1; i < sorted.size(); ++i)
@@ -128,7 +131,10 @@ namespace rl
                 std::lock_guard<std::mutex> lock(mutex_);
                 if ((u1 == kUserDataArena && IsCar(b2)) || (u2 == kUserDataArena && IsCar(b1)))
                 {
-                    arenaTouch_[static_cast<size_t>(IsCar(b1) ? u1 : u2)] = true;
+                    const size_t car = static_cast<size_t>(IsCar(b1) ? u1 : u2);
+                    arenaTouch_[car] = true;
+                    // the manifold normal runs from body 1 to body 2: from the arena to the car when the arena is body 1
+                    arenaNormal_[car] += (u1 == kUserDataArena) ? manifold.mWorldSpaceNormal : -manifold.mWorldSpaceNormal;
                     return;
                 }
                 if (!added)
@@ -147,6 +153,7 @@ namespace rl
                     e.velocityB = car.GetLinearVelocity();
                     e.positionA = JPH::Vec3(ball.GetPosition());
                     e.positionB = JPH::Vec3(car.GetPosition());
+                    e.carRotation = car.GetRotation();
                     events_.push_back(e);
                 }
                 else if (IsCar(b1) && IsCar(b2))
@@ -167,6 +174,7 @@ namespace rl
             std::mutex mutex_;
             std::vector<Event> events_;
             std::array<bool, kMaxCars> arenaTouch_{};
+            std::array<JPH::Vec3, kMaxCars> arenaNormal_{};
         };
     }
 
@@ -303,8 +311,11 @@ namespace rl
         void CreateCar(JPH::BodyInterface& bodies, int index)
         {
             const RlCarTuning& c = tuning.car;
-            JPH::BodyCreationSettings settings(new JPH::BoxShape(JPH::Vec3(c.halfExtentX, c.halfExtentY, c.halfExtentZ), 0.02f),
-                                               JPH::RVec3(0.0f, 1.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, Layers::kCar);
+            // The origin of the body is the centre of the hitbox; the centre of mass is below and behind it (RL: the hitbox is offset
+            // from the origin of the car), with the inertia of the box itself.
+            JPH::RefConst<JPH::Shape> box = new JPH::BoxShape(JPH::Vec3(c.halfExtentX, c.halfExtentY, c.halfExtentZ), 0.02f);
+            JPH::RefConst<JPH::Shape> shape = new JPH::OffsetCenterOfMassShape(box, JPH::Vec3(0.0f, c.comOffsetY, c.comOffsetZ));
+            JPH::BodyCreationSettings settings(shape, JPH::RVec3(0.0f, 1.0f, 0.0f), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, Layers::kCar);
             settings.mAllowSleeping = false;
             settings.mFriction = c.friction;
             settings.mRestitution = c.restitution;
@@ -312,11 +323,50 @@ namespace rl
             settings.mAngularDamping = 0.0f;
             settings.mMaxLinearVelocity = c.maxSpeed * 2.0f;
             settings.mMaxAngularVelocity = c.maxAngularSpeed;
-            settings.mInertiaMultiplier = c.inertiaMultiplier;
-            settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
-            settings.mMassPropertiesOverride.mMass = c.mass;
+            settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
+            settings.mMassPropertiesOverride = CarMassProperties(c);
             settings.mUserData = static_cast<uint64_t>(index);
             carIds[index] = bodies.CreateAndAddBody(settings, JPH::EActivation::Activate);
+        }
+
+        static JPH::MassProperties CarMassProperties(const RlCarTuning& c)
+        {
+            const float w = 2.0f * c.halfExtentX;
+            const float h = 2.0f * c.halfExtentY;
+            const float l = 2.0f * c.halfExtentZ;
+            JPH::MassProperties mp;
+            mp.mMass = c.mass;
+            mp.mInertia = JPH::Mat44::sScale(JPH::Vec3(c.mass / 12.0f * (h * h + l * l), c.mass / 12.0f * (w * w + l * l), c.mass / 12.0f * (w * w + h * h)) *
+                                             c.inertiaMultiplier);
+            return mp;
+        }
+
+        // Live change of the numbers; the ones built into the bodies stay as they were.
+        void SetTuning(const RlTuning& t)
+        {
+            RlTuning next = t;
+            next.arena = tuning.arena;
+            next.car.mass = tuning.car.mass;
+            next.car.halfExtentX = tuning.car.halfExtentX;
+            next.car.halfExtentY = tuning.car.halfExtentY;
+            next.car.halfExtentZ = tuning.car.halfExtentZ;
+            next.car.comOffsetY = tuning.car.comOffsetY;
+            next.car.comOffsetZ = tuning.car.comOffsetZ;
+            next.car.inertiaMultiplier = tuning.car.inertiaMultiplier;
+            next.ball.radius = tuning.ball.radius;
+            next.ball.mass = tuning.ball.mass;
+            tuning = next;
+            physics.SetGravity(JPH::Vec3(0.0f, -tuning.gravity, 0.0f));
+            JPH::BodyInterface& bodies = physics.GetBodyInterfaceNoLock();
+            bodies.SetFriction(arenaId, tuning.arena.friction);
+            bodies.SetRestitution(arenaId, tuning.arena.restitution);
+            bodies.SetFriction(ballId, tuning.ball.friction);
+            bodies.SetRestitution(ballId, tuning.ball.restitution);
+            for (int i = 0; i < carCount; ++i)
+            {
+                bodies.SetFriction(carIds[i], tuning.car.friction);
+                bodies.SetRestitution(carIds[i], tuning.car.restitution);
+            }
         }
 
         void ResetCar(int index, float x, float z, float yaw)
@@ -324,9 +374,10 @@ namespace rl
             CarRuntime& rt = runtimes[index];
             std::memset(&rt, 0, sizeof(rt));
             rt.boost = tuning.car.boostStart;
-            rt.sinceJump = 1000.0f;
+            rt.jumpTime = 1000.0f;
+            rt.gripScale = 1.0f;
             rt.spawnX = x;
-            rt.spawnY = tuning.car.suspensionRest + tuning.car.wheelMountYOffset * -1.0f - 0.04f;
+            rt.spawnY = tuning.car.spawnHeight;
             rt.spawnZ = z;
             rt.spawnYaw = yaw;
             PlaceCar(index);
@@ -383,7 +434,7 @@ namespace rl
             rt.jumpUsed = 0;
             rt.secondUsed = 0;
             rt.airTime = 0.0f;
-            rt.sinceJump = 1000.0f;
+            rt.jumpTime = 1000.0f;
             PlaceCar(index);
         }
 
@@ -426,10 +477,20 @@ namespace rl
             }
 
             std::array<bool, kMaxCars> arenaTouch{};
-            const std::vector<Listener::Event> contacts = listener.TakeEvents(arenaTouch);
+            std::array<JPH::Vec3, kMaxCars> arenaNormal{};
+            const std::vector<Listener::Event> contacts = listener.TakeEvents(arenaTouch, arenaNormal);
             for (int i = 0; i < carCount; ++i)
             {
                 runtimes[i].bodyContact = arenaTouch[static_cast<size_t>(i)] ? 1 : 0;
+                if (runtimes[i].bodyContact != 0)
+                {
+                    const JPH::Vec3 n = arenaNormal[static_cast<size_t>(i)];
+                    const float length = n.Length();
+                    const JPH::Vec3 unit = length > 1e-4f ? n / length : JPH::Vec3::sAxisY();
+                    runtimes[i].bodyNormalX = unit.GetX();
+                    runtimes[i].bodyNormalY = unit.GetY();
+                    runtimes[i].bodyNormalZ = unit.GetZ();
+                }
             }
             ApplyContacts(contacts);
             LimitBall();
@@ -471,8 +532,18 @@ namespace rl
                         continue;
                     }
                     direction /= length;
-                    const float relative = (e.velocityA - e.velocityB).Length();
-                    const float scale = Interp(b.hitSpeed, b.hitScale, 4, relative);
+                    float relative = (e.velocityA - e.velocityB).Length();
+                    float scale = Interp(b.hitSpeed, b.hitScale, 4, relative);
+                    // where on the car the ball was hit and how: the roof pushes less, a hit during a dodge pushes more
+                    const JPH::Vec3 local = e.carRotation.Conjugated() * (e.point - e.positionB);
+                    if (local.GetY() > 0.12f && local.GetZ() < 0.4f)
+                    {
+                        scale *= b.roofHitScale;
+                    }
+                    if (rt.dodging != 0)
+                    {
+                        scale *= b.dodgeHitScale;
+                    }
                     JPH::Vec3 velocity = bodies.GetLinearVelocity(ballId) + direction * (relative * scale);
                     bodies.SetLinearVelocity(ballId, velocity);
                     ++events.ballHits;
@@ -557,7 +628,7 @@ namespace rl
                 s.demolished = rt.demolished != 0;
                 s.supersonic = !s.demolished && velocity.Length() >= supersonic;
                 s.jumped = rt.jumpUsed != 0;
-                s.canDodge = rt.jumpUsed != 0 && rt.secondUsed == 0 && rt.airTime < tuning.car.dodgeWindow;
+                s.canDodge = frames[i].wheelContacts < 3 && rt.secondUsed == 0 && rt.airTime < tuning.car.dodgeWindow;
                 s.dodging = rt.dodging != 0;
                 s.respawnTimer = rt.respawnTimer;
                 for (int w = 0; w < kWheelCount; ++w)
@@ -670,6 +741,7 @@ namespace rl
 
     int RlSim::CarCount() const { return impl_->carCount; }
     const RlTuning& RlSim::Tuning() const { return impl_->tuning; }
+    void RlSim::SetTuning(const RlTuning& tuning) { impl_->SetTuning(tuning); }
     const RlArena& RlSim::Arena() const { return impl_->arena; }
 
     void RlSim::ResetCar(int index, float x, float z, float yaw)
@@ -719,6 +791,21 @@ namespace rl
         impl_->ResetBall(position, velocity, angularVelocity);
         impl_->FillState();
         impl_->previous = impl_->state;
+    }
+
+    float RlSim::ArenaSegmentFree(RlVec3 from, RlVec3 to) const
+    {
+        const JPH::Vec3 a(from.x, from.y, from.z);
+        const JPH::Vec3 d = JPH::Vec3(to.x, to.y, to.z) - a;
+        JPH::RayCastResult hit;
+        const JPH::RRayCast ray(a, d);
+        const JPH::SpecifiedBroadPhaseLayerFilter broadFilter(BroadPhase::kStatic);
+        const JPH::SpecifiedObjectLayerFilter objectFilter(Layers::kStatic);
+        if (impl_->physics.GetNarrowPhaseQuery().CastRay(ray, hit, broadFilter, objectFilter))
+        {
+            return hit.mFraction;
+        }
+        return 1.0f;
     }
 
     void RlSim::Step(const RlCarInput* inputs) { impl_->Step(inputs); }

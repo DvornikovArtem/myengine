@@ -26,6 +26,10 @@ namespace rl
         int CarCount() const;
         const RlTuning& Tuning() const;
         const RlArena& Arena() const;
+        // Takes new numbers while the world runs (the RL Tuning window, a reloaded rl_tuning.json): everything the car, the ball and the
+        // match read each tick changes at once; what is built into the bodies (the arena, the hitbox, its centre of mass, the mass) keeps
+        // its value until a new sim is made.
+        void SetTuning(const RlTuning& tuning);
 
         // Puts a car upright on the floor at (x, z) looking `yaw` radians from +Z towards +X, at rest, with the starting boost.
         // This is also the point it comes back to after a demolition.
@@ -39,6 +43,9 @@ namespace rl
 
         // One 120 Hz tick; `inputs` has CarCount() entries.
         void Step(const RlCarInput* inputs);
+
+        // Fraction (0..1) of the segment from `from` to `to` that is free of the arena; 1 when it does not touch it (the camera uses it).
+        float ArenaSegmentFree(RlVec3 from, RlVec3 to) const;
 
         const RlWorldState& State() const;
         const RlWorldState& PreviousState() const;  // the state before the last Step, for interpolation
