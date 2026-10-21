@@ -573,6 +573,13 @@ namespace rl
             ball.angularVelocity = ToRl(bodies.GetAngularVelocity(ballId));
         }
 
+        struct FrameSave
+        {
+            int32_t wheelContacts;
+            float compression[kWheelCount];
+            float normal[3];
+        };
+
         struct SnapshotHeader
         {
             uint32_t magic;
@@ -589,6 +596,20 @@ namespace rl
             SnapshotHeader header{kSnapshotMagic, tick, carCount, lastToucher};
             recorder.Put(header);
             recorder.WriteBytes(runtimes, sizeof(CarRuntime) * static_cast<size_t>(carCount));
+            // what the last tick measured under the wheels: the state shows it and a bot reads it
+            for (int i = 0; i < carCount; ++i)
+            {
+                FrameSave frame{};
+                frame.wheelContacts = frames[i].wheelContacts;
+                for (int w = 0; w < kWheelCount; ++w)
+                {
+                    frame.compression[w] = frames[i].wheelCompression[w];
+                }
+                frame.normal[0] = frames[i].surfaceNormal.GetX();
+                frame.normal[1] = frames[i].surfaceNormal.GetY();
+                frame.normal[2] = frames[i].surfaceNormal.GetZ();
+                recorder.Put(frame);
+            }
             physics.SaveState(recorder);
             recorder.Bytes().swap(out);
         }
@@ -605,6 +626,11 @@ namespace rl
                 return false;
             }
             recorder.ReadBytes(runtimes, sizeof(CarRuntime) * static_cast<size_t>(carCount));
+            FrameSave saved[kMaxCars] = {};
+            for (int i = 0; i < carCount; ++i)
+            {
+                recorder.Get(saved[i]);
+            }
             if (!physics.RestoreState(recorder))
             {
                 return false;
@@ -621,6 +647,12 @@ namespace rl
                     bodies.SetObjectLayer(carIds[i], wanted);
                 }
                 frames[i] = CarFrame{};
+                frames[i].wheelContacts = saved[i].wheelContacts;
+                for (int w = 0; w < kWheelCount; ++w)
+                {
+                    frames[i].wheelCompression[w] = saved[i].compression[w];
+                }
+                frames[i].surfaceNormal = JPH::Vec3(saved[i].normal[0], saved[i].normal[1], saved[i].normal[2]);
             }
             events = {};
             FillState();
@@ -659,6 +691,17 @@ namespace rl
         }
     }
 
+    void RlSim::SetRespawnPoint(int index, float x, float z, float yaw)
+    {
+        if (index >= 0 && index < impl_->carCount)
+        {
+            CarRuntime& rt = impl_->runtimes[index];
+            rt.spawnX = x;
+            rt.spawnZ = z;
+            rt.spawnYaw = yaw;
+        }
+    }
+
     void RlSim::SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity)
     {
         if (index >= 0 && index < impl_->carCount)
@@ -693,30 +736,5 @@ namespace rl
             hash = (hash ^ byte) * 1099511628211ull;
         }
         return hash;
-    }
-
-    void RlStateRing::Push(uint32_t tick, const RlSim& sim)
-    {
-        if (slots_.empty())
-        {
-            return;
-        }
-        Slot& slot = slots_[next_];
-        sim.SaveState(slot.bytes);
-        slot.tick = tick;
-        slot.used = true;
-        next_ = (next_ + 1) % slots_.size();
-    }
-
-    bool RlStateRing::Restore(uint32_t tick, RlSim& sim) const
-    {
-        for (const Slot& slot : slots_)
-        {
-            if (slot.used && slot.tick == tick)
-            {
-                return sim.RestoreState(slot.bytes);
-            }
-        }
-        return false;
     }
 }

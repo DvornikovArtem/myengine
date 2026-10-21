@@ -34,7 +34,7 @@ namespace myengine::scripting
 
 namespace myengine::ecs::systems
 {
-    class RlSandboxSystem;
+    class RlGameSystem;
 }
 
 namespace myengine::editor
@@ -195,7 +195,7 @@ namespace myengine::core
         state::StateMachine stateMachine_;
         ecs::World world_;
         scripting::ScriptSystem* scriptSystem_ = nullptr; // owned by world_
-        ecs::systems::RlSandboxSystem* rlSandboxSystem_ = nullptr; // owned by world_
+        ecs::systems::RlGameSystem* rlGameSystem_ = nullptr; // owned by world_
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;

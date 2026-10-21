@@ -51,7 +51,7 @@
   include/myengine/ecs/systems/PhysicsSystem.h
   include/myengine/ecs/systems/PlayerControlSystem.h
   include/myengine/ecs/systems/RenderSystem.h
-  include/myengine/ecs/systems/RlSandboxSystem.h
+  include/myengine/ecs/systems/RlGameSystem.h
   include/myengine/events/EventBus.h
   include/myengine/input/InputManager.h
   include/myengine/jobs/JobSystem.h
@@ -126,7 +126,7 @@ set(ENGINE_SOURCES
   src/ecs/systems/PhysicsSystem.cpp
   src/ecs/systems/PlayerControlSystem.cpp
   src/ecs/systems/RenderSystem.cpp
-  src/ecs/systems/RlSandboxSystem.cpp
+  src/ecs/systems/RlGameSystem.cpp
   src/input/InputManager.cpp
   src/jobs/Fiber.cpp
   src/jobs/Fiber.h

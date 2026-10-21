@@ -1,6 +1,7 @@
-// RlSandboxSystem.h
-// The editor sandbox of the Rocket League physics (game/rl): in Play mode it runs an rl::RlSim at 120 Hz next to the frame loop and
-// moves the scene's entities (RlArena, RlBall, RlCar0.., RlCamera) to the interpolated state. Keyboard and XInput drive RlCar0.
+// RlGameSystem.h
+// The Rocket League game in the editor: in Play mode it shows the menu, starts an rl::RlMatch (physics, rules, bots) and runs it at 120 Hz
+// next to the frame loop, moving the scene's entities (RlArena, RlBall, RlBlue0.., RlOrange0.., RlPad0.., RlCamera) to the interpolated
+// state. Keyboard and XInput drive the first blue car.
 
 #pragma once
 
@@ -17,11 +18,11 @@ namespace myengine::input
 
 namespace myengine::ecs::systems
 {
-    class RlSandboxSystem final : public IUpdateSystem
+    class RlGameSystem final : public IUpdateSystem
     {
     public:
-        explicit RlSandboxSystem(input::InputManager& input);
-        ~RlSandboxSystem() override;
+        explicit RlGameSystem(input::InputManager& input);
+        ~RlGameSystem() override;
 
         void Update(World& world, float deltaTime) override;
 

@@ -1,4 +1,4 @@
-// RlSandboxSystem.cpp
+// RlGameSystem.cpp
 
 #include <algorithm>
 #include <cmath>
@@ -10,13 +10,14 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ecs/World.h>
 #include <myengine/ecs/components/CameraComponent.h>
+#include <myengine/ecs/components/MeshRendererComponent.h>
 #include <myengine/ecs/components/TagComponent.h>
 #include <myengine/ecs/components/TransformComponent.h>
-#include <myengine/ecs/systems/RlSandboxSystem.h>
+#include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/editor/EditorState.h>
 #include <myengine/input/InputManager.h>
 
-#include <rl/RlSim.h>
+#include <rl/RlMatch.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -34,7 +35,6 @@ namespace myengine::ecs::systems
         using components::Vec3;
 
         constexpr float kRadToDeg = 57.29577951f;
-        constexpr float kDegToRad = 0.01745329252f;
 
         dx::XMVECTOR Q(const rl::RlQuat& q) { return dx::XMVectorSet(q.x, q.y, q.z, q.w); }
         dx::XMVECTOR P(const rl::RlVec3& v) { return dx::XMVectorSet(v.x, v.y, v.z, 0.0f); }
@@ -49,11 +49,10 @@ namespace myengine::ecs::systems
         {
             dx::XMFLOAT4X4 m;
             dx::XMStoreFloat4x4(&m, dx::XMMatrixRotationQuaternion(rotation));
-            float pitch;
             float yaw;
             float roll;
             const float s = std::clamp(-m._32, -1.0f, 1.0f);
-            pitch = std::asin(s);
+            const float pitch = std::asin(s);
             if (std::fabs(s) > 0.99999f)
             {
                 yaw = std::atan2(-m._13, m._11);
@@ -69,7 +68,7 @@ namespace myengine::ecs::systems
 
         std::string Format(const char* format, ...)
         {
-            char buffer[160];
+            char buffer[200];
             va_list args;
             va_start(args, format);
             std::vsnprintf(buffer, sizeof(buffer), format, args);
@@ -86,22 +85,41 @@ namespace myengine::ecs::systems
             }
             return std::copysign((magnitude - zone) / (1.0f - zone), value);
         }
+
+        std::string ClockText(float seconds, bool overtime)
+        {
+            const int total = static_cast<int>(std::max(seconds, 0.0f) + (overtime ? 0.0f : 0.999f));
+            return Format("%s%d:%02d", overtime ? "+" : "", total / 60, total % 60);
+        }
     }
 
-    struct RlSandboxSystem::Impl
+    struct RlGameSystem::Impl
     {
+        enum class Mode
+        {
+            Menu,
+            Match,
+        };
+
         input::InputManager& input;
 
-        std::unique_ptr<rl::RlSim> sim;
+        rl::RlTuning tuning;
+        std::unique_ptr<rl::RlMatch> match;
+        Mode mode = Mode::Menu;
         bool scanned = false;
+        bool active = false;
         std::string status;
+
+        int menuMode = 2;     // 0 practice, 1..4 players per team
+        int botLevel = 1;
 
         EntityId arena = kInvalidEntity;
         EntityId ball = kInvalidEntity;
         EntityId camera = kInvalidEntity;
-        EntityId cars[rl::kMaxCars] = {};
-        EntityId wheels[rl::kMaxCars][rl::kWheelCount] = {};
-        int carCount = 0;
+        EntityId marker = kInvalidEntity;
+        EntityId cars[2][4] = {};
+        EntityId wheels[2][4][rl::kWheelCount] = {};
+        EntityId pads[rl::kPadCount] = {};
 
         float accumulator = 0.0f;
         bool jumpLatched = false;
@@ -110,6 +128,8 @@ namespace myengine::ecs::systems
         Vec3 cameraForward{0.0f, 0.0f, 1.0f};
         Vec3 cameraUp{0.0f, 1.0f, 0.0f};
         float cameraFov = 95.0f;
+        components::CameraComponent cameraHome;
+        bool haveCameraHome = false;
 
         // XInput: an unplugged pad is looked for once a second, polling it every frame is slow
         bool padConnected = false;
@@ -138,70 +158,164 @@ namespace myengine::ecs::systems
             return found;
         }
 
-        void Stop()
+        void SetVisible(World& world, EntityId entity, bool visible)
         {
-            sim.reset();
+            if (entity == kInvalidEntity)
+            {
+                return;
+            }
+            if (auto* renderer = world.TryGet<components::MeshRendererComponent>(entity))
+            {
+                renderer->visible = visible;
+            }
+        }
+
+        void HideEverything(World& world)
+        {
+            SetVisible(world, ball, false);
+            SetVisible(world, marker, false);
+            for (int t = 0; t < 2; ++t)
+            {
+                for (int i = 0; i < 4; ++i)
+                {
+                    SetVisible(world, cars[t][i], false);
+                    for (int w = 0; w < rl::kWheelCount; ++w)
+                    {
+                        SetVisible(world, wheels[t][i][w], false);
+                    }
+                }
+            }
+            for (EntityId pad : pads)
+            {
+                SetVisible(world, pad, false);
+            }
+        }
+
+        void Stop(World* world)
+        {
+            if (active && world != nullptr)
+            {
+                if (haveCameraHome && camera != kInvalidEntity)
+                {
+                    if (auto* cam = world->TryGet<components::CameraComponent>(camera))
+                    {
+                        *cam = cameraHome;
+                    }
+                }
+            }
+            match.reset();
+            mode = Mode::Menu;
             scanned = false;
+            active = false;
             status.clear();
             hud.clear();
             accumulator = 0.0f;
             cameraReady = false;
             cameraUp = {0.0f, 1.0f, 0.0f};
             jumpLatched = false;
+            haveCameraHome = false;
         }
 
-        bool Start(World& world)
+        bool Scan(World& world)
         {
             scanned = true;
             arena = FindTag(world, "RlArena");
             ball = FindTag(world, "RlBall");
             camera = FindTag(world, "RlCamera");
-            carCount = 0;
-            for (int i = 0; i < rl::kMaxCars; ++i)
+            marker = FindTag(world, "RlPlayerMarker");
+            const char* teamNames[2] = {"RlBlue", "RlOrange"};
+            for (int t = 0; t < 2; ++t)
             {
-                cars[i] = FindTag(world, Format("RlCar%d", i));
-                if (cars[i] == kInvalidEntity)
+                for (int i = 0; i < 4; ++i)
                 {
-                    break;
-                }
-                ++carCount;
-                for (int w = 0; w < rl::kWheelCount; ++w)
-                {
-                    wheels[i][w] = FindTag(world, Format("RlCar%dWheel%d", i, w));
+                    cars[t][i] = FindTag(world, Format("%s%d", teamNames[t], i));
+                    for (int w = 0; w < rl::kWheelCount; ++w)
+                    {
+                        wheels[t][i][w] = FindTag(world, Format("%s%dWheel%d", teamNames[t], i, w));
+                    }
                 }
             }
-            if (arena == kInvalidEntity || ball == kInvalidEntity || carCount == 0)
+            for (int i = 0; i < rl::kPadCount; ++i)
             {
-                return false;  // not an RL sandbox scene
+                pads[i] = FindTag(world, Format("RlPad%d", i));
+            }
+            if (arena == kInvalidEntity || ball == kInvalidEntity || cars[0][0] == kInvalidEntity)
+            {
+                return false;  // not a Rocket League scene
             }
 
-            rl::RlTuning tuning;
             std::string error;
             const auto tuningPath = core::ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/rl_tuning.json");
             if (!tuning.LoadFromFile(tuningPath.generic_u8string(), &error))
             {
                 status = "rl_tuning.json: " + error + " (defaults)";
             }
-            sim = std::make_unique<rl::RlSim>(tuning, carCount);
-
-            // the cars and the ball start where the scene has them
-            for (int i = 0; i < carCount; ++i)
-            {
-                if (const auto* transform = world.TryGet<components::TransformComponent>(cars[i]))
-                {
-                    sim->ResetCar(i, transform->position.x, transform->position.z, transform->rotationDeg.y * kDegToRad);
-                }
-            }
-            if (const auto* transform = world.TryGet<components::TransformComponent>(ball))
-            {
-                sim->ResetBall({transform->position.x, transform->position.y, transform->position.z});
-            }
             if (const auto* cam = camera != kInvalidEntity ? world.TryGet<components::CameraComponent>(camera) : nullptr)
             {
                 cameraFov = cam->fovYDeg;
+                cameraHome = *cam;
+                haveCameraHome = true;
             }
-            accumulator = 0.0f;
+            active = true;
+            HideEverything(world);
             return true;
+        }
+
+        void StartMatch(World& world)
+        {
+            rl::RlMatchConfig config;
+            config.mode = menuMode;
+            config.humanMask = 1u;
+            config.botLevel = botLevel;
+            // a seed from the clock of the frame loop would break replays; the menu counter is enough for variety
+            static uint64_t started = 0;
+            config.seed = 0x5EED0000ull + ++started;
+            match = std::make_unique<rl::RlMatch>(tuning, config);
+            mode = Mode::Match;
+            accumulator = 0.0f;
+            cameraReady = false;
+            HideEverything(world);
+            const int teamSize = std::max(menuMode, 1);
+            for (int t = 0; t < (menuMode == 0 ? 1 : 2); ++t)
+            {
+                for (int i = 0; i < teamSize; ++i)
+                {
+                    SetVisible(world, cars[t][i], true);
+                    for (int w = 0; w < rl::kWheelCount; ++w)
+                    {
+                        SetVisible(world, wheels[t][i][w], true);
+                    }
+                }
+            }
+            SetVisible(world, ball, true);
+            SetVisible(world, marker, true);
+            for (EntityId pad : pads)
+            {
+                SetVisible(world, pad, true);
+            }
+            for (int i = 0; i < rl::kPadCount; ++i)
+            {
+                if (auto* transform = world.TryGet<components::TransformComponent>(pads[i]))
+                {
+                    float x, z;
+                    rl::RlPadSpot(i, x, z);
+                    transform->position = {x, 0.04f, z};
+                }
+            }
+        }
+
+        void ToMenu(World& world)
+        {
+            match.reset();
+            mode = Mode::Menu;
+            HideEverything(world);
+            if (haveCameraHome && camera != kInvalidEntity)
+            {
+                if (auto* cam = world.TryGet<components::CameraComponent>(camera))
+                {
+                    *cam = cameraHome;
+                }
+            }
         }
 
         void PollPad(const float deltaTime, rl::RlCarInput& pad, bool& ballCamPressed)
@@ -266,30 +380,56 @@ namespace myengine::ecs::systems
 
         void Update(World& world, const float deltaTime)
         {
-            if (!scanned && !Start(world))
+            if (!scanned && !Scan(world))
             {
                 return;
             }
-            if (!sim)
+            if (!active)
             {
                 return;
             }
 
-            // ---- input of the player car
             const bool windowActive = input.GetActiveWindowId() != 0;
+            if (mode == Mode::Menu)
+            {
+                if (windowActive)
+                {
+                    for (int n = 1; n <= 4; ++n)
+                    {
+                        if (input.WasKeyPressed(static_cast<std::uint32_t>('0' + n)))
+                        {
+                            menuMode = n;
+                        }
+                    }
+                    if (input.WasKeyPressed('P') || input.WasKeyPressed('0'))
+                    {
+                        menuMode = 0;
+                    }
+                    if (input.WasKeyPressed('L'))
+                    {
+                        botLevel = (botLevel + 1) % 3;
+                    }
+                    if (input.WasKeyPressed(VK_RETURN))
+                    {
+                        StartMatch(world);
+                        return;
+                    }
+                }
+                BuildMenuHud();
+                return;
+            }
+
+            // ---- input of the player car
             rl::RlCarInput keyboard;
             bool ballCamPressed = false;
+            bool toMenu = false;
+            bool enter = false;
             if (windowActive)
             {
                 keyboard = KeyboardInput();
-                if (input.WasKeyPressed('C'))
-                {
-                    ballCamPressed = true;
-                }
-                if (input.WasKeyPressed('R'))
-                {
-                    ResetMatch(world);
-                }
+                ballCamPressed = input.WasKeyPressed('C');
+                toMenu = input.WasKeyPressed('M');
+                enter = input.WasKeyPressed(VK_RETURN);
             }
             rl::RlCarInput pad;
             bool padBallCam = false;
@@ -299,6 +439,12 @@ namespace myengine::ecs::systems
             {
                 ballCam = !ballCam;
             }
+            if (toMenu || (enter && match->World().match.phase == rl::RlMatchPhase::Finished))
+            {
+                ToMenu(world);
+                BuildMenuHud();
+                return;
+            }
             rl::RlCarInput player = padInUse ? pad : keyboard;
             if (padInUse)
             {
@@ -307,7 +453,7 @@ namespace myengine::ecs::systems
 
             // ---- fixed ticks
             accumulator += std::min(deltaTime, 0.1f);
-            std::vector<rl::RlCarInput> inputs(static_cast<size_t>(sim->CarCount()));
+            std::vector<rl::RlCarInput> inputs(static_cast<size_t>(match->SlotCount()));
             while (accumulator >= rl::kTickDt)
             {
                 accumulator -= rl::kTickDt;
@@ -317,99 +463,99 @@ namespace myengine::ecs::systems
                     inputs[0].jump = true;
                     jumpLatched = false;
                 }
-                sim->Step(inputs.data());
+                match->Step(inputs.data());
             }
 
             ApplyToScene(world, deltaTime);
-            BuildHud();
-        }
-
-        void ResetMatch(World& world)
-        {
-            for (int i = 0; i < carCount; ++i)
-            {
-                if (const auto* transform = world.TryGet<components::TransformComponent>(cars[i]))
-                {
-                    sim->ResetCar(i, transform->position.x, transform->position.z, transform->rotationDeg.y * kDegToRad);
-                }
-            }
-            Vec3 ballStart{0.0f, 3.0f, 0.0f};
-            if (const auto* transform = world.TryGet<components::TransformComponent>(ball))
-            {
-                ballStart = transform->position;
-            }
-            sim->ResetBall({ballStart.x, ballStart.y, ballStart.z});
+            BuildMatchHud();
         }
 
         void ApplyToScene(World& world, const float deltaTime)
         {
             const float alpha = std::clamp(accumulator / rl::kTickDt, 0.0f, 1.0f);
-            const rl::RlWorldState& now = sim->State();
-            const rl::RlWorldState& before = sim->PreviousState();
-            const rl::RlTuning& tuning = sim->Tuning();
+            const rl::RlWorldState& now = match->World();
+            const rl::RlWorldState& before = match->PreviousWorld();
+            const rl::RlTuning& t = match->Tuning();
+            const int teamSize = std::max(menuMode, 1);
 
-            dx::XMVECTOR carPosition = dx::XMVectorZero();
-            dx::XMVECTOR carRotation = dx::XMQuaternionIdentity();
-            dx::XMVECTOR ballPosition = dx::XMVectorZero();
+            dx::XMVECTOR playerPosition = dx::XMVectorZero();
+            dx::XMVECTOR playerRotation = dx::XMQuaternionIdentity();
 
-            for (int i = 0; i < carCount; ++i)
+            for (int slot = 0; slot < match->SlotCount(); ++slot)
             {
-                const rl::RlCarState& a = before.cars[i];
-                const rl::RlCarState& b = now.cars[i];
-                const bool jumped = a.demolished != b.demolished;  // do not slide from the park spot to the spawn
-                const float t = jumped ? 1.0f : alpha;
-                const dx::XMVECTOR position = dx::XMVectorLerp(P(a.position), P(b.position), t);
-                const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), t);
-                if (i == 0)
+                const rl::RlCarState& a = before.cars[slot];
+                const rl::RlCarState& b = now.cars[slot];
+                const bool jumped = a.demolished != b.demolished || before.match.kickoffs != now.match.kickoffs;  // no sliding from the park spot or the last kick-off
+                const float s = jumped ? 1.0f : alpha;
+                const dx::XMVECTOR position = dx::XMVectorLerp(P(a.position), P(b.position), s);
+                const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), s);
+                if (slot == 0)
                 {
-                    carPosition = position;
-                    carRotation = rotation;
+                    playerPosition = position;
+                    playerRotation = rotation;
                 }
-
-                if (auto* transform = world.TryGet<components::TransformComponent>(cars[i]))
+                const int team = match->Team(slot);
+                const int index = slot % teamSize;
+                const bool shown = !b.demolished;
+                if (auto* transform = world.TryGet<components::TransformComponent>(cars[team][index]))
                 {
                     transform->position = ToVec3(position);
                     transform->rotationDeg = EulerDegrees(rotation);
-                    transform->scale = b.demolished ? Vec3{0.0f, 0.0f, 0.0f} : Vec3{tuning.car.halfExtentX * 2.0f, tuning.car.halfExtentY * 2.0f, tuning.car.halfExtentZ * 2.0f};
+                    transform->scale = {t.car.halfExtentX * 2.0f, t.car.halfExtentY * 2.0f, t.car.halfExtentZ * 2.0f};
                 }
+                SetVisible(world, cars[team][index], shown);
                 for (int w = 0; w < rl::kWheelCount; ++w)
                 {
-                    if (wheels[i][w] == kInvalidEntity)
-                    {
-                        continue;
-                    }
-                    auto* wheel = world.TryGet<components::TransformComponent>(wheels[i][w]);
+                    const EntityId wheelEntity = wheels[team][index][w];
+                    SetVisible(world, wheelEntity, shown);
+                    auto* wheel = world.TryGet<components::TransformComponent>(wheelEntity);
                     if (wheel == nullptr)
                     {
                         continue;
                     }
                     const float side = (w & 1) ? 1.0f : -1.0f;
-                    const float z = (w < 2) ? tuning.car.wheelFrontZ : tuning.car.wheelRearZ;
+                    const float z = (w < 2) ? t.car.wheelFrontZ : t.car.wheelRearZ;
                     const float radius = 0.2f;
                     // the wheel hangs under its mount by the free suspension travel
-                    const float drop = std::max(tuning.car.suspensionRest - radius - b.wheelCompression[w], 0.0f);
-                    const dx::XMVECTOR local = dx::XMVectorSet(side * tuning.car.wheelMountX, tuning.car.wheelMountYOffset - drop, z, 0.0f);
+                    const float drop = std::max(t.car.suspensionRest - radius - b.wheelCompression[w], 0.0f);
+                    const dx::XMVECTOR local = dx::XMVectorSet(side * t.car.wheelMountX, t.car.wheelMountYOffset - drop, z, 0.0f);
                     wheel->position = ToVec3(dx::XMVectorAdd(position, dx::XMVector3Rotate(local, rotation)));
                     wheel->rotationDeg = EulerDegrees(rotation);
-                    wheel->scale = b.demolished ? Vec3{0.0f, 0.0f, 0.0f} : Vec3{0.16f, radius, radius};
+                    wheel->scale = {0.16f, radius, radius};
                 }
             }
 
+            dx::XMVECTOR ballPosition;
             {
                 const rl::RlBallState& a = before.ball;
                 const rl::RlBallState& b = now.ball;
-                ballPosition = dx::XMVectorLerp(P(a.position), P(b.position), alpha);
-                const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), alpha);
+                const bool reset = before.match.kickoffs != now.match.kickoffs;
+                const float s = reset ? 1.0f : alpha;
+                ballPosition = dx::XMVectorLerp(P(a.position), P(b.position), s);
+                const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), s);
                 if (auto* transform = world.TryGet<components::TransformComponent>(ball))
                 {
                     transform->position = ToVec3(ballPosition);
                     transform->rotationDeg = EulerDegrees(rotation);
-                    const float r = tuning.ball.radius;
+                    const float r = t.ball.radius;
                     transform->scale = {r, r, r};
                 }
             }
 
-            UpdateCamera(world, deltaTime, now.cars[0], carPosition, carRotation, ballPosition);
+            // the pads: lit while they wait for a car
+            for (int i = 0; i < rl::kPadCount; ++i)
+            {
+                SetVisible(world, pads[i], now.match.pads[i].respawnLeft <= 0.0f);
+            }
+            if (auto* transform = world.TryGet<components::TransformComponent>(marker))
+            {
+                transform->position = {dx::XMVectorGetX(playerPosition), dx::XMVectorGetY(playerPosition) + 0.95f, dx::XMVectorGetZ(playerPosition)};
+                transform->rotationDeg = {0.0f, 45.0f, 0.0f};
+                transform->scale = {0.22f, 0.22f, 0.22f};
+                SetVisible(world, marker, !now.cars[0].demolished);
+            }
+
+            UpdateCamera(world, deltaTime, now.cars[0], playerPosition, playerRotation, ballPosition);
         }
 
         // Behind the car looking over it at the ball (ball cam), or along the car's heading (chase cam). On a wall or the ceiling the
@@ -478,7 +624,7 @@ namespace myengine::ecs::systems
             const float distance = 4.6f;
             const float height = 1.55f;
             dx::XMVECTOR eye = dx::XMVectorAdd(dx::XMVectorSubtract(carPosition, dx::XMVectorScale(forward, distance)), dx::XMVectorScale(up, height));
-            eye = dx::XMVectorSetY(eye, std::clamp(dx::XMVectorGetY(eye), 0.4f, sim->Tuning().arena.height - 0.4f));
+            eye = dx::XMVectorSetY(eye, std::clamp(dx::XMVectorGetY(eye), 0.4f, match->Tuning().arena.height - 0.4f));
             dx::XMVECTOR lookAt = dx::XMVectorAdd(carPosition, dx::XMVectorAdd(dx::XMVectorScale(forward, 6.0f), dx::XMVectorScale(up, 0.7f)));
             if (ballCam && dx::XMVectorGetY(up) > 0.8f)
             {
@@ -499,57 +645,108 @@ namespace myengine::ecs::systems
             cam->isPrimary = true;
         }
 
-        void BuildHud()
+        void BuildMenuHud()
         {
             hud.clear();
-            const rl::RlCarState& car = sim->State().cars[0];
-            const float speed = std::sqrt(car.linearVelocity.x * car.linearVelocity.x + car.linearVelocity.y * car.linearVelocity.y +
-                                          car.linearVelocity.z * car.linearVelocity.z);
-            hud.push_back(Format("RL sandbox  tick %u  %s", sim->State().tick, ballCam ? "ball cam" : "chase cam"));
-            hud.push_back(Format("speed %.1f m/s (%.0f km/h)%s  boost %.0f", speed, speed * 3.6f, car.supersonic ? "  SUPERSONIC" : "", car.boost));
-            hud.push_back(Format("wheels %d/4 %s  jump %s  %s", car.wheelContacts, car.onGround ? "on surface" : "in air",
-                                 car.canDodge ? "2nd jump/dodge ready" : (car.jumped ? "used" : "ready"), car.dodging ? "flipping" : ""));
-            if (!sim->State().cars[0].demolished)
-            {
-                const rl::RlBallState& ballState = sim->State().ball;
-                const float ballSpeed = std::sqrt(ballState.linearVelocity.x * ballState.linearVelocity.x + ballState.linearVelocity.y * ballState.linearVelocity.y +
-                                                  ballState.linearVelocity.z * ballState.linearVelocity.z);
-                hud.push_back(Format("ball %.1f m/s  last touch %s", ballSpeed, sim->State().lastBallToucher < 0 ? "-" : Format("car %d", sim->State().lastBallToucher).c_str()));
-            }
-            else
-            {
-                hud.push_back(Format("demolished, back in %.1f s", car.respawnTimer));
-            }
-            hud.push_back(padConnected ? (padInUse ? "gamepad: in use" : "gamepad: connected") : "gamepad: not found");
-            hud.push_back("W/S gas+pitch  A/D steer  Q/E roll  Space jump  Shift boost  Ctrl drift/air roll  C camera  R reset");
+            hud.push_back("=== ROCKET LEAGUE ===");
+            const char* names[5] = {"practice (one car and the ball)", "1v1", "2v2", "3v3", "4v4"};
+            hud.push_back(Format("mode: %s   (1-4 = players per team, P = practice)", names[menuMode]));
+            const char* levels[3] = {"easy", "normal", "hard"};
+            hud.push_back(Format("bots: %s   (L = change)", levels[botLevel]));
+            hud.push_back("Enter - start      M - back to this menu      Esc - stop Play");
+            hud.push_back("W/S gas+pitch  A/D steer  Q/E roll  Space jump (x2 + direction = dodge)  Shift boost  Ctrl drift/air roll  C camera");
             hud.push_back("pad: RT/LT gas  stick  A jump  B boost  X drift/air roll  LB/RB roll  Y camera");
             if (!status.empty())
             {
                 hud.push_back(status);
             }
         }
+
+        void BuildMatchHud()
+        {
+            hud.clear();
+            const rl::RlWorldState& w = match->World();
+            const rl::RlMatchState& m = w.match;
+            const rl::RlCarState& car = w.cars[0];
+            const char* teamName[2] = {"BLUE", "ORANGE"};
+
+            if (menuMode == 0)
+            {
+                hud.push_back(Format("PRACTICE   goals %d", m.score[0]));
+            }
+            else
+            {
+                hud.push_back(Format("BLUE %d : %d ORANGE    %s%s", m.score[0], m.score[1], m.overtime != 0 ? "OVERTIME " : "", ClockText(m.clock, m.overtime != 0).c_str()));
+            }
+            switch (m.phase)
+            {
+            case rl::RlMatchPhase::Countdown:
+                hud.push_back(Format("- %d -", static_cast<int>(std::ceil(m.phaseTimer))));
+                break;
+            case rl::RlMatchPhase::GoalScored:
+            {
+                std::string author = m.lastGoalScorer < 0 ? "" : Format("  (%s%s %d)", teamName[match->Team(m.lastGoalScorer)], m.lastGoalOwn != 0 ? " own goal" : "",
+                                                                       m.lastGoalScorer % std::max(menuMode, 1) + 1);
+                hud.push_back(Format("*** GOAL!  %s scores%s ***", teamName[m.lastGoalTeam], author.c_str()));
+                break;
+            }
+            case rl::RlMatchPhase::Finished:
+                hud.push_back(Format("FINAL  %s TEAM WINS  %d : %d   -   Enter / M for the menu", teamName[m.winner], m.score[0], m.score[1]));
+                break;
+            case rl::RlMatchPhase::Playing:
+                if (m.overtime != 0 && m.clock < 3.0f)
+                {
+                    hud.push_back("OVERTIME! The next goal wins");
+                }
+                break;
+            }
+
+            const float speed = std::sqrt(car.linearVelocity.x * car.linearVelocity.x + car.linearVelocity.y * car.linearVelocity.y +
+                                          car.linearVelocity.z * car.linearVelocity.z);
+            hud.push_back(Format("boost %.0f   speed %.1f m/s (%.0f km/h)%s", car.boost, speed, speed * 3.6f, car.supersonic ? "  SUPERSONIC" : ""));
+            if (car.demolished)
+            {
+                hud.push_back(Format("demolished, back in %.1f s", car.respawnTimer));
+            }
+            else
+            {
+                hud.push_back(Format("wheels %d/4 %s  %s  %s   camera: %s", car.wheelContacts, car.onGround ? "on surface" : "in air",
+                                     car.canDodge ? "2nd jump/dodge ready" : (car.jumped ? "jump used" : "jump ready"), car.dodging ? "flipping" : "",
+                                     ballCam ? "ball cam" : "chase"));
+            }
+            hud.push_back(padConnected ? (padInUse ? "gamepad: in use" : "gamepad: connected") : "gamepad: not found");
+            hud.push_back("You = the blue car with the gold marker.   M menu   C camera");
+        }
     };
 
-    RlSandboxSystem::RlSandboxSystem(input::InputManager& input)
+    RlGameSystem::RlGameSystem(input::InputManager& input)
         : impl_(std::make_unique<Impl>(input))
     {
     }
 
-    RlSandboxSystem::~RlSandboxSystem() = default;
+    RlGameSystem::~RlGameSystem() = default;
 
-    void RlSandboxSystem::Update(World& world, const float deltaTime)
+    void RlGameSystem::Update(World& world, const float deltaTime)
     {
         ZoneScoped;
 
         if (core::ServiceLocator::GetEditorRuntimeState().mode != editor::RuntimeMode::Play)
         {
-            impl_->Stop();
+            if (impl_->active)
+            {
+                // the editor puts the scene back from its snapshot when Play stops; only our own state is dropped here
+                impl_->Stop(nullptr);
+            }
+            else
+            {
+                impl_->scanned = false;
+            }
             return;
         }
         impl_->Update(world, deltaTime);
     }
 
-    std::vector<std::string> RlSandboxSystem::HudLines() const
+    std::vector<std::string> RlGameSystem::HudLines() const
     {
         return impl_->hud;
     }

@@ -32,6 +32,8 @@ namespace rl
         void ResetCar(int index, float x, float z, float yaw);
         void ResetBall(RlVec3 position, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
         void SetCarBoost(int index, float boost);
+        // Where a demolished car comes back (ResetCar sets it to the spot the car was reset to).
+        void SetRespawnPoint(int index, float x, float z, float yaw);
         // Puts a car at any pose (tests, kick-off spots, flip resets); the car keeps its boost and its jump state.
         void SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity = {});
 
@@ -52,16 +54,38 @@ namespace rl
         std::unique_ptr<Impl> impl_;
     };
 
-    // A ring of snapshots by tick for the rollback of G5.
-    class RlStateRing
+    // A ring of snapshots by tick for the rollback of G5; works for anything with SaveState(vector&) and RestoreState(vector).
+    template <typename Simulation>
+    class RlStateRingT
     {
     public:
-        explicit RlStateRing(size_t capacity = 128)
+        explicit RlStateRingT(size_t capacity = 128)
             : slots_(capacity)
         {
         }
-        void Push(uint32_t tick, const RlSim& sim);
-        bool Restore(uint32_t tick, RlSim& sim) const;
+        void Push(uint32_t tick, const Simulation& sim)
+        {
+            if (slots_.empty())
+            {
+                return;
+            }
+            Slot& slot = slots_[next_];
+            sim.SaveState(slot.bytes);
+            slot.tick = tick;
+            slot.used = true;
+            next_ = (next_ + 1) % slots_.size();
+        }
+        bool Restore(uint32_t tick, Simulation& sim) const
+        {
+            for (const Slot& slot : slots_)
+            {
+                if (slot.used && slot.tick == tick)
+                {
+                    return sim.RestoreState(slot.bytes);
+                }
+            }
+            return false;
+        }
 
     private:
         struct Slot
@@ -73,4 +97,6 @@ namespace rl
         std::vector<Slot> slots_;
         size_t next_ = 0;
     };
+
+    using RlStateRing = RlStateRingT<RlSim>;
 }

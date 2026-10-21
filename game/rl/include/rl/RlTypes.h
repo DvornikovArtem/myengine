@@ -70,17 +70,50 @@ namespace rl
         RlVec3 angularVelocity{};
     };
 
+    constexpr int kPadCount = 34;  // 6 big and 28 small boost pads (RLBot field info order)
+
+    enum class RlMatchPhase : int32_t
+    {
+        Countdown = 0,  // the cars stand on the kick-off spots, the throttle does nothing
+        Playing = 1,
+        GoalScored = 2, // the ball and the cars keep living, then the next kick-off (or the end)
+        Finished = 3,
+    };
+
+    struct RlPadState
+    {
+        float respawnLeft = 0.0f;  // seconds until the pad is back, 0 = ready
+    };
+
+    // Everything of a match outside the physics. A plain structure: a snapshot copies the bytes.
+    struct RlMatchState
+    {
+        RlMatchPhase phase = RlMatchPhase::Countdown;
+        int32_t mode = 1;               // players per team (1..4); the practice mode has 1 car and mode 0
+        int32_t score[2] = {0, 0};      // blue, orange
+        float clock = 0.0f;             // seconds left; in overtime the seconds played in it
+        int32_t overtime = 0;           // 1 in overtime (int32: the structure has no padding bytes, a snapshot compares bytewise)
+        float phaseTimer = 0.0f;        // seconds left of the countdown / of the goal celebration
+        int32_t lastGoalTeam = -1;      // the team that scored last
+        int32_t lastGoalScorer = -1;    // slot of the car that touched the ball last before the goal, -1 if nobody
+        int32_t lastGoalOwn = 0;
+        int32_t winner = -1;            // 0 blue, 1 orange once the match is Finished
+        uint32_t kickoffs = 0;
+        RlPadState pads[kPadCount];
+    };
+
     struct RlWorldState
     {
         uint32_t tick = 0;
         int carCount = 0;
         RlCarState cars[kMaxCars];
         RlBallState ball;
-        // Last car that touched the ball, -1 before the first touch (the debug overlay and G4 goals use it)
+        // Last car that touched the ball, -1 before the first touch (the debug overlay and the goals use it)
         int lastBallToucher = -1;
+        RlMatchState match;  // filled by RlMatch, zero for a bare RlSim
     };
 
-    // The things a hit report carries for the tests and for the future sound / effects.
+    // The things a step reports for the tests and for the future sound / effects.
     struct RlEvents
     {
         int ballHits = 0;

@@ -1,31 +1,31 @@
 {
   "entities": [
     {
+      "Tag": {
+        "name": "RlCamera"
+      },
       "Camera": {
-        "farPlane": 300.0,
-        "fovYDeg": 75.0,
-        "isPrimary": true,
-        "nearPlane": 0.10000000149011612,
-        "orthographicHalfHeight": 1.0,
         "position": [
           0.0,
-          46.0,
-          -40.0
+          16.0,
+          -48.0
         ],
         "rotationDeg": [
-          58.0,
+          22.0,
           0.0,
           0.0
-        ]
+        ],
+        "fovYDeg": 95.0,
+        "nearPlane": 0.1,
+        "farPlane": 300.0,
+        "orthographicHalfHeight": 1.0,
+        "isPrimary": true
       },
       "CameraController": {
-        "mouseSensitivityDeg": 0.11999999731779099,
-        "moveSpeed": 10.0,
+        "moveSpeed": 12.0,
+        "mouseSensitivityDeg": 0.12,
         "rotateSpeedDeg": 80.0,
         "zoomSpeed": 1.0
-      },
-      "Tag": {
-        "name": "ArenaCamera"
       },
       "WindowBinding": {
         "windowId": 1
@@ -33,21 +33,2160 @@
       "id": 1
     },
     {
-      "Script": {
-        "scripts": [
-          {
-            "class": "RocketLeague",
-            "module": "rocket_league",
-            "props": {
-              "start_mode": 0
-            }
-          }
+      "Tag": {
+        "name": "RlArena"
+      },
+      "Transform": {
+        "position": [
+          0,
+          10.22,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          80.0,
+          80.0,
+          80.0
         ]
       },
-      "Tag": {
-        "name": "RocketLeague"
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_arena.obj",
+        "materialPath": "assets/materials/rl/sandbox_arena.material.json",
+        "visible": true
       },
       "id": 2
+    },
+    {
+      "Tag": {
+        "name": "RlBall"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.98,
+          0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.9275,
+          0.9275,
+          0.9275
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_sphere.obj",
+        "materialPath": "assets/materials/rl/ball.material.json",
+        "visible": true
+      },
+      "id": 3
+    },
+    {
+      "Tag": {
+        "name": "RlPlayerMarker"
+      },
+      "Transform": {
+        "position": [
+          -20.48,
+          1.3,
+          -25.6
+        ],
+        "rotationDeg": [
+          0,
+          45,
+          0
+        ],
+        "scale": [
+          0.22,
+          0.22,
+          0.22
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/cabin_gold.material.json",
+        "visible": true
+      },
+      "id": 4
+    },
+    {
+      "Tag": {
+        "name": "RlBlue0"
+      },
+      "Transform": {
+        "position": [
+          -20.48,
+          0.315,
+          -25.6
+        ],
+        "rotationDeg": [
+          0,
+          45.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_blue.material.json",
+        "visible": true
+      },
+      "id": 5
+    },
+    {
+      "Tag": {
+        "name": "RlBlue0Wheel0"
+      },
+      "Transform": {
+        "position": [
+          -20.4022,
+          0.2,
+          -24.9707
+        ],
+        "rotationDeg": [
+          0,
+          45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 6
+    },
+    {
+      "Tag": {
+        "name": "RlBlue0Wheel1"
+      },
+      "Transform": {
+        "position": [
+          -19.8507,
+          0.2,
+          -25.5222
+        ],
+        "rotationDeg": [
+          0,
+          45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 7
+    },
+    {
+      "Tag": {
+        "name": "RlBlue0Wheel2"
+      },
+      "Transform": {
+        "position": [
+          -21.081,
+          0.2,
+          -25.6495
+        ],
+        "rotationDeg": [
+          0,
+          45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 8
+    },
+    {
+      "Tag": {
+        "name": "RlBlue0Wheel3"
+      },
+      "Transform": {
+        "position": [
+          -20.5295,
+          0.2,
+          -26.201
+        ],
+        "rotationDeg": [
+          0,
+          45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 9
+    },
+    {
+      "Tag": {
+        "name": "RlBlue1"
+      },
+      "Transform": {
+        "position": [
+          20.48,
+          0.315,
+          -25.6
+        ],
+        "rotationDeg": [
+          0,
+          -45.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_blue.material.json",
+        "visible": true
+      },
+      "id": 10
+    },
+    {
+      "Tag": {
+        "name": "RlBlue1Wheel0"
+      },
+      "Transform": {
+        "position": [
+          19.8507,
+          0.2,
+          -25.5222
+        ],
+        "rotationDeg": [
+          0,
+          -45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 11
+    },
+    {
+      "Tag": {
+        "name": "RlBlue1Wheel1"
+      },
+      "Transform": {
+        "position": [
+          20.4022,
+          0.2,
+          -24.9707
+        ],
+        "rotationDeg": [
+          0,
+          -45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 12
+    },
+    {
+      "Tag": {
+        "name": "RlBlue1Wheel2"
+      },
+      "Transform": {
+        "position": [
+          20.5295,
+          0.2,
+          -26.201
+        ],
+        "rotationDeg": [
+          0,
+          -45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 13
+    },
+    {
+      "Tag": {
+        "name": "RlBlue1Wheel3"
+      },
+      "Transform": {
+        "position": [
+          21.081,
+          0.2,
+          -25.6495
+        ],
+        "rotationDeg": [
+          0,
+          -45.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 14
+    },
+    {
+      "Tag": {
+        "name": "RlBlue2"
+      },
+      "Transform": {
+        "position": [
+          -2.56,
+          0.315,
+          -38.4
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_blue.material.json",
+        "visible": true
+      },
+      "id": 15
+    },
+    {
+      "Tag": {
+        "name": "RlBlue2Wheel0"
+      },
+      "Transform": {
+        "position": [
+          -2.95,
+          0.2,
+          -37.9
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 16
+    },
+    {
+      "Tag": {
+        "name": "RlBlue2Wheel1"
+      },
+      "Transform": {
+        "position": [
+          -2.17,
+          0.2,
+          -37.9
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 17
+    },
+    {
+      "Tag": {
+        "name": "RlBlue2Wheel2"
+      },
+      "Transform": {
+        "position": [
+          -2.95,
+          0.2,
+          -38.86
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 18
+    },
+    {
+      "Tag": {
+        "name": "RlBlue2Wheel3"
+      },
+      "Transform": {
+        "position": [
+          -2.17,
+          0.2,
+          -38.86
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 19
+    },
+    {
+      "Tag": {
+        "name": "RlBlue3"
+      },
+      "Transform": {
+        "position": [
+          2.56,
+          0.315,
+          -38.4
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_blue.material.json",
+        "visible": true
+      },
+      "id": 20
+    },
+    {
+      "Tag": {
+        "name": "RlBlue3Wheel0"
+      },
+      "Transform": {
+        "position": [
+          2.17,
+          0.2,
+          -37.9
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 21
+    },
+    {
+      "Tag": {
+        "name": "RlBlue3Wheel1"
+      },
+      "Transform": {
+        "position": [
+          2.95,
+          0.2,
+          -37.9
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 22
+    },
+    {
+      "Tag": {
+        "name": "RlBlue3Wheel2"
+      },
+      "Transform": {
+        "position": [
+          2.17,
+          0.2,
+          -38.86
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 23
+    },
+    {
+      "Tag": {
+        "name": "RlBlue3Wheel3"
+      },
+      "Transform": {
+        "position": [
+          2.95,
+          0.2,
+          -38.86
+        ],
+        "rotationDeg": [
+          0,
+          0.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 24
+    },
+    {
+      "Tag": {
+        "name": "RlOrange0"
+      },
+      "Transform": {
+        "position": [
+          20.48,
+          0.315,
+          25.6
+        ],
+        "rotationDeg": [
+          0,
+          225.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_orange.material.json",
+        "visible": true
+      },
+      "id": 25
+    },
+    {
+      "Tag": {
+        "name": "RlOrange0Wheel0"
+      },
+      "Transform": {
+        "position": [
+          20.4022,
+          0.2,
+          24.9707
+        ],
+        "rotationDeg": [
+          0,
+          225.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 26
+    },
+    {
+      "Tag": {
+        "name": "RlOrange0Wheel1"
+      },
+      "Transform": {
+        "position": [
+          19.8507,
+          0.2,
+          25.5222
+        ],
+        "rotationDeg": [
+          0,
+          225.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 27
+    },
+    {
+      "Tag": {
+        "name": "RlOrange0Wheel2"
+      },
+      "Transform": {
+        "position": [
+          21.081,
+          0.2,
+          25.6495
+        ],
+        "rotationDeg": [
+          0,
+          225.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 28
+    },
+    {
+      "Tag": {
+        "name": "RlOrange0Wheel3"
+      },
+      "Transform": {
+        "position": [
+          20.5295,
+          0.2,
+          26.201
+        ],
+        "rotationDeg": [
+          0,
+          225.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 29
+    },
+    {
+      "Tag": {
+        "name": "RlOrange1"
+      },
+      "Transform": {
+        "position": [
+          -20.48,
+          0.315,
+          25.6
+        ],
+        "rotationDeg": [
+          0,
+          135.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_orange.material.json",
+        "visible": true
+      },
+      "id": 30
+    },
+    {
+      "Tag": {
+        "name": "RlOrange1Wheel0"
+      },
+      "Transform": {
+        "position": [
+          -19.8507,
+          0.2,
+          25.5222
+        ],
+        "rotationDeg": [
+          0,
+          135.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 31
+    },
+    {
+      "Tag": {
+        "name": "RlOrange1Wheel1"
+      },
+      "Transform": {
+        "position": [
+          -20.4022,
+          0.2,
+          24.9707
+        ],
+        "rotationDeg": [
+          0,
+          135.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 32
+    },
+    {
+      "Tag": {
+        "name": "RlOrange1Wheel2"
+      },
+      "Transform": {
+        "position": [
+          -20.5295,
+          0.2,
+          26.201
+        ],
+        "rotationDeg": [
+          0,
+          135.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 33
+    },
+    {
+      "Tag": {
+        "name": "RlOrange1Wheel3"
+      },
+      "Transform": {
+        "position": [
+          -21.081,
+          0.2,
+          25.6495
+        ],
+        "rotationDeg": [
+          0,
+          135.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 34
+    },
+    {
+      "Tag": {
+        "name": "RlOrange2"
+      },
+      "Transform": {
+        "position": [
+          2.56,
+          0.315,
+          38.4
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_orange.material.json",
+        "visible": true
+      },
+      "id": 35
+    },
+    {
+      "Tag": {
+        "name": "RlOrange2Wheel0"
+      },
+      "Transform": {
+        "position": [
+          2.95,
+          0.2,
+          37.9
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 36
+    },
+    {
+      "Tag": {
+        "name": "RlOrange2Wheel1"
+      },
+      "Transform": {
+        "position": [
+          2.17,
+          0.2,
+          37.9
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 37
+    },
+    {
+      "Tag": {
+        "name": "RlOrange2Wheel2"
+      },
+      "Transform": {
+        "position": [
+          2.95,
+          0.2,
+          38.86
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 38
+    },
+    {
+      "Tag": {
+        "name": "RlOrange2Wheel3"
+      },
+      "Transform": {
+        "position": [
+          2.17,
+          0.2,
+          38.86
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 39
+    },
+    {
+      "Tag": {
+        "name": "RlOrange3"
+      },
+      "Transform": {
+        "position": [
+          -2.56,
+          0.315,
+          38.4
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.84,
+          0.36,
+          1.18
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_box.obj",
+        "materialPath": "assets/materials/rl/car_orange.material.json",
+        "visible": true
+      },
+      "id": 40
+    },
+    {
+      "Tag": {
+        "name": "RlOrange3Wheel0"
+      },
+      "Transform": {
+        "position": [
+          -2.17,
+          0.2,
+          37.9
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 41
+    },
+    {
+      "Tag": {
+        "name": "RlOrange3Wheel1"
+      },
+      "Transform": {
+        "position": [
+          -2.95,
+          0.2,
+          37.9
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 42
+    },
+    {
+      "Tag": {
+        "name": "RlOrange3Wheel2"
+      },
+      "Transform": {
+        "position": [
+          -2.17,
+          0.2,
+          38.86
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 43
+    },
+    {
+      "Tag": {
+        "name": "RlOrange3Wheel3"
+      },
+      "Transform": {
+        "position": [
+          -2.95,
+          0.2,
+          38.86
+        ],
+        "rotationDeg": [
+          0,
+          180.0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.2,
+          0.2
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/car_wheel.material.json",
+        "visible": true
+      },
+      "id": 44
+    },
+    {
+      "Tag": {
+        "name": "RlPad0"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.04,
+          -42.4
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 45
+    },
+    {
+      "Tag": {
+        "name": "RlPad1"
+      },
+      "Transform": {
+        "position": [
+          -17.92,
+          0.04,
+          -41.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 46
+    },
+    {
+      "Tag": {
+        "name": "RlPad2"
+      },
+      "Transform": {
+        "position": [
+          17.92,
+          0.04,
+          -41.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 47
+    },
+    {
+      "Tag": {
+        "name": "RlPad3"
+      },
+      "Transform": {
+        "position": [
+          -30.72,
+          0.04,
+          -40.96
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.6640000000000001,
+          1.6640000000000001
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      },
+      "id": 48
+    },
+    {
+      "Tag": {
+        "name": "RlPad4"
+      },
+      "Transform": {
+        "position": [
+          30.72,
+          0.04,
+          -40.96
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.6640000000000001,
+          1.6640000000000001
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      },
+      "id": 49
+    },
+    {
+      "Tag": {
+        "name": "RlPad5"
+      },
+      "Transform": {
+        "position": [
+          -9.4,
+          0.04,
+          -33.08
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 50
+    },
+    {
+      "Tag": {
+        "name": "RlPad6"
+      },
+      "Transform": {
+        "position": [
+          9.4,
+          0.04,
+          -33.08
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 51
+    },
+    {
+      "Tag": {
+        "name": "RlPad7"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.04,
+          -28.16
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 52
+    },
+    {
+      "Tag": {
+        "name": "RlPad8"
+      },
+      "Transform": {
+        "position": [
+          -35.84,
+          0.04,
+          -24.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 53
+    },
+    {
+      "Tag": {
+        "name": "RlPad9"
+      },
+      "Transform": {
+        "position": [
+          35.84,
+          0.04,
+          -24.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 54
+    },
+    {
+      "Tag": {
+        "name": "RlPad10"
+      },
+      "Transform": {
+        "position": [
+          -17.88,
+          0.04,
+          -23.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 55
+    },
+    {
+      "Tag": {
+        "name": "RlPad11"
+      },
+      "Transform": {
+        "position": [
+          17.88,
+          0.04,
+          -23.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 56
+    },
+    {
+      "Tag": {
+        "name": "RlPad12"
+      },
+      "Transform": {
+        "position": [
+          -20.48,
+          0.04,
+          -10.36
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 57
+    },
+    {
+      "Tag": {
+        "name": "RlPad13"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.04,
+          -10.24
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 58
+    },
+    {
+      "Tag": {
+        "name": "RlPad14"
+      },
+      "Transform": {
+        "position": [
+          20.48,
+          0.04,
+          -10.36
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 59
+    },
+    {
+      "Tag": {
+        "name": "RlPad15"
+      },
+      "Transform": {
+        "position": [
+          -35.84,
+          0.04,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.6640000000000001,
+          1.6640000000000001
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      },
+      "id": 60
+    },
+    {
+      "Tag": {
+        "name": "RlPad16"
+      },
+      "Transform": {
+        "position": [
+          -10.24,
+          0.04,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 61
+    },
+    {
+      "Tag": {
+        "name": "RlPad17"
+      },
+      "Transform": {
+        "position": [
+          10.24,
+          0.04,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 62
+    },
+    {
+      "Tag": {
+        "name": "RlPad18"
+      },
+      "Transform": {
+        "position": [
+          35.84,
+          0.04,
+          0.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.6640000000000001,
+          1.6640000000000001
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      },
+      "id": 63
+    },
+    {
+      "Tag": {
+        "name": "RlPad19"
+      },
+      "Transform": {
+        "position": [
+          -20.48,
+          0.04,
+          10.36
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 64
+    },
+    {
+      "Tag": {
+        "name": "RlPad20"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.04,
+          10.24
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 65
+    },
+    {
+      "Tag": {
+        "name": "RlPad21"
+      },
+      "Transform": {
+        "position": [
+          20.48,
+          0.04,
+          10.36
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 66
+    },
+    {
+      "Tag": {
+        "name": "RlPad22"
+      },
+      "Transform": {
+        "position": [
+          -17.88,
+          0.04,
+          23.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 67
+    },
+    {
+      "Tag": {
+        "name": "RlPad23"
+      },
+      "Transform": {
+        "position": [
+          17.88,
+          0.04,
+          23.0
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 68
+    },
+    {
+      "Tag": {
+        "name": "RlPad24"
+      },
+      "Transform": {
+        "position": [
+          -35.84,
+          0.04,
+          24.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 69
+    },
+    {
+      "Tag": {
+        "name": "RlPad25"
+      },
+      "Transform": {
+        "position": [
+          35.84,
+          0.04,
+          24.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 70
+    },
+    {
+      "Tag": {
+        "name": "RlPad26"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.04,
+          28.16
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 71
+    },
+    {
+      "Tag": {
+        "name": "RlPad27"
+      },
+      "Transform": {
+        "position": [
+          -9.4,
+          0.04,
+          33.1
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 72
+    },
+    {
+      "Tag": {
+        "name": "RlPad28"
+      },
+      "Transform": {
+        "position": [
+          9.4,
+          0.04,
+          33.08
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 73
+    },
+    {
+      "Tag": {
+        "name": "RlPad29"
+      },
+      "Transform": {
+        "position": [
+          -30.72,
+          0.04,
+          40.96
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.6640000000000001,
+          1.6640000000000001
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      },
+      "id": 74
+    },
+    {
+      "Tag": {
+        "name": "RlPad30"
+      },
+      "Transform": {
+        "position": [
+          30.72,
+          0.04,
+          40.96
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.6640000000000001,
+          1.6640000000000001
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_gold.material.json",
+        "visible": true
+      },
+      "id": 75
+    },
+    {
+      "Tag": {
+        "name": "RlPad31"
+      },
+      "Transform": {
+        "position": [
+          -17.92,
+          0.04,
+          41.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 76
+    },
+    {
+      "Tag": {
+        "name": "RlPad32"
+      },
+      "Transform": {
+        "position": [
+          17.92,
+          0.04,
+          41.84
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 77
+    },
+    {
+      "Tag": {
+        "name": "RlPad33"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          0.04,
+          42.4
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          90
+        ],
+        "scale": [
+          0.06,
+          1.32,
+          1.32
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/rl/fx_boost.material.json",
+        "visible": true
+      },
+      "id": 78
     }
   ]
 }

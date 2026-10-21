@@ -1,5 +1,8 @@
 # RL1: Rocket League — камера из Python, ввод в Play, текстуры
 
+> **Заменено (G3/G4).** Python-версия Rocket League (`rocket_league.py`, префабы `rl_*`) удалена: физика — [docs/game/rl-physics.md](../game/rl-physics.md), матч и боты — [docs/game/rl-match.md](../game/rl-match.md). Текст ниже описывает прежнюю версию и оставлен как история ЛР2/ЛР3.
+
+
 Игру `assets/scripts/rocket_league.py` написал встроенный ассистент (AI1 / AI2). Эта задача довела её до играбельного состояния: камера от третьего лица, фокус ввода в Play, процедурные текстуры и отдельная карта.
 
 ## Как играть
