@@ -44,6 +44,10 @@ namespace myengine::render
         std::uint32_t space = 0;                              // 0 on SM 5.0
         std::uint32_t bindCount = 1;                          // the size of a resource array
         std::uint8_t stages = 0;                              // mask of ShaderStage
+        // What the author says in the comments of the HLSL ("// @label "Texture" @hidden", docs/render/b2-shader-metadata.md);
+        // filled by ApplyShaderMetadata, not by the reflection
+        std::string label;                                    // empty: none
+        bool hidden = false;                                  // an editor does not show it
     };
 
     enum class ShaderValueType : std::uint8_t
@@ -56,6 +60,27 @@ namespace myengine::render
         Float3x3, Float4x4,
     };
 
+    // What the author says about a variable in the comments of the HLSL (all of it optional). The reflection does not
+    // know it: ApplyShaderMetadata reads the source and puts it here. docs/render/b2-shader-metadata.md.
+    struct ShaderVariableMetadata
+    {
+        std::string label;                                    // "Roughness"; empty: none
+        bool hasMin = false;
+        bool hasMax = false;
+        bool hasStep = false;
+        double min = 0.0;                                     // for every component of the variable
+        double max = 0.0;
+        double step = 0.0;
+        std::vector<double> defaultValue;                     // empty: none; else one number per component of the type
+        bool color = false;                                   // a Float3 / Float4 that an editor shows as a colour
+        bool hidden = false;                                  // an editor does not show it
+
+        bool Empty() const
+        {
+            return label.empty() && !hasMin && !hasMax && !hasStep && defaultValue.empty() && !color && !hidden;
+        }
+    };
+
     // A variable of a constant buffer
     struct ShaderVariable
     {
@@ -64,6 +89,7 @@ namespace myengine::render
         std::uint32_t offset = 0;                             // in bytes from the start of the buffer
         std::uint32_t size = 0;                               // bytes, the whole array included, without the padding after it
         std::uint32_t arrayCount = 1;                         // 1: not an array
+        ShaderVariableMetadata metadata;                      // from the comments of the HLSL; not part of the layout of the bytes
     };
 
     struct ShaderConstantBuffer
@@ -157,6 +183,10 @@ namespace myengine::render
     // not to be used.
     ShaderLayout MergeShaderLayouts(const ShaderLayout& vertex, const ShaderLayout& pixel, std::vector<ShaderDiagnostic>& diagnostics);
 
-    // A table for the acceptance and for people who write materials: resources, constant buffers with offsets, inputs
+    // The number of components of a type (Float3: 3, Float4x4: 16, Bool: 1); 0 for Unknown
+    std::uint32_t ValueTypeComponents(ShaderValueType type);
+
+    // A table for the acceptance and for people who write materials: resources, constant buffers with offsets, inputs,
+    // and the metadata that the comments of the shader gave
     std::string FormatShaderLayout(const ShaderLayout& layout);
 }

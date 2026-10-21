@@ -6,6 +6,8 @@
 
 #include <d3d11shader.h>
 
+#include <myengine/render/ShaderMetadata.h>
+
 #include <tracy/Tracy.hpp>
 
 #include "ShaderCompiler.h"
@@ -25,6 +27,30 @@ namespace myengine::render::dx12
         bool HasError(const std::vector<ShaderDiagnostic>& diagnostics)
         {
             return std::any_of(diagnostics.begin(), diagnostics.end(), [](const ShaderDiagnostic& d) { return !d.warning; });
+        }
+
+        // A mistake of the file itself (a missing semicolon, an undeclared name) is found by the compile of the vertex stage and again
+        // by the compile of the pixel stage: it is one message that belongs to both stages, not two
+        void MergeEqualDiagnostics(std::vector<ShaderDiagnostic>& diagnostics)
+        {
+            std::vector<ShaderDiagnostic> merged;
+            for (ShaderDiagnostic& diagnostic : diagnostics)
+            {
+                const auto same = std::find_if(merged.begin(), merged.end(), [&diagnostic](const ShaderDiagnostic& other)
+                {
+                    return other.file == diagnostic.file && other.line == diagnostic.line && other.column == diagnostic.column &&
+                        other.warning == diagnostic.warning && other.code == diagnostic.code && other.message == diagnostic.message;
+                });
+                if (same != merged.end())
+                {
+                    same->stage = static_cast<std::uint8_t>(same->stage | diagnostic.stage);
+                }
+                else
+                {
+                    merged.push_back(std::move(diagnostic));
+                }
+            }
+            diagnostics = std::move(merged);
         }
 
         ShaderValueType MapValueType(const D3D11_SHADER_TYPE_DESC& type)
@@ -365,6 +391,7 @@ namespace myengine::render::dx12
         stageSource.profile = program.pixelProfile;
         stageSource.stage = ShaderStage::Pixel;
         const bool pixelCompiled = CompileShaderStage(stageSource, compiled->pixelBlob, result.diagnostics);
+        MergeEqualDiagnostics(result.diagnostics);
 
         bool ok = vertexCompiled && pixelCompiled;
         if (ok)
@@ -382,6 +409,12 @@ namespace myengine::render::dx12
             }
             result.diagnostics.insert(result.diagnostics.end(), conflicts.begin(), conflicts.end());
             ok = !HasError(conflicts);
+        }
+        if (ok)
+        {
+            // The comments of the source ("// @label ...") say more about the variables and the textures than the reflection
+            // does; a mistake in them is a warning and never fails the build of the program
+            ApplyShaderMetadata(file, source, name, compiled->layout, result.diagnostics);
         }
 
         std::lock_guard<std::mutex> lock(mutex_);

@@ -301,14 +301,11 @@ namespace myengine::ecs::systems
                     }
 
                     auto shaderResource = context.resourceManager->Load<resource::ShaderAsset>(materialResource->asset.shaderPath);
-                    auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
-                    if (shaderResource == nullptr || textureResource == nullptr)
+                    if (shaderResource == nullptr)
                     {
                         return;
                     }
-                    if (!meshResource->asset.gpuHandle.IsValid() ||
-                        !shaderResource->asset.gpuHandle.IsValid() ||
-                        !textureResource->asset.gpuHandle.IsValid())
+                    if (!meshResource->asset.gpuHandle.IsValid() || !shaderResource->asset.gpuHandle.IsValid())
                     {
                         return;
                     }
@@ -316,9 +313,28 @@ namespace myengine::ecs::systems
                     render::DrawItem drawItem;
                     drawItem.mesh = meshResource->asset.gpuHandle;
                     drawItem.shader = shaderResource->asset.gpuHandle;
-                    drawItem.texture = textureResource->asset.gpuHandle;
                     drawItem.model = scene::ToRenderMatrix(modelMatrix);
-                    drawItem.color = materialResource->asset.tint;
+                    // The textures and the values of the material come from its parameters, by the names of the shader
+                    drawItem.material = context.resourceManager->GetMaterialParams(materialResource);
+                    if (drawItem.material == nullptr)
+                    {
+                        // The adapter cannot tell the layout of the program: one texture and one colour, as before.
+                        // A material without a texture gets the white one.
+                        if (materialResource->asset.texturePath.empty())
+                        {
+                            drawItem.texture = context.resourceManager->GetWhiteTextureHandle();
+                        }
+                        else
+                        {
+                            auto textureResource = context.resourceManager->Load<resource::TextureAsset>(materialResource->asset.texturePath);
+                            if (textureResource == nullptr || !textureResource->asset.gpuHandle.IsValid())
+                            {
+                                return;
+                            }
+                            drawItem.texture = textureResource->asset.gpuHandle;
+                        }
+                        drawItem.color = materialResource->asset.tint;
+                    }
                     drawItems.push_back(drawItem);
                 };
 

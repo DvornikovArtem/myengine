@@ -155,10 +155,18 @@ namespace myengine::render
         std::string vertexStream = "mesh";
     };
 
+    class MaterialParams;
+
     struct DrawItem
     {
         MeshHandle mesh;
         ShaderHandle shader;
+        // The parameters of the material: the bytes of the constant buffers and all the textures of the shader by name
+        // (gColor and the other values of the material come from here). Not owned: the resource manager keeps it alive
+        // for the frame that asked for it (ResourceManager::GetMaterialParams). The renderer writes the engine
+        // semantics (gModel, gViewProjection, gLightDirection) over it.
+        const MaterialParams* material = nullptr;
+        // Without a `material` only: the texture of the first texture slot of the shader and the value of gColor
         TextureHandle texture;
         Matrix4 model = Matrix4::Identity();
         core::Color color{1.0f, 1.0f, 1.0f, 1.0f};

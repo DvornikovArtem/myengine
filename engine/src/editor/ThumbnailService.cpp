@@ -637,6 +637,17 @@ namespace myengine::editor
                         out.push_back(Resolve(materialFile.parent_path() / PathFromText(name)));
                     }
                 }
+                // the textures by the name of the shader resource
+                if (const auto textures = descriptor.find("textures"); textures != descriptor.end() && textures->is_object())
+                {
+                    for (const auto& entry : textures->items())
+                    {
+                        if (entry.value().is_string() && !entry.value().get<std::string>().empty())
+                        {
+                            out.push_back(Resolve(materialFile.parent_path() / PathFromText(entry.value().get<std::string>())));
+                        }
+                    }
+                }
             };
 
             switch (entry.kind)
@@ -758,16 +769,25 @@ namespace myengine::editor
                 return Build::Failed;
             }
             auto shader = resources.Load<resource::ShaderAsset>(PathFromText(material->asset.shaderPath));
-            auto texture = resources.Load<resource::TextureAsset>(PathFromText(material->asset.texturePath));
-            if (shader == nullptr || texture == nullptr)
+            if (shader == nullptr)
             {
                 return Build::Failed;
             }
-            if (resources.IsLoadPending(PathFromText(meshPath)) || resources.IsLoadPending(PathFromText(material->asset.texturePath)))
+            // Every texture of the material must have arrived: a thumbnail of a placeholder would be cached
+            bool pending = resources.IsLoadPending(PathFromText(meshPath));
+            if (!material->asset.texturePath.empty())
+            {
+                pending = pending || resources.IsLoadPending(PathFromText(material->asset.texturePath));
+            }
+            for (const auto& [name, texturePath] : material->asset.textures)
+            {
+                pending = pending || resources.IsLoadPending(PathFromText(texturePath));
+            }
+            if (pending)
             {
                 return Build::Pending;
             }
-            if (!mesh->asset.gpuHandle.IsValid() || !shader->asset.gpuHandle.IsValid() || !texture->asset.gpuHandle.IsValid())
+            if (!mesh->asset.gpuHandle.IsValid() || !shader->asset.gpuHandle.IsValid())
             {
                 return Build::Failed;
             }
@@ -775,9 +795,26 @@ namespace myengine::editor
             render::DrawItem item;
             item.mesh = mesh->asset.gpuHandle;
             item.shader = shader->asset.gpuHandle;
-            item.texture = texture->asset.gpuHandle;
             item.model = scene::ToRenderMatrix(model);
-            item.color = material->asset.tint;
+            // The same parameters as in the scene: the textures and the values by name, so the thumbnail looks like the object
+            item.material = resources.GetMaterialParams(material);
+            if (item.material == nullptr)
+            {
+                if (material->asset.texturePath.empty())
+                {
+                    item.texture = resources.GetWhiteTextureHandle(); // a material without a texture: the white one
+                }
+                else
+                {
+                    auto texture = resources.Load<resource::TextureAsset>(PathFromText(material->asset.texturePath));
+                    if (texture == nullptr || !texture->asset.gpuHandle.IsValid())
+                    {
+                        return Build::Failed;
+                    }
+                    item.texture = texture->asset.gpuHandle;
+                }
+                item.color = material->asset.tint;
+            }
             items.push_back(item);
 
             // The bounds of the mesh in the space of the thumbnail

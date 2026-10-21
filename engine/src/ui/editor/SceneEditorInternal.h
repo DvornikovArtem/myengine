@@ -26,6 +26,7 @@
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorCommandHistory.h>
 #include <myengine/editor/LoadingService.h>
+#include <myengine/editor/MaterialEditorModel.h>
 #include <myengine/editor/ThumbnailService.h>
 #include <myengine/editor/TransformGizmo.h>
 #include <myengine/ecs/World.h>
@@ -128,6 +129,25 @@ namespace myengine::ui::detail
         }
 
         return resourceManager.ResolvePath(lhs) == resourceManager.ResolvePath(rhs);
+    }
+
+    // A dim explanatory line with an info icon, wrapped at the panel width
+    inline void DrawInfoLine(const char* text)
+    {
+        const ImVec2 min = ImGui::GetCursorScreenPos();
+        const float available = ImGui::GetContentRegionAvail().x;
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        PushFontRole(FontRole::Secondary);
+        ImFont* font = ImGui::GetFont();
+        const float size = ImGui::GetFontSize();
+        const float wrapWidth = std::max(available - 24.0f, 40.0f);
+        const ImVec2 textSize = ImGui::CalcTextSize(text, nullptr, false, wrapWidth);
+        PopFontRole();
+
+        DrawIcon(drawList, IconSize::Row14, ICON_INFO, ImVec2(min.x + 7.0f, min.y + 9.0f), style::kTextDim);
+        drawList->AddText(font, size, ImVec2(min.x + 22.0f, min.y + 2.0f), style::kTextDim, text, nullptr, wrapWidth);
+        ImGui::Dummy(ImVec2(available, std::max(textSize.y + 6.0f, 22.0f)));
     }
 
     // The options of an asset picker: thumbnails, the meta line ("Mesh · 960 tris") and the path comparison
@@ -254,10 +274,13 @@ namespace myengine::ui::detail
     {
         return lhs.shaderPath == rhs.shaderPath &&
             lhs.texturePath == rhs.texturePath &&
+            lhs.tintSet == rhs.tintSet &&
             lhs.tint.r == rhs.tint.r &&
             lhs.tint.g == rhs.tint.g &&
             lhs.tint.b == rhs.tint.b &&
-            lhs.tint.a == rhs.tint.a;
+            lhs.tint.a == rhs.tint.a &&
+            lhs.textures == rhs.textures &&
+            lhs.params == rhs.params;
     }
 
     inline void DrawSceneVisibilityMask(const editor::ViewportRect& viewportRect)

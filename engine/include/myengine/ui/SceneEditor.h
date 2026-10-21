@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -30,6 +32,9 @@ namespace myengine::ecs
 
 namespace myengine::editor
 {
+    class MaterialEditorModelCache;
+    struct MaterialEditorModel;
+    struct ShaderBanner;
     class LoadingService;
     class EditorCommandHistory;
     class ThumbnailService;
@@ -73,6 +78,13 @@ namespace myengine::ui
             std::string lastError;      // the first error of the last reload that failed; empty when the program works
         };
         std::string summary;            // "programs 4 | PSO 7 | root signatures 3 | reloads 12 ok / 2 failed"
+        // The same numbers as numbers (the Statistics panel)
+        std::uint32_t programCount = 0;
+        std::uint32_t pipelineStates = 0;
+        std::uint32_t rootSignatures = 0;
+        std::uint64_t reloads = 0;
+        std::uint64_t reloadFailures = 0;
+        bool available = false;         // the renderer told its numbers
         std::vector<Program> programs;
     };
 
@@ -152,8 +164,17 @@ namespace myengine::ui
         void OpenMapDialog();
         void BuildProjectDialogs(); // Project Browser and the map dialogs
         void DrawMaterialPreview(const std::string& materialPath, editor::WindowEditorState& windowState);
-        // The Material category (shader, texture, tint): shared by the Material Editor and the Material Viewer
+        // The form of a material (Material, Textures, Parameters): shared by the Material Editor and the Material Viewer. It is built from
+        // the layout of the shader of the material; without a layout (an adapter that cannot reflect, a shader that does not compile)
+        // the old look stays: DrawMaterialCategoryPlain (shader, texture, tint).
         void DrawMaterialCategory(const std::string& materialPath, bool editEnabled);
+        void DrawMaterialCategoryPlain(const std::string& materialPath, bool editEnabled);
+        // SceneEditorMaterialForm.cpp. `model` is null when the shader did not compile (the first time): only the shader can be chosen then.
+        void DrawMaterialForm(const std::string& materialPath, const editor::MaterialEditorModel* model, const editor::ShaderBanner& shaderBanner, bool editEnabled);
+        // "Could not write the file" with "Try again", while the last write of this material failed
+        void DrawMaterialWriteBanner(const std::string& materialPath);
+        // A gesture on a material widget that lost its widget (the panel was closed, Play started) ends as if the mouse was released
+        void FinishAbandonedMaterialGesture(bool playing);
         // Asset viewers: tabs next to the Viewport (SceneEditorViewers.cpp)
         void OpenAssetViewer(const std::string& assetPath, AssetViewerType type);
         void BuildAssetViewers(const SceneEditorWindowContext& windowContext);
@@ -248,6 +269,11 @@ namespace myengine::ui
         float materialPreviewDistance_ = 3.0f;
         std::vector<std::unique_ptr<AssetViewerTab>> viewers_; // open Texture / Mesh / Material / Prefab viewer tabs
         std::unique_ptr<resource::MaterialAsset> materialEditBefore_; // the material when the current widget interaction began
+        std::unordered_map<std::string, std::unique_ptr<editor::MaterialEditorModelCache>> materialModels_; // the rows of the form, per material
+        std::string materialEditPath_;  // the material and the name of the command of the gesture in materialEditBefore_
+        std::string materialEditLabel_;
+        std::string materialParamFilter_; // the filter of the parameters (not kept between runs)
+        mutable std::unordered_set<std::string> materialWriteFailures_; // materials whose last write failed: the change is in memory only
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
     };

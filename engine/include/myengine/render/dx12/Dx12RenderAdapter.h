@@ -51,6 +51,19 @@ namespace myengine::render::dx12
         std::vector<ShaderProgramInfo> GetShaderPrograms() const override;
         ShaderStatistics GetShaderStatistics() const override;
 
+        // The debug layer (--dx12-debug / MYENGINE_DX12_DEBUG) is on. The report below exists only with it.
+        bool IsDebugLayerEnabled() const { return debugLayerEnabled_; }
+
+        // What Shutdown found alive in the device when everything of the adapter was released: the objects other than the device
+        // itself. `checked` is false when the debug layer is off (or Shutdown has not run). The objects are also in the log.
+        struct LiveObjectReport
+        {
+            bool checked = false;
+            std::uint32_t liveObjects = 0;
+            std::vector<std::string> objects;   // "Live ID3D12Resource at 0x..., Refcount: 1"
+        };
+        const LiveObjectReport& GetLiveObjectReport() const { return liveObjectReport_; }
+
         RenderSurfaceHandle CreateSurface(HWND hwnd, std::uint32_t width, std::uint32_t height) override;
         void ResizeSurface(RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height) override;
 
@@ -205,21 +218,29 @@ namespace myengine::render::dx12
         struct ConstantBufferSlot
         {
             std::uint32_t rootParameter = kNoRootParameter;
+            std::uint32_t layoutIndex = 0; // the index of the buffer in ShaderLayout::constantBuffers (and in MaterialParams)
             bool rootConstants = true;   // root constants or a root CBV
             std::uint32_t sizeBytes = 0;
             std::uint32_t sizeDwords = 0;
             // The "engine semantics" (docs/render/architecture.md, 3.5): offsets of the variables by name
             std::uint32_t model = kNoOffset;          // gModel
             std::uint32_t viewProjection = kNoOffset; // gViewProjection
-            std::uint32_t color = kNoOffset;          // gColor (the tint of the draw item)
+            std::uint32_t color = kNoOffset;          // gColor (a draw item without a material only; with one it is the material's)
             std::uint32_t lightDirection = kNoOffset; // gLightDirection (xyz: direction, w: ambient)
             std::uint32_t screenSize = kNoOffset;     // screenSize (the UI)
             std::uint32_t translation = kNoOffset;    // translation (the UI)
         };
+        // A texture of the program: where its descriptor table is and which texture of MaterialParams it takes
+        struct TextureSlot
+        {
+            std::uint32_t rootParameter = kNoRootParameter;
+            std::uint32_t materialIndex = 0; // the index among the Texture resources of the layout (MaterialParams::Textures())
+        };
         struct DrawSlots
         {
             std::vector<ConstantBufferSlot> constantBuffers;
-            std::uint32_t textureParameter = kNoRootParameter; // the first texture of the shader
+            std::vector<TextureSlot> textures;                 // every texture of the shader, found once when the program is built
+            std::uint32_t textureParameter = kNoRootParameter; // the first texture (the smallest register): where DrawItem::texture goes
         };
 
         struct ShaderRecord
@@ -233,6 +254,8 @@ namespace myengine::render::dx12
             DrawSlots slots;
             Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
             Microsoft::WRL::ComPtr<ID3D12PipelineState> wireframePipelineState; // same shaders, fill mode wireframe (may be empty)
+            std::uint64_t materialLayoutHash = 0;                      // MaterialLayoutHash of `layout`: the parameters of a material must match it
+            mutable bool materialMismatchLogged = false;               // the warning about parameters built for another layout is given once
             ShaderLayout layout;          // from the reflection of the compiled shaders
             ShaderLayout wireframeLayout; // the vertex shader with the constant pixel shader of the wireframe variant
         };
@@ -358,6 +381,8 @@ namespace myengine::render::dx12
         std::string pendingTargetLabel_;
         std::string adapterName_;
         bool dredEnabled_ = false;
+        bool debugLayerEnabled_ = false;
+        LiveObjectReport liveObjectReport_;
         bool deviceRemovedLogged_ = false;
         std::uint64_t testRemoveDeviceFrame_ = 0; // MYENGINE_DX12_TEST_REMOVE_DEVICE=<frame>: removes the device on purpose
     };
