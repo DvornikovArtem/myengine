@@ -29,6 +29,7 @@
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
+#include <myengine/ecs/systems/RlSandboxSystem.h>
 #include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
@@ -448,6 +449,13 @@ namespace myengine::core
                     lines.push_back(line.second);
                 }
             }
+            if (rlSandboxSystem_ != nullptr)
+            {
+                for (auto& line : rlSandboxSystem_->HudLines())
+                {
+                    lines.push_back(std::move(line));
+                }
+            }
             return lines;
         };
         sceneEditorServices.scriptConsole.execute = [this](const std::string& source)
@@ -493,6 +501,12 @@ namespace myengine::core
 
         world_.AddUpdateSystem(std::make_unique<ecs::systems::CameraControlSystem>(input_, inputOwnerWindowId_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
+        {
+            // the sandbox of the Rocket League physics (G3): does nothing unless the scene has an RlArena
+            auto rlSandbox = std::make_unique<ecs::systems::RlSandboxSystem>(input_);
+            rlSandboxSystem_ = rlSandbox.get();
+            world_.AddUpdateSystem(std::move(rlSandbox));
+        }
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
         // After physics: scripts see this frame's collision/trigger events

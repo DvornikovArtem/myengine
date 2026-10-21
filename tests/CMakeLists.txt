@@ -360,6 +360,19 @@ target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
 
+# G3: the Rocket League physics (Jolt) without a window
+add_executable(myengine_rl_physics_tests
+  rl/RlPhysicsTests.cpp)
+
+target_link_libraries(myengine_rl_physics_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_physics_tests PRIVATE
+  RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json"
+  RL_ARENA_OBJ="${CMAKE_SOURCE_DIR}/assets/models/rl_arena.obj")
+myengine_apply_compiler_options(myengine_rl_physics_tests)
+set_property(TARGET myengine_rl_physics_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_physics COMMAND myengine_rl_physics_tests)
+set_tests_properties(rl_physics PROPERTIES TIMEOUT 300)
+
 # An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
 if(MYENGINE_ASAN)
   get_property(myengine_all_tests DIRECTORY PROPERTY TESTS)
