@@ -317,6 +317,31 @@ set_property(TARGET myengine_material_render_tests PROPERTY FOLDER "Tests")
 add_test(NAME material_render COMMAND myengine_material_render_tests)
 set_tests_properties(material_render PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
+# B4.1 (LR3): the scenarios of stability of the lab (a shader with an error, a series of reloads, a file that is gone, a reload while
+# a render target is drawn, a long session, an exit in a dirty state) on a real DX12 device (or WARP) with the debug layer; after
+# Shutdown no object of the device may be alive. Skipped (exit code 77) when there is no device or no desktop to make the window on.
+add_executable(myengine_render_stability_tests
+  render/RenderStabilityTests.cpp)
+
+target_link_libraries(myengine_render_stability_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_render_stability_tests)
+set_property(TARGET myengine_render_stability_tests PROPERTY FOLDER "Tests")
+add_test(NAME render_stability COMMAND myengine_render_stability_tests)
+set_tests_properties(render_stability PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# B4.2 (LR3): the picture of a fixed scene is compared with the reference tests/render/reference/scene_256.png. The scene is drawn on the
+# WARP adapter (the same rasterizer on every machine). The reference is changed only on purpose: --update-reference. Skipped (exit code
+# 77) when WARP or a desktop to make the window on is not there.
+add_executable(myengine_render_reference_tests
+  render/RenderReferenceTests.cpp)
+
+target_link_libraries(myengine_render_reference_tests PRIVATE myengine_engine)
+target_compile_definitions(myengine_render_reference_tests PRIVATE MYENGINE_REFERENCE_OUTPUT_DIR="${CMAKE_BINARY_DIR}/render_reference")
+myengine_apply_compiler_options(myengine_render_reference_tests)
+set_property(TARGET myengine_render_reference_tests PROPERTY FOLDER "Tests")
+add_test(NAME render_reference COMMAND myengine_render_reference_tests)
+set_tests_properties(render_reference PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
 # R2: ThumbnailService on a recording adapter (no GPU): placeholder, budget, pool, disk cache, invalidation
 add_executable(myengine_thumbnail_tests
   render/ThumbnailServiceTests.cpp)

@@ -409,7 +409,19 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTexture.Sampl
         Check(first.file.size() >= 14 && first.file.compare(first.file.size() - 14, 14, "broken_vs.hlsl") == 0, "the file of the message: '" + first.file + "'");
         Check(first.line == 5 && first.column > 0, "the position of the message: " + std::to_string(first.line) + "," + std::to_string(first.column));
         Check(!first.warning && first.code.size() > 1 && first.code[0] == 'X', "the error code: '" + first.code + "'");
-        Check(first.stage == StageMask(ShaderStage::Vertex), "the message belongs to the vertex stage");
+        // The compiler checks the whole file for every entry: the same message comes from both stages and is told once, for both
+        // The compiler follows an undeclared name with a second message of its own (the function that has no value to return); no message
+        // is told twice
+        std::string all;
+        for (std::size_t i = 0; i < result.diagnostics.size(); ++i)
+        {
+            all += "\n  " + FormatShaderDiagnostic(result.diagnostics[i]);
+            for (std::size_t j = i + 1; j < result.diagnostics.size(); ++j)
+            {
+                Check(FormatShaderDiagnostic(result.diagnostics[i]) != FormatShaderDiagnostic(result.diagnostics[j]), "a message is told once, for both stages:" + all);
+            }
+        }
+        Check(first.stage == (StageMask(ShaderStage::Vertex) | StageMask(ShaderStage::Pixel)), "the message belongs to both stages");
         Check(first.message.find("gMissing") != std::string::npos, "the text of the message: " + first.message);
         Check(reflector.Stats().failures == 1, "the failure is counted");
     }

@@ -189,6 +189,10 @@ namespace myengine::resource
         // first error of the last reload that failed while the previous version keeps running. Empty when the shader works. UTF-8.
         std::string GetShaderError(const ResourceHandle<ShaderAsset>& shader) const;
 
+        // The parameters of the materials that are alive: the current ones and those that were replaced and wait a few frames before
+        // they are freed. It must not grow with the number of reloads and edits (the long session).
+        std::size_t GetMaterialParamsCount() const;
+
         // A white 1x1 texture: what a material without a texture gets where the old code needs one (a draw item
         // without MaterialParams, a thumbnail). The parameters of a material put it in every texture slot that is not set.
         render::TextureHandle GetWhiteTextureHandle();

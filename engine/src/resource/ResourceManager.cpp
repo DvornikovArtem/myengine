@@ -2854,6 +2854,19 @@ namespace myengine::resource
         return {};
     }
 
+    std::size_t ResourceManager::GetMaterialParamsCount() const
+    {
+        std::size_t count = retiredMaterialParams_.size();
+        for (const auto& [key, runtime] : materialRuntimes_)
+        {
+            if (runtime.params != nullptr)
+            {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     render::TextureHandle ResourceManager::GetWhiteTextureHandle()
     {
         if (whiteTexture_ == nullptr)

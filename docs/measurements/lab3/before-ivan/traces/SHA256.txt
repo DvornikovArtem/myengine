@@ -1,0 +1,16 @@
+# SHA-256, размер в байтах, файл. Какие трейсы где лежат. Прогон от 21.10.2026.
+
+## В репозитории (этот каталог): по одному прогону на сцену, чьи цифры ближе всего к таблице результатов
+
+caf9522b82563e0f5d494508039949233f7b1354527ce71a17f8dea98ee8f5fc  7198962  benchmark_run2.tracy
+df2deae61fc12351204fec770095c895ee83f67d80fede0cc478ef1efa6f9318  7684770  rocket_league_run2.tracy
+
+## Вне репозитория: C:\Users\ivanm\source\repos\myengine-traces\lab3\before-ivan\traces\
+
+30b160eb93abfe94b8c09c52e927cc14aa67ac4f3fdab4340e4d9b50d37c2c0c  7206078  benchmark_reload1.tracy
+94eb4993614bb4147efeb97fcaa5de8a799ca58a72c29b547c9f70d61059b7f8  7133749  benchmark_reload2.tracy
+edbe01c9457482a4a3573fa97e0a2bb1b44f16cf5f061fd83127f446ea698ca5  7156579  benchmark_reload3.tracy
+3cbf8aad164890489072fd05e5cc0d1f0dd701d4cb964a1b47549438d32deff5  6920829  benchmark_run1.tracy
+e17006b8ecfc0f57ea108bcf0cf50e134e3d95c6765139988155fc03f230a62e  7281229  benchmark_run3.tracy
+0e814207cd09c578fa72d94027a586bc5c1ea44da0a8a83567291820ead91d6d  7813365  rocket_league_run1.tracy
+d73b7a797549aaa867472952347935ab941bc3edbb3f6b9b51add4be4e59184b  7656175  rocket_league_run3.tracy

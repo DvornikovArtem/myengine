@@ -402,6 +402,12 @@ namespace myengine::core
                 return view;
             }
             const render::ShaderStatistics statistics = renderAdapter_->GetShaderStatistics();
+            view.available = true;
+            view.programCount = statistics.programs;
+            view.pipelineStates = statistics.pipelineStates;
+            view.rootSignatures = statistics.rootSignatures;
+            view.reloads = statistics.reloads;
+            view.reloadFailures = statistics.reloadFailures;
             view.summary = "programs " + std::to_string(statistics.programs) + " | PSO " + std::to_string(statistics.pipelineStates) +
                 " | root signatures " + std::to_string(statistics.rootSignatures) + " | waiting for the GPU " + std::to_string(statistics.retiredObjects) +
                 " | reloads " + std::to_string(statistics.reloads) + " ok / " + std::to_string(statistics.reloadFailures) + " failed";
