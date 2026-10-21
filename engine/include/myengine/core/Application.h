@@ -32,6 +32,11 @@ namespace myengine::scripting
     class ScriptSystem;
 }
 
+namespace myengine::ecs::systems
+{
+    class RlSandboxSystem;
+}
+
 namespace myengine::editor
 {
     class ThumbnailService;
@@ -190,6 +195,7 @@ namespace myengine::core
         state::StateMachine stateMachine_;
         ecs::World world_;
         scripting::ScriptSystem* scriptSystem_ = nullptr; // owned by world_
+        ecs::systems::RlSandboxSystem* rlSandboxSystem_ = nullptr; // owned by world_
 
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;

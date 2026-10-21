@@ -51,6 +51,7 @@
   include/myengine/ecs/systems/PhysicsSystem.h
   include/myengine/ecs/systems/PlayerControlSystem.h
   include/myengine/ecs/systems/RenderSystem.h
+  include/myengine/ecs/systems/RlSandboxSystem.h
   include/myengine/events/EventBus.h
   include/myengine/input/InputManager.h
   include/myengine/jobs/JobSystem.h
@@ -125,6 +126,7 @@ set(ENGINE_SOURCES
   src/ecs/systems/PhysicsSystem.cpp
   src/ecs/systems/PlayerControlSystem.cpp
   src/ecs/systems/RenderSystem.cpp
+  src/ecs/systems/RlSandboxSystem.cpp
   src/input/InputManager.cpp
   src/jobs/Fiber.cpp
   src/jobs/Fiber.h
@@ -269,7 +271,9 @@ target_link_libraries(myengine_engine
     gdiplus
     comdlg32
     shell32
+    xinput
     TracyClient
+    myengine_rl
   PRIVATE
     # pybind11 / Python.h stay inside engine/src/scripting, public headers do not include them
     myengine_python)

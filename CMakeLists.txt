@@ -166,7 +166,28 @@ target_link_libraries(myengine_python INTERFACE myengine_python_lib)
 
 add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
 target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE> $<$<CONFIG:RelWithDebInfo>:TRACY_FIBERS> $<$<CONFIG:RelWithDebInfo>:TRACY_ON_DEMAND>)
+# Jolt Physics (v5.6.0, submodule) for the Rocket League game (game/rl). Deterministic float mode so that a rollback replay
+# gives the same state; AVX2 can be turned off for machines without it.
+option(MYENGINE_JOLT_AVX2 "Compile Jolt with AVX2" ON)
+set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(CPP_EXCEPTIONS_ENABLED ON CACHE BOOL "" FORCE)
+set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+set(USE_AVX2 ${MYENGINE_JOLT_AVX2} CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+foreach(opt JPH_USE_DX12 JPH_USE_VK JPH_USE_MTL JPH_USE_CPU_COMPUTE)
+  set(${opt} OFF CACHE BOOL "" FORCE)
+endforeach()
+add_subdirectory(external/JoltPhysics/Build EXCLUDE_FROM_ALL)
+# SYSTEM: /W4 does not apply to Jolt headers
+get_target_property(MYENGINE_JOLT_INCLUDES Jolt INTERFACE_INCLUDE_DIRECTORIES)
+set_target_properties(Jolt PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${MYENGINE_JOLT_INCLUDES}")
+set_property(TARGET Jolt PROPERTY FOLDER "External")
+
 add_subdirectory(engine)
+add_subdirectory(game/rl)
 add_subdirectory(app)
 
 if(MYENGINE_BUILD_TESTS)

@@ -4,3 +4,6 @@
 [submodule "external/tracy"]
 	path = external/tracy
 	url = https://github.com/wolfpld/tracy.git
+[submodule "external/JoltPhysics"]
+	path = external/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git
