@@ -204,6 +204,16 @@ myengine_apply_compiler_options(myengine_loading_tests)
 set_property(TARGET myengine_loading_tests PROPERTY FOLDER "Tests")
 add_test(NAME loading_service COMMAND myengine_loading_tests)
 
+# G8: the limit of the frames per second of the main loop (the rate and the length of a frame)
+add_executable(myengine_frame_pacer_tests
+  core/FramePacerTests.cpp)
+
+target_link_libraries(myengine_frame_pacer_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_frame_pacer_tests)
+set_property(TARGET myengine_frame_pacer_tests PROPERTY FOLDER "Tests")
+add_test(NAME frame_pacer COMMAND myengine_frame_pacer_tests)
+set_tests_properties(frame_pacer PROPERTIES TIMEOUT 120)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)

@@ -221,6 +221,49 @@ namespace
         Check(harness.adapter.reloadCalls == 2 && loaded->asset.version == 3, "UpdateHotReload reloads a changed source");
     }
 
+    // ---- the scan for changed files on a worker (the application sets it): the same reloads, a few frames later, and never a scan of the files in the call ----
+
+    void TestScanOnAWorker(const Files& files)
+    {
+        Harness harness;
+        harness.resources.SetHotReloadAsync(true);
+        const auto loaded = harness.resources.Load<resource::ShaderAsset>(files.descriptor);
+        Check(loaded != nullptr && !loaded->asset.fallback, "the shader loads");
+
+        // nothing changed: the scan runs and finds nothing
+        for (int frame = 0; frame < 40; ++frame)
+        {
+            harness.resources.UpdateHotReload();
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        Check(harness.adapter.reloadCalls == 0, "an unchanged file is not reloaded");
+
+        // changed: the reload comes with a later frame, once
+        Touch(files.source, "#include \"common.hlsli\"\n// v2\n");
+        for (int frame = 0; frame < 200 && harness.adapter.reloadCalls == 0; ++frame)
+        {
+            harness.resources.UpdateHotReload();
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        Check(harness.adapter.reloadCalls == 1 && loaded->asset.version == 2, "a changed source is reloaded after the scan of the worker");
+        for (int frame = 0; frame < 60; ++frame)
+        {
+            harness.resources.UpdateHotReload();
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        Check(harness.adapter.reloadCalls == 1, "and only once");
+
+        // a call of the frame is short: it hands the files over to the worker and does not look at them
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 1000; ++i)
+        {
+            harness.resources.UpdateHotReload();
+        }
+        const double perCall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / 1000.0;
+        std::cout << "  UpdateHotReload: " << perCall << " ms per call\n";
+        Check(perCall < 0.5, "a call of a frame is short");
+    }
+
     // ---- an error leaves the old version, and is not replaced by the fallback ----
 
     void TestErrorKeepsTheOldVersion(const Files& files)
@@ -355,6 +398,7 @@ int main()
     };
     const Case cases[] = {
         {"reload keeps the handle", TestReloadKeepsTheHandle},
+        {"the scan runs on a worker", TestScanOnAWorker},
         {"an error keeps the old version", TestErrorKeepsTheOldVersion},
         {"a failed first load piles up nothing", TestFailedFirstLoad},
         {"the panel gets the error of the shader", TestShaderErrorForThePanel},

@@ -1523,6 +1523,10 @@ namespace myengine::resource
         // The jobs capture this ResourceManager, so all of them must finish before its fields are destroyed
         shuttingDown_ = true;
         jobs::Wait(streamingContext_);
+        if (hotReloadScan_.valid())
+        {
+            hotReloadScan_.wait();
+        }
     }
 
     bool ResourceManager::LoadManifest(const std::filesystem::path& path)
@@ -1606,6 +1610,41 @@ namespace myengine::resource
         return pendingMeshLoads_.size() + pendingTextureLoads_.size();
     }
 
+    namespace
+    {
+        // Is any file of the list not what it was when the resource was read? (no members: it runs on a worker too)
+        bool DependenciesChanged(const std::vector<ResourceDependency>& dependencies)
+        {
+            for (const auto& dependency : dependencies)
+            {
+                std::error_code ec;
+                const bool exists = std::filesystem::exists(dependency.path, ec);
+                if (ec)
+                {
+                    return true;
+                }
+
+                if (exists != dependency.existed)
+                {
+                    return true;
+                }
+
+                if (!exists)
+                {
+                    continue;
+                }
+
+                const auto currentWriteTime = std::filesystem::last_write_time(dependency.path, ec);
+                if (ec || currentWriteTime != dependency.lastWriteTime)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     void ResourceManager::UpdateHotReload()
     {
         // One call per frame: the clock of the material parameters. Parameters that were replaced stay alive for a few
@@ -1618,6 +1657,15 @@ namespace myengine::resource
 
         PumpAsyncLoads();
 
+        if (hotReloadScan_.valid())
+        {
+            if (hotReloadScan_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            {
+                return;
+            }
+            ApplyHotReload(hotReloadScan_.get());
+        }
+
         const auto now = std::chrono::steady_clock::now();
         if (now - lastHotReloadScanTime_ < hotReloadInterval_)
         {
@@ -1625,10 +1673,86 @@ namespace myengine::resource
         }
 
         lastHotReloadScanTime_ = now;
+        if (hotReloadAsync_)
+        {
+            ZoneScopedN("HotReload::Snapshot");
+            std::vector<HotReloadWatch> watches;
+            watches.reserve(meshCache_.size() + textureCache_.size() + shaderCache_.size() + materialCache_.size());
+            const auto collect = [&watches](const auto& cache, const int kind)
+            {
+                for (const auto& [_, resource] : cache)
+                {
+                    if (resource != nullptr && !resource->dependencies.empty())
+                    {
+                        watches.push_back({kind, resource->sourcePath, resource->dependencies});
+                    }
+                }
+            };
+            collect(shaderCache_, 0);
+            collect(materialCache_, 1);
+            collect(meshCache_, 2);
+            collect(textureCache_, 3);
+            hotReloadScan_ = std::async(std::launch::async, [watches = std::move(watches)]()
+            {
+                ZoneScopedN("HotReload::Scan");
+                HotReloadChanges changes;
+                for (const auto& watch : watches)
+                {
+                    if (DependenciesChanged(watch.dependencies))
+                    {
+                        changes.emplace_back(watch.kind, watch.sourcePath);
+                    }
+                }
+                return changes;
+            });
+            return;
+        }
+
         ReloadChangedShaders();
         ReloadChangedMaterials();
         ReloadChangedMeshes();
         ReloadChangedTextures();
+    }
+
+    void ResourceManager::ApplyHotReload(const HotReloadChanges& changes)
+    {
+        // the same order as the scan made in the call: shaders, materials, meshes, textures
+        for (int kind = 0; kind < 4; ++kind)
+        {
+            bool any = false;
+            for (const auto& [changedKind, path] : changes)
+            {
+                if (changedKind != kind)
+                {
+                    continue;
+                }
+                any = true;
+                if (kind == 0)
+                {
+                    logger_.Info("ResourceManager: hot reload shader " + NarrowText(path));
+                    Reload<ShaderAsset>(path);
+                }
+                else if (kind == 1)
+                {
+                    logger_.Info("ResourceManager: hot reload material " + NarrowText(path));
+                    Reload<MaterialAsset>(path);
+                }
+                else if (kind == 2)
+                {
+                    logger_.Info("ResourceManager: hot reload mesh " + NarrowText(path));
+                    Reload<MeshAsset>(path);
+                }
+                else
+                {
+                    logger_.Info("ResourceManager: hot reload texture " + NarrowText(path));
+                    Reload<TextureAsset>(path);
+                }
+            }
+            if (any && kind == 0)
+            {
+                RevalidateMaterials();
+            }
+        }
     }
 
     bool ResourceManager::SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset)
@@ -2823,33 +2947,7 @@ namespace myengine::resource
 
     bool ResourceManager::HasChanged(const std::vector<ResourceDependency>& dependencies) const
     {
-        for (const auto& dependency : dependencies)
-        {
-            std::error_code ec;
-            const bool exists = std::filesystem::exists(dependency.path, ec);
-            if (ec)
-            {
-                return true;
-            }
-
-            if (exists != dependency.existed)
-            {
-                return true;
-            }
-
-            if (!exists)
-            {
-                continue;
-            }
-
-            const auto currentWriteTime = std::filesystem::last_write_time(dependency.path, ec);
-            if (ec || currentWriteTime != dependency.lastWriteTime)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return DependenciesChanged(dependencies);
     }
 
     ResourceHandle<MeshAsset> ResourceManager::CreateFallbackMesh()

@@ -1,0 +1,4 @@
+# the host of the online match 4v4: the lobby of the host waits for the guest, then Start match (the empty slots play bots)
+11.0 mouse 1380 938
+11.5 click left
+66.0 quit
