@@ -356,6 +356,40 @@ def make_menu_music():
 
 
 # --------------------------------------------------------------------------- output
+def make_whistle():
+    """The referee's whistle: two blasts of a 2.9 kHz tone with the pea's warble and a breathy noise."""
+    seconds = 1.5
+    t = t_axis(seconds)
+    out = np.zeros_like(t)
+    for start, length in ((0.0, 0.42), (0.55, 0.85)):
+        local = t - start
+        env = np.clip(local / 0.02, 0, 1) * np.clip((length - local) / 0.05, 0, 1) * ((local >= 0) & (local < length))
+        warble = 1 + 0.012 * np.sin(2 * np.pi * 38 * local)
+        tone = np.sin(2 * np.pi * 2900 * local * warble) + 0.35 * np.sin(2 * np.pi * 5800 * local * warble)
+        out += env * (tone * (0.85 + 0.15 * np.sin(2 * np.pi * 38 * local)) + 0.25 * highpass(noise(seconds), 2500, 2))
+    return fade_out(normalize(out, 0.8), 0.03)
+
+
+def make_skid_loop():
+    """Tyres on the floor: filtered noise and a faint squeal; 1 s, periodic."""
+    seconds = 1.0
+    t = t_axis(seconds)
+    hiss = periodic_noise(seconds, lambda f: 0.0 if f < 300 else (1.0 / (1 + (f / 2500.0) ** 2)) * (1.0 if f < 6000 else 0.3))
+    squeal = np.sin(2 * np.pi * 1100 * t + 2.0 * np.sin(2 * np.pi * 3 * t)) * 0.18
+    wobble = 0.8 + 0.2 * np.sin(2 * np.pi * 5 * t)
+    return normalize((hiss + squeal) * wobble, 0.6)
+
+
+def make_bump():
+    """Two cars touching: a dull knock with a metallic ring."""
+    seconds = 0.5
+    t = t_axis(seconds)
+    knock = sweep(180, 60, seconds) * decay(seconds, 0.06, 0.001)
+    ring = (np.sin(2 * np.pi * 740 * t) + 0.6 * np.sin(2 * np.pi * 1190 * t) + 0.4 * np.sin(2 * np.pi * 1730 * t)) * decay(seconds, 0.07, 0.001)
+    click = highpass(noise(seconds), 1800, 2) * decay(seconds, 0.012, 0.0005)
+    return fade_out(normalize(1.0 * knock + 0.28 * ring + 0.5 * click, 0.9), 0.02)
+
+
 def write_wav(name, data):
     OUT.mkdir(parents=True, exist_ok=True)
     data = np.clip(data, -1.0, 1.0)
@@ -394,6 +428,10 @@ SOUNDS = [
     ("ui_hover", lambda: make_click(2600, 0.04, 0.008), False),
     ("ui_back", make_back, False),
     ("menu_music", make_menu_music, True),
+    # G7d: appended at the end, so the draws of the random numbers (and the sounds above) stay as they were
+    ("whistle", make_whistle, False),
+    ("skid_loop", make_skid_loop, True),
+    ("bump", make_bump, False),
 ]
 
 

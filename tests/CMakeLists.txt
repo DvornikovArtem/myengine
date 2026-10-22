@@ -428,3 +428,15 @@ myengine_apply_compiler_options(myengine_fx_tests)
 set_property(TARGET myengine_fx_tests PROPERTY FOLDER "Tests")
 add_test(NAME fx COMMAND myengine_fx_tests)
 set_tests_properties(fx PROPERTIES TIMEOUT 120)
+
+
+# G7d: the sounds and effects of a Rocket League match from the state of the simulation: events of pairs of ticks, no doubles after a
+# rollback, the commands that reach the audio and particle systems (no device, no renderer), a bot match with the journal
+add_executable(myengine_rl_feedback_tests
+  rl/RlFeedbackTests.cpp)
+
+target_link_libraries(myengine_rl_feedback_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_feedback_tests)
+set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
+set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)

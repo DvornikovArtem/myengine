@@ -189,7 +189,34 @@
    "sampleRate": 44100,
    "bytes": 2822444,
    "loop": true
+  },
+  {
+   "name": "whistle",
+   "file": "whistle.wav",
+   "seconds": 1.5,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 132344,
+   "loop": false
+  },
+  {
+   "name": "skid_loop",
+   "file": "skid_loop.wav",
+   "seconds": 1.0,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 88244,
+   "loop": true
+  },
+  {
+   "name": "bump",
+   "file": "bump.wav",
+   "seconds": 0.5,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 44144,
+   "loop": false
   }
  ],
- "totalBytes": 5724222
+ "totalBytes": 5988954
 }
