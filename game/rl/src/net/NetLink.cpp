@@ -109,7 +109,41 @@ namespace rl::net
         return true;
     }
 
-    void LoopbackHub::Unregister(uint16_t port) { inboxes_.erase(port); }
+    void LoopbackHub::Unregister(uint16_t port)
+    {
+        inboxes_.erase(port);
+        for (auto& entry : shared_)
+        {
+            entry.second.erase(std::remove(entry.second.begin(), entry.second.end(), port), entry.second.end());
+        }
+    }
+
+    bool LoopbackHub::RegisterShared(uint16_t port, uint16_t& assigned)
+    {
+        if (!Register(0, assigned))
+        {
+            return false;
+        }
+        shared_[port].push_back(assigned);
+        return true;
+    }
+
+    void LoopbackHub::Broadcast(uint16_t port, NetAddress from, const uint8_t* data, size_t size)
+    {
+        const auto it = shared_.find(port);
+        if (it == shared_.end())
+        {
+            return;
+        }
+        const std::vector<uint16_t> listeners = it->second;
+        for (const uint16_t endpoint : listeners)
+        {
+            if (static_cast<NetAddress>(endpoint) != from)
+            {
+                Deliver(endpoint, from, data, size);
+            }
+        }
+    }
 
     void LoopbackHub::Deliver(uint16_t to, NetAddress from, const uint8_t* data, size_t size)
     {
@@ -158,6 +192,28 @@ namespace rl::net
                 bound_ = true;
                 return true;
             }
+            bool BindShared(uint16_t port, std::string& error) override
+            {
+                Close();
+                if (!hub_.RegisterShared(port, port_))
+                {
+                    error = "loopback port " + std::to_string(port) + " cannot be shared";
+                    return false;
+                }
+                bound_ = true;
+                return true;
+            }
+            void SendBroadcast(uint16_t port, const uint8_t* data, size_t size, double) override
+            {
+                if (!bound_)
+                {
+                    std::string error;
+                    Bind(0, error);
+                }
+                hub_.Broadcast(port, port_, data, size);
+            }
+            std::string FormatAddress(NetAddress address) const override { return std::to_string(address); }
+            NetAddress WithPort(NetAddress, uint16_t port) const override { return port; }
             uint16_t LocalPort() const override { return port_; }
             bool Resolve(const std::string& text, NetAddress& out, std::string& error) override
             {
@@ -224,6 +280,10 @@ namespace rl::net
             }
 
             bool Bind(uint16_t port, std::string& error) override { return inner_->Bind(port, error); }
+            bool BindShared(uint16_t port, std::string& error) override { return inner_->BindShared(port, error); }
+            void SendBroadcast(uint16_t port, const uint8_t* data, size_t size, double now) override { inner_->SendBroadcast(port, data, size, now); }
+            std::string FormatAddress(NetAddress address) const override { return inner_->FormatAddress(address); }
+            NetAddress WithPort(NetAddress address, uint16_t port) const override { return inner_->WithPort(address, port); }
             uint16_t LocalPort() const override { return inner_->LocalPort(); }
             bool Resolve(const std::string& text, NetAddress& out, std::string& error) override { return inner_->Resolve(text, out, error); }
 
@@ -314,7 +374,35 @@ namespace rl::net
         public:
             ~UdpLink() override { Close(); }
 
-            bool Bind(uint16_t port, std::string& error) override
+            bool Bind(uint16_t port, std::string& error) override { return BindInternal(port, false, error); }
+            bool BindShared(uint16_t port, std::string& error) override { return BindInternal(port, true, error); }
+
+            std::string FormatAddress(NetAddress address) const override
+            {
+                const uint32_t ip = static_cast<uint32_t>(address >> 16);
+                return std::to_string((ip >> 24) & 255) + "." + std::to_string((ip >> 16) & 255) + "." + std::to_string((ip >> 8) & 255) + "." + std::to_string(ip & 255) + ":" +
+                       std::to_string(address & 0xFFFF);
+            }
+            NetAddress WithPort(NetAddress address, uint16_t port) const override { return (address & ~static_cast<NetAddress>(0xFFFF)) | port; }
+
+            void SendBroadcast(uint16_t port, const uint8_t* data, size_t size, double) override
+            {
+                if (socket_ == INVALID_SOCKET)
+                {
+                    std::string error;
+                    if (!Bind(0, error))
+                    {
+                        return;
+                    }
+                }
+                sockaddr_in address{};
+                address.sin_family = AF_INET;
+                address.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+                address.sin_port = htons(port);
+                sendto(socket_, reinterpret_cast<const char*>(data), static_cast<int>(size), 0, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+            }
+
+            bool BindInternal(uint16_t port, bool shared, std::string& error)
             {
                 Close();
                 if (!StartWinsock())
@@ -336,6 +424,12 @@ namespace rl::net
                 WSAIoctl(socket_, kUdpConnReset, &noReset, sizeof(noReset), nullptr, 0, &bytes, nullptr, nullptr);
                 int buffer = 1 << 20;
                 setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&buffer), sizeof(buffer));
+                BOOL yes = TRUE;
+                setsockopt(socket_, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&yes), sizeof(yes));
+                if (shared)
+                {
+                    setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+                }
 
                 sockaddr_in address{};
                 address.sin_family = AF_INET;
