@@ -742,7 +742,7 @@ namespace
             rig.Run(6.0);
             CHECK(late.State() == RlNetClientState::Failed);
             Note("late: \"%s\"", late.Error().c_str());
-            CHECK(late.Error().find("started") != std::string::npos);
+            CHECK(late.Error().find("slot") != std::string::npos);  // the match is full: a running match is not the reason any more
         }
         {
             // a lossy start: Join, Welcome and MatchStart all have to be repeated
@@ -759,6 +759,47 @@ namespace
             Note("45%% loss: client state %d, tick %u", static_cast<int>(client.State()), client.Stats().tick);
             CHECK(client.Stats().tick > 100);
         }
+    }
+
+    // A player joins a match that has been running for a minute: he takes the slot of a bot, gets the state of the match, catches up
+    void TestLateJoin(const char* title, const net::NetSimParams& sim)
+    {
+        std::printf("a player joins a running match, %s\n", title);
+        Rig rig(sim, 2);
+        rig.recordHashes = true;
+        RlNetClient& first = rig.AddClient();
+        CHECK(rig.RunUntil(10.0, &AllInLobby));
+        CHECK(rig.host->StartMatch(rig.now));
+        rig.Run(60.0);
+        CHECK(first.State() == RlNetClientState::Playing);
+        CHECK(first.Stats().hardCorrections == 0);
+        const uint32_t hostTickAtJoin = rig.host->Stats().tick;
+        const uint32_t maskBefore = rig.host->HumanMask();
+
+        RlNetClient& late = rig.AddClient();
+        rig.Run(1.5);
+        Note("  after 1.5 s: the new player is in state %d", static_cast<int>(late.State()));
+        rig.Run(12.0);
+        Report("the player who joined late", rig, late);
+        CHECK(late.State() == RlNetClientState::Playing);
+        CHECK(late.Slot() == 1 || late.Slot() == 3);              // the slots of the bots
+        CHECK((maskBefore & (1u << late.Slot())) == 0);
+        CHECK((rig.host->HumanMask() & (1u << late.Slot())) != 0);
+        CHECK(!rig.host->Match()->IsBot(late.Slot()) && !late.Match()->IsBot(late.Slot()));
+        CHECK(rig.host->Stats().lateJoins == 1);
+        CHECK(late.Stats().tick > hostTickAtJoin);                 // he has caught up with the host
+        CHECK(late.Stats().hardCorrections == 0);
+        CHECK(late.Stats().hashMismatches == 0);
+        int compared = 0;
+        const int equal = CompareWithHost(rig, late, 60, &compared);
+        Note("states of the last %d verified ticks equal to the host's: %d", compared, equal);
+        CHECK(compared >= 30 && equal == compared);
+        // the player who was there stays in step with the host: the slot changed under him at an agreed tick
+        CHECK(first.Stats().hardCorrections == 0);
+        compared = 0;
+        const int firstEqual = CompareWithHost(rig, first, 60, &compared);
+        CHECK(compared >= 30 && firstEqual == compared);
+        CHECK(first.Match()->IsBot(late.Slot()) == false);
     }
 
     void TestUdp()
@@ -967,6 +1008,17 @@ int main(int argc, char** argv)
     TestHostAndClient("one-way 100 ms +-30 (RTT 200), 10% loss, 3% duplicates", slow, 20.0);
     TestGoalAndOutOfBandChange();
     TestSeveralClientsAndLeaving();
+    {
+        net::NetSimParams sim;
+        sim.latencyMs = 50.0f;
+        sim.jitterMs = 20.0f;
+        sim.lossPercent = 5.0f;
+        TestLateJoin("RTT 100 +-40 ms, 5% loss", sim);
+        sim.latencyMs = 100.0f;
+        sim.jitterMs = 30.0f;
+        sim.lossPercent = 10.0f;
+        TestLateJoin("RTT 200 +-60 ms, 10% loss", sim);
+    }
     TestJoinRefusals();
     TestUdp();
     TestRollbackBudget();

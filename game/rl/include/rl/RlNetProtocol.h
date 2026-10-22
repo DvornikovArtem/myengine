@@ -35,6 +35,9 @@ namespace rl
         Input = 4,
         Snapshot = 5,
         Event = 6,
+        StateChunk = 7,     // host -> client, reliable: a piece of the full state of the match (a player who joins a running match)
+        InputRequest = 8,   // client -> host, reliable: the inputs the host used for these ticks
+        InputHistory = 9,   // host -> client, reliable: the answer
     };
 
     enum class RlRejectReason : uint8_t
@@ -42,7 +45,7 @@ namespace rl
         Version = 1,   // other protocol version
         Tuning = 2,    // other rl_tuning.json
         Full = 3,      // no free slot
-        Started = 4,   // the match is on already
+        Started = 4,   // the match is on already (no longer sent: a running match takes new players into the slots of bots)
     };
 
     const char* RlRejectText(RlRejectReason reason);
@@ -114,6 +117,36 @@ namespace rl
         int inputCount = 0;           // ticks of used input: tick - inputCount .. tick - 1
         uint8_t inputs[kMaxCars][kNetInputWindow][kNetInputBytes] = {};
     };
+
+    // A player who joins a running match gets the saved state of the match at tick `tick` in pieces of at most kStateChunkBytes
+    constexpr size_t kStateChunkBytes = 1000;
+    struct RlStateChunkMsg
+    {
+        uint32_t tick = 0;
+        uint32_t total = 0;    // bytes of the whole state
+        uint32_t offset = 0;   // where this piece goes
+        std::vector<uint8_t> bytes;
+    };
+
+    constexpr int kHistoryTicksPerMessage = 20;
+    struct RlInputRequestMsg
+    {
+        uint32_t first = 0;
+        uint32_t count = 0;
+    };
+    struct RlInputHistoryMsg
+    {
+        uint32_t first = 0;
+        int count = 0;  // <= kHistoryTicksPerMessage; every slot, so that the client knows what the others did
+        uint8_t inputs[kHistoryTicksPerMessage][kMaxCars][kNetInputBytes] = {};
+    };
+
+    void RlEncode(const RlStateChunkMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlInputRequestMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlInputHistoryMsg& msg, std::vector<uint8_t>& out);
+    bool RlDecode(const uint8_t* data, size_t size, RlStateChunkMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlInputRequestMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlInputHistoryMsg& msg);
 
     void RlEncode(const RlJoinMsg& msg, std::vector<uint8_t>& out);
     void RlEncode(const RlWelcomeMsg& msg, std::vector<uint8_t>& out);

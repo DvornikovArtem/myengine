@@ -1,5 +1,6 @@
 set(RL_HEADERS
   include/rl/RlArena.h
+  include/rl/RlBotForecast.h
   include/rl/RlCamera.h
   include/rl/RlControls.h
   include/rl/RlMatch.h
@@ -18,6 +19,10 @@ set(RL_SOURCES
   src/RlArena.cpp
   src/RlBots.cpp
   src/RlBots.h
+  src/RlBotsBrain.cpp
+  src/RlBotsBrain.h
+  src/RlBotsV1.cpp
+  src/RlBotsV1.h
   src/RlCamera.cpp
   src/RlCarController.cpp
   src/RlControls.cpp
