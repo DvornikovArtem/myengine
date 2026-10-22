@@ -265,25 +265,54 @@ namespace rl
             }
         }
 
-        // the two goals: a box behind each end wall
+        // the two goals behind the end walls: the sweep of the sections of GoalProfile (a box when goalCornerRadius is 0), closed by the flat part of the back
+        const std::vector<RlGoalSection> goalSections = GoalProfile(t);
+        const int goalCorners = 4 * (std::max(t.rampSegments, 1) + 1);
         for (const float sign : {1.0f, -1.0f})
         {
-            const float gw = t.goalHalfWidth;
             const float gh = t.goalHeight;
             const float z0 = sign * t.halfLength;
-            const float z1 = sign * (t.halfLength + t.goalDepth);
-            const V3 cavity = {0.0f, gh * 0.5f, 0.5f * (z0 + z1)};
-            // the side walls and the back wall are split where the floor ramp of the end wall ends: no T-junction there
-            const float split = std::min(rf, gh);
-            mesh.Quad({-gw, 0.0f, z0}, {gw, 0.0f, z0}, {gw, 0.0f, z1}, {-gw, 0.0f, z1}, cavity);
-            mesh.Quad({-gw, gh, z0}, {gw, gh, z0}, {gw, gh, z1}, {-gw, gh, z1}, cavity);
-            for (const float x : {gw, -gw})
+            const V3 cavity = {0.0f, gh * 0.5f, sign * (t.halfLength + 0.5f * t.goalDepth)};
+            const auto point = [&](const RlGoalSection& section, int index)
             {
-                mesh.Quad({x, 0.0f, z0}, {x, split, z0}, {x, split, z1}, {x, 0.0f, z1}, cavity);
-                mesh.Quad({x, split, z0}, {x, gh, z0}, {x, gh, z1}, {x, split, z1}, cavity);
+                const int steps = std::max(t.rampSegments, 1) + 1;
+                const RlVec3 p = GoalSectionPoint(t, section, index / steps, index % steps);
+                return V3{p.x, p.y, z0 + sign * section.along};
+            };
+            const int cornerSteps = std::max(t.rampSegments, 1) + 1;
+            // the side edges of the mouth are split where the floor ramp of the end wall ends (the end wall has a vertex there): no T-junction
+            const float split = std::min(rf, gh);
+            for (size_t i = 0; i + 1 < goalSections.size(); ++i)
+            {
+                for (int j = 0; j < goalCorners; ++j)
+                {
+                    const int next = (j + 1) % goalCorners;
+                    const V3 a0 = point(goalSections[i], j);
+                    const V3 a1 = point(goalSections[i], next);
+                    const V3 b0 = point(goalSections[i + 1], j);
+                    const V3 b1 = point(goalSections[i + 1], next);
+                    // the straight edge between corner 1 and 2 (the left side) and between 3 and 0 (the right side)
+                    const bool sideEdge = j % cornerSteps == cornerSteps - 1 && ((j / cornerSteps) % 2 == 1);
+                    if (i == 0 && sideEdge && std::fabs(a0.x - a1.x) < 1e-4f && std::min(a0.y, a1.y) < split - 1e-4f && std::max(a0.y, a1.y) > split + 1e-4f)
+                    {
+                        const V3 mid = {a0.x, split, a0.z};
+                        mesh.Tri(a0, mid, b0, cavity);
+                        mesh.Tri(mid, a1, b1, cavity);
+                        mesh.Tri(mid, b1, b0, cavity);
+                    }
+                    else
+                    {
+                        mesh.Quad(a0, a1, b1, b0, cavity);
+                    }
+                }
             }
-            mesh.Quad({-gw, 0.0f, z1}, {gw, 0.0f, z1}, {gw, split, z1}, {-gw, split, z1}, cavity);
-            mesh.Quad({-gw, split, z1}, {gw, split, z1}, {gw, gh, z1}, {-gw, gh, z1}, cavity);
+            // the back: the flat rectangle of the last section
+            const RlGoalSection& back = goalSections.back();
+            const V3 c0 = point(back, 0);
+            for (int j = 1; j + 1 < goalCorners; ++j)
+            {
+                mesh.Tri(c0, point(back, j), point(back, j + 1), cavity);
+            }
         }
 
         vertices_.reserve(mesh.positions.size());
@@ -300,6 +329,55 @@ namespace rl
             boundsMin_ = {std::min(boundsMin_.x, p.x), std::min(boundsMin_.y, p.y), std::min(boundsMin_.z, p.z)};
             boundsMax_ = {std::max(boundsMax_.x, p.x), std::max(boundsMax_.y, p.y), std::max(boundsMax_.z, p.z)};
         }
+    }
+
+    std::vector<RlGoalSection> RlArena::GoalProfile(const RlArenaTuning& t)
+    {
+        const int segments = std::max(t.rampSegments, 1);
+        const float gh = t.goalHeight;
+        const float depth = std::max(t.goalDepth, 0.1f);
+        // the radius fits the goal: no more than half of the height and of the width, and the back has to fit in the depth
+        const float radius = std::clamp(t.goalCornerRadius, 0.0f, std::min({0.5f * gh - 0.01f, t.goalHalfWidth - 0.01f, depth - 0.01f}));
+        const float innerX = t.goalHalfWidth - radius;
+        const float innerY = 0.5f * gh - radius;
+        const float blend = radius > 0.0f ? std::clamp(t.goalMouthBlend, 0.01f, depth - radius) : 0.0f;
+        std::vector<RlGoalSection> sections;
+        if (radius <= 0.0f)
+        {
+            sections.push_back({0.0f, t.goalHalfWidth, 0.5f * gh, 0.0f});
+            sections.push_back({depth, t.goalHalfWidth, 0.5f * gh, 0.0f});
+            return sections;
+        }
+        // the mouth: the outside is the rectangle of the opening, the radius grows from nothing (smoothstep: the corners do not step in at the mouth)
+        const int blendSteps = std::max(segments, 4);
+        for (int k = 0; k <= blendSteps; ++k)
+        {
+            const float f = static_cast<float>(k) / static_cast<float>(blendSteps);
+            const float rho = radius * f * f * (3.0f - 2.0f * f);
+            sections.push_back({blend * f, t.goalHalfWidth - rho, 0.5f * gh - rho, rho});
+        }
+        // the straight part ends where the quarter circle of the back starts
+        const float backStart = depth - radius;
+        if (backStart > blend + 1e-4f)
+        {
+            sections.push_back({backStart, innerX, innerY, radius});
+        }
+        // the back: a quarter circle in the z direction, the radius shrinks to nothing
+        for (int k = 1; k <= segments; ++k)
+        {
+            const float a = 0.5f * kPi * static_cast<float>(k) / static_cast<float>(segments);
+            sections.push_back({backStart + radius * std::sin(a), innerX, innerY, radius * std::cos(a)});
+        }
+        return sections;
+    }
+
+    RlVec3 RlArena::GoalSectionPoint(const RlArenaTuning& t, const RlGoalSection& section, int corner, int step)
+    {
+        const int segments = std::max(t.rampSegments, 1);
+        static const float kSignX[4] = {1.0f, -1.0f, -1.0f, 1.0f};
+        static const float kSignY[4] = {1.0f, 1.0f, -1.0f, -1.0f};
+        const float angle = 0.5f * kPi * (static_cast<float>(corner) + static_cast<float>(step) / static_cast<float>(segments));
+        return {kSignX[corner] * section.innerX + section.radius * std::cos(angle), 0.5f * t.goalHeight + kSignY[corner] * section.innerY + section.radius * std::sin(angle), 0.0f};
     }
 
     std::string RlArena::ToObj(float uvMetres, float scale, RlVec3 origin) const

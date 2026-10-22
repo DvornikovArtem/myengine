@@ -7,7 +7,7 @@ Meshes (all in the world frame of the sim, y = 0 is the floor, blue defends -z, 
   arena_wall_orange   the same for the orange half
   arena_frame_blue    the "glass" above the lower wall as an open frame: posts, rails, ceiling ramp ribs, ceiling beams
   arena_frame_orange  (open geometry instead of transparent glass: the scene shader has no blending, see rl-assets.md)
-  arena_goal_blue     the goal box behind the end wall: net surfaces, posts and crossbar (back stays)
+  arena_goal_blue     the inside of a goal behind the end wall: the net on the smooth profile (quarter pipes like the collision), posts, crossbar, rails
   arena_goal_orange
   pad_small, pad_big, pad_orb   the boost pads: a hexagon plate, a big plate with a ring, the floating orb
 """
@@ -15,7 +15,7 @@ Meshes (all in the world frame of the sim, y = 0 is the floor, blue defends -z, 
 import math
 
 from .common import BLUE, BLUE_DARK, BLUE_GLOW, GRAPHITE, GOLD, ORANGE, ORANGE_DARK, ORANGE_GLOW, WHITE, Atlas, canvas, mix, shade
-from .mesh import (FULL, Mesh, beam, box, cylinder, disc, lerp, loft, revolve, uv_sphere, vadd, vmul, vsub, normalize, cross)
+from .mesh import (FULL, Mesh, beam, box, cylinder, disc, length, lerp, loft, revolve, uv_sphere, vadd, vmul, vsub, normalize, cross)
 
 TILE_U_M = 8.0  # the wall tile repeats every 8 m along the wall
 WALL_TOP = 5.0  # the opaque lower wall ends here, above it the open frame
@@ -112,7 +112,8 @@ def floor_texture(t, ppm=20):
         L([(-14, gz - sign * 0.6 * rf), (-14, gz - sign * 17), (14, gz - sign * 17), (14, gz - sign * 0.6 * rf)])
         L([(-t["goalHalfWidth"], gz - sign * 0.6 * rf), (-t["goalHalfWidth"], gz - sign * 7.5), (t["goalHalfWidth"], gz - sign * 7.5),
            (t["goalHalfWidth"], gz - sign * 0.6 * rf)])
-        cv.ellipse(X(0), Z(gz - sign * 12.5), 0.4 * ppm, 0.4 * ppm, fill=line)
+        # (no spot in front of the goal: the kick-off camera of the back spots stands two and a half metres from it, and a white dot seen at that
+        # angle with the gloss of the floor blew up into a white blur at the corner of the screen)
         # a team coloured goal line glow
         L([(-t["goalHalfWidth"], gz - sign * 0.6 * rf), (t["goalHalfWidth"], gz - sign * 0.6 * rf)], col, 0.5)
     # the pad rings and the plates of the pads
@@ -500,6 +501,46 @@ def poly_span(poly, axis, value):
     return (min(hits), max(hits)) if hits else (0.0, 0.0)
 
 
+def goal_profile(t):
+    """The sections of the inside of a goal, from the mouth to the back wall: the same list as RlArena::GoalProfile (game/rl/src/RlArena.cpp), which is
+    also the collision. A section is (along, inner_x, inner_y, radius): a rounded rectangle around (0, goalHeight / 2) with straight parts up to
+    +-inner and quarter circle corners of `radius`. The radius grows from 0 at the mouth over goalMouthBlend metres (smoothstep), is goalCornerRadius in
+    the straight part and shrinks to 0 along a quarter circle at the back (spheres in the back corners)."""
+    segments = max(int(t["rampSegments"]), 1)
+    gh, gw, depth = t["goalHeight"], t["goalHalfWidth"], max(t["goalDepth"], 0.1)
+    radius = max(0.0, min(t.get("goalCornerRadius", 0.0), 0.5 * gh - 0.01, gw - 0.01, depth - 0.01))
+    if radius <= 0.0:
+        return [(0.0, gw, 0.5 * gh, 0.0), (depth, gw, 0.5 * gh, 0.0)]
+    blend = min(max(t.get("goalMouthBlend", 5.0), 0.01), depth - radius)
+    inner_x, inner_y = gw - radius, 0.5 * gh - radius
+    sections = []
+    steps = max(segments, 4)
+    for k in range(steps + 1):
+        f = k / steps
+        rho = radius * f * f * (3.0 - 2.0 * f)
+        sections.append((blend * f, gw - rho, 0.5 * gh - rho, rho))
+    back_start = depth - radius
+    if back_start > blend + 1e-4:
+        sections.append((back_start, inner_x, inner_y, radius))
+    for k in range(1, segments + 1):
+        a = 0.5 * math.pi * k / segments
+        sections.append((back_start + radius * math.sin(a), inner_x, inner_y, radius * math.cos(a)))
+    return sections
+
+
+def goal_section_points(t, sec):
+    """The (x, y) points of a section: four corners (+x +y, -x +y, -x -y, +x -y), rampSegments + 1 points each (RlArena::GoalSectionPoint)."""
+    segments = max(int(t["rampSegments"]), 1)
+    _, ix, iy, rho = sec
+    sx, sy = (1.0, -1.0, -1.0, 1.0), (1.0, 1.0, -1.0, -1.0)
+    pts = []
+    for corner in range(4):
+        for step in range(segments + 1):
+            a = 0.5 * math.pi * (corner + step / segments)
+            pts.append((sx[corner] * ix + rho * math.cos(a), 0.5 * t["goalHeight"] + sy[corner] * iy + rho * math.sin(a)))
+    return pts
+
+
 def build_goal(t, team, atlas):
     sign = -1.0 if team == 0 else 1.0
     gw, gh, depth = t["goalHalfWidth"], t["goalHeight"], t["goalDepth"]
@@ -535,19 +576,76 @@ def build_goal(t, team, atlas):
                 q = [pt(lo_a, lo_b), pt(hi_a, lo_b), pt(hi_a, hi_b), pt(lo_a, hi_b)]
                 uvs = [(nu0 + (nu1 - nu0) * (qq[a] / cell - i), nv0 + (nv1 - nv0) * (qq[b] / cell - j)) for qq in q]
                 m.quad(*q, uvs=uvs, outside=cavity)
-    face((-gw, 0, z0), (gw, 0, z0), (gw, 0, z1), (-gw, 0, z1), 0, 2)  # floor
-    face((-gw, gh, z0), (gw, gh, z0), (gw, gh, z1), (-gw, gh, z1), 0, 2)  # roof
-    face((-gw, 0, z1), (gw, 0, z1), (gw, gh, z1), (-gw, gh, z1), 0, 1)  # back
-    for x in (-gw, gw):
-        face((x, 0, z0), (x, gh, z0), (x, gh, z1), (x, 0, z1), 2, 1)  # sides
-    # the frame: posts and crossbar on the goal line, stays at the back corners
+
+    # the net: the sweep of the sections of the profile (the same triangles as the collision), the UV follow the length round the section and along the goal;
+    # a long quad (the straight parts of the section) is cut into pieces of a tile, the UV of a piece do not leave the tile of its middle
+    sections = goal_profile(t)
+    pts = [goal_section_points(t, s) for s in sections]
+    perimeter = []
+    for ring in pts:
+        total, acc = [0.0], 0.0
+        for k in range(1, len(ring)):
+            acc += math.hypot(ring[k][0] - ring[k - 1][0], ring[k][1] - ring[k - 1][1])
+            total.append(acc)
+        perimeter.append(total)
+
+    def uv_of(s, z, tile):
+        return (nu0 + (nu1 - nu0) * min(max(s / cell - tile[0], 0.0), 1.0), nv0 + (nv1 - nv0) * min(max(z / cell - tile[1], 0.0), 1.0))
+
+    for i in range(len(sections) - 1):
+        za, zb = sections[i][0], sections[i + 1][0]
+        for j in range(len(pts[i]) - 1):
+            ring_a, ring_b = pts[i], pts[i + 1]
+            quad = [(ring_a[j], perimeter[i][j], za), (ring_a[j + 1], perimeter[i][j + 1], za), (ring_b[j + 1], perimeter[i + 1][j + 1], zb),
+                    (ring_b[j], perimeter[i + 1][j], zb)]
+            span_s = max(abs(quad[1][1] - quad[0][1]), abs(quad[2][1] - quad[3][1]))
+            span_z = abs(zb - za)
+            if span_s < 1e-6 and span_z < 1e-6:
+                continue
+            na = max(1, int(math.ceil(span_s / cell - 1e-6)))
+            nb = max(1, int(math.ceil(span_z / cell - 1e-6)))
+
+            for ka in range(na):
+                for kb in range(nb):
+                    corners = []
+                    for fa, fb in ((ka, kb), (ka + 1, kb), (ka + 1, kb + 1), (ka, kb + 1)):
+                        u, v = fa / na, fb / nb
+                        # the corners of the quad: quad[0] (a0, b0), quad[1] (a1, b0), quad[2] (a1, b1), quad[3] (a0, b1)
+                        def mix2(f0, f1, f2, f3):
+                            return (f0 * (1 - u) * (1 - v) + f1 * u * (1 - v) + f2 * u * v + f3 * (1 - u) * v)
+                        x = mix2(quad[0][0][0], quad[1][0][0], quad[2][0][0], quad[3][0][0])
+                        y = mix2(quad[0][0][1], quad[1][0][1], quad[2][0][1], quad[3][0][1])
+                        s = mix2(quad[0][1], quad[1][1], quad[2][1], quad[3][1])
+                        z = mix2(quad[0][2], quad[1][2], quad[2][2], quad[3][2])
+                        corners.append(((x, y, z0 + sign * z), s, z))
+                    mid_s = sum(c[1] for c in corners) / 4.0
+                    mid_z = sum(c[2] for c in corners) / 4.0
+                    tile = (math.floor(mid_s / cell), math.floor(mid_z / cell))
+                    q = [c[0] for c in corners]
+                    area2 = (length(cross(vsub(q[1], q[0]), vsub(q[2], q[0]))) + length(cross(vsub(q[2], q[0]), vsub(q[3], q[0]))))
+                    # a quad that has collapsed to a line (the section shrinks to nothing at the back) has no net
+                    if span_s < 1e-6 or span_z < 1e-6 or area2 < 1e-8:
+                        continue
+                    m.quad(*q, uvs=[uv_of(c[1], c[2], tile) for c in corners], outside=cavity)
+    # the flat part of the back wall: the inner rectangle of the last section
+    last = sections[-1]
+    cy = 0.5 * gh
+    face((-last[1], cy - last[2], z1), (last[1], cy - last[2], z1), (last[1], cy + last[2], z1), (-last[1], cy + last[2], z1), 0, 1)
+    # the frame: posts and crossbar on the goal line, a rail along each upper corner of the net, stays on the back wall
     r = 0.16
     for x in (-gw, gw):
         m.extend(cylinder((x, 0, z0), (x, gh, z0), r, r, 10, caps=(False, True), rect=metal))
-        m.extend(cylinder((x, 0, z1 - sign * 0.2), (x, gh, z1 - sign * 0.2), r * 0.8, r * 0.8, 10, caps=(False, True), rect=metal))
-        m.extend(cylinder((x, gh, z0), (x, gh, z1), r * 0.8, r * 0.8, 10, caps=(True, True), rect=metal))
+    mid_step = max(int(t["rampSegments"]), 1) // 2
+    segments = max(int(t["rampSegments"]), 1)
+    for corner in (0, 1):
+        rail = [(p[0], p[1], z0 + sign * s[0]) for s, p in ((s, goal_section_points(t, s)[corner * (segments + 1) + mid_step]) for s in sections)]
+        for a, b in zip(rail, rail[1:]):
+            if math.dist(a, b) > 1e-4:
+                m.extend(cylinder(a, b, r * 0.8, r * 0.8, 10, caps=(True, True), rect=metal))
     m.extend(cylinder((-gw, gh, z0), (gw, gh, z0), r, r, 10, caps=(True, True), rect=accent))
-    m.extend(cylinder((-gw, gh, z1 - sign * 0.2), (gw, gh, z1 - sign * 0.2), r * 0.8, r * 0.8, 10, caps=(True, True), rect=metal))
+    for x in (-last[1], last[1]):
+        m.extend(cylinder((x, cy - last[2], z1 - sign * 0.2), (x, cy + last[2], z1 - sign * 0.2), r * 0.8, r * 0.8, 10, caps=(False, True), rect=metal))
+    m.extend(cylinder((-last[1], cy + last[2], z1 - sign * 0.2), (last[1], cy + last[2], z1 - sign * 0.2), r * 0.8, r * 0.8, 10, caps=(True, True), rect=metal))
     m.smooth(45.0)
     return m
 
@@ -600,7 +698,7 @@ def build(ctx):
                  note="translucent glass panels over the lower wall and the ceiling ramp (blend alpha)")
         gz = (-1.0 if team == 0 else 1.0) * (tuning["halfLength"] + tuning["goalDepth"] * 0.5)
         ctx.mesh("arena_goal_" + name, build_goal(tuning, team, ga), origin=(0.0, tuning["goalHeight"] * 0.5, gz), part_of="arena",
-                 note="goal box behind the end wall: net surfaces, posts, crossbar")
+                 note="goal behind the end wall: net on the smooth profile of RlArena::GoalProfile, posts, crossbar, rails")
     ctx.texture("arena_glass_roof", glass_texture("roof"))
     ctx.mesh("arena_glass_roof", build_glass_roof(tuning, foot), origin=centre, part_of="arena", note="the glass of the ceiling, y = height")
     pa = pads_texture()

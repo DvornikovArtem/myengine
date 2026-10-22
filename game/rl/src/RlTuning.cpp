@@ -34,6 +34,8 @@ namespace rl
             v.Float("goalHalfWidth", t.arena.goalHalfWidth);
             v.Float("goalHeight", t.arena.goalHeight);
             v.Float("goalDepth", t.arena.goalDepth);
+            v.Float("goalCornerRadius", t.arena.goalCornerRadius);
+            v.Float("goalMouthBlend", t.arena.goalMouthBlend);
             v.Float("friction", t.arena.friction);
             v.Float("restitution", t.arena.restitution);
             v.End();
@@ -192,6 +194,7 @@ namespace rl
             v.Float("wallMargin", t.camera.wallMargin);
             v.Float("ballCamMaxPitch", t.camera.ballCamMaxPitch);
             v.Float("rollFollow", t.camera.rollFollow);
+            v.Float("airVelocityFollow", t.camera.airVelocityFollow);
             v.Float("maxTurnRate", t.camera.maxTurnRate);
             v.End();
 

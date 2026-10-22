@@ -1736,6 +1736,12 @@ namespace
         float maxRoll = 0;       // degrees the camera was tilted from the horizon (its right axis out of the horizontal plane)
         float maxTurnRate = 0;   // degrees per second the camera turned (the angle between its looking directions of two frames)
         float minCarInFrame = 99;  // the smallest cosine between the looking direction and the direction to the car: the car stays in the picture
+        float maxYawRate = 0;      // degrees per second the heading of the camera (its looking direction on the ground plane) turned
+        float yawTravelled = 0;    // degrees the heading turned in all (the sum of the frames)
+        float lastYaw = 0;
+        float carYawTravelled = 0;  // degrees the nose of the car turned on the ground plane in all (while it was not pointing up or down)
+        float lastCarYaw = 0;
+        bool haveCarYaw = false;
     };
 
     CameraRun RunCamera(RlSim& sim, int ticks, bool ballCam, const Script& script, const RlCameraTuning* tuningOverride = nullptr)
@@ -1764,6 +1770,33 @@ namespace
             if (run.frames > 1)
             {
                 run.maxTurnRate = std::max(run.maxTurnRate, std::acos(std::clamp(Dot(V(view.forward), V(prevForward)), -1.0f, 1.0f)) * 57.29578f * 60.0f);
+            }
+            {
+                const float yaw = std::atan2(view.forward.x, view.forward.z) * 57.29578f;
+                if (run.frames > 1)
+                {
+                    float step = yaw - run.lastYaw;
+                    while (step > 180.0f) step -= 360.0f;
+                    while (step < -180.0f) step += 360.0f;
+                    run.maxYawRate = std::max(run.maxYawRate, std::fabs(step) * 60.0f);
+                    run.yawTravelled += std::fabs(step);
+                }
+                run.lastYaw = yaw;
+                const float nx = 2.0f * (c.rotation.x * c.rotation.z + c.rotation.w * c.rotation.y);
+                const float nz = 1.0f - 2.0f * (c.rotation.x * c.rotation.x + c.rotation.y * c.rotation.y);
+                if (std::sqrt(nx * nx + nz * nz) > 0.3f)
+                {
+                    const float carYaw = std::atan2(nx, nz) * 57.29578f;
+                    if (run.haveCarYaw)
+                    {
+                        float carStep = carYaw - run.lastCarYaw;
+                        while (carStep > 180.0f) carStep -= 360.0f;
+                        while (carStep < -180.0f) carStep += 360.0f;
+                        run.carYawTravelled += std::fabs(carStep);
+                    }
+                    run.lastCarYaw = carYaw;
+                    run.haveCarYaw = true;
+                }
             }
             prevForward = view.forward;
             {
@@ -1826,13 +1859,13 @@ namespace
         // a car at the back wall of a goal, nose to the field: the camera belongs behind the back wall without the clip
         {
             RlSim sim(g_tuning, 1);
-            sim.ResetCar(0, 0.0f, 58.8f, 3.14159265f);
+            sim.ResetCar(0, 0.0f, 58.1f, 3.14159265f);
             QuietBall(sim);
             Settle(sim);
             const CameraRun r = RunCamera(sim, Ticks(1.0f), false, nullptr);
             std::printf("  at the back wall of the goal: outside %d of %d, blocked %d, closest %.2f m\n", r.outside, r.frames, r.blocked, static_cast<double>(r.minDistance));
             CHECK(r.outside == 0 && r.blocked == 0);
-            CHECK(r.minDistance < g_tuning.camera.distance - 0.5f);  // it really had to come closer
+            CHECK(r.minDistance < g_tuning.camera.distance - 0.05f);  // it had to come closer (less than with the box: the quarter pipe keeps the wall farther away)
         }
         // the goal: the camera behind a car in a goal may be in the goal, never behind its walls
         {
@@ -2142,6 +2175,111 @@ namespace
         }
     }
 
+    // The camera in the air (G4h3): in a jump, a double jump, a flip in any direction, an air roll and a boosted flight the heading of the camera does not jump: it
+    // follows where the car faces (the nose, or the side of the car when the nose points up or down), smoothly, and it does not follow the dodge or the flip.
+    void TestCameraAir()
+    {
+        std::printf("camera: the heading in the air, in jumps, flips and an air roll\n");
+        const auto start = [](RlSim& sim) {
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+        };
+        // a jump at t = 2 ticks, held for `hold` seconds
+        const auto jumpAt = [](int t, float from, float hold) { return t >= Ticks(from) && t < Ticks(from + hold); };
+        const auto dodge = [&](Inputs& in, int t, float from, float pitch, float steer) {
+            // the first jump, then (0.4 s later) a second press with a direction: a dodge
+            in[0].jump = jumpAt(t, from, 0.2f) || (t >= Ticks(from + 0.4f) && t < Ticks(from + 0.4f) + 3);
+            if (t >= Ticks(from + 0.4f) && t < Ticks(from + 0.4f) + 3)
+            {
+                in[0].pitch = pitch;
+                in[0].steer = steer;
+            }
+        };
+        struct AirScenario
+        {
+            const char* name;
+            float seconds;
+            Script script;
+        };
+        const AirScenario scenarios[] = {
+            {"a jump on the spot", 2.5f, [&](int t, const RlWorldState&, Inputs& in) { in[0].jump = jumpAt(t, 1.0f, 0.25f); }},
+            {"a double jump", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].jump = jumpAt(t, 1.0f, 0.2f) || jumpAt(t, 1.6f, 0.05f); }},
+            {"a front flip on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, -1.0f, 0.0f); }},
+            {"a back flip on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, 1.0f, 0.0f); }},
+            {"a side flip to the left on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, 0.0f, -1.0f); }},
+            {"a side flip to the right on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, 0.0f, 1.0f); }},
+            {"a front flip at speed", 4.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; in[0].boost = t < Ticks(1.6f); dodge(in, t, 1.8f, -1.0f, 0.0f); }},
+            {"a back flip at speed", 4.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; in[0].boost = t < Ticks(1.6f); dodge(in, t, 1.8f, 1.0f, 0.0f); }},
+            {"a side flip at speed", 4.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; in[0].boost = t < Ticks(1.6f); dodge(in, t, 1.8f, 0.0f, 1.0f); }},
+            {"an air roll for three seconds", 4.5f, [&](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = t >= 2 && t < Ticks(0.3f);
+                 in[0].boost = t >= Ticks(0.3f) && t < Ticks(3.5f);
+                 in[0].pitch = (t >= Ticks(0.3f) && t < Ticks(0.8f)) ? 0.6f : 0.0f;
+                 in[0].airRoll = t >= Ticks(0.8f);
+                 in[0].steer = t >= Ticks(0.8f) ? 1.0f : 0.0f;
+             }},
+            {"a boosted flight on an arc", 4.5f, [&](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = t >= 2 && t < Ticks(0.3f);
+                 in[0].boost = t >= Ticks(0.3f) && t < Ticks(3.0f);
+                 in[0].pitch = (t >= Ticks(0.3f) && t < Ticks(1.2f)) ? 0.5f : 0.0f;
+                 in[0].steer = (t >= Ticks(1.5f) && t < Ticks(2.2f)) ? 0.5f : 0.0f;
+             }},
+        };
+        for (int ball = 0; ball < 2; ++ball)
+        {
+            for (const AirScenario& scenario : scenarios)
+            {
+                RlSim sim(g_tuning, 1);
+                start(sim);
+                QuietBall(sim);
+                Settle(sim);
+                const CameraRun r = RunCamera(sim, Ticks(scenario.seconds), ball == 1, scenario.script);
+                std::printf("  %s, %s: the heading turned at most %.0f deg/s (%.0f deg in all, the car turned %.0f), the car at most %.0f deg off the middle of the picture, at least %.2f m from it, outside %d, blocked %d\n",
+                            ball == 1 ? "ball cam" : "car cam", scenario.name, static_cast<double>(r.maxYawRate), static_cast<double>(r.yawTravelled), static_cast<double>(r.carYawTravelled),
+                            static_cast<double>(std::acos(std::clamp(r.minCarInFrame, -1.0f, 1.0f)) * 57.29578f), static_cast<double>(r.minDistance), r.outside, r.blocked);
+                CHECK(r.outside == 0 && r.blocked == 0);
+                CHECK(r.minDistance >= 0.85f * g_tuning.camera.distance);
+                CHECK(r.minCarInFrame > std::cos(65.0f * 0.01745329f));
+                if (ball == 0)
+                {
+                    const bool turning = std::strstr(scenario.name, "air roll") != nullptr || std::strstr(scenario.name, "arc") != nullptr;
+                    if (!turning)
+                    {
+                        CHECK(r.maxYawRate < 90.0f);                    // no jerk of the heading: nothing here turns the car round
+                        CHECK(r.yawTravelled < 60.0f);                  // the heading does not wander: a jump or a flip straight ahead keeps the camera straight ahead
+                    }
+                    else
+                    {
+                        CHECK(r.maxYawRate < 360.0f);                   // the car itself yaws in these (the boost, the roll about a steep nose): the camera follows it, no faster
+                        CHECK(r.yawTravelled < r.carYawTravelled * 1.25f + 15.0f);   // and no farther than the car turned: no swings of its own
+                    }
+                }
+            }
+        }
+    }
+
+    // "airVelocityFollow" brings the old behaviour back: the camera in the air follows the direction of the motion, and a dodge turns it
+    void TestCameraAirVelocityFollow()
+    {
+        RlCameraTuning tuning = g_tuning.camera;
+        tuning.airVelocityFollow = 1.0f;
+        RlSim sim(g_tuning, 1);
+        sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+        QuietBall(sim);
+        Settle(sim);
+        const CameraRun r = RunCamera(sim, Ticks(3.0f), false, [](int t, const RlWorldState&, Inputs& in) {
+            in[0].jump = (t >= Ticks(1.0f) && t < Ticks(1.2f)) || (t >= Ticks(1.4f) && t < Ticks(1.4f) + 3);
+            if (t >= Ticks(1.4f) && t < Ticks(1.4f) + 3)
+            {
+                in[0].steer = 1.0f;
+            }
+        }, &tuning);
+        std::printf("  with airVelocityFollow 1, a side flip on the spot: the heading turned %.0f deg in all%c", static_cast<double>(r.yawTravelled), 10);
+        CHECK(r.yawTravelled > 20.0f);
+    }
+
     // ---------------------------------------------------------------- ball
 
     void TestBallBounce()
@@ -2217,6 +2355,206 @@ namespace
         }
         Note("shots that left the shell: %.0f of 7", escaped);
         CHECK(escaped == 0);
+    }
+
+    // ---------------------------------------------------------------- the goals are smooth (G9)
+
+    // The inside of a goal: quarter pipes where the box had edges. The profile is one list (RlArena::GoalProfile) that the collision and the generator of the visual follow.
+    void TestGoalProfile()
+    {
+        std::printf("goal: the smooth inside (G9)\n");
+        const RlArenaTuning& t = g_tuning.arena;
+        const std::vector<RlGoalSection> profile = RlArena::GoalProfile(t);
+        CHECK(profile.size() > 10);
+        const float R = t.goalCornerRadius;
+        CHECK(R > 0.5f);
+        // the mouth is the sharp rectangle of the opening, the back is the flat rectangle with the radius shrunk to nothing
+        CHECK(profile.front().along == 0.0f && profile.front().radius == 0.0f);
+        CHECK(std::fabs(profile.front().innerX - t.goalHalfWidth) < 1e-5f && std::fabs(profile.front().innerY - 0.5f * t.goalHeight) < 1e-5f);
+        CHECK(std::fabs(profile.back().along - t.goalDepth) < 1e-4f && profile.back().radius < 1e-4f);
+        bool straight = false;
+        float outerX = t.goalHalfWidth;
+        for (size_t i = 0; i < profile.size(); ++i)
+        {
+            const RlGoalSection& s = profile[i];
+            if (i > 0)
+            {
+                CHECK(s.along >= profile[i - 1].along);
+            }
+            straight = straight || std::fabs(s.radius - R) < 1e-4f;
+            // the outside of the blend is the opening; the back shrinks inwards
+            if (s.along <= t.goalDepth - R - 1e-3f)
+            {
+                CHECK(std::fabs(s.innerX + s.radius - outerX) < 1e-4f && std::fabs(s.innerY + s.radius - 0.5f * t.goalHeight) < 1e-4f);
+            }
+            CHECK(s.radius <= R + 1e-4f && s.innerX >= 0.0f && s.innerY >= 0.0f);
+        }
+        CHECK(straight);
+        // the corner points: the first point of corner 0 is on the right side wall (x = outer), the last of it on the ceiling (y = top)
+        const RlGoalSection mid = profile[profile.size() / 2];
+        const int segments = std::max(t.rampSegments, 1);
+        const RlVec3 first = RlArena::GoalSectionPoint(t, mid, 0, 0);
+        const RlVec3 last = RlArena::GoalSectionPoint(t, mid, 0, segments);
+        CHECK(std::fabs(first.x - (mid.innerX + mid.radius)) < 1e-4f && std::fabs(last.y - (0.5f * t.goalHeight + mid.innerY + mid.radius)) < 1e-4f);
+        const RlVec3 bottom = RlArena::GoalSectionPoint(t, mid, 3, segments / 2);
+        CHECK(bottom.y > 0.0f && bottom.x > 0.0f);  // the middle of the corner at the floor and the right wall cuts the edge: the box corner (outer, 0) is not on it
+        CHECK(Len({bottom.x - (mid.innerX + mid.radius), bottom.y, 0.0f}) > 0.5f);
+
+        // no edge of the shell inside a goal turns by more than a few degrees: the box had edges of 90 degrees (the mouth and the ramps of the end wall are not part of it)
+        const RlArena arena(t);
+        const std::vector<RlVec3>& v = arena.Vertices();
+        const std::vector<uint32_t>& idx = arena.Indices();
+        std::map<std::pair<uint32_t, uint32_t>, std::vector<size_t>> edges;
+        std::vector<Vec> normals(arena.TriangleCount());
+        for (size_t tri = 0; tri < arena.TriangleCount(); ++tri)
+        {
+            const Vec a = V(v[idx[tri * 3]]);
+            const Vec b = V(v[idx[tri * 3 + 1]]);
+            const Vec c = V(v[idx[tri * 3 + 2]]);
+            const Vec e1{b.x - a.x, b.y - a.y, b.z - a.z};
+            const Vec e2{c.x - a.x, c.y - a.y, c.z - a.z};
+            Vec n{e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+            const float length = Len(n);
+            normals[tri] = length > 1e-12f ? Vec{n.x / length, n.y / length, n.z / length} : Vec{};
+            for (int k = 0; k < 3; ++k)
+            {
+                const uint32_t p = idx[tri * 3 + static_cast<size_t>(k)];
+                const uint32_t q = idx[tri * 3 + static_cast<size_t>((k + 1) % 3)];
+                edges[{std::min(p, q), std::max(p, q)}].push_back(tri);
+            }
+        }
+        float sharpest = 0.0f;
+        int goalEdges = 0;
+        for (const auto& [edge, triangles] : edges)
+        {
+            if (triangles.size() != 2)
+            {
+                continue;
+            }
+            const RlVec3& a = v[edge.first];
+            const RlVec3& b = v[edge.second];
+            if (std::fabs(a.z) < t.halfLength + 0.3f || std::fabs(b.z) < t.halfLength + 0.3f)
+            {
+                continue;  // the mouth plane: the opening of the end wall
+            }
+            ++goalEdges;
+            const float cosine = std::clamp(Dot(normals[triangles[0]], normals[triangles[1]]), -1.0f, 1.0f);
+            sharpest = std::max(sharpest, std::acos(cosine) * 57.29578f);
+        }
+        Note("%.0f edges inside the goals, the sharpest turns by %.1f degrees", goalEdges, sharpest);
+        CHECK(goalEdges > 200);
+        CHECK(sharpest < 20.0f);
+    }
+
+    // a ball in the goal: it counts as a goal, does not hang in a corner, and rolls down the quarter pipes
+    void TestGoalBall()
+    {
+        std::printf("goal: the ball in the corners of the goal\n");
+        const RlArenaTuning& t = g_tuning.arena;
+        const RlVec3 hi = RlArena(t).BoundsMax();
+        const RlVec3 lo = RlArena(t).BoundsMin();
+        struct Shot
+        {
+            const char* name;
+            RlVec3 position;
+            RlVec3 velocity;
+        };
+        const float gw = t.goalHalfWidth;
+        const float end = t.halfLength;
+        const Shot shots[] = {
+            {"into the back wall at the floor", {0.0f, 1.2f, end - 4.0f}, {0.0f, -2.0f, 40.0f}},
+            {"into the right back corner", {gw - 3.0f, 2.0f, end - 2.0f}, {9.0f, 3.0f, 30.0f}},
+            {"into the left back corner at the roof", {-gw + 2.0f, 4.5f, end - 2.0f}, {-8.0f, 6.0f, 32.0f}},
+            {"into the roof of the goal", {0.0f, 3.0f, end - 2.0f}, {0.0f, 18.0f, 22.0f}},
+            {"along the right wall", {gw - 1.0f, 2.0f, end - 3.0f}, {4.0f, 1.0f, 36.0f}},
+        };
+        for (const Shot& shot : shots)
+        {
+            RlSim sim(g_tuning, 0);
+            sim.ResetBall(shot.position, shot.velocity);
+            bool out = false;
+            bool crossed = false;
+            bool bad = false;
+            int hanging = 0;  // ticks in which the ball is off the floor and does not move: stuck in a corner or on a wall
+            Run(sim, Ticks(14.0f), [&](int, const RlWorldState& s, Inputs&) {
+                const RlVec3 p = s.ball.position;
+                if (p.y > g_tuning.ball.radius + 0.5f && Len(V(s.ball.linearVelocity)) < 0.3f) ++hanging;
+                if (p.x < lo.x || p.x > hi.x || p.y < lo.y || p.y > hi.y || p.z < lo.z || p.z > hi.z) out = true;
+                if (p.z > end + g_tuning.ball.radius) crossed = true;
+                if (!(p.x == p.x) || !(p.y == p.y) || !(p.z == p.z)) bad = true;
+            });
+            const RlBallState& b = sim.State().ball;
+            const float speed = Len(V(b.linearVelocity));
+            std::printf("  %-40s the ball ends at (%.1f, %.2f, %.1f), speed %.2f\n", shot.name, static_cast<double>(b.position.x), static_cast<double>(b.position.y), static_cast<double>(b.position.z), static_cast<double>(speed));
+            CHECK(!out && !bad);
+            CHECK(crossed);
+            // the ball rebounds out of the goal (restitution 0.6): it does not hang in a corner or on a wall, and it ends on the floor
+            CHECK(hanging < Ticks(0.3f));
+            CHECK(b.position.y < g_tuning.ball.radius + 0.25f);
+        }
+
+        // let go on the quarter pipe: the ball rolls down to the floor; in the old box it fell straight down by the wall and stayed in the corner
+        {
+            RlSim sim(g_tuning, 0);
+            sim.ResetBall({gw - 1.3f, 2.0f, end + 4.0f});
+            Run(sim, Ticks(6.0f), nullptr);
+            const RlBallState& b = sim.State().ball;
+            Note("let go on the quarter pipe of the side wall: x %.2f of the wall at %.2f, y %.2f", b.position.x, gw, b.position.y);
+            CHECK(b.position.x < gw - 2.2f);
+            CHECK(b.position.y < g_tuning.ball.radius + 0.25f);
+        }
+    }
+
+    // a car drives into the goal, climbs the quarter pipe of the back wall and comes out again
+    void TestGoalCar()
+    {
+        std::printf("goal: the car climbs the back wall and drives out\n");
+        const RlArenaTuning& t = g_tuning.arena;
+        RlSim sim(g_tuning, 1);
+        sim.ResetCar(0, 0.0f, t.halfLength - 3.0f, 0.0f);
+        sim.ResetBall({-32.0f, 1.0f, -40.0f});
+        sim.SetCarBoost(0, 0.0f);
+        Settle(sim);
+        float highest = 0.0f;
+        float steepest = 0.0f;  // the largest |up.z|: 1 when the car stands on the vertical back wall
+        float deepest = 0.0f;
+        bool inGoal = false;
+        bool climbed = false;
+        bool coasting = false;
+        bool out = false;
+        Run(sim, Ticks(22.0f), [&](int tick, const RlWorldState& s, Inputs& in) {
+            const RlCarState& c = s.cars[0];
+            const Vec up = Up(c);
+            if (g_verbose && tick % 30 == 0)
+            {
+                std::printf("    goal car t=%.1f z=%.1f y=%.2f up=(%.2f %.2f %.2f) contacts=%d speed=%.1f\n", static_cast<double>(tick) / 60.0, static_cast<double>(c.position.z), static_cast<double>(c.position.y), static_cast<double>(up.x), static_cast<double>(up.y), static_cast<double>(up.z), c.wheelContacts, static_cast<double>(Len(V(c.linearVelocity))));
+            }
+            highest = std::max(highest, c.position.y);
+            steepest = std::max(steepest, std::fabs(up.z));
+            deepest = std::max(deepest, c.position.z);
+            inGoal = inGoal || c.position.z > t.halfLength + 1.0f;
+            climbed = climbed || std::fabs(up.z) > 0.5f;
+            // drive in up to a speed that takes the car up the quarter pipe but not onto the roof of the goal, coast, and when it is back on its wheels reverse out
+            const float speed = Len(V(c.linearVelocity));
+            const bool onFloor = c.wheelContacts >= 3 && up.y > 0.85f;
+            coasting = coasting || speed > 9.5f;
+            if (!coasting)
+            {
+                in[0].throttle = 1.0f;
+            }
+            else if (climbed && (onFloor || speed < 1.0f))
+            {
+                in[0].throttle = -1.0f;
+            }
+            out = out || (inGoal && c.position.z < t.halfLength - 2.0f && c.wheelContacts >= 3 && up.y > 0.7f);
+        });
+        const RlCarState& c = sim.State().cars[0];
+        Note("deepest z %.1f (the back wall at %.1f), highest y %.2f, largest |up.z| %.2f, climbed %.0f, out %.0f, at the end z %.1f", deepest, t.halfLength + t.goalDepth, highest, steepest, climbed, out, c.position.z);
+        CHECK(inGoal);
+        CHECK(climbed);                       // it went up the quarter pipe of the back wall
+        CHECK(highest > 1.5f);
+        CHECK(out);                           // and came out on the floor, on its wheels
+        CHECK(c.position.z < t.halfLength);   // the end of the run: out of the goal
     }
 
     void TestBallHit()
@@ -2573,8 +2911,13 @@ int main(int argc, char** argv)
     TestCameraLevel();
     TestCameraDistance();
     TestCameraTransition();
+    TestCameraAir();
+    TestCameraAirVelocityFollow();
     TestBallBounce();
     TestBallStaysInside();
+    TestGoalProfile();
+    TestGoalBall();
+    TestGoalCar();
     TestBallHit();
     TestDemolish();
     TestDeterminism();

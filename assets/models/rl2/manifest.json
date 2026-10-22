@@ -254,9 +254,9 @@
   },
   "arena_goal_blue": {
    "name": "arena_goal_blue",
-   "triangles": 640,
-   "vertices": 1028,
-   "bytes": 30027,
+   "triangles": 4146,
+   "vertices": 4303,
+   "bytes": 295133,
    "origin": [
     0.0,
     3.215,
@@ -267,8 +267,8 @@
    "bounds": [
     [
      -9.09,
-     0,
-     -60.0
+     -0.0,
+     -60.127
     ],
     [
      9.09,
@@ -278,7 +278,7 @@
    ],
    "orientation": 1.0,
    "part_of": "arena",
-   "note": "goal box behind the end wall: net surfaces, posts, crossbar"
+   "note": "goal behind the end wall: net on the smooth profile of RlArena::GoalProfile, posts, crossbar, rails"
   },
   "arena_wall_orange": {
    "name": "arena_wall_orange",
@@ -366,9 +366,9 @@
   },
   "arena_goal_orange": {
    "name": "arena_goal_orange",
-   "triangles": 640,
-   "vertices": 1028,
-   "bytes": 30069,
+   "triangles": 4146,
+   "vertices": 4303,
+   "bytes": 294536,
    "origin": [
     0.0,
     3.215,
@@ -379,18 +379,18 @@
    "bounds": [
     [
      -9.09,
-     0,
+     -0.0,
      51.04
     ],
     [
      9.09,
      6.582,
-     60.0
+     60.127
     ]
    ],
    "orientation": 1.0,
    "part_of": "arena",
-   "note": "goal box behind the end wall: net surfaces, posts, crossbar"
+   "note": "goal behind the end wall: net on the smooth profile of RlArena::GoalProfile, posts, crossbar, rails"
   },
   "arena_glass_roof": {
    "name": "arena_glass_roof",
@@ -1113,7 +1113,7 @@
     1638,
     2048
    ],
-   "bytes": 578892
+   "bytes": 576495
   },
   "arena_wall_blue": {
    "size": [
