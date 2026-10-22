@@ -11,7 +11,9 @@
 #include <states/LoadingState.h>
 
 #include <myengine/config/AppConfig.h>
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/render/dx12/ShaderLayoutDump.h>
 
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
@@ -339,6 +341,10 @@ namespace
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
+    // A crash leaves a minidump and a short report in <UserData>\crashes; the next start says so (docs/game/packaging.md)
+    myengine::core::crash::Install(myengine::core::apppaths::UserDataDirectory() / L"crashes", myengine::core::apppaths::LogDirectory() / L"myengine.log");
+    myengine::core::crash::CrashIfRequested();
+
     LaunchOptions options;
     if (!ParseArguments(options))
     {

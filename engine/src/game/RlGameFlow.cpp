@@ -22,7 +22,9 @@
 #include <rl/RlTuning.h>
 
 #include <myengine/core/AppPaths.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/core/ServiceLocator.h>
+#include <myengine/core/Version.h>
 #include <myengine/editor/EditorState.h>
 #include <myengine/game/RlCars.h>
 #include <myengine/game/RlTrainingStore.h>
@@ -337,6 +339,7 @@ namespace myengine::game
 
         void Draw(Frame& f)
         {
+            core::crash::Reassert();   // the Steam library takes the crash handlers over when it starts (core/CrashHandler.h)
             const auto begin = std::chrono::steady_clock::now();
             DrawScreen(f);
             drawMsSum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
@@ -468,7 +471,7 @@ namespace myengine::game
             const sys::RlGameStatus& status = System().Status();
             SideShade(f);
             ScreenTitle(f, "MYENGINE", "ROCKET\nARENA", {80.0f, 76.0f}, true);
-            const float versionWidth = Chip(f, {1850.0f, 60.0f}, "V0.1 \xC2\xB7 G1");
+            const float versionWidth = Chip(f, {1850.0f, 60.0f}, std::string("V") + MYENGINE_VERSION_STRING);
             Chip(f, {1850.0f - versionWidth - 12.0f, 60.0f}, "OFFLINE", Icon::WifiOff);
 
             const Id play = HashId("main/play"), training = HashId("main/training"), settingsId = HashId("main/settings"), exit = HashId("main/exit");
@@ -525,6 +528,17 @@ namespace myengine::game
                 const std::string name = Upper(car->name);
                 Text(f, FontStyle::BlackItalic, 34.0f, {plate.x + 36.0f, plate.y + 32.0f}, style::kText, name);
                 Text(f, FontStyle::Bold, 18.0f, {plate.x + 50.0f + TextWidth(f, FontStyle::BlackItalic, 34.0f, name), plate.y + 44.0f}, style::kTextDim, "\xC2\xB7 " + Upper(car->className), Align::Left, 0.08f);
+            }
+            if (!crashChecked)
+            {
+                // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
+                crashChecked = true;
+                if (const auto report = core::crash::TakePending(core::apppaths::UserDataDirectory() / L"crashes"))
+                {
+                    Log("the previous run crashed: " + report->summary + "; the report is " + report->text.generic_u8string());
+                    const std::string folder = core::apppaths::IsShipping() ? std::string("%LOCALAPPDATA%\\RocketArena\\crashes") : report->text.parent_path().generic_u8string();
+                    f.ShowToast("The game crashed last time. Send " + report->text.filename().generic_u8string() + " from " + folder, style::kBad, 12.0f);
+                }
             }
             if (carMissingToast)
             {
@@ -921,6 +935,7 @@ namespace myengine::game
         std::string garageClickCar;             // the double click that equips with the mouse
         double garageClickTime = -10.0;
         bool carsPreloaded = false;
+        bool crashChecked = false;              // the report of a crash of the previous run is looked for once, on the first main menu
         bool carMissingToast = false;           // the car of the file is not in the data any more: Pulse, said once on the main menu
         Id mainDefaultFocus = HashId("main/play");
         std::map<std::string, std::uint64_t> carImages;
