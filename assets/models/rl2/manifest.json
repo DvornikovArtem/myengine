@@ -254,9 +254,9 @@
   },
   "arena_goal_blue": {
    "name": "arena_goal_blue",
-   "triangles": 4146,
-   "vertices": 4303,
-   "bytes": 295133,
+   "triangles": 4216,
+   "vertices": 4406,
+   "bytes": 305561,
    "origin": [
     0.0,
     3.215,
@@ -366,9 +366,9 @@
   },
   "arena_goal_orange": {
    "name": "arena_goal_orange",
-   "triangles": 4146,
-   "vertices": 4303,
-   "bytes": 294536,
+   "triangles": 4216,
+   "vertices": 4406,
+   "bytes": 304945,
    "origin": [
     0.0,
     3.215,

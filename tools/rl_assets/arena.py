@@ -577,54 +577,67 @@ def build_goal(t, team, atlas):
                 uvs = [(nu0 + (nu1 - nu0) * (qq[a] / cell - i), nv0 + (nv1 - nv0) * (qq[b] / cell - j)) for qq in q]
                 m.quad(*q, uvs=uvs, outside=cavity)
 
-    # the net: the sweep of the sections of the profile (the same triangles as the collision), the UV follow the length round the section and along the goal;
-    # a long quad (the straight parts of the section) is cut into pieces of a tile, the UV of a piece do not leave the tile of its middle
+    # the net: the sweep of the sections of the profile (the same triangles as the collision). The UV follow the surface: u is the length round the
+    # section from the middle of the floor (so the mirror halves of the net are alike), v is the length of the surface along the goal (not the depth z: where
+    # the radius grows the surface also moves inwards, and a net laid by z is stretched there). A long quad is cut into pieces of a tile, the UV of a piece
+    # do not leave the tile of its middle.
     sections = goal_profile(t)
     pts = [goal_section_points(t, s) for s in sections]
-    perimeter = []
+    steps = max(int(t["rampSegments"]), 1) + 1
+    count = len(pts[0])
+    perimeter = []   # perimeter[i][j]: the length of the section i from the middle of the floor to the point j (j = count: back to the first point)
     for ring in pts:
         total, acc = [0.0], 0.0
-        for k in range(1, len(ring)):
-            acc += math.hypot(ring[k][0] - ring[k - 1][0], ring[k][1] - ring[k - 1][1])
+        for k in range(1, count + 1):
+            acc += math.hypot(ring[k % count][0] - ring[k - 1][0], ring[k % count][1] - ring[k - 1][1])
             total.append(acc)
-        perimeter.append(total)
+        # the middle of the floor: between the last point of corner 2 and the first of corner 3
+        mid_floor = 0.5 * (total[3 * steps - 1] + total[3 * steps])
+        perimeter.append([s - mid_floor for s in total])
+    depth_v = [[0.0] * (count + 1) for _ in sections]   # the length of the surface along the goal, per point
+    for i in range(1, len(sections)):
+        for j in range(count + 1):
+            a3 = (pts[i - 1][j % count][0], pts[i - 1][j % count][1], sections[i - 1][0])
+            b3 = (pts[i][j % count][0], pts[i][j % count][1], sections[i][0])
+            depth_v[i][j] = depth_v[i - 1][j] + math.dist(a3, b3)
 
-    def uv_of(s, z, tile):
-        return (nu0 + (nu1 - nu0) * min(max(s / cell - tile[0], 0.0), 1.0), nv0 + (nv1 - nv0) * min(max(z / cell - tile[1], 0.0), 1.0))
+    def uv_of(s, v, tile):
+        return (nu0 + (nu1 - nu0) * min(max(s / cell - tile[0], 0.0), 1.0), nv0 + (nv1 - nv0) * min(max(v / cell - tile[1], 0.0), 1.0))
 
     for i in range(len(sections) - 1):
-        za, zb = sections[i][0], sections[i + 1][0]
-        for j in range(len(pts[i]) - 1):
+        for j in range(count):
+            jn = (j + 1) % count
             ring_a, ring_b = pts[i], pts[i + 1]
-            quad = [(ring_a[j], perimeter[i][j], za), (ring_a[j + 1], perimeter[i][j + 1], za), (ring_b[j + 1], perimeter[i + 1][j + 1], zb),
-                    (ring_b[j], perimeter[i + 1][j], zb)]
-            span_s = max(abs(quad[1][1] - quad[0][1]), abs(quad[2][1] - quad[3][1]))
-            span_z = abs(zb - za)
-            if span_s < 1e-6 and span_z < 1e-6:
+            # a vertex: (x, y, along, u, v)
+            quad = [(ring_a[j], sections[i][0], perimeter[i][j], depth_v[i][j]), (ring_a[jn], sections[i][0], perimeter[i][j + 1], depth_v[i][j + 1]),
+                    (ring_b[jn], sections[i + 1][0], perimeter[i + 1][j + 1], depth_v[i + 1][j + 1]), (ring_b[j], sections[i + 1][0], perimeter[i + 1][j], depth_v[i + 1][j])]
+            span_s = max(abs(quad[1][2] - quad[0][2]), abs(quad[2][2] - quad[3][2]))
+            span_v = max(abs(quad[3][3] - quad[0][3]), abs(quad[2][3] - quad[1][3]))
+            if span_s < 1e-6 or span_v < 1e-6:
                 continue
             na = max(1, int(math.ceil(span_s / cell - 1e-6)))
-            nb = max(1, int(math.ceil(span_z / cell - 1e-6)))
-
+            nb = max(1, int(math.ceil(span_v / cell - 1e-6)))
             for ka in range(na):
                 for kb in range(nb):
                     corners = []
                     for fa, fb in ((ka, kb), (ka + 1, kb), (ka + 1, kb + 1), (ka, kb + 1)):
                         u, v = fa / na, fb / nb
-                        # the corners of the quad: quad[0] (a0, b0), quad[1] (a1, b0), quad[2] (a1, b1), quad[3] (a0, b1)
+
                         def mix2(f0, f1, f2, f3):
-                            return (f0 * (1 - u) * (1 - v) + f1 * u * (1 - v) + f2 * u * v + f3 * (1 - u) * v)
+                            return f0 * (1 - u) * (1 - v) + f1 * u * (1 - v) + f2 * u * v + f3 * (1 - u) * v
                         x = mix2(quad[0][0][0], quad[1][0][0], quad[2][0][0], quad[3][0][0])
                         y = mix2(quad[0][0][1], quad[1][0][1], quad[2][0][1], quad[3][0][1])
-                        s = mix2(quad[0][1], quad[1][1], quad[2][1], quad[3][1])
-                        z = mix2(quad[0][2], quad[1][2], quad[2][2], quad[3][2])
-                        corners.append(((x, y, z0 + sign * z), s, z))
+                        along = mix2(quad[0][1], quad[1][1], quad[2][1], quad[3][1])
+                        s = mix2(quad[0][2], quad[1][2], quad[2][2], quad[3][2])
+                        w = mix2(quad[0][3], quad[1][3], quad[2][3], quad[3][3])
+                        corners.append(((x, y, z0 + sign * along), s, w))
                     mid_s = sum(c[1] for c in corners) / 4.0
-                    mid_z = sum(c[2] for c in corners) / 4.0
-                    tile = (math.floor(mid_s / cell), math.floor(mid_z / cell))
+                    mid_v = sum(c[2] for c in corners) / 4.0
+                    tile = (math.floor(mid_s / cell), math.floor(mid_v / cell))
                     q = [c[0] for c in corners]
                     area2 = (length(cross(vsub(q[1], q[0]), vsub(q[2], q[0]))) + length(cross(vsub(q[2], q[0]), vsub(q[3], q[0]))))
                     # a quad that has collapsed to a line (the section shrinks to nothing at the back) has no net
-                    if span_s < 1e-6 or span_z < 1e-6 or area2 < 1e-8:
+                    if area2 < 1e-8:
                         continue
                     m.quad(*q, uvs=[uv_of(c[1], c[2], tile) for c in corners], outside=cavity)
     # the flat part of the back wall: the inner rectangle of the last section
