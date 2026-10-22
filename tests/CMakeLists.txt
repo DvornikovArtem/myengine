@@ -440,3 +440,15 @@ myengine_apply_compiler_options(myengine_rl_feedback_tests)
 set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
 set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
+
+
+# G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery
+add_executable(myengine_rl_ui_tests
+  ui/RlUiTests.cpp)
+
+target_link_libraries(myengine_rl_ui_tests PRIVATE myengine_engine)
+target_include_directories(myengine_rl_ui_tests PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_rl_ui_tests)
+set_property(TARGET myengine_rl_ui_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_ui COMMAND myengine_rl_ui_tests)
+set_tests_properties(rl_ui PROPERTIES TIMEOUT 120)

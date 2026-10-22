@@ -101,6 +101,16 @@
   include/myengine/ui/ScriptConsole.h
   include/myengine/ui/ScriptInspector.h
   include/myengine/ui/UiManager.h
+  include/myengine/ui/rl/RlUiCommon.h
+  include/myengine/ui/rl/RlUiFonts.h
+  include/myengine/ui/rl/RlUiFrame.h
+  include/myengine/ui/rl/RlUiGallery.h
+  include/myengine/ui/rl/RlUiHost.h
+  include/myengine/ui/rl/RlUiHud.h
+  include/myengine/ui/rl/RlUiInput.h
+  include/myengine/ui/rl/RlUiPaint.h
+  include/myengine/ui/rl/RlUiTheme.h
+  include/myengine/ui/rl/RlUiWidgets.h
 )
 
 set(ENGINE_SOURCES
@@ -218,6 +228,15 @@ set(ENGINE_SOURCES
   src/ui/ScriptConsole.cpp
   src/ui/ScriptInspector.cpp
   src/ui/UiManager.cpp
+  src/ui/rl/RlUiFonts.cpp
+  src/ui/rl/RlUiFrame.cpp
+  src/ui/rl/RlUiGallery.cpp
+  src/ui/rl/RlUiHost.cpp
+  src/ui/rl/RlUiHud.cpp
+  src/ui/rl/RlUiInput.cpp
+  src/ui/rl/RlUiInternal.h
+  src/ui/rl/RlUiPaint.cpp
+  src/ui/rl/RlUiWidgets.cpp
 )
 
 set(ENGINE_OWN_HEADERS ${ENGINE_HEADERS})
