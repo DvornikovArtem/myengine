@@ -1,6 +1,5 @@
 {
   "name": "RocketArena",
-  "version": "0.1.0",
   "exe": "RocketArena.exe",
 
   "comment": "What goes into dist/RocketArena (tools/package_game.ps1, docs/game/packaging.md). 'assets' are roots: a file, a folder (with everything inside) or a wildcard, relative to the repository. With followReferences the script also takes everything a taken scene / material / shader / data file names (models, materials, textures, shaders), so the list follows the map: when the game scene moves to other assets, the old ones leave the package by themselves. 'exclude' wins over everything.",
