@@ -1453,7 +1453,21 @@ namespace myengine::ecs::systems
                 return false;
             }
             static std::uint64_t started = 0;
-            transport = rl::net::MakeUdpTransport(sim, static_cast<std::uint64_t>(GetCurrentProcessId()) * 2654435761u + ++started);
+            ++started;
+            if (setup.transportFactory)
+            {
+                transport = setup.transportFactory(sim);
+                status_.setup.transportFactory = nullptr;  // used once; it holds the lobby service
+                if (!transport)
+                {
+                    error = "The lobby could not make the transport of the match";
+                    return false;
+                }
+            }
+            else
+            {
+                transport = rl::net::MakeUdpTransport(sim, static_cast<std::uint64_t>(GetCurrentProcessId()) * 2654435761u + started);
+            }
             onlineEpoch = std::chrono::steady_clock::now();
             if (setup.kind == RlGameMatchSetup::Kind::Host)
             {
@@ -1465,7 +1479,7 @@ namespace myengine::ecs::systems
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(setup.port, error))
                 {
-                    error = "Cannot listen on UDP port " + std::to_string(setup.port) + ": " + error;
+                    error = "Cannot listen on port " + std::to_string(setup.port) + ": " + error;
                     netHost.reset();
                     transport->Close();
                     transport.reset();

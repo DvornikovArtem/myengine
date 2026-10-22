@@ -124,7 +124,7 @@ namespace rl::net
 
         // Hosting
         virtual bool Create(const LobbyCreateOptions& options, std::string& error) = 0;
-        // LAN: the text to show to a friend who types it in; Steam: "" (use InviteFriends)
+        // LAN: the address "ip:lobbyPort" that a friend types in by hand (the list shows the lobby by itself); Steam: "" (use InviteFriends)
         virtual std::string InviteText() const = 0;
         // Steam: opens the overlay with the list of friends; LAN: false
         virtual bool InviteFriends() = 0;

@@ -84,6 +84,15 @@ namespace
                 options.gameMode = true;
                 continue;
             }
+            // Steam starts the game of a friend who accepts an invitation with "+connect_lobby <lobby id>": the lobby screens read it from the command line
+            if (argument == L"+connect_lobby")
+            {
+                if (index + 1 < argumentCount && IsDigits(arguments[index + 1]))
+                {
+                    ++index;
+                }
+                continue;
+            }
             if (argument == L"--project-browser" && !options.showProjectBrowser)
             {
                 options.showProjectBrowser = true;

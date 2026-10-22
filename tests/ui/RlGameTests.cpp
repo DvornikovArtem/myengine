@@ -17,6 +17,7 @@
 #include <myengine/input/InputManager.h>
 
 #include <rl/RlControls.h>
+#include <rl/net/NetReliable.h>
 #include <rl/RlTuning.h>
 
 #include "../../engine/src/core/UiScript.h"
@@ -446,6 +447,33 @@ namespace
         rig.system.LeaveMatch();
         rig.Frames(2);
         Check(status.stage == sys::RlGameStage::Menu, "leaving the lobby brings the menu back");
+
+        // a private match on the transport of a lobby service (LAN, Steam): the factory is called once and the system does not keep it
+        {
+            rl::net::LoopbackHub hub;
+            int made = 0;
+            sys::RlGameMatchSetup lobbyHost = host;
+            lobbyHost.transportFactory = [&](const rl::net::NetSimParams& sim) {
+                ++made;
+                return rl::net::MakeLoopbackTransport(hub, sim, 5);
+            };
+            rig.system.StartMatch(lobbyHost);
+            rig.Frames(3);
+            Check(made == 1, "the transport comes from the factory of the lobby, once");
+            Check(status.stage == sys::RlGameStage::Lobby && status.isHost && status.lobby.size() == 4, "the host of a lobby transport waits in the lobby of the match");
+            Check(!status.setup.transportFactory, "the system forgot the factory (it holds the lobby service)");
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+            Check(status.stage == sys::RlGameStage::Menu, "leaving brings the menu back");
+
+            sys::RlGameMatchSetup refusing = host;
+            refusing.transportFactory = [&](const rl::net::NetSimParams&) { return std::unique_ptr<rl::net::INetTransport>(); };
+            rig.system.StartMatch(refusing);
+            rig.Frames(3);
+            Check(status.stage == sys::RlGameStage::Failed && !status.error.empty(), "a factory that gives no transport fails with a reason");
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+        }
 
         // a port that is taken fails with the reason
         sys::RlGameMatchSetup first = host;

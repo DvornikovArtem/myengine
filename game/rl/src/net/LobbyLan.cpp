@@ -257,7 +257,9 @@ namespace rl::net
                 {
                     return "";
                 }
-                return "LAN: friends on this network find the lobby in the list; by hand: this PC, port " + std::to_string(create_.lobbyPort);
+                // what a friend types into the Address field when the list does not show the lobby
+                const std::string address = LocalIPv4Address();
+                return (address.empty() ? std::string("this-pc") : address) + ":" + std::to_string(create_.lobbyPort);
             }
 
             bool InviteFriends() override { return false; }
