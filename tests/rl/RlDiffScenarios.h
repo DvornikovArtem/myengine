@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstdio>
 #include <cstring>
 
 namespace rldiff
@@ -36,7 +37,29 @@ namespace rldiff
         float boostStart = 33.3f;
     };
 
-    constexpr int kScenarioCount = 45;
+    constexpr int kScenarioCount = 230;
+
+    // G4j: flights of a player who flips, rolls and recovers at random: a jump, a dodge in a random direction, a roll or two against it, the throttle at
+    // a random time. They are made from the index with a fixed hash, so the generator of the traces and the test see the same inputs. The outcomes
+    // (on its wheels at the end or not, how long it took) are compared with RocketSim, tick for tick only until the first touchdown.
+    constexpr int kFuzzFirst = 50;
+    constexpr int kFuzzCount = 60;
+    constexpr int kFuzzTicks = 540;
+    // the second family: a long roll, pitch or yaw that is let go of (no recovery), the throttle late: where the car lands and how it rests
+    constexpr int kSpinFirst = 110;
+    constexpr int kSpinCount = 120;  // the second 60 are the same flights without the throttle at all (spin_60 ..): how the car rests when nobody drives it
+    inline unsigned Hash(unsigned x)
+    {
+        x ^= x >> 16;
+        x *= 0x7feb352dU;
+        x ^= x >> 15;
+        x *= 0x846ca68bU;
+        x ^= x >> 16;
+        return x;
+    }
+    // the number n of the scenario `index`, 0 .. range - 1
+    inline int Pick(int index, int n, int range) { return static_cast<int>(Hash(static_cast<unsigned>(index) * 7919u + static_cast<unsigned>(n) * 104729u + 12345u) % static_cast<unsigned>(range)); }
+    inline float Stick(int index, int n) { return static_cast<float>(Pick(index, n, 3) - 1); }  // -1, 0 or 1
 
     // The cars of the six classes of RocketSim (G4i): the order is the order of the files of the cars
     constexpr int kCarClassCount = 6;
@@ -49,8 +72,17 @@ namespace rldiff
     // The scenarios that the cars other than the Octane run: driving, jumping, flips, the air, a landing, the ball, a bump (traces/<class>_<name>.csv)
     inline bool InCarSubset(const char* name)
     {
+        if (std::strncmp(name, "fuzz_", 5) == 0)
+        {
+            return false;  // the Octane only
+        }
+        if (std::strncmp(name, "spin_", 5) == 0)
+        {
+            return false;
+        }
         static const char* const names[] = {"accel", "accel_boost", "brake", "turn_10", "turn_20", "powerslide_14", "jump_tap", "jump_hold", "flip_front", "flip_back",
-                                            "flip_right", "air_roll_e", "air_pitch_w", "landing_roll12", "ball_hit", "drive_and_jump_steer", "boost_air", "bump"};
+                                            "flip_right", "air_roll_e", "air_pitch_w", "landing_roll12", "ball_hit", "drive_and_jump_steer", "boost_air", "bump",
+                                            "flip_front_recover", "flip_right_recover", "flip_diag_recover", "air_roll_recover", "air_roll_land_throttle"};
         for (const char* n : names)
         {
             if (std::strcmp(n, name) == 0)
@@ -170,7 +202,32 @@ namespace rldiff
                 break;
             case 43: ground("flip_cancel", 190, 8.0f, -45.0f); break;
             case 44: ground("half_flip", 190, 8.0f, -45.0f); break;
-            default: ground("", 0, 0.0f); break;
+            // G4j: the flight of a player who recovers after a flip or an air roll and lands, with the throttle held after the touchdown (a tall W on a keyboard)
+            case 45: ground("flip_front_recover", 480, 8.0f, -45.0f); break;
+            case 46: ground("flip_right_recover", 480, 8.0f, -45.0f); break;
+            case 47: ground("flip_diag_recover", 480, 8.0f, -45.0f); break;
+            case 48: ground("air_roll_recover", 480, 8.0f, -45.0f); break;
+            case 49: ground("air_roll_land_throttle", 480, 8.0f, -45.0f); break;
+            default:
+                if (index >= kFuzzFirst && index < kFuzzFirst + kFuzzCount)
+                {
+                    static char names[kFuzzCount][16];
+                    char* name = names[index - kFuzzFirst];
+                    std::snprintf(name, 16, "fuzz_%02d", index - kFuzzFirst);
+                    ground(name, kFuzzTicks, 4.0f + static_cast<float>(Pick(index, 0, 13)), -45.0f);
+                }
+                else if (index >= kSpinFirst && index < kSpinFirst + kSpinCount)
+                {
+                    static char names[kSpinCount][16];
+                    char* name = names[index - kSpinFirst];
+                    std::snprintf(name, 16, "spin_%02d", index - kSpinFirst);
+                    ground(name, kFuzzTicks, 4.0f + static_cast<float>(Pick(kSpinFirst + (index - kSpinFirst) % 60, 0, 13)), -45.0f);
+                }
+                else
+                {
+                    ground("", 0, 0.0f);
+                }
+                break;
         }
         return s;
     }
@@ -266,7 +323,95 @@ namespace rldiff
                 }
                 break;
             case 42: in.throttle = 1.0f; break;
-            default: break;
+            case 45:
+                // a front flip, then the stick back to stop its spin and level the nose, the throttle from the touchdown on
+                holdDodge(10, 40, 50, -1.0f, 0.0f, 0.0f);
+                if (t >= 165 && t < 215) in.pitch = 1.0f;
+                if (t >= 240) in.throttle = 1.0f;
+                break;
+            case 46:
+                // a side flip, then the roll stick against its spin
+                holdDodge(10, 40, 50, 0.0f, 1.0f, 0.0f);
+                if (t >= 165 && t < 215) in.roll = -1.0f;
+                if (t >= 240) in.throttle = 1.0f;
+                break;
+            case 47:
+                // a diagonal flip, then both sticks against its spin
+                holdDodge(10, 40, 50, -1.0f, 0.0f, -1.0f);
+                if (t >= 165 && t < 215)
+                {
+                    in.pitch = 1.0f;
+                    in.roll = 1.0f;
+                }
+                if (t >= 240) in.throttle = 1.0f;
+                break;
+            case 48:
+                // an air roll for half a second, then back against it to level the car
+                in.jump = t >= 10 && t < 40;
+                if (t >= 50 && t < 110) in.roll = 1.0f;
+                if (t >= 120 && t < 170) in.roll = -1.0f;
+                if (t >= 240) in.throttle = 1.0f;
+                break;
+            case 49:
+                // an air roll that is let go of and left to the landing, the throttle held in the last second of the fall
+                in.jump = t >= 10 && t < 40;
+                if (t >= 50 && t < 120) in.roll = 1.0f;
+                if (t >= 200) in.throttle = 1.0f;
+                break;
+            default:
+                if (index >= kFuzzFirst && index < kFuzzFirst + kFuzzCount)
+                {
+                    const int jumpHold = 8 + Pick(index, 1, 40);          // the first jump, held
+                    const int dodgeAt = 10 + jumpHold + 6 + Pick(index, 2, 40);
+                    in.jump = (t >= 10 && t < 10 + jumpHold) || (t >= dodgeAt && t < dodgeAt + 3);
+                    if (t >= dodgeAt && t < dodgeAt + 3)
+                    {
+                        in.pitch = Stick(index, 3);
+                        in.steer = Stick(index, 4);
+                        in.roll = Stick(index, 5);
+                    }
+                    // the recovery: two stretches of sticks, one over the flip and one later
+                    const int firstAt = dodgeAt + 25 + Pick(index, 6, 70);
+                    const int firstLen = 10 + Pick(index, 7, 50);
+                    if (t >= firstAt && t < firstAt + firstLen)
+                    {
+                        in.pitch = Stick(index, 8);
+                        in.roll = Stick(index, 9);
+                        in.steer = Stick(index, 10);
+                    }
+                    const int secondAt = firstAt + firstLen + Pick(index, 11, 40);
+                    const int secondLen = 10 + Pick(index, 12, 50);
+                    if (t >= secondAt && t < secondAt + secondLen)
+                    {
+                        in.pitch = Stick(index, 13);
+                        in.roll = Stick(index, 14);
+                    }
+                    if (t >= 120 + Pick(index, 15, 250)) in.throttle = 1.0f;
+                }
+                else if (index >= kSpinFirst && index < kSpinFirst + kSpinCount)
+                {
+                    const int key = kSpinFirst + (index - kSpinFirst) % 60;   // the second 60 are the same flights
+                    const int jumpHold = 8 + Pick(key, 1, 40);
+                    const int dodgeAt = 10 + jumpHold + 6 + Pick(key, 2, 60);
+                    in.jump = (t >= 10 && t < 10 + jumpHold) || (Pick(key, 3, 3) != 0 && t >= dodgeAt && t < dodgeAt + 3);
+                    if (Pick(key, 3, 3) != 0 && t >= dodgeAt && t < dodgeAt + 3)
+                    {
+                        in.pitch = Stick(key, 4);
+                        in.steer = Stick(key, 5);
+                        in.roll = Stick(key, 6);
+                    }
+                    const int spinAt = dodgeAt + 40 + Pick(key, 7, 30);
+                    const int spinLen = 30 + Pick(key, 8, 100);
+                    if (t >= spinAt && t < spinAt + spinLen)
+                    {
+                        in.roll = Stick(key, 9) * (Pick(key, 10, 4) == 0 ? 0.0f : 1.0f);
+                        in.pitch = Stick(key, 11);
+                        in.steer = Stick(key, 12);
+                        if (in.roll == 0.0f && in.pitch == 0.0f && in.steer == 0.0f) in.roll = 1.0f;
+                    }
+                    if (index < kSpinFirst + 60 && t >= 330 + Pick(key, 13, 60)) in.throttle = 1.0f;
+                }
+                break;
         }
         return in;
     }

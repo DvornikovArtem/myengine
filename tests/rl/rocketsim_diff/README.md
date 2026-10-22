@@ -24,3 +24,7 @@ cmake --build <build dir> --config Release --target rsgen
 
 `rsgen` converts everything to the axes of the engine (x right, y up, z forward, metres) and writes the position of the car as the centre of
 its hitbox (RocketSim's own position is the centre of mass).
+
+## The flights of G4j
+
+`traces/*_recover.csv`, `air_roll_land_throttle.csv` (the five flights of a player who flips or rolls and lands; all six car classes), and `fuzz_*.csv`, `spin_*.csv` (Octane only: 60 random flights each with the throttle at a random time, the same with the throttle late, and the same without it, see `rldiff::kFuzzFirst` and `kSpinFirst`, the inputs are made from the index by a fixed hash). `rsgen <dir>` for the Octane writes all of them, `rsgen <dir> <class>` the five flights for a class. The test compares the five tick by tick (the three that end with a car spinning into the floor only until the first touchdown, then by the end of the flight) and the random flights by where the car ends (on its wheels, on its roof, on its side) and when it stood on its wheels for good: docs/game/rl-cars.md, "Воздух, кувырки и посадка против RocketSim (G4j)".
