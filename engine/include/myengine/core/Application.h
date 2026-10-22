@@ -28,6 +28,11 @@
 #include <myengine/state/StateMachine.h>
 #include <myengine/ui/UiManager.h>
 
+namespace myengine::rlui
+{
+    class Host;
+}
+
 namespace myengine::scripting
 {
     class ScriptSystem;
@@ -206,6 +211,7 @@ namespace myengine::core
         editor::LoadingService loadingService_;
         std::unique_ptr<PendingSceneLoad> pendingSceneLoad_;
         ui::UiManager uiManager_;
+        std::unique_ptr<rlui::Host> uiGallery_; // MYENGINE_UI_GALLERY: the gallery of the UI kit instead of the editor; after uiManager_: goes first
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;

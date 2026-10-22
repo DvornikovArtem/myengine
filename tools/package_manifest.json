@@ -70,7 +70,8 @@
       { "from": "external/JoltPhysics/LICENSE", "to": "JoltPhysics-MIT-LICENSE.txt" },
       { "from": "external/freetype/docs/FTL.TXT", "to": "FreeType-FTL.txt" },
       { "from": "external/pybind11/LICENSE", "to": "pybind11-BSD-LICENSE.txt" },
-      { "from": "assets/fonts/LICENSE-lucide.txt", "to": "Lucide-ISC-LICENSE.txt" }
+      { "from": "assets/fonts/LICENSE-lucide.txt", "to": "Lucide-ISC-LICENSE.txt" },
+      { "from": "assets/fonts/exo2/OFL.txt", "to": "Exo2-OFL.txt" }
     ]
   },
 

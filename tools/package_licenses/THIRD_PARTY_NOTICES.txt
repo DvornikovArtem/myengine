@@ -15,6 +15,7 @@ Dear ImGui, ImGuizmo            MIT             Omar Cornut; Cedric Guillemet   
 nlohmann/json                   MIT             Niels Lohmann                       MIT text below
 DirectX Tool Kit, DirectXTex    MIT             Microsoft Corporation               MIT text below
 stb_image                       MIT / public    Sean Barrett                        end of stb_image.h (public domain)
+Exo 2 (the font of the game UI) SIL OFL 1.1     The Exo 2 Project Authors            Exo2-OFL.txt
 Inter, JetBrains Mono (fonts)   SIL OFL 1.1     The Inter Project Authors;          OFL-1.1.txt
                                                 The JetBrains Mono Project Authors
 Lucide (icons)                  ISC             Lucide Contributors                 Lucide-ISC-LICENSE.txt
@@ -35,6 +36,7 @@ nlohmann/json       https://github.com/nlohmann/json
 DirectX Tool Kit    https://github.com/microsoft/DirectXTK12
 DirectXTex          https://github.com/microsoft/DirectXTex
 stb                 https://github.com/nothings/stb
+Exo 2               https://github.com/googlefonts/Exo-2.0
 Inter               https://github.com/rsms/inter
 JetBrains Mono      https://github.com/JetBrains/JetBrainsMono
 Lucide              https://lucide.dev

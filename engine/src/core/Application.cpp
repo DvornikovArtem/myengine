@@ -41,6 +41,8 @@
 #include <myengine/scene/SceneEvents.h>
 #include <myengine/scene/SceneSerializer.h>
 #include <myengine/scripting/ScriptSystem.h>
+#include <myengine/ui/rl/RlUiGallery.h>
+#include <myengine/ui/rl/RlUiHost.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -507,6 +509,47 @@ namespace myengine::core
             return false;
         }
 
+        // MYENGINE_UI_GALLERY=<screen> or "all": the gallery of the UI kit of the game instead of the editor (docs/game/rl-ui.md)
+        {
+            char* gallery = nullptr;
+            std::size_t galleryLength = 0;
+            _dupenv_s(&gallery, &galleryLength, "MYENGINE_UI_GALLERY");
+            if (gallery != nullptr && *gallery != '\0')
+            {
+                struct Cycle
+                {
+                    rlui::GalleryScreen screen = rlui::GalleryScreen::Main;
+                    bool all = false;
+                    double clock = 0.0;
+                    int shown = -1;
+                };
+                auto cycle = std::make_shared<Cycle>();
+                cycle->all = std::string(gallery) == "all";
+                if (!cycle->all && !rlui::ParseGalleryScreen(gallery, cycle->screen))
+                {
+                    logger_.Warning(std::string("MYENGINE_UI_GALLERY: unknown screen '") + gallery + "', showing main");
+                }
+                uiGallery_ = std::make_unique<rlui::Host>();
+                uiGallery_->Install(uiManager_, {});
+                uiGallery_->SetScreen([cycle](rlui::Frame& frame)
+                {
+                    cycle->clock += static_cast<double>(frame.DeltaTime());
+                    if (cycle->all)
+                    {
+                        cycle->screen = static_cast<rlui::GalleryScreen>(static_cast<int>(cycle->clock / 4.0) % static_cast<int>(rlui::GalleryScreen::Count));
+                    }
+                    if (cycle->shown != static_cast<int>(cycle->screen))
+                    {
+                        cycle->shown = static_cast<int>(cycle->screen);
+                        frame.ResetFocus();
+                    }
+                    rlui::DrawGalleryScreen(frame, cycle->screen);
+                });
+                logger_.Info(std::string("UI gallery: ") + gallery);
+            }
+            std::free(gallery);
+        }
+
         for (const auto& runtime : windows_)
         {
             if (runtime.window != nullptr && runtime.surface.IsValid())
@@ -884,6 +927,7 @@ namespace myengine::core
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
 
+        uiGallery_.reset();   // before the UiManager it is hooked into
         uiManager_.Shutdown();
         audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
