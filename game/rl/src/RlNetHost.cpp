@@ -1,5 +1,6 @@
 // RlNetHost.cpp
 
+#include <rl/RlClock.h>
 #include <rl/RlNet.h>
 
 #include <tracy/Tracy.hpp>
@@ -476,7 +477,7 @@ namespace rl
         void StepOne()
         {
             ZoneScopedN("Rl::Host::Step");
-            const auto begin = std::chrono::steady_clock::now();
+            const double begin = ThreadCpuMs();
             RlCarInput inputs[kMaxCars];
             for (int slot = 0; slot < slotCount; ++slot)
             {
@@ -527,7 +528,7 @@ namespace rl
             {
                 SendSnapshots();
             }
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const double ms = ThreadCpuMs() - begin;
             stats.stepMsMax = std::max(stats.stepMsMax, ms);
         }
 

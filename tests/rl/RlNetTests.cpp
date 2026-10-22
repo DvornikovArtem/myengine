@@ -4,6 +4,7 @@
 // goes over real UDP sockets on 127.0.0.1. `--verbose` prints more.
 
 #include <rl/RlCars.h>
+#include <rl/RlClock.h>
 #include <rl/RlNet.h>
 #include <rl/RlNetProtocol.h>
 #include <rl/net/LobbyLan.h>
@@ -996,9 +997,10 @@ namespace
         CHECK(rig.host->Stats().lateJoins == 1);
         CHECK(late.Stats().tick > hostTickAtJoin);                 // he has caught up with the host
         CHECK(late.Stats().hardCorrections == 0);
-        // a player who joined late can see the hash of a tick differ once or twice, each time fixed by the next replay without a pose taken from a
-        // snapshot (G4i: contacts are taken 1 cm earlier, which moved the moments at which this happens)
-        CHECK(late.Stats().hashMismatches <= 3);
+        // the hash of a snapshot can differ while a snapshot that carries an input is still on its way (the jitter reorders them): that is counted apart
+        // (unconfirmedHashes) and fixed by the replay of the late one; with every input known the hashes agree
+        CHECK(late.Stats().hashMismatches == 0);
+        Note("hashes that differed while an input of the host was missing: %llu", static_cast<unsigned long long>(late.Stats().unconfirmedHashes));
         int compared = 0;
         const int equal = CompareWithHost(rig, late, 60, &compared);
         Note("states of the last %d verified ticks equal to the host's: %d", compared, equal);
@@ -1408,14 +1410,14 @@ namespace
         RlCarInput inputs[kMaxCars];
         std::vector<std::vector<uint8_t>> states(32);
         std::vector<double> stepMs;
-        const auto now = [] { return std::chrono::steady_clock::now(); };
+        const auto now = [] { return ThreadCpuMs(); };  // CPU time of this thread: a busy PC (a parallel ctest) does not fail a budget
         // the countdown, then play
         for (int t = 0; t < 120 * 12; ++t)
         {
             inputs[0] = RlQuantizeInput(Script(0, t / 120.0));
             const auto begin = now();
             match.Step(inputs);
-            stepMs.push_back(std::chrono::duration<double, std::milli>(now() - begin).count());
+            stepMs.push_back((now() - begin));
         }
         std::vector<double> sorted = stepMs;
         std::sort(sorted.begin(), sorted.end());
@@ -1448,7 +1450,7 @@ namespace
                     const auto begin = now();
                     bots.Step(none);
                     Tick tick;
-                    tick.ms = std::chrono::duration<double, std::milli>(now() - begin).count();
+                    tick.ms = (now() - begin);
                     tick.phase = static_cast<int>(bots.World().match.phase);
                     tick.ballHits = bots.LastEvents().ballHits;
                     tick.demolitions = bots.LastEvents().demolitions;
@@ -1506,7 +1508,7 @@ namespace
                 match.SaveState(scratch);  // the client saves each replayed tick into its ring
                 match.Step(inputs);
             }
-            const double ms = std::chrono::duration<double, std::milli>(now() - begin).count();
+            const double ms = (now() - begin);
             worstRollback = std::max(worstRollback, ms);
             totalRollback += ms;
             // go back to the same state for the next round

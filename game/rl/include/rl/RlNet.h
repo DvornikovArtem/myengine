@@ -42,15 +42,16 @@ namespace rl
         uint64_t snapshots = 0;           // sent (host) / received (client)
         uint64_t rollbacks = 0;           // client
         uint64_t hardCorrections = 0;     // client: poses taken from a snapshot because the replay did not reproduce the host
-        uint64_t hashMismatches = 0;      // client: snapshots whose state hash differed from ours (a hard correction makes the states close, not bit-equal)
+        uint64_t hashMismatches = 0;      // client: snapshots whose state hash differed from ours although all the inputs of the host were known (a hard correction makes the states close, not bit-equal)
+        uint64_t unconfirmedHashes = 0;   // client: snapshots whose hash differed while an input of the host was still missing (expected: the replay of the snapshot that brings it fixes the state)
         uint64_t lateInputs = 0;          // host: inputs of a tick that was simulated already
         uint64_t repeatedInputs = 0;      // host: ticks where a client's input was missing and the last one was repeated
         uint64_t lateJoins = 0;           // host: players that joined a running match
         int rollbacksLastSecond = 0;      // client: the "corrections per second" of the overlay
         int lastResimTicks = 0;
-        double lastRollbackMs = 0.0;
+        double lastRollbackMs = 0.0;      // CPU time of the thread, like the next one
         double maxRollbackMs = 0.0;
-        double stepMsMax = 0.0;           // slowest single tick (host or client)
+        double stepMsMax = 0.0;           // slowest single tick (host or client); CPU time of the thread (RlClock.h), not wall time
     };
 
     // ------------------------------------------------------------------------------------------------------------------------------
