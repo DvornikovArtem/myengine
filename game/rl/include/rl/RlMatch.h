@@ -26,6 +26,10 @@ namespace rl
         uint64_t seed = 1;            // seed of the random numbers of the match
         uint32_t humanMask = 1;       // bit i set: slot i takes its input from Step(), the others are bots
         int botLevel = 1;             // 0 easy, 1 normal, 2 hard
+        int botVersion = 2;           // 1: the bots of G4b (kept for comparison), 2: the bots of G4f
+        // The orange team plays with other bots (tests that measure one kind against another); -1: the same as the blue team
+        int botLevelOrange = -1;
+        int botVersionOrange = -1;
     };
 
     // The places of the rules, in metres (RLBot field info, uu / 100).

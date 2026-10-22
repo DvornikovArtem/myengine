@@ -373,6 +373,17 @@ set_property(TARGET myengine_rl_match_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_match COMMAND myengine_rl_match_tests)
 set_tests_properties(rl_match PROPERTIES TIMEOUT 600)
 
+# G4f: the bots of the second version against the first ones and against each other (many headless matches)
+add_executable(myengine_rl_bots_tests
+  rl/RlBotsTests.cpp)
+
+target_link_libraries(myengine_rl_bots_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_bots_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
+myengine_apply_compiler_options(myengine_rl_bots_tests)
+set_property(TARGET myengine_rl_bots_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_bots COMMAND myengine_rl_bots_tests)
+set_tests_properties(rl_bots PROPERTIES TIMEOUT 900)
+
 # G4e: the car of the game against RocketSim (reference traces written by tests/rl/rocketsim_diff, no RocketSim in this build)
 add_executable(myengine_rl_rocketsim_diff
   rl/RlRocketSimDiffTests.cpp)
