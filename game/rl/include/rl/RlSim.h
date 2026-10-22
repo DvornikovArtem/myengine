@@ -44,6 +44,9 @@ namespace rl
         void SetCarTeam(int index, int team);
         // Where a demolished car comes back (ResetCar sets it to the spot the car was reset to).
         void SetRespawnPoint(int index, float x, float z, float yaw);
+        // Demolishes a car as an enemy at full speed would (the car is parked until its respawn delay is over, then it comes back at its respawn point):
+        // the tests and the debug commands of the game use it.
+        void DemolishCar(int index);
         // Puts a car at any pose (tests, kick-off spots, flip resets); the car keeps its boost and its jump state.
         void SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
 
