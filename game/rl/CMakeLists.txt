@@ -5,11 +5,14 @@ set(RL_HEADERS
   include/rl/RlCinematic.h
   include/rl/RlControls.h
   include/rl/RlMatch.h
+  include/rl/RlName.h
   include/rl/RlNet.h
   include/rl/RlNetProtocol.h
   include/rl/net/LobbyLan.h
   include/rl/net/LobbyService.h
   include/rl/net/LobbySteam.h
+  include/rl/RlCars.h
+  include/rl/RlClock.h
   include/rl/RlReplay.h
   include/rl/net/NetLink.h
   include/rl/net/NetReliable.h
@@ -43,6 +46,8 @@ set(RL_SOURCES
   src/RlNetProtocol.cpp
   src/net/LobbyLan.cpp
   src/net/LobbySteamStub.cpp
+  src/RlCars.cpp
+  src/RlClock.cpp
   src/RlReplay.cpp
   src/RlV3.h
   src/net/NetLink.cpp

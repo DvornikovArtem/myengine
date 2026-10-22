@@ -190,6 +190,19 @@ get_target_property(MYENGINE_JOLT_INCLUDES Jolt INTERFACE_INCLUDE_DIRECTORIES)
 set_target_properties(Jolt PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${MYENGINE_JOLT_INCLUDES}")
 set_property(TARGET Jolt PROPERTY FOLDER "External")
 
+# The version of the game and of the exe resources comes from project(... VERSION) above and nowhere else:
+# generated/myengine/core/Version.h (the menu, the crash report) and app/resources/RocketArena.rc.in (VERSIONINFO of the exe)
+set(MYENGINE_GIT_COMMIT "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
+    OUTPUT_VARIABLE MYENGINE_GIT_COMMIT_OUT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE MYENGINE_GIT_RESULT)
+  if(MYENGINE_GIT_RESULT EQUAL 0 AND MYENGINE_GIT_COMMIT_OUT)
+    set(MYENGINE_GIT_COMMIT "${MYENGINE_GIT_COMMIT_OUT}")
+  endif()
+endif()
+configure_file(cmake/Version.h.in "${CMAKE_BINARY_DIR}/generated/myengine/core/Version.h" @ONLY)
+
 add_subdirectory(engine)
 add_subdirectory(game/rl)
 add_subdirectory(app)

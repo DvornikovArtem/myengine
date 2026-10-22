@@ -407,13 +407,13 @@ namespace rl::net
                 Close();
                 if (!StartWinsock())
                 {
-                    error = "WSAStartup failed";
+                    error = "The network is not available on this PC.";
                     return false;
                 }
                 socket_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
                 if (socket_ == INVALID_SOCKET)
                 {
-                    error = "socket() failed: " + std::to_string(WSAGetLastError());
+                    error = "Cannot open a network socket: is the network available?";
                     return false;
                 }
                 u_long nonBlocking = 1;
@@ -437,7 +437,8 @@ namespace rl::net
                 address.sin_port = htons(port);
                 if (::bind(socket_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
                 {
-                    error = "bind(" + std::to_string(port) + ") failed: " + std::to_string(WSAGetLastError());
+                    error = port == 0 ? std::string("Cannot open a network port: is the network available?")
+                                  : "The port " + std::to_string(port) + " is used by another program or blocked: try another port.";
                     Close();
                     return false;
                 }
@@ -462,7 +463,7 @@ namespace rl::net
                 const long port = portText.empty() ? 0 : std::strtol(portText.c_str(), nullptr, 10);
                 if (port <= 0 || port > 65535)
                 {
-                    error = "address '" + text + "' has no valid port (use ip:port)";
+                    error = "'" + text + "' is not a valid address: type it like 192.168.1.5 or 192.168.1.5:47778.";
                     return false;
                 }
                 if (host.empty() || host == "localhost")
@@ -474,7 +475,7 @@ namespace rl::net
                 {
                     if (!StartWinsock())
                     {
-                        error = "WSAStartup failed";
+                        error = "The network is not available on this PC.";
                         return false;
                     }
                     addrinfo hints{};
@@ -483,7 +484,7 @@ namespace rl::net
                     addrinfo* result = nullptr;
                     if (getaddrinfo(host.c_str(), nullptr, &hints, &result) != 0 || result == nullptr)
                     {
-                        error = "cannot resolve '" + host + "'";
+                        error = "Cannot find the host '" + host + "': check the address.";
                         return false;
                     }
                     ip = reinterpret_cast<sockaddr_in*>(result->ai_addr)->sin_addr;

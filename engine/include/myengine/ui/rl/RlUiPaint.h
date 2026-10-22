@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 #include <myengine/ui/rl/RlUiFrame.h>
@@ -65,6 +66,10 @@ namespace myengine::rlui::paint
 
     // The dimming of the whole window (the pause, a dialog): `color` over everything under it
     void Dim(Frame& f, Color color);
+
+    // A picture (a texture of the renderer, the id as ImGui takes it: render::TextureHandle::value) into the rect; `tint` multiplies it (a dark blue on a white card).
+    // texture 0 draws nothing.
+    void Image(Frame& f, std::uint64_t texture, const Rect& rect, Color tint = Color::Hex(0xffffff));
     // The background of the menus when there is no 3D scene behind (the gallery): the night gradient, the slanting beams, the glow in the middle
     void MenuBackdrop(Frame& f);
 }

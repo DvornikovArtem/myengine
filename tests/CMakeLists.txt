@@ -405,6 +405,17 @@ set_property(TARGET myengine_rl_bots_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_bots COMMAND myengine_rl_bots_tests)
 set_tests_properties(rl_bots PROPERTIES TIMEOUT 900)
 
+# G4i: the cars of the match (the physics of the six, the choice, six cars in one world); the garage and its data are tested by rl_cars
+add_executable(myengine_rl_carphysics_tests
+  rl/RlCarPhysicsTests.cpp)
+
+target_link_libraries(myengine_rl_carphysics_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_carphysics_tests PRIVATE RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
+myengine_apply_compiler_options(myengine_rl_carphysics_tests)
+set_property(TARGET myengine_rl_carphysics_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_carphysics COMMAND myengine_rl_carphysics_tests)
+set_tests_properties(rl_carphysics PROPERTIES TIMEOUT 300)
+
 # G4e: the car of the game against RocketSim (reference traces written by tests/rl/rocketsim_diff, no RocketSim in this build)
 add_executable(myengine_rl_rocketsim_diff
   rl/RlRocketSimDiffTests.cpp)
@@ -412,7 +423,8 @@ add_executable(myengine_rl_rocketsim_diff
 target_link_libraries(myengine_rl_rocketsim_diff PRIVATE myengine_rl)
 target_compile_definitions(myengine_rl_rocketsim_diff PRIVATE
   RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json"
-  RL_DIFF_TRACES="${CMAKE_SOURCE_DIR}/tests/rl/rocketsim_diff/traces")
+  RL_DIFF_TRACES="${CMAKE_SOURCE_DIR}/tests/rl/rocketsim_diff/traces"
+  RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
 myengine_apply_compiler_options(myengine_rl_rocketsim_diff)
 set_property(TARGET myengine_rl_rocketsim_diff PROPERTY FOLDER "Tests")
 add_test(NAME rl_rocketsim_diff COMMAND myengine_rl_rocketsim_diff)
@@ -423,7 +435,7 @@ add_executable(myengine_rl_net_tests
   rl/RlNetTests.cpp)
 
 target_link_libraries(myengine_rl_net_tests PRIVATE myengine_rl)
-target_compile_definitions(myengine_rl_net_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
+target_compile_definitions(myengine_rl_net_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json" RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
 myengine_apply_compiler_options(myengine_rl_net_tests)
 set_property(TARGET myengine_rl_net_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_net COMMAND myengine_rl_net_tests)
@@ -508,6 +520,17 @@ myengine_apply_compiler_options(myengine_rl_training_tests)
 set_property(TARGET myengine_rl_training_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_training COMMAND myengine_rl_training_tests)
 set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
+
+
+# G4i: the cars of the garage: the data (the hitboxes of RocketSim), the meshes and previews they name, the bars, broken data, the key in the settings (no window)
+add_executable(myengine_rl_cars_tests
+  rl/RlCarsTests.cpp)
+
+target_link_libraries(myengine_rl_cars_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_cars_tests)
+set_property(TARGET myengine_rl_cars_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_cars COMMAND myengine_rl_cars_tests)
+set_tests_properties(rl_cars PROPERTIES TIMEOUT 120)
 
 
 # G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,

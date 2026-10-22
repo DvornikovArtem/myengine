@@ -1,6 +1,7 @@
 // RlMatch.cpp
 
 #include <rl/RlMatch.h>
+#include <rl/RlName.h>
 
 #include "RlBots.h"
 #include "RlBotsV1.h"
@@ -160,7 +161,7 @@ namespace rl
             config.mode = std::clamp(c.mode, 0, 4);
             teamSize = std::max(config.mode, 1);
             slots = config.mode == 0 ? 1 : 2 * config.mode;
-            sim = std::make_unique<RlSim>(tuning, slots);
+            sim = std::make_unique<RlSim>(tuning, slots, config.cars);
             for (int slot = 0; slot < slots; ++slot)
             {
                 sim->SetCarTeam(slot, TeamOf(slot));  // cars of one team bump each other, only the other team is demolished
@@ -216,7 +217,7 @@ namespace rl
             int bots = 0;
             for (int slot = 0; slot < slots; ++slot)
             {
-                std::string name = config.names[slot];
+                std::string name = SanitizePlayerName(config.names[slot]);
                 if (name.empty())
                 {
                     name = IsBot(slot) ? kBotNames[bots % 7] : "Player";
@@ -664,6 +665,7 @@ namespace rl
     int RlMatch::SlotCount() const { return impl_->slots; }
     int RlMatch::Team(int slot) const { return impl_->TeamOf(slot); }
     bool RlMatch::IsBot(int slot) const { return impl_->IsBot(slot); }
+    int RlMatch::CarId(int slot) const { return slot >= 0 && slot < kMaxCars ? impl_->config.carIds[slot] : 0; }
     uint32_t RlMatch::HumanMask() const { return impl_->config.humanMask; }
     void RlMatch::SetHumanMask(uint32_t mask) { impl_->config.humanMask = mask; }
 

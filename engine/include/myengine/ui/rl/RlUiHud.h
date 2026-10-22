@@ -49,6 +49,7 @@ namespace myengine::rlui
         int shots = 0;
         int demos = 0;
         int pingMs = -1;            // online; -1 none
+        std::string car;            // the name of the car ("Pulse"), drawn small under the name in the table; empty = nothing
     };
 
     // The replay of a goal (RlReplay): while `active` the HUD shows the REPLAY label, the author and the speed of the goal, the letterbox bars, the

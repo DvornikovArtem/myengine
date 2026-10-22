@@ -1,0 +1,75 @@
+{
+  "id": "vector",
+  "name": "Vector",
+  "class": "Long",
+  "hitboxClass": "Dominus",
+  "description": "Long and low. Hits hard off the flat nose.",
+  "order": 1,
+  "hitbox": {
+    "halfExtentX": 0.4289,
+    "halfExtentY": 0.169,
+    "halfExtentZ": 0.65214,
+    "comOffsetY": -0.1575,
+    "comOffsetZ": -0.09,
+    "wheelMountXFront": 0.311,
+    "wheelMountXRear": 0.33,
+    "wheelFrontZ": 0.413,
+    "wheelRearZ": -0.4375,
+    "wheelMountYOffset": 0.0,
+    "wheelRadiusFront": 0.12,
+    "wheelRadiusRear": 0.135,
+    "suspensionRestFront": 0.2195,
+    "suspensionRestRear": 0.2185,
+    "rocketSim": {
+      "size": [130.427, 85.7799, 33.8],
+      "offset": [9.0, 0.0, 15.75]
+    }
+  },
+  "mesh": {
+    "body": "assets/models/rl2/car_vector_body.obj",
+    "bodyScale": 1.07,
+    "lights": "assets/models/rl2/car_vector_lights.obj",
+    "lightsScale": 0.996,
+    "materials": {
+      "blue": "assets/materials/rl2/car_vector_blue.material.json",
+      "orange": "assets/materials/rl2/car_vector_orange.material.json"
+    },
+    "boostNozzle": [0.0, -0.05, -0.78]
+  },
+  "preview": {
+    "blue": "assets/ui/cars/vector_blue.png",
+    "orange": "assets/ui/cars/vector_orange.png"
+  },
+  "physics": {
+    "mass": 194.4,
+    "inertiaMultiplier": 1.05,
+    "friction": 0.3,
+    "maxSpeed": 23.0,
+    "maxAngularSpeed": 5.5,
+    "supersonicSpeed": 22.0,
+    "supersonicMaintainSpeed": 21.0,
+    "throttleAccel": 16.0,
+    "driveSpeed": [0.0, 14.0, 14.1],
+    "driveFactor": [1.0, 0.1, 0.0],
+    "brakeAccel": 35.0,
+    "steerSpeed": [0.0, 5.0, 10.0, 15.0, 17.5, 30.0],
+    "steerAngle": [0.501546, 0.300142, 0.171108, 0.099358, 0.0799658, 0.0324676],
+    "powerslideSteerSpeed": [0.0, 25.0],
+    "powerslideSteerAngle": [0.368809, 0.118534],
+    "latFrictionSlip": [0.0, 1.0],
+    "latFriction": [1.0, 0.2],
+    "handbrakeLatFriction": 0.1,
+    "jumpImpulse": 2.91667,
+    "jumpHoldAccel": 14.5833,
+    "doubleJumpImpulse": 2.91667,
+    "dodgeImpulse": 5.0,
+    "airPitchTorque": 12.0897,
+    "airYawTorque": 8.83471,
+    "airRollTorque": 37.199,
+    "boostStart": 33.3,
+    "boostMax": 100.0,
+    "boostUsePerSecond": 33.3,
+    "boostAccelGround": 9.71837,
+    "boostAccelAir": 10.3716
+  }
+}

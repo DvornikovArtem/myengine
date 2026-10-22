@@ -24,7 +24,11 @@ namespace rl
         constexpr uint64_t kUserDataArena = 200;
         constexpr uint32_t kSnapshotMagic = 0x31534C52;  // "RLS1"
         constexpr float kParkY = -60.0f;
-        constexpr float kContactMargin = 0.01f;  // m: a contact further apart than this is not a hit (Bullet's breaking threshold of 0.02 bt)
+        // m: a contact further apart than this is not a hit. Bullet meets a hit when the shapes overlap (its margin of 0.04 bt and its breaking threshold of
+        // 0.02 bt are in this); Jolt reports a contact ahead of time and resolves it in the same step, so the first contact of a fast hit is a few
+        // centimetres away (G4i: the Hybrid and the Merc against the traces of RocketSim; 1 cm made a hit one tick late for the ball)
+        constexpr float kContactMargin = 0.02f;
+        constexpr float kSeparatingSpeed = 4.0f; // m/s: bodies that part faster than this along the contact normal have hit already (the push of that hit was given)
 
         static_assert(std::is_trivially_copyable_v<CarRuntime>, "the car runtime is copied as bytes");
 
@@ -70,6 +74,11 @@ namespace rl
                 JPH::Vec3 positionB = JPH::Vec3::sZero();
                 JPH::Quat rotationA = JPH::Quat::sIdentity();
                 JPH::Quat rotationB = JPH::Quat::sIdentity();
+                // A contact that Jolt resolves ahead of time (the bodies are still apart) leaves them closing at separation / dt after the solver; Bullet
+                // only meets them once they overlap and takes the whole closing speed out in that tick. `closing` is what is left, `towardsB` the unit
+                // normal from A to B (see ApplyContacts, which finishes the job).
+                float closing = 0.0f;
+                JPH::Vec3 towardsB = JPH::Vec3::sZero();
             };
 
             void SetTuning(const RlTuning* tuning) { tuning_ = tuning; }
@@ -129,6 +138,30 @@ namespace rl
 
             static bool IsCar(const JPH::Body& body) { return body.GetUserData() < static_cast<uint64_t>(kMaxCars); }
 
+            // The speed at which the bodies still close in after Jolt has solved a contact that is not an overlap yet (0 for an overlap): Jolt takes out
+            // only what the gap allows (gap / dt), Bullet, which meets the bodies when they overlap, takes out all of it; ApplyContacts finishes the job.
+            static float LeftClosing(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold)
+            {
+                const float separation = -manifold.mPenetrationDepth;
+                if (separation <= 0.0f)
+                {
+                    return 0.0f;
+                }
+                const float approach = (b1.GetLinearVelocity() - b2.GetLinearVelocity()).Dot(manifold.mWorldSpaceNormal);
+                return approach > 0.0f ? std::min(approach, separation / kTickDt) : 0.0f;
+            }
+
+            // Whether the contact is a hit of this tick as Bullet sees it: the bodies overlap or are within the margin, and are not flying apart
+            static bool TouchesThisTick(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold)
+            {
+                const float approach = (b1.GetLinearVelocity() - b2.GetLinearVelocity()).Dot(manifold.mWorldSpaceNormal);  // the normal runs from 1 to 2
+                if (approach < -kSeparatingSpeed)
+                {
+                    return false;  // a contact that stays for a tick or two after a hit while the bodies fly apart is not a new hit
+                }
+                return -manifold.mPenetrationDepth <= kContactMargin;
+            }
+
             void Record(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings)
             {
                 const uint64_t u1 = b1.GetUserData();
@@ -157,7 +190,7 @@ namespace rl
                     const JPH::Body& car = u1 == kUserDataBall ? b2 : b1;
                     settings.mCombinedFriction = t.car.carBallFriction;
                     settings.mCombinedRestitution = t.car.carBallRestitution;
-                    if (manifold.mPenetrationDepth < -kContactMargin)
+                    if (!TouchesThisTick(b1, b2, manifold))
                     {
                         return;  // Jolt reports contacts that are about to happen; Bullet only the ones that are there
                     }
@@ -170,13 +203,15 @@ namespace rl
                     e.positionA = JPH::Vec3(ball.GetCenterOfMassPosition());
                     e.positionB = JPH::Vec3(car.GetCenterOfMassPosition());
                     e.rotationB = car.GetRotation();
+                    e.closing = LeftClosing(b1, b2, manifold);
+                    e.towardsB = (&ball == &b1 ? 1.0f : -1.0f) * manifold.mWorldSpaceNormal;  // the normal runs from body 1 to body 2: ball -> car
                     events_.push_back(e);
                 }
                 else if (IsCar(b1) && IsCar(b2))
                 {
                     settings.mCombinedFriction = t.car.carCarFriction;
                     settings.mCombinedRestitution = t.car.carCarRestitution;
-                    if (manifold.mPenetrationDepth < -kContactMargin)
+                    if (!TouchesThisTick(b1, b2, manifold))
                     {
                         return;
                     }
@@ -196,6 +231,8 @@ namespace rl
                         e.positionB = JPH::Vec3(hi.GetCenterOfMassPosition());
                         e.rotationA = lo.GetRotation();
                         e.rotationB = hi.GetRotation();
+                        e.closing = LeftClosing(b1, b2, manifold);
+                        e.towardsB = (&lo == &b1 ? 1.0f : -1.0f) * manifold.mWorldSpaceNormal;
                         events_.push_back(e);
                     }
                 }
@@ -221,6 +258,8 @@ namespace rl
         RlTuning tuning;
         RlArena arena;
         int carCount;
+        RlCarVariant variants[kMaxCars];
+        RlCarTuning carT[kMaxCars];   // tuning.car with the variant of the slot applied
 
         LayerPairFilter pairFilter;
         BroadPhaseLayerMap broadPhaseMap;
@@ -245,11 +284,16 @@ namespace rl
         RlWorldState previous;
         RlEvents events;
 
-        Impl(const RlTuning& t, int cars)
+        Impl(const RlTuning& t, int cars, const RlCarVariant* carVariants)
             : tuning(t)
             , arena(t.arena)
             , carCount(std::clamp(cars, 0, kMaxCars))
         {
+            for (int i = 0; i < kMaxCars; ++i)
+            {
+                variants[i] = (carVariants != nullptr && i < carCount) ? carVariants[i] : RlCarVariant{};
+                carT[i] = RlApplyCarVariant(tuning.car, variants[i]);
+            }
             tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(16 * 1024 * 1024);
             jobSystem = std::make_unique<JPH::JobSystemSingleThreaded>(JPH::cMaxPhysicsJobs);
             physics.Init(32, 0, 1024, 1024, broadPhaseMap, objectVsBroadPhase, pairFilter);
@@ -343,7 +387,7 @@ namespace rl
 
         void CreateCar(JPH::BodyInterface& bodies, int index)
         {
-            const RlCarTuning& c = tuning.car;
+            const RlCarTuning& c = carT[index];
             // The origin of the body is the centre of the hitbox; the centre of mass is below and behind it (RL: the hitbox is offset
             // from the origin of the car), with the inertia of the box itself.
             JPH::RefConst<JPH::Shape> box = new JPH::BoxShape(JPH::Vec3(c.halfExtentX, c.halfExtentY, c.halfExtentZ), 0.02f);
@@ -389,6 +433,19 @@ namespace rl
             next.ball.radius = tuning.ball.radius;
             next.ball.mass = tuning.ball.mass;
             tuning = next;
+            // the numbers of every car again from the new base; what its body was built with stays
+            for (int i = 0; i < carCount; ++i)
+            {
+                RlCarTuning updated = RlApplyCarVariant(tuning.car, variants[i]);
+                updated.mass = carT[i].mass;
+                updated.halfExtentX = carT[i].halfExtentX;
+                updated.halfExtentY = carT[i].halfExtentY;
+                updated.halfExtentZ = carT[i].halfExtentZ;
+                updated.comOffsetY = carT[i].comOffsetY;
+                updated.comOffsetZ = carT[i].comOffsetZ;
+                updated.inertiaMultiplier = carT[i].inertiaMultiplier;
+                carT[i] = updated;
+            }
             physics.SetGravity(JPH::Vec3(0.0f, -tuning.gravity, 0.0f));
             JPH::BodyInterface& bodies = physics.GetBodyInterfaceNoLock();
             bodies.SetFriction(arenaId, tuning.arena.friction);
@@ -397,8 +454,8 @@ namespace rl
             bodies.SetRestitution(ballId, tuning.ball.restitution);
             for (int i = 0; i < carCount; ++i)
             {
-                bodies.SetFriction(carIds[i], tuning.car.friction);
-                bodies.SetRestitution(carIds[i], tuning.car.restitution);
+                bodies.SetFriction(carIds[i], carT[i].friction);
+                bodies.SetRestitution(carIds[i], carT[i].restitution);
             }
         }
 
@@ -406,7 +463,7 @@ namespace rl
         {
             CarRuntime& rt = runtimes[index];
             std::memset(&rt, 0, sizeof(rt));
-            rt.boost = tuning.car.boostStart;
+            rt.boost = carT[index].boostStart;
             rt.jumpTime = 1000.0f;
             rt.lastExtraTick = -10;
             rt.bumpOther = -1;
@@ -416,7 +473,7 @@ namespace rl
                 rt.tyreLong[w] = 1.0f;
             }
             rt.spawnX = x;
-            rt.spawnY = tuning.car.spawnHeight;
+            rt.spawnY = carT[index].spawnHeight;
             rt.spawnZ = z;
             rt.spawnYaw = yaw;
             PlaceCar(index);
@@ -449,7 +506,7 @@ namespace rl
         {
             CarRuntime& rt = runtimes[index];
             rt.demolished = 1;
-            rt.respawnTimer = tuning.car.respawnDelay;
+            rt.respawnTimer = carT[index].respawnDelay;
             rt.boost = 0.0f;
             rt.dodging = 0;
             physics.GetBodyInterfaceNoLock().SetObjectLayer(carIds[index], Layers::kGhost);
@@ -474,7 +531,7 @@ namespace rl
             CarRuntime& rt = runtimes[index];
             rt.demolished = 0;
             rt.respawnTimer = 0.0f;
-            rt.boost = tuning.car.boostStart;
+            rt.boost = carT[index].boostStart;
             rt.jumpUsed = 0;
             rt.secondUsed = 0;
             rt.airTime = 0.0f;
@@ -491,9 +548,9 @@ namespace rl
 
             {
                 ZoneScopedN("Rl::Control");
-                const CarContext context{physics, tuning, arenaShape};
                 for (int i = 0; i < carCount; ++i)
                 {
+                    const CarContext context{physics, tuning, carT[i], arenaShape};
                     CarRuntime& rt = runtimes[i];
                     frames[i] = CarFrame{};
                     if (rt.demolished != 0)
@@ -558,8 +615,33 @@ namespace rl
             const RlBallTuning& b = tuning.ball;
             const RlCarTuning& c = tuning.car;
             JPH::BodyInterface& bodies = physics.GetBodyInterfaceNoLock();
+            bool finished[kMaxCars][kMaxCars] = {};  // the pairs of cars whose contact was finished in this tick (an event comes for every contact point)
+            bool finishedBall[kMaxCars] = {};        // the cars whose contact with the ball was
             for (const Listener::Event& e : contacts)
             {
+                if (e.closing > 0.0f)
+                {
+                    const bool ball = e.kind == Listener::BallCar;
+                    const int one = ball ? -1 : e.a;
+                    const int other = ball ? e.a : e.b;
+                    if (ball ? !finishedBall[other] : !finished[one][other])
+                    {
+                        if (ball)
+                        {
+                            finishedBall[other] = true;
+                        }
+                        else
+                        {
+                            finished[one][other] = true;
+                        }
+                        const float massA = ball ? tuning.ball.mass : carT[one].mass;
+                        const float massB = carT[other].mass;
+                        const JPH::BodyID idA = ball ? ballId : carIds[one];
+                        const JPH::BodyID idB = carIds[other];
+                        bodies.SetLinearVelocity(idA, bodies.GetLinearVelocity(idA) - e.towardsB * (e.closing * massB / (massA + massB)));
+                        bodies.SetLinearVelocity(idB, bodies.GetLinearVelocity(idB) + e.towardsB * (e.closing * massA / (massA + massB)));
+                    }
+                }
                 if (e.kind == Listener::BallCar)
                 {
                     if (runtimes[e.a].demolished != 0)
@@ -656,9 +738,9 @@ namespace rl
         void PostStep()
         {
             JPH::BodyInterface& bodies = physics.GetBodyInterfaceNoLock();
-            const RlCarTuning& c = tuning.car;
             for (int i = 0; i < carCount; ++i)
             {
+                const RlCarTuning& c = carT[i];
                 CarRuntime& rt = runtimes[i];
                 rt.bumpTimer = std::max(rt.bumpTimer - kTickDt, 0.0f);
                 if (rt.demolished != 0)
@@ -746,7 +828,7 @@ namespace rl
                 s.demolished = rt.demolished != 0;
                 s.supersonic = !s.demolished && rt.supersonic != 0;
                 s.jumped = rt.jumpUsed != 0;
-                s.canDodge = frames[i].wheelContacts < 3 && rt.secondUsed == 0 && rt.airTime < tuning.car.dodgeWindow;
+                s.canDodge = frames[i].wheelContacts < 3 && rt.secondUsed == 0 && rt.airTime < carT[i].dodgeWindow;
                 s.dodging = rt.dodging != 0;
                 s.respawnTimer = rt.respawnTimer;
                 for (int w = 0; w < kWheelCount; ++w)
@@ -850,8 +932,8 @@ namespace rl
         }
     };
 
-    RlSim::RlSim(const RlTuning& tuning, int carCount)
-        : impl_(std::make_unique<Impl>(tuning, carCount))
+    RlSim::RlSim(const RlTuning& tuning, int carCount, const RlCarVariant* variants)
+        : impl_(std::make_unique<Impl>(tuning, carCount, variants))
     {
     }
 
@@ -859,6 +941,7 @@ namespace rl
 
     int RlSim::CarCount() const { return impl_->carCount; }
     const RlTuning& RlSim::Tuning() const { return impl_->tuning; }
+    const RlCarTuning& RlSim::CarTuning(int index) const { return impl_->carT[std::clamp(index, 0, kMaxCars - 1)]; }
     void RlSim::SetTuning(const RlTuning& tuning) { impl_->SetTuning(tuning); }
     const RlArena& RlSim::Arena() const { return impl_->arena; }
 
@@ -884,7 +967,16 @@ namespace rl
     {
         if (index >= 0 && index < impl_->carCount)
         {
-            impl_->runtimes[index].boost = std::clamp(boost, 0.0f, impl_->tuning.car.boostMax);
+            impl_->runtimes[index].boost = std::clamp(boost, 0.0f, impl_->carT[index].boostMax);
+            impl_->FillState();
+        }
+    }
+
+    void RlSim::DemolishCar(int index)
+    {
+        if (index >= 0 && index < impl_->carCount && impl_->runtimes[index].demolished == 0)
+        {
+            impl_->Demolish(index, -1);
             impl_->FillState();
         }
     }

@@ -19,7 +19,7 @@ cmake --build build --config RelWithDebInfo --target myengine
 
 Путь к SDK может содержать кириллицу и пробелы (проверено в G6b: `C:/Users/пк/Documents/GitHub/sdk`, CMake и линковщик справились; слэши прямые). Ни одного предупреждения: заголовки SDK подключаются как `SYSTEM` (иначе `/W4` ругается на `strncpy` и BOM в их файлах).
 
-При `MYENGINE_STEAM=ON` `steam_api64.lib` линкуется во всё, что использует `myengine_rl`: **каждому такому exe (игра, редактор, тесты `rl_*`) нужны рядом `steam_api64.dll` и `steam_appid.txt` с одной строкой `480`**, иначе он не запустится. CMake кладёт их сам после сборки (`myengine_rl_steam_runtime` в `game/rl/CMakeLists.txt`: цель `myengine` и все исполняемые файлы `tests/`). Для дистрибутива (`dist/`) их кладёт `tools/package_game.ps1 -WithSteam -SteamSdk C:\sdk\steamworks_sdk` и **сам собирает shipping-сборку с `MYENGINE_STEAM=ON`** (в G6a скрипт только копировал dll в exe без Steam-кода); см. `docs/game/packaging.md`.
+При `MYENGINE_STEAM=ON` `steam_api64.lib` линкуется во всё, что использует `myengine_rl`: **каждому такому exe (игра, редактор, тесты `rl_*`) нужны рядом `steam_api64.dll` и `steam_appid.txt` с одной строкой `480`**, иначе он не запустится. CMake кладёт их сам после сборки (`myengine_rl_steam_runtime` в `game/rl/CMakeLists.txt`: цель `myengine` и все исполняемые файлы `tests/`). Для дистрибутива (`dist/`) их кладёт `tools/package_game.ps1` и **сам собирает shipping-сборку с `MYENGINE_STEAM=ON`**: без ключей он ищет SDK (`-SteamSdk`, `STEAMWORKS_SDK_DIR`, `tools\steam_sdk.txt`, папка `sdk` рядом с репозиторием) и при находке собирает пакет со Steam (`...-steam.zip`), иначе с предупреждением без Steam (`...-nosteam.zip`); см. `docs/game/packaging.md`.
 
 **Проверка без SDK.** `-DMYENGINE_STEAM_CHECK=ON` собирает те же файлы против `game/rl/steam_mock/steam/steam_api.h` (набросок нужных деклараций, сверенный в G6b с заголовками SDK 1.65). Он ловит опечатки и неверные сигнатуры в нашем коде; если код начнёт вызывать что-то новое, добавь объявление в мок, сверившись с `isteam*.h` настоящего SDK.
 
@@ -40,7 +40,7 @@ cmake --build build --config RelWithDebInfo --target myengine
 
 | Симптом | Причина |
 | --- | --- |
-| «Steam is not available: SteamAPI_Init failed» | не запущен клиент Steam; нет `steam_appid.txt` рядом с exe (в текущем каталоге); игра и клиент Steam запущены от разных пользователей ОС |
+| «Start the Steam client and restart the game» (в логе: `Steam is not available: …`; это отказ `SteamAPI_Init`) | не запущен клиент Steam; нет `steam_appid.txt` рядом с exe (в текущем каталоге); игра и клиент Steam запущены от разных пользователей ОС |
 | Лобби создаётся, друг его не видит в списке | лобби только для друзей; друг должен быть в друзьях Steam и **в игре** (список строится по присутствию друзей: Steam не отдаёт лобби «только для друзей» в `RequestLobbyList`); присутствие обновляется за 1–3 с; список обновляется кнопкой, не по таймеру |
 | «cannot enter the lobby» | лобби заполнено, закрыто (матч уже идёт) или хост вышел |
 | Приглашение приняли, но запустился Spacewar, а не наша игра | для AppID 480 Steam запускает приложение из библиотеки (Spacewar). Нашу игру запускать самому и принимать приглашение внутри неё (событие `InviteReceived` → `Join`); `+connect_lobby` в командной строке заработает, если exe добавлен в Steam как «не-Steam игра» (Игры → Добавить стороннюю игру) |

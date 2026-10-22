@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <imgui/imgui.h>
 
 #include <myengine/ui/rl/RlUiPaint.h>
@@ -269,6 +271,83 @@ namespace myengine::rlui
         return state.activated;
     }
 
+    // ---------------------------------------------------------------- the garage
+
+    bool CarCard(Frame& f, const Id id, const Rect& rect, const CarCardDesc& desc)
+    {
+        const ItemState state = f.Item(id, rect, true);
+        if (state.focused)
+        {
+            FocusPlate(f, rect, state.glow);
+        }
+        else
+        {
+            Parallelogram(f, rect, state.hovered ? style::kNavy3.Faded(0.9f) : style::kNavy);
+            ParallelogramOutline(f, rect, style::kLine, 1.0f);
+        }
+        const Color ink = state.focused ? style::kFocusText : style::kText;
+        const float x = EdgeAt(rect, rect.y + 36.0f) + 26.0f;
+        Text(f, FontStyle::BlackItalic, 34.0f, {x, rect.y + 12.0f}, ink, desc.name);
+        Text(f, FontStyle::SemiBold, 16.0f, {EdgeAt(rect, rect.y + 62.0f) + 26.0f, rect.y + 54.0f}, state.focused ? Color::Hex(0x4a5d85) : style::kTextDim, desc.klass, Align::Left, 0.1f);
+        // the profile at the lower right: in the focus the blue body goes dark so that it reads on the white plate
+        const Rect picture{rect.x + rect.w - 188.0f, rect.y + rect.h - 98.0f, 168.0f, 84.0f};
+        Image(f, desc.image, picture, state.focused ? Color::Hex(0x3f6fd0) : Color::Hex(0xffffff));
+        if (desc.equipped)
+        {
+            const Color good = state.focused ? Color::Hex(0x12803c) : style::kGood;
+            const float y = rect.y + rect.h - 30.0f;
+            IconGlyph(f, Icon::Check, 16.0f, {EdgeAt(rect, y) + 34.0f, y + 9.0f}, good);
+            Text(f, FontStyle::Bold, 16.0f, {EdgeAt(rect, y) + 48.0f, y}, good, "EQUIPPED", Align::Left, 0.08f);
+        }
+        return state.activated;
+    }
+
+    void StatBar(Frame& f, const Vec2 pos, const StatBarDesc& desc)
+    {
+        constexpr int kSegments = 10;
+        constexpr float kWidth = 30.0f;
+        constexpr float kHeight = 16.0f;
+        constexpr float kGap = 5.0f;
+        const int value = std::clamp(desc.value, 0, kSegments);
+        const bool compare = desc.compare >= 0;
+        const int other = std::clamp(desc.compare, 0, kSegments);
+        const Color gain = desc.betterIsMore ? style::kGood : style::kAccent;
+        const Color loss = desc.betterIsMore ? style::kBad : style::kAccent;
+        for (int i = 0; i < kSegments; ++i)
+        {
+            const Rect segment{pos.x + static_cast<float>(i) * (kWidth + kGap), pos.y, kWidth, kHeight};
+            if (!compare)
+            {
+                Parallelogram(f, segment, i < value ? style::kBlueHi : style::kNavy3);
+                continue;
+            }
+            if (i < value && i < other)
+            {
+                Parallelogram(f, segment, style::kBlueHi);
+            }
+            else if (i < value)
+            {
+                Parallelogram(f, segment, gain);
+            }
+            else if (i < other)
+            {
+                Parallelogram(f, segment, style::kNavy3.Faded(0.5f));
+                ParallelogramOutline(f, segment, loss, 1.5f);
+            }
+            else
+            {
+                Parallelogram(f, segment, style::kNavy3);
+            }
+        }
+        if (compare && value != other)
+        {
+            const bool up = value > other;
+            char text[16];
+            std::snprintf(text, sizeof(text), "%s%d", up ? "+" : "\xE2\x88\x92", std::abs(value - other));
+            Text(f, FontStyle::BlackItalic, 26.0f, {pos.x + static_cast<float>(kSegments) * (kWidth + kGap) + 36.0f, pos.y - 6.0f}, up ? gain : loss, text);
+        }
+    }
+
     // ---------------------------------------------------------------- rows
 
     RowFrame Row(Frame& f, const Id id, const Rect& rect, const std::string_view label, const bool enabled, const float contentLeft)
@@ -413,13 +492,20 @@ namespace myengine::rlui
         if (row.state.focused)
         {
             f.SetTextEditing();
-            for (const char c : f.input().Typed())
+            // a character at a time (UTF-8): one that does not fit is not added by pieces
+            const std::string& typed = f.input().Typed();
+            for (std::size_t i = 0; i < typed.size();)
             {
-                const bool printable = static_cast<unsigned char>(c) >= 0x20 && c != 0x7F;
-                const bool permitted = allowed.empty() || allowed.find(c) != std::string_view::npos;
-                if (printable && permitted && text.size() < maxLength)
+                const unsigned char lead = static_cast<unsigned char>(typed[i]);
+                std::size_t length = lead >= 0xF0 ? 4 : (lead >= 0xE0 ? 3 : (lead >= 0xC0 ? 2 : 1));
+                length = std::min(length, typed.size() - i);
+                const std::string_view character(typed.data() + i, length);
+                i += length;
+                const bool printable = lead >= 0x20 && lead != 0x7F;
+                const bool permitted = allowed.empty() || (length == 1 && allowed.find(character[0]) != std::string_view::npos);
+                if (printable && permitted && text.size() + length <= maxLength)
                 {
-                    text.push_back(c);
+                    text.append(character);
                     changed = true;
                 }
             }
@@ -655,6 +741,7 @@ namespace myengine::rlui
             case Glyph::Esc: return cap("Esc");
             case Glyph::Del: return cap("Del");
             case Glyph::R: return cap("R");
+            case Glyph::G: return cap("G");
             case Glyph::Tab: return cap("Tab");
             case Glyph::Space: return cap("Space");
             case Glyph::QE: return cap("Q E");

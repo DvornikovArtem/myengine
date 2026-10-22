@@ -19,6 +19,10 @@ namespace rl::net
     // SteamAPI_Shutdown by the last one.
     std::unique_ptr<ILobbyService> MakeSteamLobbyService(const std::string& name = "");
 
+    // The name of the Steam profile (ISteamFriends::GetPersonaName), cleaned by SanitizePlayerName: the nickname of the player in the game. false when this
+    // build has no Steam, the client is not running or the name is empty (the game then takes the name of the Windows user). Cheap to call every frame.
+    bool SteamPersonaName(std::string& name);
+
     // The transport of a match over Steam: Listen() on the host (it accepts sessions only from the members of the lobby), Connect("<steam id of the
     // host>") on a guest. nullptr with MYENGINE_STEAM OFF.
     std::unique_ptr<INetTransport> MakeSteamTransport();

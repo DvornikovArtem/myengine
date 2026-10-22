@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -66,6 +67,30 @@ namespace myengine::rlui
     // A card of a mode (250 x 330): the bevelled plate, the big number, the squares of the players in the team colours, the caption.
     // `selected` marks the chosen mode (a blue frame); the focus makes it white. Returns true when confirmed.
     bool ModeCard(Frame& f, Id id, const Rect& rect, const ModeCardDesc& desc, bool selected);
+
+    // ---------------------------------------------------------------- the garage (docs/game/rl-cars.md)
+
+    struct CarCardDesc
+    {
+        std::string_view name;       // "PULSE" (Black Italic)
+        std::string_view klass;      // "BALANCED" (the class of the car, caps)
+        std::uint64_t image = 0;     // the profile preview of the car (a texture id), 0 = none yet
+        bool equipped = false;       // the car the player drives: a green "EQUIPPED"
+    };
+    // A card of the carousel (270 x 150, the focused one 270 x 176: the caller gives the rect): the bevelled plate, the name, the class, the preview at the
+    // lower right, the mark of the equipped car. The focus makes it white with the cyan stripe. Returns true when it is chosen (Enter / A / a click on the
+    // focused card).
+    bool CarCard(Frame& f, Id id, const Rect& rect, const CarCardDesc& desc);
+
+    struct StatBarDesc
+    {
+        int value = 0;               // lit segments, 0..10
+        int compare = -1;            // >= 0: the segments of the car the player drives: the bar shows the difference to it
+        bool betterIsMore = true;    // the stat is a gain when it grows (speed): green / red; false (weight, height): both in the accent colour
+    };
+    // A bar of 10 slanted segments 30 x 16 with a gap of 5 starting at `pos`. Compared: the common segments are blue, a gain is green (or the accent), a loss
+    // an empty segment with a red (or accent) frame, and the difference is written to the right ("+2", "-3").
+    void StatBar(Frame& f, Vec2 pos, const StatBarDesc& desc);
 
     // ---------------------------------------------------------------- rows of the settings
 
@@ -136,7 +161,7 @@ namespace myengine::rlui
     enum class Glyph : std::uint8_t
     {
         None,
-        UpDown, LeftRight, AllArrows, Enter, Esc, Del, R, Tab, Space, QE,   // the keys
+        UpDown, LeftRight, AllArrows, Enter, Esc, Del, R, G, Tab, Space, QE,   // the keys
         PadA, PadB, PadX, PadY, PadLBRB, PadBack, PadStart, PadDpad          // the pad
     };
     struct Hint

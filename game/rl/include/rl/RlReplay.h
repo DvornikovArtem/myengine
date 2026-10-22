@@ -4,7 +4,7 @@
 // hands out as it draws the live ones, and puts the camera of the shot where its own camera would be. docs/game/rl-replay.md.
 //
 // What is recorded: the whole RlWorldState of every tick (cars, ball, the pads and the score; about 1.4 KB), so the replay can show exactly what
-// happened and RlFeedback can find the same events in it (hits, jumps, the demolitions) as in a live match. 1200 ticks = 10 s = under 2 MB; a
+// happened and RlFeedback can find the same events in it (hits, jumps, the demolitions) as in a live match. 1200 ticks = 10 s = about 2.1 MB (under 2.25 MB); a
 // record is one copy of the structure. A rollback of the netcode simulates a tick again: recording the same tick number drops the ticks after it
 // and writes the new one, so the ring always holds the timeline the match has now.
 

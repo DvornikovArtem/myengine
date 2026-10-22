@@ -572,6 +572,45 @@ namespace myengine::core
                 }
                 renderAdapter_->SetSceneLighting(lighting);
             };
+            // the pictures and the assets of the garage (docs/game/rl-cars.md): the profile previews are PNG files of the project drawn by the kit as images
+            services.loadImage = [this](const std::string& path) -> std::uint64_t
+            {
+                if (resourceManager_ == nullptr || path.empty())
+                {
+                    return 0;
+                }
+                const auto texture = resourceManager_->Load<resource::TextureAsset>(path);
+                if (resourceManager_->IsLoadPending(path) || texture == nullptr || !texture->asset.gpuHandle.IsValid() ||
+                    texture->asset.gpuHandle.value == resourceManager_->GetFallbackTextureHandle().value)
+                {
+                    return 0;
+                }
+                return static_cast<std::uint64_t>(texture->asset.gpuHandle.value);
+            };
+            services.preload = [this](const std::string& path)
+            {
+                if (resourceManager_ == nullptr || path.empty())
+                {
+                    return;
+                }
+                const auto ends = [&](const char* suffix)
+                {
+                    const std::size_t n = std::char_traits<char>::length(suffix);
+                    return path.size() >= n && path.compare(path.size() - n, n, suffix) == 0;
+                };
+                if (ends(".obj"))
+                {
+                    resourceManager_->Load<resource::MeshAsset>(path);
+                }
+                else if (ends(".material.json"))
+                {
+                    resourceManager_->Load<resource::MaterialAsset>(path);
+                }
+                else
+                {
+                    resourceManager_->Load<resource::TextureAsset>(path);
+                }
+            };
             // MYENGINE_GAME_SETTINGS=<file>: another settings file (the tests)
             {
                 char* settingsPath = nullptr;

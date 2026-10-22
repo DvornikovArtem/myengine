@@ -22,6 +22,7 @@
 #include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/editor/EditorState.h>
 #include <myengine/fx/ParticleSystem.h>
+#include <myengine/game/RlCars.h>
 #include <myengine/game/RlFeedback.h>
 #include <myengine/game/RlTrainingStore.h>
 #include <myengine/input/InputManager.h>
@@ -214,6 +215,17 @@ namespace myengine::ecs::systems
         std::string playerName = "Player";
         bool autoNetDone = false;        // --rl-host / --rl-join in the game mode start the network at once
         bool previewActive = false;      // Settings > Camera: the scene shows the practice field seen through the settings
+        // The garage (docs/game/rl-cars.md): the car the player drives, what the garage screen has in focus, what each body entity shows now
+        std::string selectedCar = "pulse";
+        std::uint64_t lobbySeed = 1;    // the seed of the match the host builds: the bots draw their cars from it (the lobby shows them before the start)
+        RlGarageView garage;
+        float garageBlend = 0.0f;       // 0 the camera of the menu, 1 the camera of the garage
+        float garageYaw = 215.0f;       // degrees: where the car on the podium looks
+        float garageIdle = 10.0f;       // seconds since the player turned the car by hand
+        std::string podiumCar;          // the car on the podium outside the garage: empty = the car of the player; the results: the car of the winner
+        std::string shownCar[2][4];     // the car on the body entity of a slot; empty = the car of the scene (Pulse)
+        float nozzle[2][4][3] = {};     // where the flame of the boost starts on the car of the slot
+        float wheelUnit = 0.189f;       // the scale of the mesh of a wheel of 0.15 m (read from the scene)
         // The training (G4g): in the game mode it takes the place of the match; the keys of the exercise are read from the keys that went down this frame
         std::unique_ptr<rl::RlTraining> training;
         std::unique_ptr<rl::RlTrainingAutopilot> autopilot;   // the debug command "autopilot": a bot drives the car
@@ -230,6 +242,11 @@ namespace myengine::ecs::systems
         std::unique_ptr<rl::RlNetHost> netHost;
         std::unique_ptr<rl::RlNetClient> netClient;
         bool onlineVisuals = false;
+        // Where the camera of the player stays while the car is demolished: the pose of the last tick it was alive (a demolished car is parked
+        // under the map until it comes back, and the camera must not follow it there)
+        dx::XMFLOAT3 aliveCarPosition{};
+        dx::XMFLOAT4 aliveCarRotation{0.0f, 0.0f, 0.0f, 1.0f};
+        bool aliveCarKnown = false;
         int localSlot = 0;
         std::string onlineStatus;
         std::chrono::steady_clock::time_point onlineEpoch = std::chrono::steady_clock::now();
@@ -259,6 +276,36 @@ namespace myengine::ecs::systems
             return netClient != nullptr ? netClient->Match() : nullptr;
         }
 
+        // The car of a slot of the match that is shown (G4i): the key of the car in the catalog. Without a match (a training) the player has the car of the
+        // garage and the others Pulse.
+        std::string CarIdOfSlot(const rl::RlMatch* view, const int slot) const
+        {
+            if (view == nullptr)
+            {
+                return slot == localSlot ? selectedCar : std::string("pulse");
+            }
+            const rl::RlCarCatalog& catalog = game::SimCars();
+            const int index = view->CarId(slot);
+            return (index >= 0 && index < catalog.Count()) ? catalog.Spec(index).id : std::string("pulse");
+        }
+
+        // The cars of a match that this window plays: the player's choice in slot 0 (or the slot given), a random one for every bot
+        void ChooseCars(rl::RlMatchConfig& config, const int slots, const int humanSlot) const
+        {
+            const rl::RlCarCatalog& catalog = game::SimCars();
+            int wanted[rl::kMaxCars];
+            for (int& w : wanted)
+            {
+                w = -1;
+            }
+            wanted[std::clamp(humanSlot, 0, rl::kMaxCars - 1)] = game::SimCarIndex(selectedCar);
+            rl::RlChooseCars(catalog, config.seed, slots, config.humanMask, wanted, config.carIds);
+            for (int slot = 0; slot < rl::kMaxCars; ++slot)
+            {
+                config.cars[slot] = catalog.Spec(catalog.Valid(config.carIds[slot])).variant;
+            }
+        }
+
         double OnlineNow() const { return std::chrono::duration<double>(std::chrono::steady_clock::now() - onlineEpoch).count(); }
 
         EntityId FindTag(World& world, const std::string& name)
@@ -284,6 +331,45 @@ namespace myengine::ecs::systems
             if (auto* renderer = world.TryGet<components::MeshRendererComponent>(entity))
             {
                 renderer->visible = visible;
+            }
+        }
+
+        // The body, the lights and the flame of a slot show the car `id` (the paint of the team of the slot); the scene itself has Pulse
+        void ShowCar(World& world, const int team, const int index, const std::string& id)
+        {
+            if (shownCar[team][index] == id || lights[team][index] == kInvalidEntity)
+            {
+                return;
+            }
+            const game::RlCarDef* car = game::Cars().FindOrDefault(id);
+            if (car == nullptr)
+            {
+                return;
+            }
+            shownCar[team][index] = id;
+            if (auto* renderer = world.TryGet<components::MeshRendererComponent>(cars[team][index]))
+            {
+                renderer->meshPath = car->bodyMesh;
+                renderer->materialPath = car->material[team];
+            }
+            if (auto* transform = world.TryGet<components::TransformComponent>(cars[team][index]))
+            {
+                transform->scale = {car->bodyScale, car->bodyScale, car->bodyScale};
+            }
+            if (!car->lightsMesh.empty())
+            {
+                if (auto* renderer = world.TryGet<components::MeshRendererComponent>(lights[team][index]))
+                {
+                    renderer->meshPath = car->lightsMesh;
+                }
+                if (auto* transform = world.TryGet<components::TransformComponent>(lights[team][index]))
+                {
+                    transform->scale = {car->lightsScale, car->lightsScale, car->lightsScale};
+                }
+            }
+            for (int k = 0; k < 3; ++k)
+            {
+                nozzle[team][index][k] = car->boostNozzle[k];
             }
         }
 
@@ -441,6 +527,9 @@ namespace myengine::ecs::systems
                     }
                     lights[t][i] = FindTag(world, Format("%s%dLights", teamNames[t], i));
                     boosts[t][i] = FindTag(world, Format("%s%dBoost", teamNames[t], i));
+                    nozzle[t][i][0] = 0.0f;
+                    nozzle[t][i][1] = -0.06f;
+                    nozzle[t][i][2] = -0.74f;
                     boostBaseScale[t][i] = {1.0f, 1.0f, 1.0f};
                     if (const auto* transform = boosts[t][i] != kInvalidEntity ? world.TryGet<components::TransformComponent>(boosts[t][i]) : nullptr)
                     {
@@ -454,6 +543,10 @@ namespace myengine::ecs::systems
                 orbs[i] = FindTag(world, Format("RlPadOrb%d", i));
             }
             podium = FindTag(world, "RlPodium");
+            if (const auto* rearWheel = wheels[0][0][2] != kInvalidEntity ? world.TryGet<components::TransformComponent>(wheels[0][0][2]) : nullptr)
+            {
+                wheelUnit = rearWheel->scale.x;
+            }
             if (arena == kInvalidEntity || ball == kInvalidEntity || cars[0][0] == kInvalidEntity)
             {
                 return false;  // not a Rocket League scene
@@ -520,6 +613,7 @@ namespace myengine::ecs::systems
             static uint64_t started = 0;
             config.seed = 0x5EED0000ull + ++started;
             config.names[0] = playerName;
+            ChooseCars(config, config.mode == 0 ? 1 : 2 * config.mode, 0);
             match = std::make_unique<rl::RlMatch>(tuning, config);
             mode = Mode::Match;
             accumulator = 0.0f;
@@ -573,6 +667,7 @@ namespace myengine::ecs::systems
         void BeginMatchVisuals(World& world)
         {
             HideEverything(world);
+            aliveCarKnown = false;
             const int teamSize = std::max(menuMode, 1);
             for (int t = 0; t < (menuMode == 0 ? 1 : 2); ++t)
             {
@@ -907,11 +1002,27 @@ namespace myengine::ecs::systems
                 const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), s);
                 if (slot == localSlot)
                 {
-                    playerPosition = position;
-                    playerRotation = rotation;
+                    if (b.demolished && aliveCarKnown)
+                    {
+                        // the camera stays where the car was blown up (the ball cam keeps looking at the ball) until the car comes back
+                        playerPosition = dx::XMLoadFloat3(&aliveCarPosition);
+                        playerRotation = dx::XMLoadFloat4(&aliveCarRotation);
+                    }
+                    else
+                    {
+                        playerPosition = position;
+                        playerRotation = rotation;
+                        if (!b.demolished)
+                        {
+                            dx::XMStoreFloat3(&aliveCarPosition, position);
+                            dx::XMStoreFloat4(&aliveCarRotation, rotation);
+                            aliveCarKnown = true;
+                        }
+                    }
                 }
                 const int team = view != nullptr ? view->Team(slot) : slot;   // a training: the player is blue, the bot of a kick-off orange
                 const int index = slot % teamSize;
+                ShowCar(world, team, index, CarIdOfSlot(view, slot));
                 const bool shown = !b.demolished;
                 const Vec3 eulerRotation = EulerDegrees(rotation);
                 // The meshes of the pack carry their own scale (the scene has it); a scene of the old kind (boxes) is scaled to the hitbox
@@ -933,8 +1044,8 @@ namespace myengine::ecs::systems
                 const bool boosting = shown && b.boost > 0.0f && (b.boost < a.boost - 1e-4f || (slot == localSlot && lastPlayer.boost && a.boost > 0.0f));
                 if (auto* transform = boosts[team][index] != kInvalidEntity ? world.TryGet<components::TransformComponent>(boosts[team][index]) : nullptr)
                 {
-                    const dx::XMVECTOR nozzle = dx::XMVector3Rotate(dx::XMVectorSet(0.0f, -0.06f, -0.74f, 0.0f), rotation);
-                    transform->position = ToVec3(dx::XMVectorAdd(position, nozzle));
+                    const dx::XMVECTOR nozzleOffset = dx::XMVector3Rotate(dx::XMVectorSet(nozzle[team][index][0], nozzle[team][index][1], nozzle[team][index][2], 0.0f), rotation);
+                    transform->position = ToVec3(dx::XMVectorAdd(position, nozzleOffset));
                     transform->rotationDeg = eulerRotation;
                     const float flicker = 1.0f + 0.16f * std::sin(effectTime * 55.0f + static_cast<float>(slot)) + 0.08f * std::sin(effectTime * 23.0f);
                     const Vec3& base = boostBaseScale[team][index];
@@ -1153,6 +1264,9 @@ namespace myengine::ecs::systems
                 options.match.mode = std::clamp(online.playersPerTeam, 1, 4);
                 options.match.botLevel = botLevel;
                 options.match.seed = 0x5EED0000ull + static_cast<uint64_t>(GetCurrentProcessId());
+                options.cars = &game::SimCars();
+                options.hostCar = game::SimCarIndex(selectedCar);
+                lobbySeed = options.match.seed;
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(online.port, error))
                 {
@@ -1166,7 +1280,8 @@ namespace myengine::ecs::systems
             }
             else
             {
-                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning);
+                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning, &game::SimCars());
+                netClient->SetCar(game::SimCarIndex(selectedCar));
                 if (!netClient->Connect(online.address, "player", error))
                 {
                     onlineStatus = error;
@@ -1327,17 +1442,40 @@ namespace myengine::ecs::systems
 
         void UpdatePodium(World& world, const float deltaTime)
         {
+            // the garage: the paint of the preview is the team of the car on the podium, the camera goes to the frame of the garage in 0.4 s
+            if (garage.active && podiumShown && podiumTeam != std::clamp(garage.team, 0, 1))
+            {
+                EnterPodium(world, garage.team);
+            }
             if (!podiumShown)
             {
-                EnterPodium(world, podiumTeam);
+                EnterPodium(world, garage.active ? garage.team : podiumTeam);
             }
             podiumTime += deltaTime;
+            garageBlend = std::clamp(garageBlend + (garage.active ? 1.0f : -1.0f) * deltaTime / 0.4f, 0.0f, 1.0f);
+            if (garage.active)
+            {
+                garageIdle += deltaTime;
+                if (garageIdle > 3.0f)
+                {
+                    garageYaw += 18.0f * deltaTime;   // a turn in 20 s
+                }
+            }
+            else
+            {
+                garageYaw = 215.0f;
+                garageIdle = 10.0f;
+            }
             constexpr float kPlinth = 0.26f;   // the height of the plinth (tools/rl_assets/podium.py)
-            constexpr float kRest = 0.40f;     // the centre of the hitbox over the floor when the car stands on its wheels
             constexpr float kTwoPi = 6.2831853f;
             const int team = podiumTeam;
+            const std::string& carId = garage.active ? garage.car : (podiumCar.empty() ? selectedCar : podiumCar);
+            ShowCar(world, team, 0, carId);
+            const game::RlCarDef* carDef = game::Cars().FindOrDefault(carId);
+            // the centre of the hitbox over the floor when the car stands on its wheels: the rear wheel and its spring (Pulse: 0.15 + 0.25055)
+            const float kRest = carDef != nullptr ? carDef->wheelRadius[1] + carDef->suspensionRest[1] : 0.40f;
             const dx::XMVECTOR carPosition = dx::XMVectorSet(0.0f, kPlinth + kRest, 0.0f, 0.0f);
-            const dx::XMVECTOR carRotation = dx::XMQuaternionRotationRollPitchYaw(0.0f, 215.0f / kRadToDeg, 0.0f);
+            const dx::XMVECTOR carRotation = dx::XMQuaternionRotationRollPitchYaw(0.0f, garageYaw / kRadToDeg, 0.0f);
             const Vec3 euler = EulerDegrees(carRotation);
             for (const EntityId part : {cars[team][0], lights[team][0]})
             {
@@ -1352,10 +1490,17 @@ namespace myengine::ecs::systems
                 if (auto* wheel = wheels[team][0][w] != kInvalidEntity ? world.TryGet<components::TransformComponent>(wheels[team][0][w]) : nullptr)
                 {
                     const bool front = w < 2;
+                    const int axle = front ? 0 : 1;
                     const float side = (w & 1) ? 1.0f : -1.0f;
-                    const dx::XMVECTOR local = dx::XMVectorSet(side * (front ? 0.259f : 0.295f), front ? -0.26755f : -0.25055f, front ? 0.37374f : -0.47626f, 0.0f);
+                    const float mountX = carDef != nullptr ? carDef->wheelMountX[axle] : (front ? 0.259f : 0.295f);
+                    const float rest = carDef != nullptr ? carDef->suspensionRest[axle] : (front ? 0.26755f : 0.25055f);
+                    const float mountZ = carDef != nullptr ? carDef->wheelZ[axle] : (front ? 0.37374f : -0.47626f);
+                    const float radius = carDef != nullptr ? carDef->wheelRadius[axle] : (front ? 0.125f : 0.15f);
+                    const dx::XMVECTOR local = dx::XMVectorSet(side * mountX, -rest, mountZ, 0.0f);
                     wheel->position = ToVec3(dx::XMVectorAdd(carPosition, dx::XMVector3Rotate(local, carRotation)));
                     wheel->rotationDeg = euler;
+                    const float wheelScale = wheelUnit * radius / 0.15f;
+                    wheel->scale = {wheelScale, wheelScale, wheelScale};
                 }
             }
             if (auto* transform = podium != kInvalidEntity ? world.TryGet<components::TransformComponent>(podium) : nullptr)
@@ -1367,9 +1512,11 @@ namespace myengine::ecs::systems
             // the camera: a full turn in 40 s, it rises and sinks by about 5 degrees every 20 s
             if (auto* cam = camera != kInvalidEntity ? world.TryGet<components::CameraComponent>(camera) : nullptr)
             {
-                const float angle = 0.9f + podiumTime * kTwoPi / 40.0f;
-                const float radius = 6.6f;
-                const float height = 1.75f + std::sin(podiumTime * kTwoPi / 20.0f) * 0.5f;
+                const float blend = garageBlend * garageBlend * (3.0f - 2.0f * garageBlend);
+                // the orbit of the menu is a turn in 40 s; the frame of the garage is the start of it a little closer and lower, the car turns instead
+                const float angle = 0.9f + std::remainder(podiumTime * kTwoPi / 40.0f, kTwoPi) * (1.0f - blend);
+                const float radius = 6.6f + (5.2f - 6.6f) * blend;
+                const float height = (1.75f + std::sin(podiumTime * kTwoPi / 20.0f) * 0.5f) * (1.0f - blend) + 1.4f * blend;
                 const dx::XMVECTOR eye = dx::XMVectorSet(std::sin(angle) * radius, height, std::cos(angle) * radius, 0.0f);
                 const dx::XMVECTOR worldUp = dx::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
                 dx::XMVECTOR target = dx::XMVectorSet(0.0f, 0.62f, 0.0f, 0.0f);
@@ -1397,6 +1544,7 @@ namespace myengine::ecs::systems
         {
             (void)world;
             previewActive = false;
+            podiumCar.clear();
             directed = false;
             frozen = false;
             match.reset();
@@ -1462,7 +1610,7 @@ namespace myengine::ecs::systems
                 status_.setup.transportFactory = nullptr;  // used once; it holds the lobby service
                 if (!transport)
                 {
-                    error = "The lobby could not make the transport of the match";
+                    error = "The match could not start: the network connection is not available.";
                     return false;
                 }
             }
@@ -1478,10 +1626,13 @@ namespace myengine::ecs::systems
                 options.match.botLevel = setup.botLevel;
                 options.match.seed = 0x5EED0000ull + static_cast<std::uint64_t>(GetCurrentProcessId()) + started;
                 options.match.names[0] = playerName;
+                options.cars = &game::SimCars();
+                options.hostCar = game::SimCarIndex(selectedCar);
+                lobbySeed = options.match.seed;
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(setup.port, error))
                 {
-                    error = "Cannot listen on port " + std::to_string(setup.port) + ": " + error;
+                    error = "Cannot start the match. " + error;
                     netHost.reset();
                     transport->Close();
                     transport.reset();
@@ -1492,7 +1643,8 @@ namespace myengine::ecs::systems
             }
             else
             {
-                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning);
+                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning, &game::SimCars());
+                netClient->SetCar(game::SimCarIndex(selectedCar));
                 if (!netClient->Connect(setup.address, playerName, error))
                 {
                     netClient.reset();
@@ -1592,6 +1744,22 @@ namespace myengine::ecs::systems
             {
                 const int teamSize = std::clamp(status_.setup.mode, 1, 4);
                 const std::vector<rl::RlNetPeerInfo> peers = netHost->Peers();
+                // the cars as the host will settle them at the start (the draw of a bot does not depend on the others)
+                int wantedCars[rl::kMaxCars];
+                for (int& w : wantedCars)
+                {
+                    w = -1;
+                }
+                wantedCars[0] = game::SimCarIndex(selectedCar);
+                for (const rl::RlNetPeerInfo& peer : peers)
+                {
+                    if (peer.slot >= 0 && peer.slot < rl::kMaxCars)
+                    {
+                        wantedCars[peer.slot] = peer.car;
+                    }
+                }
+                uint8_t lobbyCars[rl::kMaxCars];
+                rl::RlChooseCars(game::SimCars(), lobbySeed, teamSize * 2, netHost->HumanMask(), wantedCars, lobbyCars);
                 for (int slot = 0; slot < teamSize * 2; ++slot)
                 {
                     RlLobbySlot entry;
@@ -1601,6 +1769,7 @@ namespace myengine::ecs::systems
                         entry.name = playerName;
                         entry.you = true;
                         entry.host = true;
+                        entry.car = selectedCar;
                     }
                     else
                     {
@@ -1615,6 +1784,11 @@ namespace myengine::ecs::systems
                             entry.bot = status_.setup.fillWithBots;
                             entry.name = status_.setup.fillWithBots ? "Bot" : "";
                         }
+                        if (!entry.name.empty())
+                        {
+                            const rl::RlCarCatalog& catalog = game::SimCars();
+                            entry.car = catalog.Spec(catalog.Valid(lobbyCars[slot])).id;
+                        }
                     }
                     status_.lobby.push_back(entry);
                 }
@@ -1626,6 +1800,7 @@ namespace myengine::ecs::systems
                 RlLobbySlot entry;
                 entry.name = playerName;
                 entry.you = true;
+                entry.car = selectedCar;
                 entry.team = netClient->Slot() < 0 ? 0 : (netClient->Slot() < std::max(status_.setup.mode, 1) ? 0 : 1);
                 status_.lobby.push_back(entry);
                 status_.statusText = "Joined · waiting for the host to start the match";
@@ -1772,12 +1947,18 @@ namespace myengine::ecs::systems
             h.ballCamKey = status_.ballCamKey.empty() ? "Space" : status_.ballCamKey;
             h.localPlayer = slot;
             h.players.resize(static_cast<size_t>(view->SlotCount()));
+            status_.carIds.assign(static_cast<size_t>(view->SlotCount()), std::string("pulse"));
             for (int i = 0; i < view->SlotCount(); ++i)
             {
                 rlui::HudPlayer& p = h.players[static_cast<size_t>(i)];
                 p.name = m.names[i];
                 p.team = view->Team(i);
                 p.bot = view->IsBot(i);
+                {
+                    status_.carIds[static_cast<size_t>(i)] = CarIdOfSlot(view, i);
+                    const game::RlCarDef* playerCar = game::Cars().FindOrDefault(status_.carIds[static_cast<size_t>(i)]);
+                    p.car = playerCar != nullptr ? playerCar->name : std::string();
+                }
                 p.score = m.points[i];
                 p.goals = m.goals[i];
                 p.assists = m.assists[i];
@@ -1888,6 +2069,24 @@ namespace myengine::ecs::systems
                 }
             }
             status_.mvp = mvp;
+            // the car on the podium: the one of the MVP; a bot is not "the player", so with a bot as the MVP it is the car of the best live player of the
+            // winning team (the same order of points and goals), and only a team of bots shows the car of its bot
+            int podiumSlot = mvp;
+            if (mvp >= 0 && view->IsBot(mvp))
+            {
+                for (int slot = 0; slot < view->SlotCount(); ++slot)
+                {
+                    if (view->Team(slot) != m.winner || view->IsBot(slot))
+                    {
+                        continue;
+                    }
+                    if (podiumSlot == mvp || m.points[slot] > m.points[podiumSlot] || (m.points[slot] == m.points[podiumSlot] && m.goals[slot] > m.goals[podiumSlot]))
+                    {
+                        podiumSlot = slot;
+                    }
+                }
+            }
+            podiumCar = podiumSlot >= 0 ? CarIdOfSlot(view, podiumSlot) : std::string("pulse");
             status_.stage = RlGameStage::Finished;
             paused = false;
             EnterPodium(world, m.winner < 0 ? 0 : m.winner);
@@ -1903,7 +2102,7 @@ namespace myengine::ecs::systems
         // Begins free play (no pack) or a pack of exercises; a pack that is not there fails like a network that is not there
         void StartTraining(World& world, const RlGameMatchSetup& setup)
         {
-            training = std::make_unique<rl::RlTraining>(tuning);
+            training = std::make_unique<rl::RlTraining>(tuning, &game::SimCars().Spec(game::SimCarIndex(selectedCar)).variant);  // the car of the garage
             game::AttachTrainingResults(*training);
             autopilot.reset();
             autopilotOn = false;
@@ -2180,7 +2379,14 @@ namespace myengine::ecs::systems
                 // the menus: the podium (the network, if any, keeps going)
                 if ((netHost != nullptr || netClient != nullptr) && status_.stage != RlGameStage::Finished)
                 {
+                    const bool visualsWere = onlineVisuals;
                     NetStep(world, rl::RlCarInput{});  // the match may start while a menu is shown: the next frame is the match
+                    if (!visualsWere && onlineVisuals)
+                    {
+                        // The match began inside this call and its visuals are up (the ball, the cars, the pads). The podium below would hide them
+                        // all again (EnterPodium is a HideEverything) and nothing shows them a second time: the ball and the other cars stay invisible.
+                        return;
+                    }
                 }
                 if (status_.stage == RlGameStage::Finished && View() != nullptr)
                 {
@@ -2304,13 +2510,8 @@ namespace myengine::ecs::systems
                 }
                 else if (command == "demolish")
                 {
-                    // the car of the player is run into by an enemy at full speed
-                    const int enemy = match->SlotCount() > 1 ? match->SlotCount() - 1 : -1;
-                    if (enemy >= 0)
-                    {
-                        const rl::RlCarState& car = match->World().cars[0];
-                        sim.SetCarPose(enemy, {car.position.x + 6.0f, car.position.y, car.position.z}, {0.0f, -0.70710678f, 0.0f, 0.70710678f}, {-30.0f, 0.0f, 0.0f});
-                    }
+                    // the car of the player is demolished (as if an enemy had run into it at full speed)
+                    sim.DemolishCar(0);
                 }
                 else if (command == "boost")
                 {
@@ -2349,6 +2550,7 @@ namespace myengine::ecs::systems
                 config.humanMask = 1u;
                 config.seed = 77;
                 config.names[0] = playerName;
+                ChooseCars(config, 1, 0);
                 match = std::make_unique<rl::RlMatch>(tuning, config);
                 std::vector<rl::RlCarInput> idle(static_cast<size_t>(match->SlotCount()));
                 for (int t = 0; t < static_cast<int>(rl::kTickRate * 3.4f); ++t)
@@ -2678,6 +2880,32 @@ namespace myengine::ecs::systems
     void RlGameSystem::DebugCommand(const std::string& command)
     {
         impl_->debugCommands.push_back(command);
+    }
+
+    void RlGameSystem::SetSelectedCar(const std::string& id)
+    {
+        const game::RlCarDef* car = game::Cars().Find(id);
+        impl_->selectedCar = car != nullptr ? car->id : std::string("pulse");
+    }
+
+    const std::string& RlGameSystem::SelectedCar() const
+    {
+        return impl_->selectedCar;
+    }
+
+    void RlGameSystem::SetGarageView(const RlGarageView& view)
+    {
+        impl_->garage = view;
+        if (!view.active)
+        {
+            impl_->garage.car.clear();
+        }
+    }
+
+    void RlGameSystem::RotateGarageCar(const float degrees)
+    {
+        impl_->garageYaw += degrees;
+        impl_->garageIdle = 0.0f;
     }
 
     void RlGameSystem::SetViewAspect(const float aspect)

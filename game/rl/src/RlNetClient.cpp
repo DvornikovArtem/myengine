@@ -1,5 +1,6 @@
 // RlNetClient.cpp
 
+#include <rl/RlClock.h>
 #include <rl/RlNet.h>
 
 #include <tracy/Tracy.hpp>
@@ -16,6 +17,7 @@ namespace rl
     {
         constexpr int kHistory = 256;        // ticks of inputs the client remembers
         constexpr int kRingSize = 128;       // ticks of saved states (7.1 / 5.3)
+        constexpr uint32_t kConfirmLookback = 48;  // ticks back from a snapshot in which the missing inputs of the host may still explain a state that differs
         constexpr uint32_t kNoTick = 0xFFFFFFFFu;
         constexpr int kTargetMargin = 4;     // ticks by which an input should reach the host before the host needs it
         constexpr int kJumpMargin = 12;      // a margin error bigger than this is corrected at once, not by the tick rate
@@ -92,7 +94,13 @@ namespace rl
         net::PeerId host = net::kInvalidPeer;
         std::string name;
         std::string pendingNames[kMaxCars];  // the host's names of the table, applied at MatchStart
+        uint8_t pendingCars[kMaxCars] = {};  // and its cars (the match is built again with them at MatchStart)
         bool haveNames = false;
+        RlCarCatalog fallbackCars = RlCarCatalog::Fallback();
+        const RlCarCatalog* cars = nullptr;
+        uint64_t carsHash = 0;
+        int wantedCar = 0;
+        RlMatchConfig baseConfig;  // what the Welcome says of the match
         int slot = -1;
         int slotCount = 0;
         std::unique_ptr<RlMatch> match;
@@ -143,11 +151,13 @@ namespace rl
         std::vector<uint8_t> packet;
         std::vector<uint8_t> scratch;
 
-        Impl(net::INetTransport& t, const RlTuning& tn)
+        Impl(net::INetTransport& t, const RlTuning& tn, const RlCarCatalog* catalog)
             : transport(t)
             , tuning(tn)
+            , cars(catalog != nullptr ? catalog : &fallbackCars)
         {
             tuningHash = RlTuningHash(tuning);
+            carsHash = cars->Hash();
             std::fill(std::begin(localTick), std::end(localTick), kNoTick);
             for (auto& row : canonicalTick)
             {
@@ -258,7 +268,7 @@ namespace rl
         void StepFresh()
         {
             ZoneScopedN("Rl::Client::Step");
-            const auto begin = std::chrono::steady_clock::now();
+            const double begin = ThreadCpuMs();
             const RlCarInput quantized = RlQuantizeInput(localInput);
             localHistory[tick % kHistory] = quantized;
             localTick[tick % kHistory] = tick;
@@ -271,7 +281,7 @@ namespace rl
             {
                 observer(tick, *match);
             }
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const double ms = ThreadCpuMs() - begin;
             stats.stepMsMax = std::max(stats.stepMsMax, ms);
         }
 
@@ -320,7 +330,7 @@ namespace rl
         void Resimulate(uint32_t from, bool restore, const Shown& shown)
         {
             ZoneScopedN("Rl::Rollback");
-            const auto begin = std::chrono::steady_clock::now();
+            const double begin = ThreadCpuMs();
             if (restore)
             {
                 const StateSlot* slotState = RingAt(from);
@@ -342,7 +352,7 @@ namespace rl
             }
             SetOffset(ballOffset, shown.ball, shown.ballRotation, after.ball.position, after.ball.rotation);
 
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const double ms = ThreadCpuMs() - begin;
             ++stats.rollbacks;
             stats.lastResimTicks = static_cast<int>(tick - from);
             stats.lastRollbackMs = ms;
@@ -408,6 +418,16 @@ namespace rl
             config.seed = welcome.seed;
             config.botLevel = welcome.botLevel;
             config.humanMask = welcome.humanMask;
+            baseConfig = config;
+            if (welcome.started != 0)
+            {
+                // a match that runs has its cars settled: the bodies are built with them before the state of the host is put in
+                for (int s = 0; s < kMaxCars; ++s)
+                {
+                    config.carIds[s] = welcome.cars[s];
+                    config.cars[s] = cars->Spec(cars->Valid(welcome.cars[s])).variant;
+                }
+            }
             match = std::make_unique<RlMatch>(tuning, config);
             slotCount = match->SlotCount();
             if (slot >= slotCount)
@@ -451,7 +471,7 @@ namespace rl
             }
             if (!match->RestoreState(stateBytes))
             {
-                Fail("cannot restore the state of the match that the host sent (another build?)");
+                Fail("Cannot join this match: the host has another version of the game.");
                 return;
             }
             tick = stateTick;
@@ -567,6 +587,14 @@ namespace rl
                 {
                     if (haveNames && match != nullptr)
                     {
+                        // the cars are built into the bodies: the match of the lobby (all Pulse) is made again with the host's cars
+                        RlMatchConfig config = baseConfig;
+                        for (int s = 0; s < kMaxCars; ++s)
+                        {
+                            config.carIds[s] = pendingCars[s];
+                            config.cars[s] = cars->Spec(cars->Valid(pendingCars[s])).variant;
+                        }
+                        match = std::make_unique<RlMatch>(tuning, config);
                         match->SetPlayerNames(pendingNames);  // before tick 0, like the host
                     }
                     AddMask(0, event.mask);
@@ -609,6 +637,25 @@ namespace rl
             {
                 StepFresh();
             }
+        }
+
+        // Whether the host's inputs are known for every human slot on every tick that the state of tick `upTo` was built from (the ticks after the last
+        // verified one, at most kConfirmLookback of them)
+        bool InputsConfirmed(uint32_t upTo) const
+        {
+            const uint32_t from = std::max<uint32_t>({1u, stats.verifiedTick + 1, upTo > kConfirmLookback ? upTo - kConfirmLookback : 1u});
+            for (uint32_t t = from; t < upTo; ++t)
+            {
+                const uint32_t mask = MaskAt(t);
+                for (int s = 0; s < slotCount; ++s)
+                {
+                    if ((mask & (1u << s)) != 0 && canonicalTick[s][t % kHistory] != t)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
 
         void OnSnapshot(const std::vector<uint8_t>& data, double now)
@@ -676,6 +723,14 @@ namespace rl
                     if (RlSim::HashState(at->bytes) == msg.stateHash)
                     {
                         stats.verifiedTick = std::max(stats.verifiedTick, msg.tick);
+                    }
+                    else if (!InputsConfirmed(msg.tick))
+                    {
+                        // Our ticks since the last verified one were simulated with the inputs we guessed for some player, and the host's real ones have not
+                        // come yet (a snapshot that carries them was lost, or it is late behind this newer one: the jitter reorders them). The state is
+                        // expected to differ; the snapshot that brings the inputs makes the replay, and a state that is still wrong when they are all there
+                        // is caught by the hash of a later snapshot.
+                        ++stats.unconfirmedHashes;
                     }
                     else
                     {
@@ -819,6 +874,8 @@ namespace rl
                         state = RlNetClientState::Joining;
                         RlJoinMsg join;
                         join.tuningHash = tuningHash;
+                        join.carsHash = carsHash;
+                        join.car = static_cast<uint8_t>(cars->Valid(wantedCar));
                         join.name = name;
                         RlEncode(join, packet);
                         transport.Send(host, packet.data(), packet.size(), true);
@@ -828,9 +885,9 @@ namespace rl
                     if (state != RlNetClientState::Failed && state != RlNetClientState::Disconnected)
                     {
                         state = RlNetClientState::Disconnected;
-                        error = event.reason == net::DisconnectReason::Rejected   ? "the host refused the connection"
-                                : event.reason == net::DisconnectReason::Timeout ? "no answer from the host (timeout)"
-                                                                                  : "the host closed the connection";
+                        error = event.reason == net::DisconnectReason::Rejected   ? "The host refused the connection."
+                                : event.reason == net::DisconnectReason::Timeout ? "No answer from the host."
+                                                                                  : "The host closed the connection.";
                     }
                     break;
                 case net::NetEventType::Data:
@@ -855,6 +912,7 @@ namespace rl
                             for (int i = 0; i < kMaxCars; ++i)
                             {
                                 pendingNames[i] = names.names[i];
+                                pendingCars[i] = names.cars[i];
                             }
                             haveNames = true;
                         }
@@ -937,9 +995,22 @@ namespace rl
         }
     };
 
-    RlNetClient::RlNetClient(net::INetTransport& transport, const RlTuning& tuning)
-        : impl_(std::make_unique<Impl>(transport, tuning))
+    RlNetClient::RlNetClient(net::INetTransport& transport, const RlTuning& tuning, const RlCarCatalog* cars)
+        : impl_(std::make_unique<Impl>(transport, tuning, cars))
     {
+    }
+
+    void RlNetClient::SetCar(int car)
+    {
+        Impl& d = *impl_;
+        d.wantedCar = d.cars->Valid(car);
+        if (d.state == RlNetClientState::Lobby)
+        {
+            RlCarMsg msg;
+            msg.car = static_cast<uint8_t>(d.wantedCar);
+            RlEncode(msg, d.packet);
+            d.transport.Send(d.host, d.packet.data(), d.packet.size(), true);
+        }
     }
 
     RlNetClient::~RlNetClient() = default;

@@ -213,6 +213,10 @@ namespace myengine::core
                 pendingReleases_.push_back({time_ + 0.12, false, index, true});
             }
         }
+        else if (c.verb == "text" && !c.args.empty())
+        {
+            typed_ += c.args[0];  // typed into the field with the focus this frame (UTF-8, no spaces: the arguments are split by them)
+        }
         else if (c.verb == "wheel" && !c.args.empty())
         {
             wheel_ += static_cast<float>(std::atof(c.args[0].c_str()));
@@ -238,6 +242,7 @@ namespace myengine::core
     void UiScript::Advance(const double deltaSeconds, const Sink& sink)
     {
         wheel_ = 0.0f;
+        typed_.clear();
         time_ += deltaSeconds;
         for (std::size_t i = 0; i < pendingReleases_.size();)
         {
@@ -299,6 +304,7 @@ namespace myengine::core
             raw.mousePosition = mousePosition_;
         }
         raw.mouseWheel += wheel_;
+        raw.typed += typed_;
         raw.windowActive = true;
     }
 }

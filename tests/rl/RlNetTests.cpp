@@ -3,6 +3,9 @@
 // messages, and a host with clients that predict and roll back. Time is a virtual clock, so a minute of play takes seconds; one test
 // goes over real UDP sockets on 127.0.0.1. `--verbose` prints more.
 
+#include <rl/RlCars.h>
+#include <rl/RlClock.h>
+#include <rl/RlName.h>
 #include <rl/RlNet.h>
 #include <rl/RlNetProtocol.h>
 #include <rl/net/LobbyLan.h>
@@ -27,6 +30,8 @@ namespace
     int g_failures = 0;
     int g_checks = 0;
     bool g_verbose = false;
+
+    bool Near(float a, float b, float eps) { return std::fabs(a - b) <= eps; }
 
     void Check(bool ok, const char* what, const char* file, int line)
     {
@@ -74,6 +79,7 @@ namespace
         std::vector<std::unique_ptr<net::INetTransport>> clientTransports;
         std::unique_ptr<RlNetHost> host;
         std::vector<std::unique_ptr<RlNetClient>> clients;
+        std::string nextClientName;  // the name of the next AddClient (empty: "player<index>")
         std::vector<bool> clientActive;
         std::map<uint32_t, uint64_t> hostHashes;  // tick -> hash of the host's state at that tick
         std::map<uint32_t, RlWorldState> hostWorlds;  // tick -> the host's world at that tick
@@ -81,13 +87,15 @@ namespace
         bool recordHashes = false;
         bool scripted = true;
 
-        explicit Rig(const net::NetSimParams& simParams, int mode, const RlTuning& tuning = g_tuning)
+        explicit Rig(const net::NetSimParams& simParams, int mode, const RlTuning& tuning = g_tuning, const RlCarCatalog* cars = nullptr, int hostCar = 0)
             : sim(simParams)
         {
             hostTransport = net::MakeLoopbackTransport(hub, sim, 1);
             RlNetHostOptions options;
             options.match.mode = mode;
             options.match.seed = 77;
+            options.cars = cars;
+            options.hostCar = hostCar;
             host = std::make_unique<RlNetHost>(*hostTransport, tuning, options);
             std::string error;
             CHECK(host->Listen(5000, error));
@@ -105,14 +113,15 @@ namespace
                 });
         }
 
-        RlNetClient& AddClient(const RlTuning& tuning = g_tuning)
+        RlNetClient& AddClient(const RlTuning& tuning = g_tuning, const RlCarCatalog* cars = nullptr, int car = 0)
         {
             const int index = static_cast<int>(clients.size());
             clientTransports.push_back(net::MakeLoopbackTransport(hub, sim, 100 + static_cast<uint64_t>(index)));
-            clients.push_back(std::make_unique<RlNetClient>(*clientTransports.back(), tuning));
+            clients.push_back(std::make_unique<RlNetClient>(*clientTransports.back(), tuning, cars));
+            clients.back()->SetCar(car);
             clientActive.push_back(true);
             std::string error;
-            CHECK(clients.back()->Connect("5000", "player" + std::to_string(index), error));
+            CHECK(clients.back()->Connect("5000", nextClientName.empty() ? "player" + std::to_string(index) : nextClientName, error));
             return *clients.back();
         }
 
@@ -435,14 +444,39 @@ namespace
         CHECK(RlDecode(bytes.data(), bytes.size(), joinBack) && joinBack.name == "alice" && joinBack.tuningHash == join.tuningHash);
         CHECK(!RlDecode(bytes.data(), bytes.size() - 1, joinBack));  // cut short
 
+        join.carsHash = 0xABCDEF0123456789ull;
+        join.car = 4;
+        RlEncode(join, bytes);
+        CHECK(RlDecode(bytes.data(), bytes.size(), joinBack) && joinBack.car == 4 && joinBack.carsHash == join.carsHash && joinBack.name == "alice");
+
         RlWelcomeMsg welcome;
         welcome.slot = 5;
         welcome.mode = 3;
         welcome.seed = 99;
         welcome.humanMask = 0x25;
+        for (int i = 0; i < kMaxCars; ++i)
+        {
+            welcome.cars[i] = static_cast<uint8_t>(i % 6);
+        }
         RlEncode(welcome, bytes);
         RlWelcomeMsg welcomeBack;
         CHECK(RlDecode(bytes.data(), bytes.size(), welcomeBack) && welcomeBack.slot == 5 && welcomeBack.humanMask == 0x25 && welcomeBack.seed == 99);
+        CHECK(std::memcmp(welcomeBack.cars, welcome.cars, sizeof(welcome.cars)) == 0);
+
+        RlNamesMsg roster;
+        for (int i = 0; i < kMaxCars; ++i)
+        {
+            roster.names[i] = "p" + std::to_string(i);
+            roster.cars[i] = static_cast<uint8_t>((i * 5) % 6);
+        }
+        RlEncode(roster, bytes);
+        RlNamesMsg rosterBack;
+        CHECK(RlDecode(bytes.data(), bytes.size(), rosterBack) && rosterBack.names[3] == "p3" && std::memcmp(rosterBack.cars, roster.cars, sizeof(roster.cars)) == 0);
+        RlCarMsg carMsg;
+        carMsg.car = 5;
+        RlEncode(carMsg, bytes);
+        RlCarMsg carBack;
+        CHECK(bytes.size() == 2 && RlDecode(bytes.data(), bytes.size(), carBack) && carBack.car == 5);
 
         RlInputMsg input;
         input.firstTick = 1234;
@@ -651,6 +685,91 @@ namespace
         CHECK(std::fabs(shown.ball.position.x - physics.ball.position.x) < 2.0f);
     }
 
+    // The cars of G4i: every side builds the same bodies (the bodies are in the state and the hash)
+    RlCarCatalog g_cars;
+
+    void TestCarsOverNet()
+    {
+        std::printf("a car per slot over the net\n");
+        CHECK(g_cars.Count() == 6);
+        net::NetSimParams sim;
+        sim.latencyMs = 25.0f;
+        sim.jitterMs = 8.0f;
+        {
+            // the host drives a Vector, one guest a Bulwark, the other a Dart; the bots draw theirs from the seed
+            Rig rig(sim, 2, g_tuning, &g_cars, 1);
+            rig.recordHashes = true;
+            RlNetClient& a = rig.AddClient(g_tuning, &g_cars, 5);
+            RlNetClient& b = rig.AddClient(g_tuning, &g_cars, 3);
+            CHECK(rig.RunUntil(10.0, &AllInLobby));
+            const std::vector<RlNetPeerInfo> peers = rig.host->Peers();
+            CHECK(peers.size() == 2 && peers[0].car == 5 && peers[1].car == 3);
+            b.SetCar(4);  // the second guest changes his mind in the lobby
+            rig.Run(1.0);
+            CHECK(rig.host->Peers()[1].car == 4);
+            CHECK(rig.host->StartMatch(rig.now));
+            rig.Run(10.0);
+            const RlMatch* host = rig.host->Match();
+            CHECK(host != nullptr && a.Match() != nullptr && b.Match() != nullptr);
+            if (host != nullptr && a.Match() != nullptr && b.Match() != nullptr)
+            {
+                CHECK(host->CarId(0) == 1);
+                CHECK(host->CarId(a.Slot()) == 5);
+                CHECK(host->CarId(b.Slot()) == 4);
+                int bots = 0;
+                for (int slot = 0; slot < 4; ++slot)
+                {
+                    CHECK(a.Match()->CarId(slot) == host->CarId(slot));
+                    CHECK(b.Match()->CarId(slot) == host->CarId(slot));
+                    CHECK(Near(a.Match()->Sim().CarTuning(slot).mass, host->Sim().CarTuning(slot).mass, 1e-3f));
+                    bots += host->IsBot(slot) ? 1 : 0;
+                }
+                CHECK(bots == 1);
+                // the cars really differ in the bodies the sim has
+                CHECK(host->Sim().CarTuning(a.Slot()).mass > host->Sim().CarTuning(0).mass);
+            }
+            CHECK(a.State() == RlNetClientState::Playing && b.State() == RlNetClientState::Playing);
+            CHECK(a.Stats().hardCorrections == 0 && b.Stats().hardCorrections == 0);
+            int compared = 0;
+            CHECK(CompareWithHost(rig, a, 60, &compared) == compared && compared >= 30);
+            CHECK(CompareWithHost(rig, b, 60, &compared) == compared && compared >= 30);
+        }
+        {
+            // a car that is not in the catalog is the default one; a guest with other cars is refused
+            Rig rig(sim, 1, g_tuning, &g_cars, 0);
+            RlNetClient& wild = rig.AddClient(g_tuning, &g_cars, 0);
+            wild.SetCar(200);
+            CHECK(rig.RunUntil(10.0, &AllInLobby));
+            CHECK(rig.host->Peers()[0].car == 0);
+            const RlCarCatalog other = RlCarCatalog::Fallback();
+            RlNetClient& stranger = rig.AddClient(g_tuning, &other, 0);
+            rig.Run(2.0);
+            CHECK(stranger.State() != RlNetClientState::Lobby && stranger.State() != RlNetClientState::Playing);
+        }
+        {
+            // a guest who joins a running match gets the cars of the slots as they are
+            Rig rig(sim, 2, g_tuning, &g_cars, 2);
+            rig.recordHashes = true;
+            CHECK(rig.host->StartMatch(rig.now));
+            rig.Run(4.0);
+            RlNetClient& late = rig.AddClient(g_tuning, &g_cars, 5);
+            rig.Run(10.0);
+            CHECK(late.State() == RlNetClientState::Playing);
+            const RlMatch* host = rig.host->Match();
+            if (host != nullptr && late.Match() != nullptr)
+            {
+                for (int slot = 0; slot < 4; ++slot)
+                {
+                    CHECK(late.Match()->CarId(slot) == host->CarId(slot));
+                }
+                CHECK(host->CarId(0) == 2);
+            }
+            int compared = 0;
+            CHECK(CompareWithHost(rig, late, 60, &compared) == compared && compared >= 30);
+            CHECK(late.Stats().hardCorrections == 0);
+        }
+    }
+
     void TestGoalAndOutOfBandChange()
     {
         std::printf("a goal on the host is a goal on the client; a change only the host made is corrected\n");
@@ -815,7 +934,7 @@ namespace
             rig.Run(6.0);
             CHECK(client.State() == RlNetClientState::Failed);
             Note("tuning mismatch: \"%s\"", client.Error().c_str());
-            CHECK(client.Error().find("rl_tuning") != std::string::npos);
+            CHECK(client.Error().find("settings") != std::string::npos);
             CHECK(rig.host->ClientCount() == 0);
         }
         {
@@ -880,7 +999,10 @@ namespace
         CHECK(rig.host->Stats().lateJoins == 1);
         CHECK(late.Stats().tick > hostTickAtJoin);                 // he has caught up with the host
         CHECK(late.Stats().hardCorrections == 0);
+        // the hash of a snapshot can differ while a snapshot that carries an input is still on its way (the jitter reorders them): that is counted apart
+        // (unconfirmedHashes) and fixed by the replay of the late one; with every input known the hashes agree
         CHECK(late.Stats().hashMismatches == 0);
+        Note("hashes that differed while an input of the host was missing: %llu", static_cast<unsigned long long>(late.Stats().unconfirmedHashes));
         int compared = 0;
         const int equal = CompareWithHost(rig, late, 60, &compared);
         Note("states of the last %d verified ticks equal to the host's: %d", compared, equal);
@@ -1052,6 +1174,121 @@ namespace
         CHECK(guest->State() == net::LobbyState::Idle);
     }
 
+    // The nickname (G1n): the name that the player has (the Steam profile, the typed one, the Windows user) is cleaned once for every place that shows or
+    // sends it, and it gets through the lobby and the slot of the net match whole, Cyrillic included
+    void TestNicknames()
+    {
+        std::printf("nicknames: cleaning, the field, the lobby, the slot of the match\n");
+        const std::string artem = "\xD0\x90\xD1\x80\xD1\x82\xD1\x91\xD0\xBC";  // "Артём"
+        const std::string sixteen = std::string("\xD0\x90\xD1\x80\xD1\x82\xD1\x91\xD0\xBC") + "\xD0\x94\xD0\xB2\xD0\xBE\xD1\x80\xD0\xBD\xD0\xB8\xD0\xBA\xD0\xBE\xD0\xB2" + "\xD1\x8B\xD0\xB9";  // "АртёмДворниковый": 16 letters
+        const std::string pk = "\xD0\xBF\xD0\xBA";                                // "пк"
+        // what may stay: Latin, Cyrillic, digits and signs; the rest is "?", the length is cut by the bytes of the slot, never inside a character
+        CHECK(SanitizePlayerName("Artem") == "Artem");
+        CHECK(SanitizePlayerName(pk) == pk);
+        CHECK(SanitizePlayerName("  " + artem + "  ") == artem);                      // spaces cut, the Cyrillic stays
+        CHECK(SanitizePlayerName("Ann\xF0\x9F\x98\x80") == "Ann?");                  // an emoji has no glyph
+        CHECK(SanitizePlayerName("\xE6\x97\xA5\xE6\x9C\xAC") == "??");                // CJK as well
+        CHECK(SanitizePlayerName("a\tb\nc") == "abc");                                // control characters are dropped
+        CHECK(SanitizePlayerName("bad\xFF" "byte") == "bad?byte");                    // not UTF-8
+        CHECK(SanitizePlayerName("").empty() && SanitizePlayerName("   ").empty());
+        std::string longCyrillic;
+        for (int i = 0; i < 20; ++i)
+        {
+            longCyrillic += "\xD0\xB6";  // 40 bytes
+        }
+        const std::string cut = SanitizePlayerName(longCyrillic);
+        CHECK(cut.size() == 32 && NameCharCount(cut) == 16 && SanitizePlayerName(cut) == cut);  // 16 Cyrillic letters of two bytes fill the slot whole
+        CHECK(SanitizePlayerName(std::string(40, 'x')).size() == kPlayerNameBytes);
+
+        // the field of the nickname (Settings, without Steam): what is typed, what is kept
+        CHECK(FilterNicknameInput("  " + artem) == artem);                                          // no space at the start
+        CHECK(FilterNicknameInput("Ann\xF0\x9F\x98\x80 B!\tc") == "Ann Bc");                        // an emoji, "!" and a tab are not typed
+        CHECK(FilterNicknameInput(std::string(30, 'x')).size() == static_cast<size_t>(kNicknameMaxChars));
+        CHECK(FilterNicknameInput(longCyrillic).size() == 32);                                      // 16 letters: the characters and the bytes of the slot agree
+        CHECK(!NicknameValid("") && !NicknameValid("a") && !NicknameValid(" ab") && !NicknameValid("ab ") && !NicknameValid("A\tB") && !NicknameValid("a?"));
+        CHECK(NicknameValid("ab") && NicknameValid(pk) && NicknameValid("Artem_2000") && NicknameValid(std::string(16, 'x')) && !NicknameValid(std::string(17, 'x')));
+        CHECK(TrimNickname("  ab c  ") == "ab c" && TrimNickname("   ").empty());
+
+        // Join carries the whole name of the slot (it was 15 bytes, cutting a Cyrillic name in the middle; now 32: 16 Cyrillic letters)
+        std::vector<uint8_t> bytes;
+        RlJoinMsg join;
+        join.name = cut;
+        RlEncode(join, bytes);
+        RlJoinMsg back;
+        CHECK(RlDecode(bytes.data(), bytes.size(), back) && back.name == cut);
+
+        // over the net: the guest joins with its name, the table of the host and the table of the guest have it
+        {
+            net::NetSimParams sim;
+            Rig rig(sim, 1);
+            rig.scripted = false;
+            rig.nextClientName = artem;
+            RlNetClient& client = rig.AddClient();
+            CHECK(rig.RunUntil(10.0, &AllInLobby));
+            CHECK(rig.host->StartMatch(rig.now));
+            rig.Run(1.0);
+            CHECK(std::strcmp(rig.host->Match()->World().match.names[1], artem.c_str()) == 0);
+            CHECK(std::strcmp(client.Match()->World().match.names[1], artem.c_str()) == 0);
+        }
+
+        // a name of 16 Cyrillic letters (32 bytes) is in the table of the host and of the guest whole, and it stays the same through the rollback of the
+        // guest, the snapshots and a late join (the late joiner takes a bot's slot and its name, like before: the names are fixed at the start)
+        {
+            net::NetSimParams sim;
+            sim.latencyMs = 40.0f;
+            sim.lossPercent = 3.0f;
+            Rig rig(sim, 2);
+            rig.scripted = false;
+            rig.nextClientName = sixteen;
+            RlNetClient& first = rig.AddClient();
+            CHECK(rig.RunUntil(10.0, &AllInLobby));
+            CHECK(rig.host->StartMatch(rig.now));
+            rig.Run(4.0);
+            rig.nextClientName = artem;
+            RlNetClient& late = rig.AddClient();
+            rig.Run(5.0);
+            CHECK(late.State() == RlNetClientState::Playing && late.Match() != nullptr);
+            const int lateSlot = late.Slot();
+            const int firstSlot = first.Slot();
+            CHECK(lateSlot > 0 && firstSlot > 0 && lateSlot != firstSlot);
+            CHECK(std::strlen(rig.host->Match()->World().match.names[firstSlot]) == 32);
+            CHECK(std::strcmp(rig.host->Match()->World().match.names[firstSlot], sixteen.c_str()) == 0);
+            CHECK(std::strcmp(first.Match()->World().match.names[firstSlot], sixteen.c_str()) == 0);
+            CHECK(std::memcmp(rig.host->Match()->World().match.names, late.Match()->World().match.names, sizeof(rig.host->Match()->World().match.names)) == 0);
+            CHECK(std::memcmp(rig.host->Match()->World().match.names, first.Match()->World().match.names, sizeof(rig.host->Match()->World().match.names)) == 0);
+            CHECK(late.Stats().hardCorrections == 0 && late.Stats().hashMismatches == 0 && first.Stats().hashMismatches == 0);
+        }
+
+        // the LAN lobby: the names of the members arrive as they are, an emoji becomes "?"
+        net::LoopbackHub hub;
+        double now = 0.0;
+        net::NetSimParams none;
+        auto host = MakeTestLobby(hub, sixteen, none, 21);
+        auto guest = MakeTestLobby(hub, pk + " \xF0\x9F\x98\x80", none, 22);
+        net::LobbyCreateOptions create;
+        create.hostName = sixteen;
+        create.mode = 1;
+        create.maxPlayers = 2;
+        create.lobbyPort = 5300;
+        create.gamePort = 5200;
+        std::string error;
+        CHECK(host->Create(create, error));
+        guest->RefreshList();
+        StepLobbies(now, 3.0, {host.get(), guest.get()});
+        CHECK(!guest->Lobbies().empty() && guest->Lobbies()[0].hostName == sixteen);
+        CHECK(!guest->Lobbies().empty() && guest->Join(guest->Lobbies()[0].id, error));
+        StepLobbies(now, 2.0, {host.get(), guest.get()});
+        CHECK(guest->Members().size() == 2 && guest->Members()[0].name == sixteen && guest->Members()[1].name == pk + " ?");
+        CHECK(host->Members().size() == 2 && host->Members()[1].name == pk + " ?");
+        guest->Leave();
+        host->Leave();
+
+#ifndef MYENGINE_STEAM
+        std::string steamName;
+        CHECK(!net::SteamPersonaName(steamName));  // without Steam the game takes the Windows user
+#endif
+    }
+
     void TestLanLobbyEdges()
     {
         std::printf("LAN lobby: full, other version, by hand, leaving, the list forgets\n");
@@ -1215,7 +1452,7 @@ namespace
         std::string why;
         CHECK(!service->Available(why));
         Note("Available: \"%s\"", why.c_str());
-        CHECK(why.find("MYENGINE_STEAM") != std::string::npos);
+        CHECK(why.find("without Steam") != std::string::npos);
         net::LobbyCreateOptions create;
         std::string error;
         CHECK(!service->Create(create, error) && !error.empty());
@@ -1290,14 +1527,14 @@ namespace
         RlCarInput inputs[kMaxCars];
         std::vector<std::vector<uint8_t>> states(32);
         std::vector<double> stepMs;
-        const auto now = [] { return std::chrono::steady_clock::now(); };
+        const auto now = [] { return ThreadCpuMs(); };  // CPU time of this thread: a busy PC (a parallel ctest) does not fail a budget
         // the countdown, then play
         for (int t = 0; t < 120 * 12; ++t)
         {
             inputs[0] = RlQuantizeInput(Script(0, t / 120.0));
             const auto begin = now();
             match.Step(inputs);
-            stepMs.push_back(std::chrono::duration<double, std::milli>(now() - begin).count());
+            stepMs.push_back((now() - begin));
         }
         std::vector<double> sorted = stepMs;
         std::sort(sorted.begin(), sorted.end());
@@ -1330,7 +1567,7 @@ namespace
                     const auto begin = now();
                     bots.Step(none);
                     Tick tick;
-                    tick.ms = std::chrono::duration<double, std::milli>(now() - begin).count();
+                    tick.ms = (now() - begin);
                     tick.phase = static_cast<int>(bots.World().match.phase);
                     tick.ballHits = bots.LastEvents().ballHits;
                     tick.demolitions = bots.LastEvents().demolitions;
@@ -1388,7 +1625,7 @@ namespace
                 match.SaveState(scratch);  // the client saves each replayed tick into its ring
                 match.Step(inputs);
             }
-            const double ms = std::chrono::duration<double, std::milli>(now() - begin).count();
+            const double ms = (now() - begin);
             worstRollback = std::max(worstRollback, ms);
             totalRollback += ms;
             // go back to the same state for the next round
@@ -1415,6 +1652,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    if (!g_cars.LoadDirectory(RL_CARS_DIR, &error))
+    {
+        std::printf("FAIL: cannot read the cars %s: %s\n", RL_CARS_DIR, error.c_str());
+        return 1;
+    }
+
     TestSimParams();
     TestReliableChannel();
     TestConnectionLifecycle();
@@ -1431,6 +1674,7 @@ int main(int argc, char** argv)
     slow.lossPercent = 10.0f;
     slow.duplicatePercent = 3.0f;
     TestHostAndClient("one-way 100 ms +-30 (RTT 200), 10% loss, 3% duplicates", slow, 20.0);
+    TestCarsOverNet();
     TestGoalAndOutOfBandChange();
     TestStatisticsOverNet();
     TestSeveralClientsAndLeaving();
@@ -1448,6 +1692,7 @@ int main(int argc, char** argv)
     TestJoinRefusals();
     TestLanLobby();
     TestLanLobbyEdges();
+    TestNicknames();
     TestLanLobbyUdp();
     TestSteamWithoutSdk();
     TestUdp();

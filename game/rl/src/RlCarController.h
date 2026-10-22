@@ -63,6 +63,7 @@ namespace rl::detail
     {
         JPH::PhysicsSystem& physics;
         const RlTuning& tuning;
+        const RlCarTuning& car;   // the numbers of this car (the tuning has the match, the ball and the base car)
         const JPH::Shape* arenaShape;
     };
 

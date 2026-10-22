@@ -33,7 +33,7 @@ namespace rl::net
     constexpr uint16_t kLanBeaconPort = 47779;    // hosts broadcast here, searching clients listen here
     constexpr uint16_t kDefaultLobbyPort = 47778; // members connect to the lobby of a LAN host here
     constexpr uint16_t kDefaultGamePort = 47777;  // the match itself (RlNetHost)
-    constexpr int kLobbyProtocolVersion = 1;
+    constexpr int kLobbyProtocolVersion = 2;  // 2: names up to 32 bytes (G1n)
 
     // One line of the list of lobbies
     struct LobbyInfo

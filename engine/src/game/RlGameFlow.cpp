@@ -11,16 +11,22 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <string>
 
 #include <rl/RlControls.h>
+#include <rl/RlName.h>
 #include <rl/RlTraining.h>
 #include <rl/RlTuning.h>
 
 #include <myengine/core/AppPaths.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/core/ServiceLocator.h>
+#include <myengine/core/Version.h>
 #include <myengine/editor/EditorState.h>
+#include <myengine/game/RlCars.h>
 #include <myengine/game/RlTrainingStore.h>
 #include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/ui/UiManager.h>
@@ -58,9 +64,10 @@ namespace myengine::game
             Settings,
             Room,
             Training,
+            Garage,
         };
 
-        const char* const kScreenNames[] = {"boot", "main", "play", "loading", "lobby", "match", "pause", "results", "settings", "room", "training"};
+        const char* const kScreenNames[] = {"boot", "main", "play", "loading", "lobby", "match", "pause", "results", "settings", "room", "training", "garage"};
 
         const char* const kTips[] = {
             "Tip: hold {Space} to look at the ball, release for the car cam.",
@@ -187,6 +194,8 @@ namespace myengine::game
 
         // settings
         int tab = 0;
+        std::string nickEdit;          // the field "Player name" (without Steam)
+        bool nickLoaded = false;
         bool askResetControls = false;
         bool askResetTab = false;
         // the rebind window
@@ -241,6 +250,7 @@ namespace myengine::game
             system.SetInvertPitch(settings.invertPitch);
             system.SetVolumes(settings.audio.master, settings.audio.effects, settings.audio.music);
             system.SetPlayerName(settings.PlayerName());
+            CheckCar();
             host.SetUiScale(static_cast<float>(settings.video.uiScalePercent) / 100.0f);
         }
 
@@ -329,6 +339,7 @@ namespace myengine::game
 
         void Draw(Frame& f)
         {
+            core::crash::Reassert();   // the Steam library takes the crash handlers over when it starts (core/CrashHandler.h)
             const auto begin = std::chrono::steady_clock::now();
             DrawScreen(f);
             drawMsSum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
@@ -427,6 +438,7 @@ namespace myengine::game
             case Screen::Results: DrawResults(f); break;
             case Screen::Settings: DrawSettings(f); break;
             case Screen::Training: DrawTraining(f); break;
+            case Screen::Garage: DrawGarage(f); break;
             }
         }
 
@@ -442,6 +454,10 @@ namespace myengine::game
             FillRect(f, {window.x * 0.5f - 110.0f, window.y * 0.5f + 40.0f, 220.0f * alpha, 4.0f}, style::kAccent.Faded(alpha));
             f.SetSpace(Space::Menu);
             const bool ready = !svc.sceneReady || svc.sceneReady();
+            if (ready)
+            {
+                PreloadCars();
+            }
             if (ready && screenTime > 0.9f && frames > 4)
             {
                 GoTo(f, Screen::Main);
@@ -455,17 +471,24 @@ namespace myengine::game
             const sys::RlGameStatus& status = System().Status();
             SideShade(f);
             ScreenTitle(f, "MYENGINE", "ROCKET\nARENA", {80.0f, 76.0f}, true);
-            const float versionWidth = Chip(f, {1850.0f, 60.0f}, "V0.1 \xC2\xB7 G1");
+            const float versionWidth = Chip(f, {1850.0f, 60.0f}, std::string("V") + MYENGINE_VERSION_STRING);
             Chip(f, {1850.0f - versionWidth - 12.0f, 60.0f}, "OFFLINE", Icon::WifiOff);
 
             const Id play = HashId("main/play"), training = HashId("main/training"), settingsId = HashId("main/settings"), exit = HashId("main/exit");
-            f.SetDefaultFocus(play);
+            const Id garageId = HashId("main/garage");
+            f.SetDefaultFocus(mainDefaultFocus);
             const bool dialogOpen = askQuit || !errorText.empty();
             Column column({76.0f, 370.0f, style::kMenuButtonWidth, style::kMenuButtonHeight}, style::kMenuButtonStep);
             if (MenuButton(f, play, column.Next(), "PLAY", Icon::Play))
             {
                 playTab = 0;
                 GoTo(f, Screen::Play);
+            }
+            if (MenuButton(f, garageId, column.Next(), "GARAGE", Icon::Car))
+            {
+                mainDefaultFocus = garageId;
+                OpenGarage(f, Screen::Main);
+                return;
             }
             if (MenuButton(f, training, column.Next(), "TRAINING", Icon::Target))
             {
@@ -487,6 +510,41 @@ namespace myengine::game
             }
             Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::Enter, Glyph::None, "Confirm"}, {Glyph::Esc, Glyph::PadB, "Back"}});
             (void)status;
+            // the nickname of the player (the Steam profile, G1n), top right
+            {
+                const std::string nick = settings.PlayerName();
+                const float width = 96.0f + TextWidth(f, FontStyle::Bold, 24.0f, nick);
+                const Rect chip{1840.0f - width, 112.0f, width, 54.0f};
+                Parallelogram(f, chip, style::kNavySolid.Faded(0.9f));
+                IconGlyph(f, Icon::Person, 24.0f, {chip.x + 44.0f, chip.y + 27.0f}, style::kText);
+                TextIn(f, FontStyle::Bold, 24.0f, {chip.x + 72.0f, chip.y, chip.w - 72.0f, chip.h}, style::kText, nick);
+            }
+            // the car of the player, lower right under the podium
+            if (const game::RlCarDef* car = game::Cars().FindOrDefault(settings.car))
+            {
+                const Rect plate{1380.0f, 876.0f, 430.0f, 84.0f};
+                Parallelogram(f, plate, style::kNavySolid.Faded(0.9f));
+                Text(f, FontStyle::SemiBold, 16.0f, {plate.x + 36.0f, plate.y + 12.0f}, style::kTextDim, "YOUR CAR", Align::Left, 0.1f);
+                const std::string name = Upper(car->name);
+                Text(f, FontStyle::BlackItalic, 34.0f, {plate.x + 36.0f, plate.y + 32.0f}, style::kText, name);
+                Text(f, FontStyle::Bold, 18.0f, {plate.x + 50.0f + TextWidth(f, FontStyle::BlackItalic, 34.0f, name), plate.y + 44.0f}, style::kTextDim, "\xC2\xB7 " + Upper(car->className), Align::Left, 0.08f);
+            }
+            if (!crashChecked)
+            {
+                // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
+                crashChecked = true;
+                if (const auto report = core::crash::TakePending(core::apppaths::UserDataDirectory() / L"crashes"))
+                {
+                    Log("the previous run crashed: " + report->summary + "; the report is " + report->text.generic_u8string());
+                    const std::string folder = core::apppaths::IsShipping() ? std::string("%LOCALAPPDATA%\\RocketArena\\crashes") : report->text.parent_path().generic_u8string();
+                    f.ShowToast("The game crashed last time. Send " + report->text.filename().generic_u8string() + " from " + folder, style::kBad, 12.0f);
+                }
+            }
+            if (carMissingToast)
+            {
+                carMissingToast = false;
+                f.ShowToast("Your car is no longer available \xE2\x80\x94 Pulse selected", style::kMvp, 4.0f);
+            }
             if (askQuit)
             {
                 const DialogResult result = ConfirmDialog(f, HashId("main/quit"), {"QUIT TO DESKTOP?", "Your settings are saved.", "Quit", "Cancel"});
@@ -556,6 +614,22 @@ namespace myengine::game
                 const std::string_view levels[] = {"Rookie", "Pro", "All-star"};
                 settings.play.botLevel =
                     OptionRow(f, HashId("play/difficulty"), {80.0f, 700.0f, 1100.0f, 64.0f}, "Bot difficulty", Span<std::string_view>(levels), settings.play.botLevel);
+                if (const game::RlCarDef* car = game::Cars().FindOrDefault(settings.car))
+                {
+                    const RowFrame row = Row(f, HashId("play/car"), {80.0f, 774.0f, 1100.0f, 64.0f}, "Car");
+                    const Color ink = row.state.focused ? style::kFocusText : style::kText;
+                    const std::string name = Upper(car->name);
+                    Text(f, FontStyle::BlackItalic, 34.0f, {row.content.x, row.content.y + 12.0f}, ink, name);
+                    Text(f, FontStyle::SemiBold, 22.0f, {row.content.x + TextWidth(f, FontStyle::BlackItalic, 34.0f, name) + 18.0f, row.content.y + 20.0f},
+                         row.state.focused ? Color::Hex(0x4a5d85) : style::kTextDim, car->className);
+                    Text(f, FontStyle::SemiBold, 22.0f, {80.0f + 1100.0f - 54.0f, row.content.y + 20.0f}, ink, "Change", Align::Right);
+                    IconGlyph(f, Icon::ChevronRight, 22.0f, {80.0f + 1100.0f - 34.0f, row.content.y + 32.0f}, ink);
+                    if (row.state.activated)
+                    {
+                        OpenGarage(f, Screen::Play);
+                        return;
+                    }
+                }
                 if (ActionButton(f, HashId("play/start"), {1370.0f, 877.0f, 440.0f, 76.0f}, "START MATCH", Icon::Play, true, true))
                 {
                     sys::RlGameMatchSetup setup;
@@ -588,6 +662,25 @@ namespace myengine::game
         void DrawRoom(Frame& f)
         {
             const RlLobbyScreens::Action action = lobby.DrawRoom(f, settings.PlayerName());
+            if (action == RlLobbyScreens::Action::None)
+            {
+                // the car of the player under the invitation: the garage opens over the room, Back returns (G / Y do the same)
+                const game::RlCarDef* car = game::Cars().FindOrDefault(settings.car);
+                const bool free = !lobby.ErrorShown();
+                Panel(f, {1210.0f, 650.0f, 630.0f, 210.0f}, false, true);
+                Text(f, FontStyle::SemiBold, 16.0f, {1290.0f, 670.0f}, style::kTextFaint, "YOUR CAR", Align::Left, 0.1f);
+                if (car != nullptr)
+                {
+                    Image(f, CarImage(*car, 0), {1290.0f, 700.0f, 200.0f, 96.0f});
+                    Text(f, FontStyle::BlackItalic, 34.0f, {1510.0f, 704.0f}, style::kText, Upper(car->name));
+                    Text(f, FontStyle::SemiBold, 18.0f, {1510.0f, 750.0f}, style::kTextDim, Upper(car->className), Align::Left, 0.1f);
+                }
+                if (ActionButton(f, HashId("room/car"), {1290.0f, 800.0f, 400.0f, 48.0f}, "CHANGE CAR", Icon::Car, free) || (free && (f.input().KeyPressed('G') || f.input().Pressed(Nav::ResetRow))))
+                {
+                    OpenGarage(f, Screen::Room);
+                    return;
+                }
+            }
             if (action == RlLobbyScreens::Action::LeaveRoom)
             {
                 GoTo(f, Screen::Play);
@@ -616,6 +709,10 @@ namespace myengine::game
             MenuBackdropOver3D(f);
             const std::string config = LoadingConfigText();
             Text(f, FontStyle::SemiBold, 24.0f, {80.0f, 703.0f}, style::kTextDim, config);
+            if (const game::RlCarDef* car = game::Cars().FindOrDefault(settings.car))
+            {
+                Text(f, FontStyle::SemiBold, 24.0f, {80.0f, 667.0f}, style::kTextDim, "Your car: " + Upper(car->name));
+            }
             Text(f, FontStyle::BlackItalic, 84.0f, {80.0f, 730.0f}, style::kText, "STANDARD ARENA");
             // the tip: {Key} is a key cap
             std::string tip = kTips[tipIndex];
@@ -829,6 +926,304 @@ namespace myengine::game
             }
         }
 
+        // ---- the garage (docs/game/rl-cars.md): the podium of the menu shows the car in focus, the bars compare it with the one that is driven
+
+        Screen garageReturn = Screen::Main;     // where Back goes: the main menu, Play, the room, the lobby
+        std::string garageFocusCar;             // the car in focus (a key); an equip is a separate act
+        int garageTeam = 0;                     // the paint of the preview: 0 blue, 1 orange
+        bool garageDragging = false;
+        std::string garageClickCar;             // the double click that equips with the mouse
+        double garageClickTime = -10.0;
+        bool carsPreloaded = false;
+        bool crashChecked = false;              // the report of a crash of the previous run is looked for once, on the first main menu
+        bool carMissingToast = false;           // the car of the file is not in the data any more: Pulse, said once on the main menu
+        Id mainDefaultFocus = HashId("main/play");
+        std::map<std::string, std::uint64_t> carImages;
+
+        // The profile of a car on a card (the texture id), 0 while it loads
+        std::uint64_t CarImage(const game::RlCarDef& car, const int team)
+        {
+            const std::string& path = car.preview[team];
+            if (path.empty() || !svc.loadImage)
+            {
+                return 0;
+            }
+            std::uint64_t& id = carImages[path];
+            if (id == 0)
+            {
+                id = svc.loadImage(path);
+            }
+            return id;
+        }
+
+        // The meshes, the paint and the previews of every car are loaded behind the boot screen, so that the carousel does not stutter
+        void PreloadCars()
+        {
+            if (carsPreloaded || !svc.preload)
+            {
+                return;
+            }
+            carsPreloaded = true;
+            for (const game::RlCarDef& car : game::Cars().Cars())
+            {
+                svc.preload(car.bodyMesh);
+                if (!car.lightsMesh.empty())
+                {
+                    svc.preload(car.lightsMesh);
+                }
+                for (int team = 0; team < 2; ++team)
+                {
+                    svc.preload(car.material[team]);
+                    std::string texture = car.material[team];   // assets/materials/rl2/<name>.material.json -> assets/textures/rl2/<name>.tga
+                    const std::size_t at = texture.find("/materials/");
+                    const std::size_t end = texture.rfind(".material.json");
+                    if (at != std::string::npos && end != std::string::npos)
+                    {
+                        svc.preload(texture.substr(0, at) + "/textures/" + texture.substr(at + 11, end - at - 11) + ".tga");
+                    }
+                    CarImage(car, team);
+                }
+            }
+        }
+
+        // The car of the settings must be one of the data: a car that was removed is Pulse again (and the main menu says so)
+        void CheckCar()
+        {
+            const game::RlCarCatalog& catalog = game::Cars();
+            if (!catalog.Empty() && catalog.Find(settings.car) == nullptr)
+            {
+                settings.car = catalog.Default() != nullptr ? catalog.Default()->id : std::string("pulse");
+                carMissingToast = true;
+            }
+            System().SetSelectedCar(settings.car);
+        }
+
+        void OpenGarage(Frame& f, const Screen from)
+        {
+            garageReturn = from;
+            garageFocusCar = settings.car;
+            garageDragging = false;
+            garageClickCar.clear();
+            GoTo(f, Screen::Garage);
+        }
+
+        void LeaveGarage(Frame& f)
+        {
+            System().SetGarageView({});
+            garageDragging = false;
+            GoTo(f, garageReturn);
+        }
+
+        std::string ClassLine(const game::RlCarDef& car) const { return Upper(car.className); }
+
+        float GarageChip(Frame& f, const float x, const float y, const std::string& text, const Color fill, const Color ink, const bool frame, const Icon icon = Icon::None)
+        {
+            const float textWidth = TextWidth(f, FontStyle::Bold, 18.0f, text, 0.1f);
+            const float iconWidth = icon != Icon::None ? 26.0f : 0.0f;
+            const Rect box{x, y, textWidth + iconWidth + 26.0f, 32.0f};
+            FillRect(f, box, fill);
+            if (frame)
+            {
+                OutlineRect(f, box, style::kLine, 1.0f);
+            }
+            if (icon != Icon::None)
+            {
+                IconGlyph(f, icon, 16.0f, {box.x + 22.0f, box.y + 16.0f}, ink);
+            }
+            Text(f, FontStyle::Bold, 18.0f, {box.x + 13.0f + iconWidth, box.y + 6.0f}, ink, text, Align::Left, 0.1f);
+            return box.w + 8.0f;
+        }
+
+        void DrawGarage(Frame& f)
+        {
+            sys::RlGameSystem& system = System();
+            const game::RlCarCatalog& catalog = game::Cars();
+            SideShade(f, 900.0f);
+            if (catalog.Empty())
+            {
+                Text(f, FontStyle::BlackItalic, 64.0f, {80.0f, 86.0f}, style::kText, "GARAGE");
+                Text(f, FontStyle::SemiBold, 24.0f, {80.0f, 190.0f}, style::kTextDim, "There are no cars in assets/data/cars.");
+                if (f.input().Pressed(Nav::Back) || f.input().Pressed(Nav::Confirm))
+                {
+                    LeaveGarage(f);
+                }
+                return;
+            }
+            const std::vector<game::RlCarDef>& list = catalog.Cars();
+            const game::RlCarDef* focus = catalog.FindOrDefault(garageFocusCar);
+            const game::RlCarDef* equipped = catalog.FindOrDefault(settings.car);
+            if (focus == nullptr || equipped == nullptr)
+            {
+                LeaveGarage(f);
+                return;
+            }
+            const int count = static_cast<int>(list.size());
+            const char* from = garageReturn == Screen::Play ? "PLAY" : (garageReturn == Screen::Lobby || garageReturn == Screen::Room ? "LOBBY" : "MAIN MENU");
+
+            // ---- the left column
+            Text(f, FontStyle::SemiBold, 24.0f, {80.0f, 58.0f}, style::kTextDim, from);
+            Text(f, FontStyle::BlackItalic, 64.0f, {80.0f, 84.0f}, style::kText, "GARAGE");
+            Text(f, FontStyle::BlackItalic, 96.0f, {80.0f, 182.0f}, style::kText, Upper(focus->name));
+            float chipX = 80.0f;
+            const float chipY = 312.0f;
+            chipX += GarageChip(f, chipX, chipY, ClassLine(*focus), style::kBlue, style::kText, false);
+            chipX += GarageChip(f, chipX, chipY, "HITBOX \xE2\x89\x88 " + Upper(focus->hitboxClass), style::kNavy, style::kTextDim, true);
+            if (focus->id == equipped->id)
+            {
+                GarageChip(f, chipX, chipY, "EQUIPPED", Color::Hex(0x0e3a24), style::kGood, true, Icon::Check);
+            }
+            Text(f, FontStyle::SemiBold, 20.0f, {80.0f, 358.0f}, style::kTextDim, focus->description);
+            const bool compare = focus->id != equipped->id;
+            for (int i = 0; i < static_cast<int>(game::RlCarStat::Count); ++i)
+            {
+                const game::RlCarStat stat = static_cast<game::RlCarStat>(i);
+                const float y = 408.0f + 44.0f * static_cast<float>(i);
+                Text(f, FontStyle::SemiBold, 26.0f, {80.0f, y - 2.0f}, style::kText, game::RlCarStatName(stat));
+                StatBarDesc bar;
+                bar.value = catalog.Segments(*focus, stat);
+                bar.compare = compare ? catalog.Segments(*equipped, stat) : -1;
+                bar.betterIsMore = game::RlCarStatBetterIsMore(stat);
+                StatBar(f, {285.0f, y + 6.0f}, bar);
+            }
+            IconGlyph(f, Icon::Ruler, 18.0f, {90.0f, 646.0f}, style::kTextDim);
+            std::string ruler = Format("Hitbox %.2f \xC3\x97 %.2f \xC3\x97 %.2f m", static_cast<double>(focus->Length()), static_cast<double>(focus->Width()), static_cast<double>(focus->HeightOfHitbox()));
+            Text(f, FontStyle::SemiBold, 20.0f, {108.0f, 634.0f}, style::kTextDim, ruler);
+            if (compare)
+            {
+                Text(f, FontStyle::SemiBold, 20.0f, {108.0f + TextWidth(f, FontStyle::SemiBold, 20.0f, ruler), 634.0f}, style::kAccent, " \xC2\xB7 compared with " + equipped->name);
+            }
+
+            // ---- the team of the preview
+            Text(f, FontStyle::SemiBold, 22.0f, {1560.0f, 74.0f}, style::kTextDim, "Preview team", Align::Right);
+            const std::string_view teams[] = {"BLUE", "ORANGE"};
+            garageTeam = Tabs(f, HashId("garage/team"), {1580.0f, 62.0f, 260.0f, 54.0f}, Span<std::string_view>(teams), garageTeam);
+
+            // ---- the carousel: the cards of 270 x 150 (176 in the focus) in a row, bottom aligned
+            const int visible = std::min(count, 6);
+            const int focusIndex = std::max(catalog.IndexOf(focus->id), 0);
+            int& first = f.IntState(HashId("garage/first"));
+            first = std::clamp(first, 0, std::max(count - visible, 0));
+            if (focusIndex < first)
+            {
+                first = focusIndex;
+            }
+            if (focusIndex >= first + visible)
+            {
+                first = focusIndex - visible + 1;
+            }
+            f.SetDefaultFocus(HashId("garage/car/" + equipped->id));
+            std::string pendingFocus;
+            std::string toEquip;
+            const double now = f.Time();
+            for (int k = 0; k < visible; ++k)
+            {
+                const game::RlCarDef& car = list[static_cast<std::size_t>(first + k)];
+                const bool focused = car.id == focus->id;
+                const Rect rect{70.0f + 286.0f * static_cast<float>(k), focused ? 808.0f : 834.0f, 270.0f, focused ? 176.0f : 150.0f};
+                CarCardDesc card;
+                card.name = car.name;
+                card.klass = car.className;
+                card.image = CarImage(car, 0);
+                card.equipped = car.id == equipped->id;
+                const Id id = HashId("garage/car/" + car.id);
+                std::string upperName = Upper(car.name);
+                std::string upperClass = ClassLine(car);
+                card.name = upperName;
+                card.klass = upperClass;
+                const bool chosen = CarCard(f, id, rect, card);
+                if (f.Focus() == id)
+                {
+                    pendingFocus = car.id;
+                }
+                if (chosen && car.id != equipped->id)
+                {
+                    const bool byMouse = f.input().MousePressed();
+                    if (!byMouse || (garageClickCar == car.id && now - garageClickTime < 0.45))
+                    {
+                        toEquip = car.id;
+                    }
+                    else
+                    {
+                        garageClickCar = car.id;
+                        garageClickTime = now;
+                    }
+                }
+            }
+            if (count > visible)
+            {
+                if (first > 0)
+                {
+                    IconGlyph(f, Icon::ChevronLeft, 30.0f, {36.0f, 910.0f}, style::kText);
+                }
+                if (first + visible < count)
+                {
+                    IconGlyph(f, Icon::ChevronRight, 30.0f, {1884.0f, 910.0f}, style::kText);
+                }
+            }
+            if (!pendingFocus.empty())
+            {
+                garageFocusCar = pendingFocus;
+            }
+            // the wheel of the mouse turns the carousel
+            if (f.input().Wheel() != 0.0f)
+            {
+                const int step = f.input().Wheel() < 0.0f ? 1 : -1;
+                const int next = std::clamp(focusIndex + step, 0, count - 1);
+                f.SetFocus(HashId("garage/car/" + list[static_cast<std::size_t>(next)].id));
+                garageFocusCar = list[static_cast<std::size_t>(next)].id;
+            }
+            if (!toEquip.empty())
+            {
+                settings.car = toEquip;
+                system.SetSelectedCar(settings.car);
+                Save();
+                const game::RlCarDef* now_equipped = catalog.Find(toEquip);
+                f.ShowToast((now_equipped != nullptr ? now_equipped->name : toEquip) + " equipped", style::kGood);
+                Sound("ui_click");
+            }
+
+            // ---- the car on the podium: drag with the mouse or the right stick turns it by hand
+            const Vec2 mouse = f.ToDesign(f.input().MousePosition());
+            if (f.input().MousePressed())
+            {
+                garageDragging = mouse.x > 700.0f && mouse.y > 130.0f && mouse.y < 790.0f;
+            }
+            if (garageDragging && f.input().MouseDown())
+            {
+                const Vec2 before = f.ToDesign(f.input().PreviousRaw().mousePosition);
+                const float dx = mouse.x - before.x;
+                if (dx != 0.0f)
+                {
+                    system.RotateGarageCar(dx * 0.5f);
+                }
+            }
+            else
+            {
+                garageDragging = false;
+            }
+            const float stick = f.input().Raw().padAxes[2];
+            if (std::fabs(stick) > 0.25f)
+            {
+                system.RotateGarageCar(stick * 140.0f * f.DeltaTime());
+            }
+            sys::RlGarageView view;
+            view.active = true;
+            view.car = garageFocusCar;
+            view.team = garageTeam;
+            system.SetGarageView(view);
+
+            Hints(f, {{Glyph::LeftRight, Glyph::PadA, compare ? "Equip" : "Equipped"}, {Glyph::QE, Glyph::PadLBRB, "Team colour"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+            float hintX = 1840.0f - TextWidth(f, FontStyle::SemiBold, 22.0f, "Rotate") - 14.0f;
+            Text(f, FontStyle::SemiBold, 22.0f, {hintX, 1010.0f}, style::kTextDim, "Rotate");
+            hintX -= 12.0f + TextWidth(f, FontStyle::Bold, 20.0f, "Drag") + 24.0f;
+            KeyCap(f, {hintX, 1006.0f}, "Drag");
+
+            if (f.input().Pressed(Nav::Back))
+            {
+                LeaveGarage(f);
+            }
+        }
+
         // ---- the lobby of a private match
 
         int lobbyEnteredAt = 0;
@@ -862,11 +1257,18 @@ namespace myengine::game
                     const Rect row{r.x + 20.0f, y, r.w - 40.0f, 54.0f};
                     Parallelogram(f, row, slot.you ? style::kNavy3 : style::kNavy2);
                     IconGlyph(f, slot.bot ? Icon::Robot : Icon::Person, 24.0f, {row.x + 34.0f, row.y + 27.0f}, slot.name.empty() ? style::kTextFaint : style::kText);
-                    TextIn(f, FontStyle::Bold, 24.0f, {row.x + 70.0f, row.y, 420.0f, row.h}, slot.name.empty() ? style::kTextFaint : style::kText,
+                    TextIn(f, FontStyle::Bold, 24.0f, {row.x + 70.0f, row.y, 250.0f, row.h}, slot.name.empty() ? style::kTextFaint : style::kText,
                            slot.name.empty() ? "Open slot" : slot.name + (slot.you ? "  (you)" : ""));
+                    if (const game::RlCarDef* slotCar = slot.name.empty() ? nullptr : game::Cars().FindOrDefault(slot.car.empty() ? std::string("pulse") : slot.car))
+                    {
+                        // the car of the slot: its profile, the name and the class
+                        Image(f, CarImage(*slotCar, team), {row.x + 330.0f, row.y + 3.0f, 100.0f, 48.0f});
+                        Text(f, FontStyle::BlackItalic, 26.0f, {row.x + 442.0f, row.y + 4.0f}, style::kText, Upper(slotCar->name));
+                        Text(f, FontStyle::SemiBold, 16.0f, {row.x + 442.0f, row.y + 33.0f}, style::kTextDim, Upper(slotCar->className), Align::Left, 0.1f);
+                    }
                     if (slot.host)
                     {
-                        TextIn(f, FontStyle::Bold, 16.0f, {row.x + row.w - 220.0f, row.y, 100.0f, row.h}, style::kAccent, "HOST", Align::Right);
+                        TextIn(f, FontStyle::Bold, 16.0f, {row.x + row.w - 190.0f, row.y, 100.0f, row.h}, style::kAccent, "HOST", Align::Right);
                     }
                     if (slot.pingMs >= 0)
                     {
@@ -878,6 +1280,16 @@ namespace myengine::game
             }
 
             f.SetDefaultFocus(HashId("lobby/leave"));
+            // Change car under the team of the player: the garage opens over the lobby, Back returns (G / Y do the same)
+            if (status.stage == sys::RlGameStage::Lobby && !lobbyAskLeave)
+            {
+                if (ActionButton(f, HashId("lobby/car"), {80.0f, 300.0f + panelHeight + 26.0f, 400.0f, 72.0f}, "CHANGE CAR", Icon::Car) || f.input().KeyPressed('G') ||
+                    f.input().Pressed(Nav::ResetRow))
+                {
+                    OpenGarage(f, Screen::Lobby);
+                    return;
+                }
+            }
             int humans = 0;
             for (const sys::RlLobbySlot& slot : status.lobby)
             {
@@ -909,7 +1321,7 @@ namespace myengine::game
                 System().LeaveMatch();
                 GoTo(f, Screen::Play);
             }
-            Hints(f, {{Glyph::AllArrows, Glyph::PadA, "Select"}, {Glyph::Esc, Glyph::PadB, "Leave"}});
+            Hints(f, {{Glyph::AllArrows, Glyph::PadA, "Select"}, {Glyph::G, Glyph::PadY, "Garage"}, {Glyph::Esc, Glyph::PadB, "Leave"}});
 
             if (status.stage == sys::RlGameStage::Playing)
             {
@@ -1133,6 +1545,15 @@ namespace myengine::game
                 Parallelogram(f, mvp, style::kMvp);
                 IconGlyph(f, Icon::Star, 24.0f, {mvp.x + 44.0f, mvp.y + 24.0f}, Color::Hex(0x08142c));
                 TextIn(f, FontStyle::ExtraBoldItalic, 26.0f, {mvp.x + 66.0f, mvp.y, mvp.w - 66.0f, mvp.h}, Color::Hex(0x08142c), "MVP \xC2\xB7 " + name);
+            }
+            if (const game::RlCarDef* car = game::Cars().FindOrDefault(system.SelectedCar()))
+            {
+                // the podium shows the car of the winner: its name under the MVP chip
+                if (status.winner >= 0 && !status.hud.players.empty() && status.hud.localPlayer >= 0 && status.hud.localPlayer < static_cast<int>(status.hud.players.size()) &&
+                    status.hud.players[static_cast<std::size_t>(status.hud.localPlayer)].team == status.winner)
+                {
+                    Text(f, FontStyle::ExtraBoldItalic, 26.0f, {1470.0f, 392.0f}, style::kText, Upper(car->name) + " \xC2\xB7 " + Upper(car->className));
+                }
             }
             HudState table = status.hud;
             table.phase = HudPhase::Finished;
@@ -1754,6 +2175,44 @@ namespace myengine::game
             Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::LeftRight, Glyph::None, "Change"}, {Glyph::Esc, Glyph::PadB, "Back"}});
         }
 
+        // The nickname (G1n): with Steam it is the name of the profile and cannot be changed; without it the player types his own, 2..16 characters, kept at once
+        void DrawPlayer(Frame& f)
+        {
+            std::string steam;
+            const bool fromSteam = settings.PlayerNameFromSteam(&steam);
+            f.SetDefaultFocus(HashId("player/name"));
+            Column rows({80.0f, 290.0f, 1000.0f, style::kRowHeight}, 62.0f);
+            const Rect row = rows.Next();
+            if (fromSteam)
+            {
+                ValueRow(f, HashId("player/name"), row, "Player name", steam, true, true);
+                TextIn(f, FontStyle::Bold, 18.0f, {row.x + row.w - 220.0f, row.y, 200.0f, row.h}, style::kAccent, "FROM STEAM", Align::Right, 12.0f, 0.1f);
+                Text(f, FontStyle::SemiBold, 22.0f, {row.x, row.y + row.h + 24.0f}, style::kTextDim, "Your nickname is the name of your Steam profile. Change it in Steam.");
+            }
+            else
+            {
+                if (!nickLoaded)
+                {
+                    nickEdit = rl::FilterNicknameInput(settings.OwnPlayerName());
+                    nickLoaded = true;
+                }
+                if (TextRow(f, HashId("player/name"), row, "Player name", nickEdit, 64))
+                {
+                    nickEdit = rl::FilterNicknameInput(nickEdit);
+                    const std::string kept = rl::TrimNickname(nickEdit);
+                    if (rl::NicknameValid(kept))
+                    {
+                        settings.play.playerName = kept;
+                        System().SetPlayerName(settings.PlayerName());
+                    }
+                }
+                const bool valid = rl::NicknameValid(rl::TrimNickname(nickEdit));
+                Text(f, FontStyle::SemiBold, 22.0f, {row.x, row.y + row.h + 24.0f}, valid ? style::kTextDim : style::kBad,
+                     valid ? std::string("2 to 16 characters: letters (Latin, Cyrillic), digits, space . _ -  Shown in the lobby and in the match.") : std::string("The nickname needs at least 2 characters."));
+            }
+            Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+        }
+
         void DrawSettings(Frame& f)
         {
             const bool cameraTab = tab == 1;
@@ -1769,29 +2228,31 @@ namespace myengine::game
             {
                 Backdrop(f, 0.94f);
             }
-            static const char* const kTitles[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO"};
-            ScreenTitle(f, "SETTINGS", kTitles[std::clamp(tab, 0, 3)]);
-            const std::string_view labels[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO"};
+            static const char* const kTitles[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO", "PLAYER"};
+            ScreenTitle(f, "SETTINGS", kTitles[std::clamp(tab, 0, 4)]);
+            const std::string_view labels[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO", "PLAYER"};
             const bool dialogOpen = rebind.active || askResetControls || askResetTab || videoPending;
             if (!dialogOpen)
             {
-                const int next = Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 700.0f, 54.0f}, Span<std::string_view>(labels), tab);
+                const int next = Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 880.0f, 54.0f}, Span<std::string_view>(labels), tab);
                 if (next != tab)
                 {
                     tab = next;
+                    nickLoaded = false;
                     f.SetFocus(kNoId);
                 }
             }
             else
             {
-                Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 700.0f, 54.0f}, Span<std::string_view>(labels), tab);
+                Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 880.0f, 54.0f}, Span<std::string_view>(labels), tab);
             }
             switch (tab)
             {
             case 0: DrawControls(f); break;
             case 1: DrawCamera(f); break;
             case 2: DrawVideo(f); break;
-            default: DrawAudio(f); break;
+            case 3: DrawAudio(f); break;
+            default: DrawPlayer(f); break;
             }
             if (!dialogOpen && f.input().Pressed(Nav::Back) && !rebind.active)
             {
@@ -1801,6 +2262,7 @@ namespace myengine::game
 
         void LeaveSettings(Frame& f)
         {
+            nickLoaded = false;
             System().SetCameraPreview(false);
             Save();
             System().SaveControls();

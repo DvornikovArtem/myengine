@@ -17,6 +17,7 @@
   include/myengine/core/FileWatcher.h
   include/myengine/core/Logger.h
   include/myengine/core/AppPaths.h
+  include/myengine/core/CrashHandler.h
   include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -76,6 +77,7 @@
   include/myengine/audio/WavFile.h
   include/myengine/fx/ParticleEffect.h
   include/myengine/fx/ParticleSystem.h
+  include/myengine/game/RlCars.h
   include/myengine/game/RlFeedback.h
   include/myengine/game/RlGameFlow.h
   include/myengine/game/RlGameSettings.h
@@ -132,6 +134,7 @@ set(ENGINE_SOURCES
   src/assistant/Markdown.cpp
   src/config/AppConfig.cpp
   src/core/AppPaths.cpp
+  src/core/CrashHandler.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/FramePacer.cpp
@@ -178,6 +181,7 @@ set(ENGINE_SOURCES
   src/audio/XAudio2Backend.cpp
   src/fx/ParticleEffect.cpp
   src/fx/ParticleSystem.cpp
+  src/game/RlCars.cpp
   src/game/RlFeedback.cpp
   src/game/RlGameFlow.cpp
   src/game/RlLobbyScreens.cpp
@@ -293,6 +297,7 @@ add_library(myengine_engine STATIC ${ENGINE_HEADERS} ${ENGINE_SOURCES})
 target_include_directories(myengine_engine
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_BINARY_DIR}/generated
   PRIVATE
     ${IMGUI_ROOT}/Include
     ${IMGUI_ROOT}/Include/imgui

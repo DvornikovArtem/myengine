@@ -6,6 +6,7 @@
 #pragma once
 
 #include <rl/RlArena.h>
+#include <rl/RlCars.h>
 #include <rl/RlTuning.h>
 #include <rl/RlTypes.h>
 
@@ -18,13 +19,16 @@ namespace rl
     class RlSim
     {
     public:
-        RlSim(const RlTuning& tuning, int carCount);
+        // `variants` (carCount entries, or null): the car of every slot as RlCarVariant of the catalog; null is the car of the tuning for all
+        RlSim(const RlTuning& tuning, int carCount, const RlCarVariant* variants = nullptr);
         ~RlSim();
         RlSim(const RlSim&) = delete;
         RlSim& operator=(const RlSim&) = delete;
 
         int CarCount() const;
         const RlTuning& Tuning() const;
+        // The numbers of the car of a slot: the car of the tuning with the variant of the slot applied
+        const RlCarTuning& CarTuning(int index) const;
         const RlArena& Arena() const;
         // Takes new numbers while the world runs (the RL Tuning window, a reloaded rl_tuning.json): everything the car, the ball and the
         // match read each tick changes at once; what is built into the bodies (the arena, the hitbox, its centre of mass, the mass) keeps
@@ -40,6 +44,9 @@ namespace rl
         void SetCarTeam(int index, int team);
         // Where a demolished car comes back (ResetCar sets it to the spot the car was reset to).
         void SetRespawnPoint(int index, float x, float z, float yaw);
+        // Demolishes a car as an enemy at full speed would (the car is parked until its respawn delay is over, then it comes back at its respawn point):
+        // the tests and the debug commands of the game use it.
+        void DemolishCar(int index);
         // Puts a car at any pose (tests, kick-off spots, flip resets); the car keeps its boost and its jump state.
         void SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
 

@@ -2,6 +2,7 @@
 
 #include <rl/net/LobbyLan.h>
 
+#include <rl/RlName.h>
 #include <rl/RlTypes.h>
 #include <rl/net/NetReliable.h>
 
@@ -48,7 +49,7 @@ namespace rl::net
         constexpr double kEntryLifetime = 4.0;
         constexpr double kPingInterval = 2.0;
         constexpr double kKickDelay = 0.6;
-        constexpr size_t kMaxName = 24;
+        constexpr size_t kMaxName = kPlayerNameBytes;
 
         class Writer
         {
@@ -73,9 +74,9 @@ namespace rl::net
             }
             void Str(const std::string& text)
             {
-                const size_t length = std::min(text.size(), kMaxName);
-                U8(static_cast<uint8_t>(length));
-                out_.insert(out_.end(), text.begin(), text.begin() + static_cast<std::ptrdiff_t>(length));
+                const std::string clean = SanitizePlayerName(text);  // the names that leave this machine are the ones the kit can draw
+                U8(static_cast<uint8_t>(clean.size()));
+                out_.insert(out_.end(), clean.begin(), clean.end());
             }
 
         private:
@@ -124,7 +125,7 @@ namespace rl::net
                 }
                 std::string text(reinterpret_cast<const char*>(data_ + pos_), length);
                 pos_ += length;
-                return text;
+                return SanitizePlayerName(text);  // and the ones that come in are cleaned as well
             }
 
         private:
@@ -159,7 +160,7 @@ namespace rl::net
                 {
                     options_.makeMatchTransport = [](const NetSimParams& sim) { return MakeUdpTransport(sim); };
                 }
-                name_ = options_.name.empty() ? ComputerName() : options_.name.substr(0, kMaxName);
+                name_ = options_.name.empty() ? ComputerName() : SanitizePlayerName(options_.name);
             }
 
             ~LanLobbyService() override { Leave(); }
@@ -216,21 +217,21 @@ namespace rl::net
                 create_.maxPlayers = std::clamp(create_.maxPlayers, 2, kMaxCars);
                 if (!create_.hostName.empty())
                 {
-                    name_ = create_.hostName.substr(0, kMaxName);
+                    name_ = SanitizePlayerName(create_.hostName);
                 }
 
                 lobbyTransport_ = MakeReliableTransport(options_.makeLink(), options_.seed);
                 if (!lobbyTransport_->Listen(create_.lobbyPort, error))
                 {
                     lobbyTransport_.reset();
-                    return Fail("cannot open the lobby port " + std::to_string(create_.lobbyPort) + ": " + error, true);
+                    return Fail("Cannot create the lobby. " + error, true);
                 }
                 beaconLink_ = options_.makeLink();
                 if (!beaconLink_->Bind(0, error))
                 {
                     lobbyTransport_.reset();
                     beaconLink_.reset();
-                    return Fail("cannot open the beacon: " + error, true);
+                    return Fail("Cannot announce the lobby on the network. " + error, true);
                 }
 
                 hosting_ = true;
@@ -316,7 +317,7 @@ namespace rl::net
                     if (!scanLink_->BindShared(kLanBeaconPort, error))
                     {
                         scanLink_.reset();
-                        lastError_ = "cannot listen for lobbies: " + error;
+                        lastError_ = "Cannot look for lobbies. " + error;
                         PushEvent(LobbyEventKind::Error, LobbyMember{}, lastError_);
                         return;
                     }
@@ -390,7 +391,7 @@ namespace rl::net
 
             void SetLocalName(const std::string& name) override
             {
-                name_ = name.substr(0, kMaxName);
+                name_ = SanitizePlayerName(name);
                 if (guesting_ && state_ == LobbyState::Joined)
                 {
                     writer_.clear();

@@ -66,7 +66,7 @@ namespace myengine::game
         int hostPort = 27015;
         std::string joinAddress;      // the last typed address
         std::vector<std::string> recent;  // the addresses that worked, the newest first, at most 5
-        std::string playerName;       // empty: the name of the Windows user
+        std::string playerName;       // the typed nickname (Settings, Player; used when there is no Steam name), 2..16 characters; empty: the Windows user
     };
 
     struct RlGameSettings
@@ -76,6 +76,9 @@ namespace myengine::game
         RlAudioSettings audio;
         RlPlaySettings play;
         bool invertPitch = false;
+        // The car of the garage (assets/data/cars/<id>.json, docs/game/rl-cars.md): the key of the car the player drives; a key that is not in the data of
+        // the game (the car was removed) is put back to "pulse" by the garage, not here
+        std::string car = "pulse";
 
         // Returns false (the settings stay at the defaults) when the file exists but cannot be read; a missing file is fine. `error` says why.
         bool Load(const std::filesystem::path& file, std::string* error = nullptr);
@@ -86,7 +89,13 @@ namespace myengine::game
 
         // %LOCALAPPDATA%\RocketArena\game_settings.json (shipping) or %APPDATA%\myengine\game_settings.json
         static std::filesystem::path DefaultPath();
-        // The name of the player for the table: PlayerName, else the user of Windows, else "Player"
+        // The nickname of the player everywhere (lobby, slot, table, feed, banners, menu): MYENGINE_PLAYER_NAME (tests), else the name of the Steam profile,
+        // else the typed play.playerName, else the user of Windows, else "Player"; always cleaned by rl::SanitizePlayerName
         std::string PlayerName() const;
+        // true when the nickname is the name of the Steam profile (then it cannot be edited); `name` gets it
+        bool PlayerNameFromSteam(std::string* name = nullptr) const;
+        // The nickname without Steam: the typed one (play.playerName), else the Windows user, else "Player"
+        std::string OwnPlayerName() const;
+        static std::string WindowsUserName();
     };
 }

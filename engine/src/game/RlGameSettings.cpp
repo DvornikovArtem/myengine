@@ -10,6 +10,9 @@
 
 #include <myengine/core/AppPaths.h>
 
+#include <rl/RlName.h>
+#include <rl/net/LobbySteam.h>
+
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -133,8 +136,23 @@ namespace myengine::game
         {
             play.recent.resize(5);
         }
-        play.playerName = TruncateUtf8(play.playerName, 15);
+        // the typed nickname: 2..16 characters of the allowed ones, the spaces at the ends cut; anything else is the default (the Windows user)
+        play.playerName = rl::TrimNickname(rl::FilterNicknameInput(play.playerName));
+        if (!rl::NicknameValid(play.playerName))
+        {
+            play.playerName.clear();
+        }
         play.joinAddress = TruncateUtf8(play.joinAddress, 40);
+        // a key of a car is lower case letters, digits and "_" / "-": anything else is not a car of ours
+        std::string key;
+        for (const char c : car)
+        {
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
+            {
+                key += c;
+            }
+        }
+        car = key.empty() ? std::string("pulse") : key.substr(0, 32);
     }
 
     std::string RlGameSettings::ToJson() const
@@ -180,6 +198,7 @@ namespace myengine::game
         p["playerName"] = play.playerName;
         root["play"] = p;
         root["invertPitch"] = invertPitch;
+        root["car"] = car;
         return root.dump(2) + "\n";
     }
 
@@ -238,6 +257,7 @@ namespace myengine::game
             Read(*it, "playerName", loaded.play.playerName);
         }
         Read(root, "invertPitch", loaded.invertPitch);
+        Read(root, "car", loaded.car);
         loaded.Clamp();
         *this = loaded;
         return true;
@@ -308,15 +328,53 @@ namespace myengine::game
 
     std::string RlGameSettings::PlayerName() const
     {
+        // MYENGINE_PLAYER_NAME: for tests and for two copies of the game on one machine (both would have the same Steam profile)
+        wchar_t fromEnvironment[64]{};
+        const DWORD environmentLength = GetEnvironmentVariableW(L"MYENGINE_PLAYER_NAME", fromEnvironment, static_cast<DWORD>(std::size(fromEnvironment)));
+        if (environmentLength > 0 && environmentLength < std::size(fromEnvironment))
+        {
+            const std::string name = rl::SanitizePlayerName(Utf8FromWide(std::wstring(fromEnvironment, environmentLength)));
+            if (!name.empty())
+            {
+                return name;
+            }
+        }
+        // the nickname is the name of the Steam profile when there is one (G1n)
+        std::string steam;
+        if (rl::net::SteamPersonaName(steam))
+        {
+            return steam;
+        }
+        return OwnPlayerName();
+    }
+
+    bool RlGameSettings::PlayerNameFromSteam(std::string* name) const
+    {
+        std::string steam;
+        const bool available = rl::net::SteamPersonaName(steam);
+        if (available && name != nullptr)
+        {
+            *name = steam;
+        }
+        return available;
+    }
+
+    std::string RlGameSettings::OwnPlayerName() const
+    {
         if (!play.playerName.empty())
         {
-            return play.playerName;
+            return rl::SanitizePlayerName(play.playerName);
         }
+        return WindowsUserName();
+    }
+
+    std::string RlGameSettings::WindowsUserName()
+    {
         wchar_t buffer[64]{};
         DWORD length = static_cast<DWORD>(std::size(buffer));
         if (GetUserNameW(buffer, &length) != FALSE && length > 1)
         {
-            const std::string name = TruncateUtf8(Utf8FromWide(std::wstring(buffer, length - 1)), 15);
+            const std::string name = rl::SanitizePlayerName(Utf8FromWide(std::wstring(buffer, length - 1)));
             if (!name.empty())
             {
                 return name;
