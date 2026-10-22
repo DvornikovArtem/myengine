@@ -76,12 +76,23 @@ option(MYENGINE_STEAM "Build the Steam lobby and transport (needs the Steamworks
 set(STEAMWORKS_SDK_DIR "" CACHE PATH "Folder of the unpacked Steamworks SDK (the one with public/ and redistributable_bin/)")
 option(MYENGINE_STEAM_CHECK "Compile the Steam sources against game/rl/steam_mock (syntax check only, nothing is linked)" OFF)
 
+# Next to the exe of <target>: steam_api64.dll and steam_appid.txt (480). A no-op without MYENGINE_STEAM.
+function(myengine_rl_steam_runtime target)
+  if(MYENGINE_STEAM)
+    file(WRITE "${CMAKE_BINARY_DIR}/steam_appid.txt" "480\n")
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${STEAMWORKS_SDK_DIR}/redistributable_bin/win64/steam_api64.dll" "${CMAKE_BINARY_DIR}/steam_appid.txt" "$<TARGET_FILE_DIR:${target}>"
+      VERBATIM)
+  endif()
+endfunction()
+
 if(MYENGINE_STEAM)
   if(NOT EXISTS "${STEAMWORKS_SDK_DIR}/public/steam/steam_api.h")
     message(FATAL_ERROR "MYENGINE_STEAM is ON but STEAMWORKS_SDK_DIR ('${STEAMWORKS_SDK_DIR}') has no public/steam/steam_api.h. See docs/game/steam-setup.md")
   endif()
   target_sources(myengine_rl PRIVATE ${RL_STEAM_SOURCES})
-  target_include_directories(myengine_rl PRIVATE "${STEAMWORKS_SDK_DIR}/public")
+  # SYSTEM: the headers of Valve are not ours (strncpy, a BOM in some of them): /W4 does not apply
+  target_include_directories(myengine_rl SYSTEM PRIVATE "${STEAMWORKS_SDK_DIR}/public")
   target_compile_definitions(myengine_rl PUBLIC MYENGINE_STEAM=1)
   target_link_libraries(myengine_rl PUBLIC "${STEAMWORKS_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
 elseif(MYENGINE_STEAM_CHECK)

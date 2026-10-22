@@ -1,6 +1,6 @@
-# Steam для Rocket Arena: что сделать Артёму (G6a)
+# Steam для Rocket Arena (G6a, G6b)
 
-Лобби и сетевой транспорт Steam написаны (`game/rl/src/net/steam/`), но **ни разу не собирались с настоящим SDK**: SDK скачивает только владелец аккаунта. Без него сборка идёт как раньше (офлайн, UDP по LAN), игра про Steam просто говорит «в этой сборке Steam нет». Ниже — как включить Steam и проверить вдвоём. Архитектура: `docs/game/rl-online.md` §7.4–7.5, сервис лобби: `docs/game/rl-lobby.md`.
+Лобби и сетевой транспорт Steam (`game/rl/src/net/steam/`) собраны и проверены с настоящим Steamworks SDK 1.65 на одном аккаунте (G6b, раздел 6). Не проверено: игра двух аккаунтов (раздел 3) и оверлей приглашений в окне движка. SDK скачивает владелец аккаунта и в репозиторий не кладёт. Без SDK сборка идёт как раньше (офлайн, UDP по LAN), игра про Steam просто говорит «в этой сборке Steam нет». Ниже — как включить Steam и проверить вдвоём. Архитектура: `docs/game/rl-online.md` §7.4–7.5, сервис лобби: `docs/game/rl-lobby.md`.
 
 ## 1. Скачать SDK
 
@@ -17,14 +17,11 @@ cmake --build build --config RelWithDebInfo --target myengine
 
 `MYENGINE_STEAM` по умолчанию `OFF`. Если папка SDK указана неверно, CMake остановится с понятным сообщением. При `ON` в `myengine_rl` добавляются `SteamLobbyService.cpp` и `SteamTransport.cpp`, определяется макрос `MYENGINE_STEAM`, линкуется `steam_api64.lib`.
 
-**Ожидаемо: при первой сборке может понадобиться пара мелких правок** (имя метода, тип в сигнатуре): код писали по документации Steamworks, а не по заголовкам SDK. Проверка без SDK уже есть: `-DMYENGINE_STEAM_CHECK=ON` собирает те же файлы против `game/rl/steam_mock/steam/steam_api.h` (мой набросок нужных деклараций; без SDK он ловит опечатки). Если настоящий SDK расходится с наброском, правится сборка с `MYENGINE_STEAM=ON`, а потом исправляется `steam_mock`.
+Путь к SDK может содержать кириллицу и пробелы (проверено в G6b: `C:/Users/пк/Documents/GitHub/sdk`, CMake и линковщик справились; слэши прямые). Ни одного предупреждения: заголовки SDK подключаются как `SYSTEM` (иначе `/W4` ругается на `strncpy` и BOM в их файлах).
 
-В папку рядом с `myengine.exe` положить:
+При `MYENGINE_STEAM=ON` `steam_api64.lib` линкуется во всё, что использует `myengine_rl`: **каждому такому exe (игра, редактор, тесты `rl_*`) нужны рядом `steam_api64.dll` и `steam_appid.txt` с одной строкой `480`**, иначе он не запустится. CMake кладёт их сам после сборки (`myengine_rl_steam_runtime` в `game/rl/CMakeLists.txt`: цель `myengine` и все исполняемые файлы `tests/`). Для дистрибутива (`dist/`) их кладёт `tools/package_game.ps1 -WithSteam -SteamSdk C:\sdk\steamworks_sdk` и **сам собирает shipping-сборку с `MYENGINE_STEAM=ON`** (в G6a скрипт только копировал dll в exe без Steam-кода); см. `docs/game/packaging.md`.
 
-- `steam_api64.dll` (из `redistributable_bin\win64\` SDK);
-- `steam_appid.txt` с одной строкой `480`.
-
-Для дистрибутива (`dist/`) то же делает `tools/package_game.ps1 -WithSteam -SteamSdk C:\sdk\steamworks_sdk` (см. `docs/game/packaging.md`).
+**Проверка без SDK.** `-DMYENGINE_STEAM_CHECK=ON` собирает те же файлы против `game/rl/steam_mock/steam/steam_api.h` (набросок нужных деклараций, сверенный в G6b с заголовками SDK 1.65). Он ловит опечатки и неверные сигнатуры в нашем коде; если код начнёт вызывать что-то новое, добавь объявление в мок, сверившись с `isteam*.h` настоящего SDK.
 
 ## 3. Проверить вдвоём
 
@@ -44,7 +41,7 @@ cmake --build build --config RelWithDebInfo --target myengine
 | Симптом | Причина |
 | --- | --- |
 | «Steam is not available: SteamAPI_Init failed» | не запущен клиент Steam; нет `steam_appid.txt` рядом с exe (в текущем каталоге); игра и клиент Steam запущены от разных пользователей ОС |
-| Лобби создаётся, друг его не видит в списке | лобби только для друзей; друг должен быть в друзьях Steam; список обновляется кнопкой, не по таймеру |
+| Лобби создаётся, друг его не видит в списке | лобби только для друзей; друг должен быть в друзьях Steam и **в игре** (список строится по присутствию друзей: Steam не отдаёт лобби «только для друзей» в `RequestLobbyList`); присутствие обновляется за 1–3 с; список обновляется кнопкой, не по таймеру |
 | «cannot enter the lobby» | лобби заполнено, закрыто (матч уже идёт) или хост вышел |
 | Приглашение приняли, но запустился Spacewar, а не наша игра | для AppID 480 Steam запускает приложение из библиотеки (Spacewar). Нашу игру запускать самому и принимать приглашение внутри неё (событие `InviteReceived` → `Join`); `+connect_lobby` в командной строке заработает, если exe добавлен в Steam как «не-Steam игра» (Игры → Добавить стороннюю игру) |
 | Матч не стартует, `Welcome` не приходит | хост принимает сессии только от участников своего лобби; сеть Valve стартует лениво и первые секунды может быть недоступна (`InitRelayNetworkAccess` вызывается при Listen/Connect) |
@@ -56,4 +53,39 @@ cmake --build build --config RelWithDebInfo --target myengine
 - Публичные лобби и поиск незнакомых игроков не делаются (общий AppID).
 - Авторизация по тикетам Steam (`GetAuthSessionTicket`) не используется: хост принимает сессии только от участников своего лобби, друг ли это, проверяет Steam.
 - Именованное лобби «пароль» нет: доступ — приглашение друга.
+- Список лобби строится по присутствию друзей (`ISteamFriends::GetFriendGamePlayed` → `FriendGameInfo_t::m_steamIDLobby`), потому что лобби «только для друзей» в `RequestLobbyList` не попадает (комментарий к `k_ELobbyTypeFriendsOnly` в `isteammatchmaking.h`: «not in public lobby list»). Публичный поиск (`RequestLobbyList` с фильтром `rl_game=1`) оставлен в коде, но лобби с `friendsOnly=false` экран не создаёт.
 - `+connect_lobby` разбирает функция `FindConnectLobbyInCommandLine`, но сам `main`/`RlGameSystem` её пока не вызывают: подключить в G1-flow (экран Private match) вместе с вызовом `Join`.
+
+## 6. Что проверено с настоящим SDK на одном аккаунте (G6b)
+
+Проверка — `tests/rl/RlSteamSmoke.cpp`, цель `myengine_rl_steam_smoke` (только при `MYENGINE_STEAM=ON`, **в `ctest` не входит**: нужен запущенный и залогиненный клиент Steam). Запуск из папки exe (dll и `steam_appid.txt` рядом лежат после сборки):
+
+```bash
+build/tests/RelWithDebInfo/myengine_rl_steam_smoke.exe
+```
+
+Код возврата: `0` всё прошло, `1` что-то не прошло, `77` пропущено (клиент Steam не запущен; проверка сама его не запускает). Она работает только на этом ПК и в своём аккаунте: ничего не отправляет друзьям, не пишет в чат, не меняет профиль, создаёт одно лобби «только для друзей» и закрывает его.
+
+Результат на ПК Артёма (Steam-клиент запущен, один аккаунт), 41 проверка, все прошли:
+
+| Что | Итог |
+| --- | --- |
+| `SteamAPI_Init` с AppID 480 (`steam_appid.txt`) | успех за ~0,3 с; `SteamUtils()->GetAppID() == 480`, пользователь залогинен, Steam id валиден |
+| Сеть Valve (`InitRelayNetworkAccess`) | статус `Current` через 6–8 с после запуска процесса (сеть стартует лениво); «24 valid relays» |
+| `CreateLobby` «только для друзей» | лобби за ~0,35 с; данные `rl_game`, `rl_version`, `mode`, `max`, `host_name`, `host_id`, `state=open` читаются обратно; один участник; владелец — мы |
+| Данные участника `ready` | `SetReady(true)` возвращается колбэком `LobbyDataUpdate_t` на свою же правку |
+| Список лобби | **`RequestLobbyList` своё лобби «только для друзей» не возвращает** (ни за 6 попыток по 2 с) — так задумано Steam. Через присутствие (`GetFriendGamePlayed` для себя и друзей) своё лобби появляется в `Lobbies()` через 2–3 с |
+| Некорректный id, вход при уже открытом лобби | отказы с текстом |
+| `StartMatch` в одиночку | `state=match`, `start=1` в данных лобби, `StartInfo` хоста, `CreateMatchTransport` даёт транспорт Steam |
+| Выход, повторный запуск | `Leave()` → `Idle`; кэш клиента ещё ~3 с показывает 1 участника в покинутом лобби, из списка оно исчезает; после уничтожения последнего сервиса (`SteamAPI_Shutdown`) новый сервис снова поднимает `SteamAPI_Init` |
+| `SteamTransport` | `Listen` и отказ на мусорный адрес работают, `Poll` без пиров пуст; **соединение с настоящим пиром не проверялось** (два экземпляра в одном процессе делят очередь `ReceiveMessagesOnChannel`, а на себя `ISteamNetworkingMessages` писать не заставляем) |
+
+**Исправлено относительно G6a** (код писали по документации, SDK расходился в одном месте и ещё в сборке):
+
+- Список лобби: см. выше. `RefreshList` теперь запрашивает и публичный поиск, и лобби друзей (`ScanFriendLobbies`, `RequestLobbyData`, пересборка списка по `LobbyDataUpdate_t`). В G6a список был бы всегда пуст.
+- Сравнение с `k_EChatRoomEnterResponseSuccess` вместо числа 1.
+- Заголовки SDK как `SYSTEM`; `steam_api64.dll` и `steam_appid.txt` рядом с каждым exe (CMake); `package_game.ps1 -WithSteam` собирает exe с `MYENGINE_STEAM=ON`.
+- `steam_mock` приведён в соответствие (`FriendGameInfo_t`, `CGameID`, `RequestLobbyData`, `GetFriendGamePlayed`, `EChatRoomEnterResponse`).
+- Все остальные вызовы (`CCallback`, `CCallResult`, `ISteamNetworkingMessages`, `SteamNetworkingIdentity`, `SteamNetConnectionRealTimeStatus_t`) совпали с заголовками SDK 1.65 без правок.
+
+**Оверлей** (`ActivateGameOverlayInviteDialog`, Shift+Tab) в этой проверке не смотрели: у консольной проверки нет окна. Его надо проверить в окне движка (раздел 3, пункт 3).

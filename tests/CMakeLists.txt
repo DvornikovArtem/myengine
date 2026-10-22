@@ -419,6 +419,28 @@ set_property(TARGET myengine_rl_net_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_net COMMAND myengine_rl_net_tests)
 set_tests_properties(rl_net PROPERTIES TIMEOUT 600)
 
+# G6b: the manual check of the Steam code against the real SDK (needs the Steam client running; not in ctest, exit code 77 = skipped)
+if(MYENGINE_STEAM)
+  add_executable(myengine_rl_steam_smoke
+    rl/RlSteamSmoke.cpp)
+
+  target_link_libraries(myengine_rl_steam_smoke PRIVATE myengine_rl)
+  target_include_directories(myengine_rl_steam_smoke SYSTEM PRIVATE "${STEAMWORKS_SDK_DIR}/public")
+  myengine_apply_compiler_options(myengine_rl_steam_smoke)
+  set_property(TARGET myengine_rl_steam_smoke PROPERTY FOLDER "Tests")
+endif()
+
+# A build with Steam links steam_api64.lib into everything that uses myengine_rl: every test exe needs steam_api64.dll next to it to start
+if(MYENGINE_STEAM)
+  get_property(myengine_test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(test_target IN LISTS myengine_test_targets)
+    get_target_property(test_target_type ${test_target} TYPE)
+    if(test_target_type STREQUAL "EXECUTABLE")
+      myengine_rl_steam_runtime(${test_target})
+    endif()
+  endforeach()
+endif()
+
 # An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
 if(MYENGINE_ASAN)
   get_property(myengine_all_tests DIRECTORY PROPERTY TESTS)

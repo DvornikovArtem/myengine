@@ -1,8 +1,12 @@
 // SteamLobbyService.cpp
 // The Steam lobby (docs/game/rl-online.md 7.4) written from the Steamworks documentation: ISteamMatchmaking (CreateLobby, JoinLobby, RequestLobbyList,
 // lobby data and member data), ISteamFriends (the invite dialog of the overlay), the callbacks GameLobbyJoinRequested_t, LobbyChatUpdate_t,
-// LobbyDataUpdate_t. It has never been linked against the real SDK; the first build with MYENGINE_STEAM=ON may need small fixes
-// (docs/game/steam-setup.md says how to try it with two accounts).
+// LobbyDataUpdate_t. Built and run against the real SDK 1.65 (G6b: tests/rl/RlSteamSmoke.cpp, one account); the play of two accounts is
+// described in docs/game/steam-setup.md.
+//
+// The lobby is "friends only", and Steam does not put such a lobby into the result of RequestLobbyList (only a public one gets there). Friends find
+// it through the presence: ISteamFriends::GetFriendGamePlayed gives the lobby a friend is in (FriendGameInfo_t::m_steamIDLobby); RefreshList reads
+// the data of those lobbies (RequestLobbyData) and keeps the ones with rl_game=1.
 //
 // What is in the lobby data (set by the owner): rl_game=1 (our label, the list filters by it), rl_version, mode, max, host_name, host_id (the Steam id
 // of the host of the match, fixed when the lobby is made: the owner of a Steam lobby can change when he leaves), state (open | match), start (a counter
@@ -192,6 +196,7 @@ namespace rl::net
                 matchmaking->AddRequestLobbyListResultCountFilter(50);
                 const SteamAPICall_t call = matchmaking->RequestLobbyList();
                 callbacks_->matchList.Set(call, this, &SteamLobbyService::OnLobbyList);
+                ScanFriendLobbies();
             }
 
             const std::vector<LobbyInfo>& Lobbies() const override { return lobbies_; }
@@ -242,6 +247,8 @@ namespace rl::net
                 hostId_ = 0;
                 members_.clear();
                 lobbies_.clear();
+                publicLobbies_.clear();
+                friendLobbies_.clear();
                 state_ = LobbyState::Idle;
             }
 
@@ -328,8 +335,7 @@ namespace rl::net
 
             void OnLobbyEntered(LobbyEnter_t* entered, bool ioFailure)
             {
-                // k_EChatRoomEnterResponseSuccess is 1
-                if (ioFailure || entered->m_EChatRoomEnterResponse != 1)
+                if (ioFailure || entered->m_EChatRoomEnterResponse != k_EChatRoomEnterResponseSuccess)
                 {
                     Fail("cannot enter the lobby (it may be full, closed or gone)");
                     return;
@@ -353,42 +359,104 @@ namespace rl::net
                 PushEvent(LobbyEventKind::Joined, LobbyMember{}, current_.hostName);
             }
 
+            // One line of the list from the data of a lobby; false if the data is not there yet or the lobby is not ours (rl_game=1)
+            bool BuildInfo(const CSteamID& id, LobbyInfo& info) const
+            {
+                ISteamMatchmaking* matchmaking = SteamMatchmaking();
+                if (DataOf(matchmaking, id, "rl_game") != "1")
+                {
+                    return false;
+                }
+                info = LobbyInfo{};
+                info.id = IdToString(id);
+                info.hostName = DataOf(matchmaking, id, "host_name");
+                info.mode = IntOf(DataOf(matchmaking, id, "mode"), 2);
+                info.maxPlayers = IntOf(DataOf(matchmaking, id, "max"), 8);
+                info.players = matchmaking->GetNumLobbyMembers(id);
+                info.pingMs = -1;  // Steam does not tell the ping to a lobby before one has entered it
+                info.joinable = true;
+                if (IntOf(DataOf(matchmaking, id, "rl_version"), -1) != kLobbyProtocolVersion)
+                {
+                    info.joinable = false;
+                    info.note = "other version";
+                }
+                else if (DataOf(matchmaking, id, "state") == "match")
+                {
+                    info.joinable = false;
+                    info.note = "match in progress";
+                }
+                else if (info.players >= info.maxPlayers)
+                {
+                    info.joinable = false;
+                    info.note = "full";
+                }
+                return true;
+            }
+
             void OnLobbyList(LobbyMatchList_t* list, bool ioFailure)
             {
-                lobbies_.clear();
+                publicLobbies_.clear();
                 if (!ioFailure)
                 {
-                    ISteamMatchmaking* matchmaking = SteamMatchmaking();
                     for (uint32 i = 0; i < list->m_nLobbiesMatching; ++i)
                     {
-                        const CSteamID id = matchmaking->GetLobbyByIndex(static_cast<int>(i));
                         LobbyInfo info;
-                        info.id = IdToString(id);
-                        info.hostName = DataOf(matchmaking, id, "host_name");
-                        info.mode = IntOf(DataOf(matchmaking, id, "mode"), 2);
-                        info.maxPlayers = IntOf(DataOf(matchmaking, id, "max"), 8);
-                        info.players = matchmaking->GetNumLobbyMembers(id);
-                        info.pingMs = -1;  // Steam does not tell the ping to a lobby before one has entered it
-                        info.joinable = true;
-                        if (IntOf(DataOf(matchmaking, id, "rl_version"), -1) != kLobbyProtocolVersion)
+                        if (BuildInfo(SteamMatchmaking()->GetLobbyByIndex(static_cast<int>(i)), info))
                         {
-                            info.joinable = false;
-                            info.note = "other version";
+                            publicLobbies_.push_back(std::move(info));
                         }
-                        else if (DataOf(matchmaking, id, "state") == "match")
-                        {
-                            info.joinable = false;
-                            info.note = "match in progress";
-                        }
-                        else if (info.players >= info.maxPlayers)
-                        {
-                            info.joinable = false;
-                            info.note = "full";
-                        }
+                    }
+                }
+                RebuildList();
+                PushEvent(LobbyEventKind::ListUpdated, LobbyMember{}, "");
+            }
+
+            // The lobbies that we and our friends are in right now (the presence knows the lobby of a friend who plays this app); their data is asked for
+            void ScanFriendLobbies()
+            {
+                ISteamFriends* friends = SteamFriends();
+                if (friends == nullptr)
+                {
+                    return;
+                }
+                friendLobbies_.clear();
+                const auto consider = [&](const CSteamID& who) {
+                    FriendGameInfo_t game{};
+                    if (friends->GetFriendGamePlayed(who, &game) && game.m_gameID.IsValid() && game.m_gameID.AppID() == static_cast<AppId_t>(kSteamAppId) &&
+                        game.m_steamIDLobby.IsValid() && std::find(friendLobbies_.begin(), friendLobbies_.end(), game.m_steamIDLobby) == friendLobbies_.end())
+                    {
+                        friendLobbies_.push_back(game.m_steamIDLobby);
+                    }
+                };
+                consider(SteamUser()->GetSteamID());
+                const int count = friends->GetFriendCount(k_EFriendFlagImmediate);
+                for (int i = 0; i < count; ++i)
+                {
+                    consider(friends->GetFriendByIndex(i, k_EFriendFlagImmediate));
+                }
+                for (const CSteamID& id : friendLobbies_)
+                {
+                    SteamMatchmaking()->RequestLobbyData(id);  // LobbyDataUpdate_t comes when it is there; what is cached is read right away
+                }
+                RebuildList();
+                if (!lobbies_.empty())
+                {
+                    PushEvent(LobbyEventKind::ListUpdated, LobbyMember{}, "");
+                }
+            }
+
+            // Lobbies() = the public ones of the search + the lobbies of the friends whose data is there
+            void RebuildList()
+            {
+                lobbies_ = publicLobbies_;
+                for (const CSteamID& id : friendLobbies_)
+                {
+                    LobbyInfo info;
+                    if (BuildInfo(id, info) && std::none_of(lobbies_.begin(), lobbies_.end(), [&](const LobbyInfo& l) { return l.id == info.id; }))
+                    {
                         lobbies_.push_back(std::move(info));
                     }
                 }
-                PushEvent(LobbyEventKind::ListUpdated, LobbyMember{}, "");
             }
 
             // somebody came or went
@@ -415,6 +483,12 @@ namespace rl::net
             // the data of the lobby (the host started the match) or of a member (ready) changed
             void OnDataUpdate(LobbyDataUpdate_t* update)
             {
+                const CSteamID changed(update->m_ulSteamIDLobby);
+                if (update->m_ulSteamIDLobby == update->m_ulSteamIDMember && std::find(friendLobbies_.begin(), friendLobbies_.end(), changed) != friendLobbies_.end())
+                {
+                    RebuildList();  // the data of a lobby of a friend arrived (RequestLobbyData)
+                    PushEvent(LobbyEventKind::ListUpdated, LobbyMember{}, "");
+                }
                 if (update->m_ulSteamIDLobby != lobby_.ConvertToUint64())
                 {
                     return;
@@ -516,6 +590,8 @@ namespace rl::net
             std::string lastError_;
             std::vector<LobbyEvent> events_;
             std::vector<LobbyInfo> lobbies_;
+            std::vector<LobbyInfo> publicLobbies_;   // the last result of RequestLobbyList
+            std::vector<CSteamID> friendLobbies_;    // the lobbies found through the presence of the friends
             std::vector<LobbyMember> members_;
             LobbyInfo current_;
             MatchStartInfo startInfo_;
