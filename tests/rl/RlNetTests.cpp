@@ -934,7 +934,7 @@ namespace
             rig.Run(6.0);
             CHECK(client.State() == RlNetClientState::Failed);
             Note("tuning mismatch: \"%s\"", client.Error().c_str());
-            CHECK(client.Error().find("rl_tuning") != std::string::npos);
+            CHECK(client.Error().find("settings") != std::string::npos);
             CHECK(rig.host->ClientCount() == 0);
         }
         {
@@ -1452,7 +1452,7 @@ namespace
         std::string why;
         CHECK(!service->Available(why));
         Note("Available: \"%s\"", why.c_str());
-        CHECK(why.find("MYENGINE_STEAM") != std::string::npos);
+        CHECK(why.find("without Steam") != std::string::npos);
         net::LobbyCreateOptions create;
         std::string error;
         CHECK(!service->Create(create, error) && !error.empty());

@@ -41,7 +41,7 @@ namespace rl::net
             const char* Name() const override { return "Steam"; }
             bool Available(std::string& whyNot) const override
             {
-                whyNot = "this build has no Steam support (CMake option MYENGINE_STEAM is OFF); see docs/game/steam-setup.md";
+                whyNot = "This version is built without Steam. Use LAN or Join by IP.";
                 return false;
             }
             void Update(double) override {}

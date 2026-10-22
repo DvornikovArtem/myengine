@@ -55,7 +55,7 @@ namespace rl::net
             {
                 if (SteamNetworkingMessages() == nullptr)
                 {
-                    error = "Steam is not running (SteamNetworkingMessages is not there)";
+                    error = "Steam is not running: start the Steam client and restart the game.";
                     return false;
                 }
                 // the Valve network starts lazily: a first message would wait for it for some seconds
@@ -71,14 +71,14 @@ namespace rl::net
             {
                 if (SteamNetworkingMessages() == nullptr)
                 {
-                    error = "Steam is not running (SteamNetworkingMessages is not there)";
+                    error = "Steam is not running: start the Steam client and restart the game.";
                     return kInvalidPeer;
                 }
                 char* end = nullptr;
                 const uint64_t id = std::strtoull(address.c_str(), &end, 10);
                 if (id == 0 || end == address.c_str())
                 {
-                    error = "'" + address + "' is not a Steam id";
+                    error = "This is not a Steam address.";
                     return kInvalidPeer;
                 }
                 if (SteamNetworkingUtils() != nullptr)

@@ -224,14 +224,14 @@ namespace rl::net
                 if (!lobbyTransport_->Listen(create_.lobbyPort, error))
                 {
                     lobbyTransport_.reset();
-                    return Fail("cannot open the lobby port " + std::to_string(create_.lobbyPort) + ": " + error, true);
+                    return Fail("Cannot create the lobby. " + error, true);
                 }
                 beaconLink_ = options_.makeLink();
                 if (!beaconLink_->Bind(0, error))
                 {
                     lobbyTransport_.reset();
                     beaconLink_.reset();
-                    return Fail("cannot open the beacon: " + error, true);
+                    return Fail("Cannot announce the lobby on the network. " + error, true);
                 }
 
                 hosting_ = true;
@@ -317,7 +317,7 @@ namespace rl::net
                     if (!scanLink_->BindShared(kLanBeaconPort, error))
                     {
                         scanLink_.reset();
-                        lastError_ = "cannot listen for lobbies: " + error;
+                        lastError_ = "Cannot look for lobbies. " + error;
                         PushEvent(LobbyEventKind::Error, LobbyMember{}, lastError_);
                         return;
                     }
