@@ -230,6 +230,90 @@
     },
     {
       "Tag": {
+        "name": "arena_glass_blue"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          10.22,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          69.975,
+          69.975,
+          69.975
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl2/arena_glass_blue.obj",
+        "materialPath": "assets/materials/rl2/arena_glass_blue.material.json",
+        "visible": true
+      },
+      "id": 9
+    },
+    {
+      "Tag": {
+        "name": "arena_glass_orange"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          10.22,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          69.975,
+          69.975,
+          69.975
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl2/arena_glass_orange.obj",
+        "materialPath": "assets/materials/rl2/arena_glass_orange.material.json",
+        "visible": true
+      },
+      "id": 10
+    },
+    {
+      "Tag": {
+        "name": "arena_glass_roof"
+      },
+      "Transform": {
+        "position": [
+          0.0,
+          10.22,
+          0.0
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          66.796,
+          66.796,
+          66.796
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl2/arena_glass_roof.obj",
+        "materialPath": "assets/materials/rl2/arena_glass_roof.material.json",
+        "visible": true
+      },
+      "id": 11
+    },
+    {
+      "Tag": {
         "name": "Pad00"
       },
       "Transform": {
@@ -254,7 +338,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 9
+      "id": 12
     },
     {
       "Tag": {
@@ -282,7 +366,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 10
+      "id": 13
     },
     {
       "Tag": {
@@ -310,7 +394,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 11
+      "id": 14
     },
     {
       "Tag": {
@@ -338,7 +422,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 12
+      "id": 15
     },
     {
       "Tag": {
@@ -363,10 +447,10 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl2/pad_orb.obj",
-        "materialPath": "assets/materials/rl2/pads.material.json",
+        "materialPath": "assets/materials/rl2/pad_orb.material.json",
         "visible": true
       },
-      "id": 13
+      "id": 16
     },
     {
       "Tag": {
@@ -394,7 +478,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 14
+      "id": 17
     },
     {
       "Tag": {
@@ -419,10 +503,10 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl2/pad_orb.obj",
-        "materialPath": "assets/materials/rl2/pads.material.json",
+        "materialPath": "assets/materials/rl2/pad_orb.material.json",
         "visible": true
       },
-      "id": 15
+      "id": 18
     },
     {
       "Tag": {
@@ -450,7 +534,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 16
+      "id": 19
     },
     {
       "Tag": {
@@ -478,7 +562,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 17
+      "id": 20
     },
     {
       "Tag": {
@@ -506,7 +590,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 18
+      "id": 21
     },
     {
       "Tag": {
@@ -534,7 +618,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 19
+      "id": 22
     },
     {
       "Tag": {
@@ -562,7 +646,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 20
+      "id": 23
     },
     {
       "Tag": {
@@ -590,7 +674,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 21
+      "id": 24
     },
     {
       "Tag": {
@@ -618,7 +702,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 22
+      "id": 25
     },
     {
       "Tag": {
@@ -646,7 +730,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 23
+      "id": 26
     },
     {
       "Tag": {
@@ -674,7 +758,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 24
+      "id": 27
     },
     {
       "Tag": {
@@ -702,7 +786,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 25
+      "id": 28
     },
     {
       "Tag": {
@@ -730,7 +814,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 26
+      "id": 29
     },
     {
       "Tag": {
@@ -755,10 +839,10 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl2/pad_orb.obj",
-        "materialPath": "assets/materials/rl2/pads.material.json",
+        "materialPath": "assets/materials/rl2/pad_orb.material.json",
         "visible": true
       },
-      "id": 27
+      "id": 30
     },
     {
       "Tag": {
@@ -786,7 +870,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 28
+      "id": 31
     },
     {
       "Tag": {
@@ -814,7 +898,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 29
+      "id": 32
     },
     {
       "Tag": {
@@ -842,7 +926,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 30
+      "id": 33
     },
     {
       "Tag": {
@@ -867,10 +951,10 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl2/pad_orb.obj",
-        "materialPath": "assets/materials/rl2/pads.material.json",
+        "materialPath": "assets/materials/rl2/pad_orb.material.json",
         "visible": true
       },
-      "id": 31
+      "id": 34
     },
     {
       "Tag": {
@@ -898,7 +982,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 32
+      "id": 35
     },
     {
       "Tag": {
@@ -926,7 +1010,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 33
+      "id": 36
     },
     {
       "Tag": {
@@ -954,7 +1038,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 34
+      "id": 37
     },
     {
       "Tag": {
@@ -982,7 +1066,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 35
+      "id": 38
     },
     {
       "Tag": {
@@ -1010,7 +1094,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 36
+      "id": 39
     },
     {
       "Tag": {
@@ -1038,7 +1122,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 37
+      "id": 40
     },
     {
       "Tag": {
@@ -1066,7 +1150,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 38
+      "id": 41
     },
     {
       "Tag": {
@@ -1094,7 +1178,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 39
+      "id": 42
     },
     {
       "Tag": {
@@ -1122,7 +1206,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 40
+      "id": 43
     },
     {
       "Tag": {
@@ -1150,7 +1234,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 41
+      "id": 44
     },
     {
       "Tag": {
@@ -1178,7 +1262,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 42
+      "id": 45
     },
     {
       "Tag": {
@@ -1203,10 +1287,10 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl2/pad_orb.obj",
-        "materialPath": "assets/materials/rl2/pads.material.json",
+        "materialPath": "assets/materials/rl2/pad_orb.material.json",
         "visible": true
       },
-      "id": 43
+      "id": 46
     },
     {
       "Tag": {
@@ -1234,7 +1318,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 44
+      "id": 47
     },
     {
       "Tag": {
@@ -1259,10 +1343,10 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl2/pad_orb.obj",
-        "materialPath": "assets/materials/rl2/pads.material.json",
+        "materialPath": "assets/materials/rl2/pad_orb.material.json",
         "visible": true
       },
-      "id": 45
+      "id": 48
     },
     {
       "Tag": {
@@ -1290,7 +1374,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 46
+      "id": 49
     },
     {
       "Tag": {
@@ -1318,7 +1402,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 47
+      "id": 50
     },
     {
       "Tag": {
@@ -1346,7 +1430,7 @@
         "materialPath": "assets/materials/rl2/pads.material.json",
         "visible": true
       },
-      "id": 48
+      "id": 51
     },
     {
       "Tag": {
@@ -1374,7 +1458,7 @@
         "materialPath": "assets/materials/rl2/ball.material.json",
         "visible": true
       },
-      "id": 49
+      "id": 52
     },
     {
       "Tag": {
@@ -1402,7 +1486,7 @@
         "materialPath": "assets/materials/rl2/car_blue.material.json",
         "visible": true
       },
-      "id": 50
+      "id": 53
     },
     {
       "Tag": {
@@ -1430,7 +1514,7 @@
         "materialPath": "assets/materials/rl2/car_lights.material.json",
         "visible": true
       },
-      "id": 51
+      "id": 54
     },
     {
       "Tag": {
@@ -1458,7 +1542,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 52
+      "id": 55
     },
     {
       "Tag": {
@@ -1486,7 +1570,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 53
+      "id": 56
     },
     {
       "Tag": {
@@ -1514,7 +1598,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 54
+      "id": 57
     },
     {
       "Tag": {
@@ -1542,7 +1626,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 55
+      "id": 58
     },
     {
       "Tag": {
@@ -1570,7 +1654,7 @@
         "materialPath": "assets/materials/rl2/car_orange.material.json",
         "visible": true
       },
-      "id": 56
+      "id": 59
     },
     {
       "Tag": {
@@ -1598,7 +1682,7 @@
         "materialPath": "assets/materials/rl2/car_lights.material.json",
         "visible": true
       },
-      "id": 57
+      "id": 60
     },
     {
       "Tag": {
@@ -1626,7 +1710,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 58
+      "id": 61
     },
     {
       "Tag": {
@@ -1654,7 +1738,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 59
+      "id": 62
     },
     {
       "Tag": {
@@ -1682,7 +1766,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 60
+      "id": 63
     },
     {
       "Tag": {
@@ -1710,7 +1794,7 @@
         "materialPath": "assets/materials/rl2/car_wheel.material.json",
         "visible": true
       },
-      "id": 61
+      "id": 64
     },
     {
       "Tag": {
@@ -1738,7 +1822,7 @@
         "materialPath": "assets/materials/rl2/car_boost.material.json",
         "visible": true
       },
-      "id": 62
+      "id": 65
     },
     {
       "Tag": {
@@ -1766,7 +1850,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 63
+      "id": 66
     },
     {
       "Tag": {
@@ -1794,7 +1878,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 64
+      "id": 67
     },
     {
       "Tag": {
@@ -1822,7 +1906,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 65
+      "id": 68
     },
     {
       "Tag": {
@@ -1850,7 +1934,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 66
+      "id": 69
     },
     {
       "Tag": {
@@ -1878,7 +1962,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 67
+      "id": 70
     },
     {
       "Tag": {
@@ -1906,7 +1990,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 68
+      "id": 71
     },
     {
       "Tag": {
@@ -1934,7 +2018,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 69
+      "id": 72
     },
     {
       "Tag": {
@@ -1962,7 +2046,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 70
+      "id": 73
     },
     {
       "Tag": {
@@ -1990,7 +2074,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 71
+      "id": 74
     },
     {
       "Tag": {
@@ -2018,7 +2102,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 72
+      "id": 75
     },
     {
       "Tag": {
@@ -2046,7 +2130,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 73
+      "id": 76
     },
     {
       "Tag": {
@@ -2074,7 +2158,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 74
+      "id": 77
     },
     {
       "Tag": {
@@ -2102,7 +2186,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 75
+      "id": 78
     },
     {
       "Tag": {
@@ -2130,7 +2214,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 76
+      "id": 79
     },
     {
       "Tag": {
@@ -2158,7 +2242,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 77
+      "id": 80
     },
     {
       "Tag": {
@@ -2186,7 +2270,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 78
+      "id": 81
     },
     {
       "Tag": {
@@ -2214,7 +2298,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 79
+      "id": 82
     },
     {
       "Tag": {
@@ -2242,7 +2326,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 80
+      "id": 83
     },
     {
       "Tag": {
@@ -2270,7 +2354,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 81
+      "id": 84
     },
     {
       "Tag": {
@@ -2298,7 +2382,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 82
+      "id": 85
     },
     {
       "Tag": {
@@ -2326,7 +2410,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 83
+      "id": 86
     },
     {
       "Tag": {
@@ -2354,7 +2438,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 84
+      "id": 87
     },
     {
       "Tag": {
@@ -2382,7 +2466,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 85
+      "id": 88
     },
     {
       "Tag": {
@@ -2410,7 +2494,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 86
+      "id": 89
     },
     {
       "Tag": {
@@ -2438,7 +2522,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 87
+      "id": 90
     },
     {
       "Tag": {
@@ -2466,7 +2550,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 88
+      "id": 91
     },
     {
       "Tag": {
@@ -2494,7 +2578,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 89
+      "id": 92
     },
     {
       "Tag": {
@@ -2522,7 +2606,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 90
+      "id": 93
     },
     {
       "Tag": {
@@ -2550,7 +2634,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 91
+      "id": 94
     },
     {
       "Tag": {
@@ -2578,7 +2662,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 92
+      "id": 95
     },
     {
       "Tag": {
@@ -2606,7 +2690,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 93
+      "id": 96
     },
     {
       "Tag": {
@@ -2634,7 +2718,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 94
+      "id": 97
     },
     {
       "Tag": {
@@ -2662,7 +2746,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 95
+      "id": 98
     },
     {
       "Tag": {
@@ -2690,7 +2774,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 96
+      "id": 99
     },
     {
       "Tag": {
@@ -2718,7 +2802,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 97
+      "id": 100
     },
     {
       "Tag": {
@@ -2746,7 +2830,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 98
+      "id": 101
     },
     {
       "Tag": {
@@ -2774,7 +2858,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 99
+      "id": 102
     },
     {
       "Tag": {
@@ -2802,7 +2886,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 100
+      "id": 103
     },
     {
       "Tag": {
@@ -2830,7 +2914,7 @@
         "materialPath": "assets/materials/rl2/stands.material.json",
         "visible": true
       },
-      "id": 101
+      "id": 104
     },
     {
       "Tag": {
@@ -2858,7 +2942,7 @@
         "materialPath": "assets/materials/rl2/floodlight.material.json",
         "visible": true
       },
-      "id": 102
+      "id": 105
     },
     {
       "Tag": {
@@ -2886,7 +2970,7 @@
         "materialPath": "assets/materials/rl2/stadium_facade.material.json",
         "visible": true
       },
-      "id": 103
+      "id": 106
     },
     {
       "Tag": {
@@ -2914,7 +2998,7 @@
         "materialPath": "assets/materials/rl2/stadium_roof.material.json",
         "visible": true
       },
-      "id": 104
+      "id": 107
     },
     {
       "Tag": {
@@ -2942,7 +3026,7 @@
         "materialPath": "assets/materials/rl2/stadium_ground.material.json",
         "visible": true
       },
-      "id": 105
+      "id": 108
     },
     {
       "Tag": {
@@ -2970,7 +3054,7 @@
         "materialPath": "assets/materials/rl2/sky.material.json",
         "visible": true
       },
-      "id": 106
+      "id": 109
     },
     {
       "Tag": {
@@ -2998,7 +3082,7 @@
         "materialPath": "assets/materials/rl2/scoreboard.material.json",
         "visible": true
       },
-      "id": 107
+      "id": 110
     },
     {
       "Tag": {
@@ -3026,7 +3110,7 @@
         "materialPath": "assets/materials/rl2/scoreboard.material.json",
         "visible": true
       },
-      "id": 108
+      "id": 111
     }
   ]
 }

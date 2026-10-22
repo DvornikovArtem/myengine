@@ -1,10 +1,16 @@
 {
-  "shader": "../../shaders/textured_lit.shader.json",
+  "shader": "../../shaders/lit.shader.json",
   "texture": "../../textures/rl2/arena_floor.tga",
   "tint": [
     1.0,
     1.0,
     1.0,
     1.0
-  ]
+  ],
+  "params": {
+    "gSpecular": 0.18,
+    "gGloss": 28,
+    "gFresnel": 0.0
+  },
+  "castShadow": false
 }

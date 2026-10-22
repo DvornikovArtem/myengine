@@ -210,6 +210,84 @@ def goal_texture(team):
     return a
 
 
+def goal_image(atlas, team):
+    """The goal atlas as RGBA: the net tile is see-through between its lines (the material alpha-tests it), the frame cells opaque."""
+    import numpy as np
+    from PIL import Image
+    col, glow = (BLUE, BLUE_GLOW) if team == "blue" else (ORANGE, ORANGE_GLOW)
+    img = atlas.image().convert("RGBA")
+    arr = np.asarray(img).copy()
+    region = arr[:, :256, :3].astype(np.int32)
+    background = np.array(shade(col, 0.16), dtype=np.int32)
+    diff = np.abs(region - background).sum(axis=-1)
+    alpha = np.clip(diff * 3, 0, 255).astype(np.uint8)
+    arr[:, :256, 3] = alpha
+    # the see-through texels carry the line colour, so a filtered edge does not get a dark fringe
+    clear = alpha == 0
+    for c in range(3):
+        channel = arr[:, :256, c]
+        channel[clear] = glow[c]
+    return Image.fromarray(arr, "RGBA")
+
+
+def glass_texture(team):
+    """128x128 RGBA tile of the glass: a faint team tint, a few brighter streaks, the edges of the pane."""
+    from PIL import Image, ImageDraw
+    tint = {"blue": (70, 130, 255), "orange": (255, 150, 60), "roof": (150, 190, 255)}[team]
+    img = Image.new("RGBA", (128, 128), tint + (34,))
+    d = ImageDraw.Draw(img)
+    for x, w in ((18, 5), (44, 2), (70, 9), (112, 3)):
+        d.polygon([(x, 0), (x + w, 0), (x + w - 40, 128), (x - 40, 128)], fill=tint + (78,))
+    d.rectangle([0, 0, 127, 127], outline=tint + (150,), width=2)
+    return img
+
+
+def build_glass(t, foot, team):
+    """Translucent panels in the open frame: the wall above the lower wall (from the mouth header over a goal) and the ceiling ramp."""
+    from .mesh import Mesh
+    H, rc = t["height"], t["ceilingRampRadius"]
+    cuts = mouth_cuts(t)
+    m = Mesh("arena_glass_" + ("blue" if team == 0 else "orange"))
+    offset = 0.03
+    segs = 4
+    centre = (0.0, 6.0, 0.0)
+    for edge in range(8):
+        spans = [(0.0, 1.0, WALL_TOP)] if edge not in (0, 4) else [(0.0, 0.5, WALL_TOP), (0.5, 1.0, WALL_TOP)]
+        if edge in (2, 6):
+            spans = [(0.0, cuts[0], WALL_TOP), (cuts[0], cuts[1], MOUTH_TOP), (cuts[1], 1.0, WALL_TOP)]
+        for u0, u1, y_sill in spans:
+            if edge_team(edge, (u0 + u1) * 0.5) != team:
+                continue
+            rib = [(offset, y_sill), (offset, H - rc)]
+            for k in range(1, segs + 1):
+                ang = 0.5 * math.pi * k / segs
+                rib.append((offset + rc - rc * math.cos(ang), min(H - rc + rc * math.sin(ang), H - 0.02)))
+            arc = [0.0]
+            for i in range(1, len(rib)):
+                arc.append(arc[-1] + math.dist(rib[i], rib[i - 1]))
+            ua, ub = foot.dist(edge, u0) / TILE_U_M, foot.dist(edge, u1) / TILE_U_M
+            for i in range(len(rib) - 1):
+                (s0, y0), (s1, y1) = rib[i], rib[i + 1]
+                q = [foot.point(edge, u0, s0, y0), foot.point(edge, u1, s0, y0), foot.point(edge, u1, s1, y1), foot.point(edge, u0, s1, y1)]
+                v0, v1 = arc[i] / TILE_U_M, arc[i + 1] / TILE_U_M
+                m.quad(*q, uvs=[(ua, v0), (ub, v0), (ub, v1), (ua, v1)], outside=centre)
+    return m
+
+
+def build_glass_roof(t, foot):
+    from .mesh import Mesh
+    H, rc = t["height"], t["ceilingRampRadius"]
+    cuts = mouth_cuts(t)
+    m = Mesh("arena_glass_roof")
+    loop = floor_loop(foot, t, cuts, rc, H - 0.02)
+    c = (0.0, H - 0.02, 0.0)
+    uv = lambda p: (p[0] / TILE_U_M, p[2] / TILE_U_M)
+    for i in range(len(loop)):
+        a, b = loop[i], loop[(i + 1) % len(loop)]
+        m.tri(c, a, b, uv(c), uv(a), uv(b), normals=((0, -1, 0),) * 3)
+    return m
+
+
 def pads_texture():
     a = Atlas(768, 256, (20, 22, 28))
     a.cell("small", 0, 0, 256, 256)
@@ -513,12 +591,18 @@ def build(ctx):
         ctx.mesh("arena_frame_" + name, build_frame(tuning, foot, team, fa), origin=centre, part_of="arena",
                  note="open frame instead of transparent glass: posts, rails, ceiling ribs and beams")
         ga = goal_texture(name)
-        ctx.texture("arena_goal_" + name, ga.image())
+        ctx.texture("arena_goal_" + name, goal_image(ga, name))
+        ctx.texture("arena_glass_" + name, glass_texture(name))
+        ctx.mesh("arena_glass_" + name, build_glass(tuning, foot, team), origin=centre, part_of="arena",
+                 note="translucent glass panels over the lower wall and the ceiling ramp (blend alpha)")
         gz = (-1.0 if team == 0 else 1.0) * (tuning["halfLength"] + tuning["goalDepth"] * 0.5)
         ctx.mesh("arena_goal_" + name, build_goal(tuning, team, ga), origin=(0.0, tuning["goalHeight"] * 0.5, gz), part_of="arena",
                  note="goal box behind the end wall: net surfaces, posts, crossbar")
+    ctx.texture("arena_glass_roof", glass_texture("roof"))
+    ctx.mesh("arena_glass_roof", build_glass_roof(tuning, foot), origin=centre, part_of="arena", note="the glass of the ceiling, y = height")
     pa = pads_texture()
     ctx.texture("pads", pa.image())
     ctx.mesh("pad_small", build_pad(False, pa), origin=(0.0, 0.0, 0.0), part_of="pads", note="hexagon plate, origin on the floor")
     ctx.mesh("pad_big", build_pad(True, pa), origin=(0.0, 0.0, 0.0), part_of="pads", note="big plate with a ring, origin on the floor")
+    ctx.material("pad_orb", "pads")  # the orb glows additively: its own material over the same texture
     ctx.mesh("pad_orb", build_orb(pa), origin=(0.0, 0.0, 0.0), part_of="pads", note="orb of a big pad, origin = its centre (float it ~1.6 m up)")

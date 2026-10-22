@@ -1,0 +1,18 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/arena_glass_blue.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 1.2,
+    "gGloss": 110,
+    "gFresnel": 1.1
+  },
+  "blend": "alpha",
+  "doubleSided": true,
+  "castShadow": false
+}

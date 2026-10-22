@@ -146,8 +146,12 @@ namespace
             const bool isRlClients = argument == L"--rl-clients";
             const bool isRlMode = argument == L"--rl-mode";
             const bool isNetSim = argument == L"--net-sim";
+            // The scene passes (docs/render/scene-passes.md): --render-settings shadows=2,msaa=4,bloom=1,instancing=1; --screenshot <file.tga> [--screenshot-frame N]
+            const bool isRenderSettings = argument == L"--render-settings";
+            const bool isScreenshot = argument == L"--screenshot";
+            const bool isScreenshotFrame = argument == L"--screenshot-frame";
             if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
-                !isRlClients && !isRlMode && !isNetSim)
+                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame)
             {
                 valid = false;
                 break;
@@ -214,6 +218,12 @@ namespace
             else if (isNetSim && options.rlOnline.netSim.empty())
             {
                 options.rlOnline.netSim = Narrow(value);
+            }
+            else if (isRenderSettings || isScreenshot || isScreenshotFrame)
+            {
+                // They reach the adapter as environment variables, like the DX12 switches
+                const wchar_t* variable = isRenderSettings ? L"MYENGINE_RENDER_SETTINGS" : (isScreenshot ? L"MYENGINE_SCREENSHOT" : L"MYENGINE_SCREENSHOT_FRAME");
+                _wputenv_s(variable, std::wstring(value).c_str());
             }
             else
             {
@@ -323,6 +333,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
+            L"  Render: [--render-settings shadows=0..2,msaa=1|4,bloom=0|1,instancing=0|1] [--screenshot <file.tga> [--screenshot-frame N]]\n"
             L"  Rocket League online: --rl-host [port] [--rl-clients N] [--rl-mode 1..4] | --rl-join ip[:port]   [--net-sim latency=100,jitter=20,loss=5]",
             L"myengine",
             MB_OK | MB_ICONERROR);

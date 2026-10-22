@@ -83,6 +83,10 @@ namespace myengine::render::dx12
             targetLightDirection_ = direction;
             targetAmbient_ = ambient;
         }
+        void SetRenderSettings(const RenderSettings& settings) override;
+        RenderSettings GetRenderSettings() const override { return settings_; }
+        void SetSceneLighting(const SceneLighting& lighting) override { lighting_ = lighting; }
+        bool RequestScreenshot(const std::string& path) override;
 
         RenderTargetHandle CreateRenderTarget(std::uint32_t width, std::uint32_t height) override;
         void DestroyRenderTarget(RenderTargetHandle target) override;
@@ -138,6 +142,7 @@ namespace myengine::render::dx12
             std::array<FrameUploadBuffer, kBackBufferCount> uiIndexUploadBuffers;
             std::array<FrameUploadBuffer, kBackBufferCount> debugVertexUploadBuffers;
             std::array<FrameUploadBuffer, kBackBufferCount> constantUploadBuffers; // the data of root CBVs
+            std::array<FrameUploadBuffer, kBackBufferCount> instanceUploadBuffers; // the model matrices of the instanced draws
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
             Microsoft::WRL::ComPtr<ID3D12Resource> depthStencil;
 
@@ -146,6 +151,7 @@ namespace myengine::render::dx12
             D3D12_VIEWPORT viewport{};
             D3D12_RECT scissorRect{};
             Matrix4 viewProjection = Matrix4::Identity();
+            Float3 cameraPosition{};
         };
 
         struct DxVertex
@@ -198,6 +204,7 @@ namespace myengine::render::dx12
             UINT slot = 0; // index in the RTV and DSV heaps
             TextureHandle texture{};
             Matrix4 viewProjection = Matrix4::Identity();
+            Float3 cameraPosition{};
         };
 
         // A resource that the GPU may still read: released once the fence reaches `fenceValue`
@@ -211,6 +218,30 @@ namespace myengine::render::dx12
             bool hasDescriptor = false;
             bool hasSlot = false;
             UINT slot = 0;
+        };
+
+        // The kind of pass a program is for: the states of its pipeline
+        enum class ProgramKind
+        {
+            Scene,
+            DebugLines,
+            Ui,
+            Post,   // a fullscreen triangle (bloom, composite): no depth, no culling, no vertex data
+        };
+
+        // The key of a pipeline state variant of one program: the same shaders for another blend, culling, pass or target format
+        struct PipelineKey
+        {
+            BlendMode blend = BlendMode::Opaque;
+            bool doubleSided = false;
+            bool depthOnly = false;           // the shadow pass: no pixel shader, no colour target
+            DXGI_FORMAT colorFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+            std::uint8_t samples = 1;
+            std::uint64_t Hash() const
+            {
+                return static_cast<std::uint64_t>(blend) | (doubleSided ? 4ull : 0ull) | (depthOnly ? 8ull : 0ull) |
+                    (static_cast<std::uint64_t>(samples) << 8) | (static_cast<std::uint64_t>(colorFormat) << 16);
+            }
         };
 
         // Where the renderer writes its own values in a program: found by name once, when the program is created
@@ -229,6 +260,14 @@ namespace myengine::render::dx12
             std::uint32_t lightDirection = kNoOffset; // gLightDirection (xyz: direction, w: ambient)
             std::uint32_t screenSize = kNoOffset;     // screenSize (the UI)
             std::uint32_t translation = kNoOffset;    // translation (the UI)
+            std::uint32_t lightViewProjection = kNoOffset; // gLightViewProjection: the shadow map's view-projection
+            std::uint32_t cameraPosition = kNoOffset;      // gCameraPosition
+            std::uint32_t lightColor = kNoOffset;          // gLightColor (rgb)
+            std::uint32_t ambientSky = kNoOffset;          // gAmbientSky
+            std::uint32_t ambientGround = kNoOffset;       // gAmbientGround
+            std::uint32_t shadowParams = kNoOffset;        // gShadowParams: x 1/size, y depth bias, z normal offset, w enabled
+            std::uint32_t postParams = kNoOffset;          // gPostParams (post passes)
+            std::uint32_t texelSize = kNoOffset;           // gTexelSize (post passes)
         };
         // A texture of the program: where its descriptor table is and which texture of MaterialParams it takes
         struct TextureSlot
@@ -241,6 +280,7 @@ namespace myengine::render::dx12
             std::vector<ConstantBufferSlot> constantBuffers;
             std::vector<TextureSlot> textures;                 // every texture of the shader, found once when the program is built
             std::uint32_t textureParameter = kNoRootParameter; // the first texture (the smallest register): where DrawItem::texture goes
+            std::uint32_t shadowMapParameter = kNoRootParameter; // the texture named gShadowMap: the renderer binds the shadow map there
         };
 
         struct ShaderRecord
@@ -258,6 +298,13 @@ namespace myengine::render::dx12
             mutable bool materialMismatchLogged = false;               // the warning about parameters built for another layout is given once
             ShaderLayout layout;          // from the reflection of the compiled shaders
             ShaderLayout wireframeLayout; // the vertex shader with the constant pixel shader of the wireframe variant
+            // What the pipeline state variants are built from (blend modes, the shadow pass, the HDR / MSAA scene target)
+            ProgramKind kind = ProgramKind::Scene;
+            Microsoft::WRL::ComPtr<ID3DBlob> vertexBlob;
+            Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
+            InputLayoutBuild inputLayout;
+            bool instanced = false;       // the vertex shader reads INSTANCE0..3: the model matrix comes from slot 1
+            mutable std::unordered_map<std::uint64_t, Microsoft::WRL::ComPtr<ID3D12PipelineState>> variants;
         };
 
         // The marker group that the draw calls outside render targets fall into: switched when the kind of calls changes
@@ -265,6 +312,10 @@ namespace myengine::render::dx12
         {
             None,
             Scene,
+            SceneTransparent,
+            Shadow,
+            Bloom,
+            Composite,
             DebugLines,
             Ui,
         };
@@ -290,13 +341,6 @@ namespace myengine::render::dx12
         bool CreateBuffer(const void* data, UINT64 dataSize, D3D12_RESOURCE_STATES finalState, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer);
         bool CreateUploadBuffer(const void* data, UINT64 dataSize, Microsoft::WRL::ComPtr<ID3D12Resource>& outBuffer);
         bool CreateTextureResource(const TextureData& textureData, Microsoft::WRL::ComPtr<ID3D12Resource>& outTexture);
-        // The kind of pass a program is for: the states of its pipeline (the input layouts stay in the code until A3)
-        enum class ProgramKind
-        {
-            Scene,
-            DebugLines,
-            Ui,
-        };
         // Compiles and reflects one of the renderer's own programs (the file is searched like the other assets).
         // The messages go to the log.
         bool BuildBuiltinProgram(const char* relativeDescriptorPath, ProgramKind kind, ShaderRecord& record);
@@ -312,6 +356,68 @@ namespace myengine::render::dx12
         bool EnsureFrameUploadBuffer(FrameUploadBuffer& buffer, UINT64 requiredSize);
         bool AllocateFrameUploadData(FrameUploadBuffer& buffer, const void* data, UINT64 dataSize, UINT64 alignment, D3D12_GPU_VIRTUAL_ADDRESS& outGpuAddress);
         void ReleaseFrameUploadBuffer(FrameUploadBuffer& buffer);
+
+        // ---- scene passes (Dx12ScenePass.cpp): the draws of a surface are collected, then drawn as one shadow pass, the opaque
+        // instanced groups, the transparent ones, and (with MSAA or bloom) resolved, blurred and composited into the back buffer ----
+        struct PendingDraw
+        {
+            MeshHandle mesh;
+            ShaderHandle shader;
+            const MaterialParams* material = nullptr;
+            TextureHandle texture;
+            Matrix4 model;
+            core::Color color;
+            BlendMode blend = BlendMode::Opaque;
+            bool doubleSided = false;
+            bool castShadow = true;
+            Float3 boundsCenter{};
+            float boundsRadius = 0.0f;
+        };
+        // How a pass writes the engine values (the light, the camera, the shadow map) into the constant buffers
+        struct PassParams
+        {
+            Matrix4 viewProjection;
+            Matrix4 lightViewProjection;
+            Float3 cameraPosition{};
+            float shadowParams[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            bool depthOnly = false;
+            PipelineKey key;
+        };
+        static constexpr DXGI_FORMAT kSceneColorFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        static constexpr UINT kBloomLevels = 3;
+        struct SceneTargets
+        {
+            std::uint32_t width = 0;
+            std::uint32_t height = 0;
+            std::uint8_t samples = 1;
+            bool bloom = false;
+            Microsoft::WRL::ComPtr<ID3D12Resource> color;     // HDR, MSAA when samples > 1
+            Microsoft::WRL::ComPtr<ID3D12Resource> depth;
+            Microsoft::WRL::ComPtr<ID3D12Resource> resolved;  // single sample copy of `color` (only with MSAA)
+            std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, kBloomLevels> bloomLevels;
+            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap; // 0 colour, 1 resolved, 2.. bloom levels
+            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
+            UINT srvResolved = 0;                                  // the descriptors in the texture heap
+            std::array<UINT, kBloomLevels> srvBloom{};
+            bool descriptorsAllocated = false;
+            D3D12_RESOURCE_STATES colorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        };
+        bool EnsureSceneTargets(const SurfaceData& surface);
+        bool EnsureShadowMap();
+        ID3D12PipelineState* GetPipelineVariant(const ShaderRecord& record, const PipelineKey& key);
+        void FlushScene();
+        void BeginSceneOutput(SurfaceData& surface);
+        void EndSceneOutput(SurfaceData& surface);
+        void SetSurfaceOutput(SurfaceData& surface); // the render target the commands of the surface go to now (scene or back buffer)
+        void RenderShadowPass(SurfaceData& surface, const std::vector<std::size_t>& casters, PassParams& mainPass);
+        void RecordDraws(SurfaceData& surface, const std::vector<std::size_t>& order, const PassParams& pass);
+        void RunBloomAndComposite(SurfaceData& surface);
+        void DrawFullscreen(float mode, UINT sourceA, UINT sourceB, float texelX, float texelY, const PipelineKey& key);
+        void WriteEngineConstants(const ConstantBufferSlot& slot, const PendingDraw& draw, const PassParams& pass);
+        void RetireSceneTargets();
+        void RetireShadowMap();
+        void ApplyEnvironmentSettings();
+        void WriteScreenshot(ID3D12Resource* readback, const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint, std::uint32_t width, std::uint32_t height);
 
         void RebuildSurfaceBuffers(SurfaceData& surface);
         void WaitForGpu();
@@ -371,6 +477,25 @@ namespace myengine::render::dx12
         float targetAmbient_ = 0.25f;
         Microsoft::WRL::ComPtr<ID3DBlob> wireframePixelShader_; // constant colour, shared by every wireframe PSO
         ShaderLayout wireframePixelLayout_;                      // its reflection (no resources)
+
+        // scene passes
+        RenderSettings settings_;
+        SceneLighting lighting_;
+        std::vector<PendingDraw> pendingDraws_;
+        bool sceneOutputActive_ = false;       // the commands of the surface go to the HDR scene targets
+        bool useSceneTargets_ = false;         // this frame uses them (MSAA or bloom on)
+        core::Color sceneClearColor_{0.0f, 0.0f, 0.0f, 1.0f};
+        SceneTargets sceneTargets_;
+        ShaderRecord postProgram_;             // the fullscreen passes: bloom, composite
+        Microsoft::WRL::ComPtr<ID3D12Resource> shadowMap_;
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> shadowDsvHeap_;
+        UINT shadowSrv_ = 0;
+        std::uint32_t shadowMapSize_ = 0;
+        bool shadowMapReady_ = false;          // a map was rendered this frame and holds depth
+        std::string screenshotPath_;           // RequestScreenshot: the next presented frame is saved here
+        std::uint64_t screenshotFrame_ = 1;    // ... from this frame on
+        std::uint32_t frameDraws_ = 0;         // diagnostic counters of the last flush
+        std::uint32_t frameInstanced_ = 0;
 
         std::unique_ptr<ShaderReflector> shaderReflector_;       // compiles the programs, keeps the cache
         std::vector<ShaderDiagnostic> lastShaderDiagnostics_;

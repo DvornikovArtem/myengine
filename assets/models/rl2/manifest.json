@@ -224,6 +224,34 @@
    "part_of": "arena",
    "note": "open frame instead of transparent glass: posts, rails, ceiling ribs and beams"
   },
+  "arena_glass_blue": {
+   "name": "arena_glass_blue",
+   "triangles": 70,
+   "vertices": 140,
+   "bytes": 5024,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 69.975,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -40.93,
+     5.0,
+     -51.17
+    ],
+    [
+     40.93,
+     20.42,
+     0.0
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "translucent glass panels over the lower wall and the ceiling ramp (blend alpha)"
+  },
   "arena_goal_blue": {
    "name": "arena_goal_blue",
    "triangles": 640,
@@ -308,6 +336,34 @@
    "part_of": "arena",
    "note": "open frame instead of transparent glass: posts, rails, ceiling ribs and beams"
   },
+  "arena_glass_orange": {
+   "name": "arena_glass_orange",
+   "triangles": 70,
+   "vertices": 140,
+   "bytes": 4958,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 69.975,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -40.93,
+     5.0,
+     0.0
+    ],
+    [
+     40.93,
+     20.42,
+     51.17
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "translucent glass panels over the lower wall and the ceiling ramp (blend alpha)"
+  },
   "arena_goal_orange": {
    "name": "arena_goal_orange",
    "triangles": 640,
@@ -335,6 +391,34 @@
    "orientation": 1.0,
    "part_of": "arena",
    "note": "goal box behind the end wall: net surfaces, posts, crossbar"
+  },
+  "arena_glass_roof": {
+   "name": "arena_glass_roof",
+   "triangles": 12,
+   "vertices": 13,
+   "bytes": 1029,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 66.796,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -37.96,
+     20.42,
+     -48.2
+    ],
+    [
+     37.96,
+     20.42,
+     48.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "the glass of the ceiling, y = height"
   },
   "pad_small": {
    "name": "pad_small",
@@ -744,6 +828,13 @@
    ],
    "bytes": 80570
   },
+  "arena_glass_blue": {
+   "size": [
+    128,
+    128
+   ],
+   "bytes": 6219
+  },
   "arena_wall_orange": {
    "size": [
     512,
@@ -764,6 +855,20 @@
     256
    ],
    "bytes": 81576
+  },
+  "arena_glass_orange": {
+   "size": [
+    128,
+    128
+   ],
+   "bytes": 6219
+  },
+  "arena_glass_roof": {
+   "size": [
+    128,
+    128
+   ],
+   "bytes": 6219
   },
   "pads": {
    "size": [
@@ -827,6 +932,9 @@
   "arena_floor",
   "arena_frame_blue",
   "arena_frame_orange",
+  "arena_glass_blue",
+  "arena_glass_orange",
+  "arena_glass_roof",
   "arena_goal_blue",
   "arena_goal_orange",
   "arena_wall_blue",
@@ -838,6 +946,7 @@
   "car_orange",
   "car_wheel",
   "floodlight",
+  "pad_orb",
   "pads",
   "scoreboard",
   "sky",
@@ -846,5 +955,5 @@
   "stadium_roof",
   "stands"
  ],
- "showcase_draw_calls": 107
+ "showcase_draw_calls": 110
 }

@@ -59,9 +59,18 @@ def save_texture(name, img, tint=(1.0, 1.0, 1.0, 1.0)):
 
 
 def write_material(name, texture, tint=(1.0, 1.0, 1.0, 1.0)):
+    """The material of a texture: the lit shader of G7b, the parameters and the pass state of materials.py."""
+    from . import materials
+    option = materials.options(name)
     MAT_DIR.mkdir(parents=True, exist_ok=True)
-    material = {"shader": "../../shaders/textured_lit.shader.json", "texture": "../../textures/%s/%s.tga" % (PACK, texture),
-                "tint": [float(v) for v in tint]}
+    material = {"shader": "../../shaders/%s.shader.json" % option["shader"], "texture": "../../textures/%s/%s.tga" % (PACK, texture),
+                "tint": [float(v) for v in tint], "params": {k: v for k, v in option["params"].items()}}
+    if option["blend"] != "opaque":
+        material["blend"] = option["blend"]
+    if option["doubleSided"]:
+        material["doubleSided"] = True
+    if not option["castShadow"]:
+        material["castShadow"] = False
     (MAT_DIR / (name + ".material.json")).write_text(json.dumps(material, indent=2) + "\n", encoding="utf-8")
 
 
