@@ -79,6 +79,8 @@ namespace rl
 
     namespace
     {
+        constexpr float kWedgedSeconds = 7.0f;
+
         // The part of the match that lives outside RlSim and outside RlWorldState: plain data for the snapshot.
         struct MatchRuntime
         {
@@ -87,6 +89,7 @@ namespace rl
             RlBotMemory bots[kMaxCars];
             float roleTimer[2];
             int32_t wasDemolished[kMaxCars];
+            float stillSeconds[kMaxCars];  // how long a bot has not moved (the rescue of a wedged bot)
         };
         static_assert(std::is_trivially_copyable_v<MatchRuntime>, "the match runtime is copied as bytes");
         static_assert(std::is_trivially_copyable_v<RlRng>, "the generator is copied as bytes");
@@ -114,6 +117,10 @@ namespace rl
             teamSize = std::max(config.mode, 1);
             slots = config.mode == 0 ? 1 : 2 * config.mode;
             sim = std::make_unique<RlSim>(tuning, slots);
+            for (int slot = 0; slot < slots; ++slot)
+            {
+                sim->SetCarTeam(slot, TeamOf(slot));  // cars of one team bump each other, only the other team is demolished
+            }
             for (int i = 0; i < kMaxCars; ++i)
             {
                 rt.bots[i] = RlBotMemory{};
@@ -225,6 +232,27 @@ namespace rl
                     sim->SetRespawnPoint(slot, spot.x, spot.z, spot.yaw);
                 }
                 rt.wasDemolished[slot] = down ? 1 : 0;
+            }
+
+            // A bot that has been wedged for a while (on a post of the goal, between a ramp and a wall) is put back on a respawn spot of its
+            // team: a safeguard for the bots, nothing of the rules (a player gets out of such a place with a flip or leaves the match).
+            if (m.phase == RlMatchPhase::Playing)
+            {
+                for (int slot = 0; slot < slots; ++slot)
+                {
+                    const RlCarState& car = now.cars[slot];
+                    const float speed = std::sqrt(car.linearVelocity.x * car.linearVelocity.x + car.linearVelocity.y * car.linearVelocity.y +
+                                                  car.linearVelocity.z * car.linearVelocity.z);
+                    rt.stillSeconds[slot] = (IsBot(slot) && !car.demolished && speed < 0.5f) ? rt.stillSeconds[slot] + kTickDt : 0.0f;
+                    if (rt.stillSeconds[slot] > kWedgedSeconds)
+                    {
+                        rt.stillSeconds[slot] = 0.0f;
+                        const RlSpot spot = RlRespawnSpot(TeamOf(slot), rt.rng.Range(4));
+                        const float boost = car.boost;
+                        sim->ResetCar(slot, spot.x, spot.z, spot.yaw);
+                        sim->SetCarBoost(slot, boost);
+                    }
+                }
             }
 
             if (live)

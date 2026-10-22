@@ -1,10 +1,12 @@
 // RlCarController.cpp
 //
-// The model of the car follows RocketSim (https://github.com/ZealanL/RocketSim, MIT license, Copyright (c) 2022 ZealanL): the air control
-// as an angular acceleration in the car's axes (Car::_UpdateAirTorque), jump, double jump and dodge (Car::_UpdateJump,
-// Car::_UpdateDoubleJumpOrFlip, from the dodge notes of RLUtilities by Samuel P. Mish), the suspension of four rays (btVehicleRL) and the
-// pull into the surface (Car::_UpdateWheels, "sticky force"). The numbers live in RlTuning.h; this file writes the formulas in the
-// units and axes of this engine (metres, Y up, the car's +Z forward, +X right).
+// The model of the car follows RocketSim (https://github.com/ZealanL/RocketSim, MIT license, Copyright (c) 2022 ZealanL): the tyres and the
+// throttle (Car::_UpdateWheels, btVehicleRL::calcFrictionImpulses), the air control as an angular acceleration in the car's axes
+// (Car::_UpdateAirTorque), jump, double jump and dodge (Car::_UpdateJump, Car::_UpdateDoubleJumpOrFlip, from the dodge notes of RLUtilities
+// by Samuel P. Mish), the suspension of four rays (btVehicleRL), the pull into the surface ("sticky force"), the auto-roll, the auto-flip
+// and the boost. The numbers live in RlTuning.h; this file writes the formulas in the units and axes of this engine (metres, Y up, the
+// car's +Z forward, +X right). Bullet works in units of 0.5 m with a tick of 1/120 s, the constants of RocketSim that depend on that are
+// converted where they are used (the comments say how).
 
 #include "RlCarController.h"
 
@@ -18,10 +20,12 @@ namespace rl::detail
         using JPH::Mat44;
         using JPH::Vec3;
 
+        constexpr float kPi = 3.14159265f;
+
         float Clamp(float v, float lo, float hi) { return std::min(std::max(v, lo), hi); }
         float Sign(float v) { return v > 0.0f ? 1.0f : (v < 0.0f ? -1.0f : 0.0f); }
 
-        // piecewise linear table, clamped at both ends
+        // piecewise linear table, clamped at both ends (RocketSim LinearPieceCurve)
         float Interp(const float* xs, const float* ys, int count, float x)
         {
             if (x <= xs[0])
@@ -30,7 +34,7 @@ namespace rl::detail
             }
             for (int i = 1; i < count; ++i)
             {
-                if (x <= xs[i])
+                if (x < xs[i])
                 {
                     const float t = (x - xs[i - 1]) / std::max(xs[i] - xs[i - 1], 1e-6f);
                     return ys[i - 1] + (ys[i] - ys[i - 1]) * t;
@@ -45,14 +49,12 @@ namespace rl::detail
             return length > 1e-6f ? v / length : fallback;
         }
 
-        float ThrottleAccel(const RlCarTuning& t, float speedAlong)
+        // the signed angle that carries the up of an upright car with this heading to the up of the car (about its nose): the roll
+        float RollAngle(Vec3 forward, Vec3 up)
         {
-            if (speedAlong >= t.throttleMaxSpeed)
-            {
-                return 0.0f;
-            }
-            const float f = std::max(speedAlong, 0.0f) / t.throttleMaxSpeed;
-            return t.throttleAccel + (t.throttleAccelAtMax - t.throttleAccel) * f;
+            const Vec3 worldUp = Vec3::sAxisY();
+            const Vec3 reference = SafeNormalized(worldUp - forward * forward.Dot(worldUp), up);
+            return std::atan2(forward.Dot(reference.Cross(up)), reference.Dot(up));
         }
     }
 
@@ -68,6 +70,9 @@ namespace rl::detail
         const Vec3 up = basis.GetAxisY();
         const Vec3 forward = basis.GetAxisZ();
         const Vec3 worldUp = Vec3::sAxisY();
+        const Vec3 centerOfMass = Vec3(body.GetCenterOfMassPosition());
+        const Vec3 startVelocity = body.GetLinearVelocity();
+        const Vec3 startAngular = body.GetAngularVelocity();
 
         // ---- 1. the four wheel rays
         struct Wheel
@@ -118,57 +123,37 @@ namespace rl::detail
         frame.surfaceNormal = surfaceNormal;
         rt.wheelContacts = contacts;
 
-        // The powerslide button is the air roll in the air: held through the landing it is not a powerslide until it is let go (and pressed
-        // again), or every landing with Shift held would spin the car round. The grip of the rear tyres falls fast with the slide and
-        // comes back over `handbrakeRecoverTime`, so a car that comes out of a slide is not still on the loose.
+        // The powerslide button is also the air roll here (the controls of the game bind both to Shift): held in the air as the air roll it
+        // is no handbrake after the landing until it is let go and pressed again, or every landing with Shift held would start a slide.
         if (contacts == 0)
         {
-            rt.slideLatch = input.handbrake ? 1 : 0;
+            rt.slideLatch = (input.handbrake && input.airRoll) ? 1 : 0;
         }
         else if (!input.handbrake)
         {
             rt.slideLatch = 0;
         }
-        const bool slide = input.handbrake && rt.slideLatch == 0;
-        {
-            const float target = slide ? T.handbrakeLateralScale : 1.0f;
-            if (target < rt.gripScale)
-            {
-                rt.gripScale = std::max(target, rt.gripScale - dt / 0.08f);
-            }
-            else
-            {
-                rt.gripScale = std::min(target, rt.gripScale + dt * (1.0f - T.handbrakeLateralScale) / std::max(T.handbrakeRecoverTime, 1e-3f));
-            }
-        }
-        // a touchdown: stronger side grip for a moment, the yaw left over from the air dies out
-        if (onGround && rt.wasOnSurface == 0)
-        {
-            rt.landingTimer = T.landingGripTime;
-        }
-        rt.wasOnSurface = onGround ? 1 : 0;
-        const bool landing = rt.landingTimer > 0.0f;
-        rt.landingTimer = std::max(rt.landingTimer - dt, 0.0f);
-        rt.ballHitCooldown = std::max(rt.ballHitCooldown - 1, 0);
+        const bool handbrake = input.handbrake && rt.slideLatch == 0;
 
-        // lying on the roof or on a side: the hitbox rests on a surface, the wheels do not (or hardly) touch it and the car's up is not its normal
-        const Vec3 bodyNormal = SafeNormalized(Vec3(rt.bodyNormalX, rt.bodyNormalY, rt.bodyNormalZ), worldUp);
-        const bool lying = rt.bodyContact != 0 && contacts <= 1 && up.Dot(bodyNormal) < 0.6f && rt.dodging == 0;
-
-        // the player's stick in the three axes: the powerslide button turns the steering into a roll
+        // the player's stick in the three axes: the air roll button turns the steering into a roll
         const float stickPitch = Clamp(input.pitch, -1.0f, 1.0f);
         float stickYaw = Clamp(input.steer, -1.0f, 1.0f);
         float stickRoll = Clamp(input.roll, -1.0f, 1.0f);
+        const float steerIn = stickYaw;
         if (input.airRoll)
         {
             stickRoll = Clamp(stickRoll + stickYaw, -1.0f, 1.0f);
             stickYaw = 0.0f;
         }
+        const float throttleIn = Clamp(input.throttle, -1.0f, 1.0f);
+        const bool hasBodyContact = rt.bodyContact != 0;
+        const Vec3 bodyNormal = SafeNormalized(Vec3(rt.bodyNormalX, rt.bodyNormalY, rt.bodyNormalZ), worldUp);
+        rt.bodyContact = 0;  // read once, the next step writes it again
 
         // ---- 2. the jump (RocketSim Car::_UpdateJump): an instant speed along the up of the car, then a push while the button is held
         const bool jumpPressed = input.jump && rt.jumpPrev == 0;
         rt.jumpPrev = input.jump ? 1 : 0;
-        Vec3 velocity = body.GetLinearVelocity();
+        Vec3 velocity = startVelocity;
         bool velocityChanged = false;
 
         if (onGround && rt.isJumping == 0)
@@ -190,50 +175,18 @@ namespace rl::detail
             rt.airTime = 0.0f;
             rt.flipTime = 0.0f;
             rt.dodging = 0;
-            rt.selfRight = 0;
-            rt.rightSpinLeft = 0.0f;
         }
-        bool jumpConsumed = false;
-        if (jumpPressed && lying)
-        {
-            // Lying on the roof or a side: the jump hops the car off the surface and turns it back onto its wheels the short way,
-            // an impulse and a spin about the axis that carries its up to the surface normal (the spin is a velocity like the one of a
-            // dodge; it runs as long as the car needs and the air damping takes the rest).
-            jumpConsumed = true;
-            const Vec3 n = bodyNormal;
-            Vec3 axis = up.Cross(n);
-            if (axis.Length() < 0.25f)
-            {
-                // upside down: there is no short way, roll to the side of the steering (to the left without it)
-                axis = forward * (input.steer > 0.2f ? -1.0f : 1.0f);
-            }
-            axis = SafeNormalized(axis, forward);
-            const float angle = std::acos(Clamp(up.Dot(n), -1.0f, 1.0f));
-            const Vec3 local = basis.Multiply3x3Transposed(axis) * T.selfRightSpin;
-            const float weightX = std::fabs(local.GetX());
-            const float weightZ = std::fabs(local.GetZ());
-            const float damping = (weightX * T.airPitchDamping + weightZ * T.airRollDamping) / std::max(weightX + weightZ, 1e-3f);
-            const float coast = T.selfRightSpin / std::max(damping, 0.5f);  // the angle the air damping adds after the spin
-            rt.selfRight = 1;
-            rt.rightSpinLeft = Clamp((angle - coast) / T.selfRightSpin, 0.05f, 0.9f);
-            rt.rightSpinX = local.GetX();
-            rt.rightSpinZ = local.GetZ();
-            velocity += n * T.selfRightHop;
-            velocityChanged = true;
-            rt.jumpUsed = 1;
-            rt.secondUsed = 0;
-            rt.isJumping = 0;
-            rt.airTime = 0.0f;
-            rt.jumpTime = 0.0f;
-        }
+        // RocketSim runs the air torque before it decides about a new dodge: the flip starts to turn the tick after it was made
+        const bool dodgingAtStart = rt.dodging != 0;
+        const bool flippedAtStart = rt.flipped != 0;
+        const float flipTimeAtStart = rt.flipTime;
 
         if (rt.isJumping != 0)
         {
             rt.isJumping = (rt.jumpTime < T.jumpMinTime || (input.jump && rt.jumpTime < T.jumpHoldTime)) ? 1 : 0;
         }
-        else if (!jumpConsumed && onGround && jumpPressed)
+        else if (onGround && jumpPressed)
         {
-            jumpConsumed = true;
             rt.isJumping = 1;
             rt.jumpTime = 0.0f;
             velocity += up * T.jumpImpulse;
@@ -255,6 +208,34 @@ namespace rl::detail
             rt.jumpTime += dt;
         }
 
+        // ---- 2b. the auto-flip (RocketSim Car::_UpdateAutoFlip): a jump of a car on its roof hops it off the floor and rolls it back onto its wheels
+        Vec3 angularAdd = Vec3::sZero();
+        if (jumpPressed && hasBodyContact && bodyNormal.GetY() > T.autoFlipNormalY)
+        {
+            const float roll = RollAngle(forward, up);
+            if (std::fabs(roll) > T.autoFlipRollThreshold)
+            {
+                rt.autoFlipTimer = T.autoFlipTime * (std::fabs(roll) / kPi);
+                rt.autoFlipScale = roll > 0.0f ? -1.0f : 1.0f;  // the roll about the nose that takes the roll angle towards zero
+                rt.autoFlipping = 1;
+                velocity += -up * T.autoFlipImpulse;
+                velocityChanged = true;
+            }
+        }
+        if (rt.autoFlipping != 0)
+        {
+            if (rt.autoFlipTimer <= 0.0f)
+            {
+                rt.autoFlipping = 0;
+                rt.autoFlipTimer = 0.0f;
+            }
+            else
+            {
+                angularAdd += forward * (T.autoFlipTorque * rt.autoFlipScale * dt);
+                rt.autoFlipTimer -= dt;
+            }
+        }
+
         // ---- 3. double jump or dodge in the air (RocketSim Car::_UpdateDoubleJumpOrFlip)
         if (!onGround)
         {
@@ -267,7 +248,7 @@ namespace rl::detail
                 rt.airTime = 0.0f;
             }
 
-            if (jumpPressed && !jumpConsumed && rt.airTime < T.dodgeWindow && rt.secondUsed == 0 && rt.selfRight == 0)
+            if (jumpPressed && rt.airTime < T.dodgeWindow && rt.secondUsed == 0 && rt.autoFlipping == 0)
             {
                 const float inputMagnitude = std::fabs(stickYaw) + std::fabs(stickPitch) + std::fabs(stickRoll);
                 rt.secondUsed = 1;
@@ -303,16 +284,16 @@ namespace rl::detail
                     }
                     if (dirForward != 0.0f || dirRight != 0.0f)
                     {
-                        const float forwardSpeed = velocity.Dot(forward);
-                        const float speedRatio = std::fabs(forwardSpeed) / T.maxSpeed;
+                        const float dodgeForwardSpeed = velocity.Dot(forward);
+                        const float speedRatio = std::fabs(dodgeForwardSpeed) / T.maxSpeed;
                         bool backwards;
-                        if (std::fabs(forwardSpeed) < 1.0f)
+                        if (std::fabs(dodgeForwardSpeed) < 1.0f)
                         {
                             backwards = dirForward < 0.0f;
                         }
                         else
                         {
-                            backwards = (dirForward >= 0.0f) != (forwardSpeed >= 0.0f);
+                            backwards = (dirForward >= 0.0f) != (dodgeForwardSpeed >= 0.0f);
                         }
                         float impulseForward = dirForward * T.dodgeImpulse;
                         float impulseRight = dirRight * T.dodgeImpulse;
@@ -336,33 +317,82 @@ namespace rl::detail
             }
         }
 
-        // ---- 4. suspension and grip of every wheel on the ground
-        float driveScale = 0.0f;
-        const float gravity = ctx.tuning.gravity;
+        // ---- 4. the throttle, the brake, the steering and the tyres (RocketSim Car::_UpdateWheels and btVehicleRL::calcFrictionImpulses)
+        // Everything is worked out from the velocities the tick started with (the way RocketSim does in updateVehicleFirst); applied one by
+        // one the impulse of the first wheel would change what the next one sees.
+        const float forwardSpeed = startVelocity.Dot(forward);
+        const float absForwardSpeed = std::fabs(forwardSpeed);
+        Vec3 tyreImpulse[kWheelCount];
+        Vec3 tyrePoint[kWheelCount];
+        Vec3 springImpulse[kWheelCount];
+        for (int w = 0; w < kWheelCount; ++w)
+        {
+            tyreImpulse[w] = Vec3::sZero();
+            tyrePoint[w] = centerOfMass;
+            springImpulse[w] = Vec3::sZero();
+        }
+
+        // the handbrake builds up and lets go over time
+        rt.handbrakeVal = Clamp(rt.handbrakeVal + (handbrake ? T.handbrakeRise : -T.handbrakeFall) * dt, 0.0f, 1.0f);
+
+        float realThrottle = throttleIn;
+        float realBrake = 0.0f;
+        if (input.boost && rt.boost > 0.0f)
+        {
+            realThrottle = 1.0f;
+        }
+        float engineThrottle = realThrottle;
+        float driveSpeedScale = Interp(T.driveSpeed, T.driveFactor, 3, absForwardSpeed);
+        if (!handbrake)
+        {
+            if (std::fabs(realThrottle) >= T.throttleDeadzone)
+            {
+                if (absForwardSpeed > T.stopSpeed && Sign(realThrottle) != Sign(forwardSpeed))
+                {
+                    realBrake = 1.0f;  // the full brake against the way the car goes
+                    if (absForwardSpeed > 0.0001f)
+                    {
+                        engineThrottle = 0.0f;
+                    }
+                }
+            }
+            else
+            {
+                engineThrottle = 0.0f;  // coasting
+                realBrake = absForwardSpeed < T.stopSpeed ? 1.0f : T.coastBrakeFactor;
+            }
+        }
+        if (contacts < 3)
+        {
+            driveSpeedScale /= 4.0f;
+        }
+        const float engineImpulse = engineThrottle * T.throttleAccel * (mass * 0.25f) * dt * driveSpeedScale;  // per wheel
+        const float brakeMaxImpulse = realBrake * T.brakeAccel * (mass * 0.25f) * dt;                         // per wheel
+
+        // the angle of the front wheels
+        float steerAngle = Interp(T.steerSpeed, T.steerAngle, 6, absForwardSpeed);
+        if (rt.handbrakeVal > 0.0f)
+        {
+            steerAngle += (Interp(T.powerslideSteerSpeed, T.powerslideSteerAngle, 2, absForwardSpeed) - steerAngle) * rt.handbrakeVal;
+        }
+        steerAngle *= steerIn;
+        // what the tyres do now was set in the tick before; what is worked out here is for the next one
+        const float steerSin = std::sin(rt.tyreSteer);
+        const float steerCos = std::cos(rt.tyreSteer);
+        const float tyreEngine = rt.tyreEngine;
+        const float tyreBrake = rt.tyreBrake;
+        float nextLat[kWheelCount];
+        float nextLong[kWheelCount];
+        for (int w = 0; w < kWheelCount; ++w)
+        {
+            nextLat[w] = rt.tyreLat[w];
+            nextLong[w] = rt.tyreLong[w];
+        }
+
         if (contacts > 0)
         {
-            if (velocityChanged)
-            {
-                body.SetLinearVelocityClamped(velocity);
-                velocityChanged = false;
-            }
-            driveScale = std::min(static_cast<float>(contacts), 3.0f) / 3.0f;
-            const Vec3 rightOnSurface = SafeNormalized(right - surfaceNormal * right.Dot(surfaceNormal), right);
-            const Vec3 forwardOnSurface = SafeNormalized(rightOnSurface.Cross(surfaceNormal), forward);
-            const float forwardSpeed = body.GetLinearVelocity().Dot(forwardOnSurface);
-
-            // Steering turns the front wheels (a bicycle model); the car then turns because the tyres do not slide sideways.
-            // The angle comes from RL's curvature-by-speed table: tan(angle) = curvature * wheelbase.
-            const float wheelBase = std::max(T.wheelFrontZ - T.wheelRearZ, 0.1f);
-            const float curvature = Interp(T.curvatureSpeed, T.curvatureValue, 6, std::fabs(forwardSpeed)) * (slide ? T.handbrakeSteerScale : 1.0f);
-            const float steerAngle = Clamp(std::atan(Clamp(input.steer, -1.0f, 1.0f) * curvature * wheelBase), -T.maxSteerAngle, T.maxSteerAngle);
-            const float steerSin = std::sin(steerAngle);
-            const float steerCos = std::cos(steerAngle);
-            const float wheelMass = mass * 0.25f;
-            const Vec3 centerOfMass = Vec3(body.GetCenterOfMassPosition());
-            Vec3 springImpulse[kWheelCount];
-            Vec3 sideImpulse[kWheelCount];
-            Vec3 sideAt[kWheelCount];
+            const float invMass = body.GetMotionProperties()->GetInverseMass();
+            const Mat44 inverseInertia = body.GetInverseInertia();
             for (int w = 0; w < kWheelCount; ++w)
             {
                 const Wheel& wheel = wheels[w];
@@ -389,169 +419,194 @@ namespace rl::detail
                     float force = (compression * T.suspensionStiffness * inverse - damping * relativeVelocity) *
                                   (front ? T.suspensionScaleFront : T.suspensionScaleRear);
                     force = std::max(force, 0.0f);  // RL never pulls the car down with a spring
-                    springImpulse[w] = n * (force * dt);
+
+                    // a wheel that sinks deeper than its rest (less the ray's shortening) hits the ground like a body does: the part of the
+                    // impulse that stops it is shared by the four wheels (btVehicleRL::rayCast, resolveSingleCollision of RocketSim)
+                    float extra = 0.0f;
+                    const float radius = front ? T.wheelRadiusFront : T.wheelRadiusRear;
+                    const float traceLength = (wheel.origin - wheel.point).Dot(up);
+                    const float pushbackThreshold = wheel.rest + radius - T.suspensionSubtraction;
+                    if (traceLength < pushbackThreshold)
+                    {
+                        const Vec3 arm = wheel.point - centerOfMass;
+                        const Vec3 moment = arm.Cross(n);
+                        const float meff = 1.0f / (invMass + moment.Dot(inverseInertia.Multiply3x3(moment)));
+                        const float approach = n.Dot(body.GetPointVelocity(wheel.point));
+                        const float impulse = (T.pushbackErp * static_cast<float>(kTickRate) * (pushbackThreshold - traceLength) - approach) * meff;
+                        extra = std::max(impulse, 0.0f) / static_cast<float>(kWheelCount);
+                    }
+                    springImpulse[w] = force > 0.0f ? n * (force * dt + extra) : Vec3::sZero();
                 }
 
-                // the sideways axis of this tyre on the surface it stands on
-                const Vec3 wheelRight = SafeNormalized(right - n * right.Dot(n), right);
-                Vec3 sideAxis = wheelRight;
+                // the axle of this wheel (the front wheels turn with the steering), the grip curves by how much the wheel slides
+                Vec3 axle = right;
                 if (front)
                 {
-                    const Vec3 wheelForward = SafeNormalized(wheelRight.Cross(n), forward);
-                    sideAxis = wheelRight * steerCos - wheelForward * steerSin;
+                    axle = right * steerCos - forward * steerSin;
                 }
-                // the handbrake lets go of the rear tyres: the tail slides
-                const float grip = (front ? 1.0f : rt.gripScale) * (landing ? T.landingLateralScale : 1.0f);
-                const float sideSpeed = body.GetPointVelocity(wheel.origin).Dot(sideAxis);
-                const float cap = wheelMass * T.lateralAccel * grip * dt;
-                const float impulse = Clamp(-sideSpeed * wheelMass * (landing ? 1.0f : T.lateralGain), -cap, cap);
-                // RL applies the tyre forces at the height of the centre of mass: they do not tip the car over
-                const Vec3 applyAt = wheel.origin - up * (wheel.origin - centerOfMass).Dot(up);
-                sideImpulse[w] = sideAxis * impulse;
-                sideAt[w] = applyAt;
-            }
-            // Every impulse of the tick is worked out from the velocities the tick started with (RocketSim computes them in
-            // btVehicleRL::updateVehicleFirst); applied one by one the first wheel's impulse would change what the next one sees.
-            for (int w = 0; w < kWheelCount; ++w)
-            {
-                if (wheels[w].contact)
+                const Vec3 slideLong = axle.Cross(n);
+                const Vec3 wheelVelocity = startVelocity + startAngular.Cross(wheel.origin - centerOfMass);
+                const float baseFriction = std::fabs(wheelVelocity.Dot(axle));
+                float slip = 0.0f;
+                if (baseFriction > T.slipMinSpeed)
                 {
-                    body.AddImpulse(springImpulse[w], wheels[w].point);
-                    body.AddImpulse(sideImpulse[w], sideAt[w]);
+                    slip = baseFriction / (std::fabs(wheelVelocity.Dot(slideLong)) + baseFriction);  // the sideways share of the wheel's speed
                 }
-            }
+                float latFriction = Interp(T.latFrictionSlip, T.latFriction, 2, slip);
+                float longFriction = 1.0f;
+                if (rt.handbrakeVal > 0.0f)
+                {
+                    latFriction *= (T.handbrakeLatFriction - 1.0f) * rt.handbrakeVal + 1.0f;
+                    longFriction *= (Interp(T.handbrakeLongSlip, T.handbrakeLongFriction, 2, slip) - 1.0f) * rt.handbrakeVal + 1.0f;
+                }
+                if (realThrottle == 0.0f)
+                {
+                    // no throttle: the tyres hold less, the less the surface is floor
+                    const float nonSticky = Interp(T.nonStickyNormal, T.nonStickyScale, 3, n.GetY());
+                    latFriction *= nonSticky;
+                    longFriction *= nonSticky;
+                }
+                nextLat[w] = latFriction;  // for the next tick
+                nextLong[w] = longFriction;
+                latFriction = rt.tyreLat[w];  // this tick holds with what the tick before set
+                longFriction = rt.tyreLong[w];
 
-            // throttle, brake, coasting along the surface
-            Vec3 ground = body.GetLinearVelocity();
-            float deltaSpeed = 0.0f;
-            const float throttle = Clamp(input.throttle, -1.0f, 1.0f);
-            if (std::fabs(throttle) > 0.01f)
-            {
-                const float direction = throttle > 0.0f ? 1.0f : -1.0f;
-                if (forwardSpeed * direction >= -0.1f)
+                // the axle in the plane of the surface and the direction the wheel rolls
+                const Vec3 axleOnSurface = SafeNormalized(axle - n * axle.Dot(n), right);
+                const Vec3 rollDir = SafeNormalized(axleOnSurface.Cross(n), forward);
+                const Vec3 relative = wheel.point - centerOfMass;
+                const Vec3 contactVelocity = startVelocity + startAngular.Cross(relative);
+
+                // the tyre holds the car against the sideways speed at the contact point: the impulse is a share of the one that stops it
+                const Vec3 lever = relative.Cross(axleOnSurface);
+                const float effectiveMass = 1.0f / (invMass + lever.Dot(inverseInertia.Multiply3x3(lever)));
+                const float sideImpulse = -(T.frictionDamping * 0.5f) * contactVelocity.Dot(axleOnSurface) * effectiveMass * latFriction;
+
+                float rolling = 0.0f;
+                if (tyreEngine == 0.0f)
                 {
-                    deltaSpeed = direction * ThrottleAccel(T, forwardSpeed * direction) * std::fabs(throttle) * dt;
+                    if (tyreBrake != 0.0f)
+                    {
+                        rolling = Clamp(-T.brakeStiffness * contactVelocity.Dot(rollDir), -tyreBrake, tyreBrake);
+                    }
                 }
                 else
                 {
-                    const float brake = std::min(T.brakeAccel * std::fabs(throttle) * dt, std::fabs(forwardSpeed));
-                    deltaSpeed = forwardSpeed > 0.0f ? -brake : brake;
+                    rolling = tyreEngine;  // the drive pushes along the way the wheel points
                 }
+                tyreImpulse[w] = rollDir * (rolling * longFriction) + axleOnSurface * sideImpulse;
+                // RL applies the tyre forces at the height of the centre of mass: they do not tip the car over
+                tyrePoint[w] = centerOfMass + (relative - up * relative.Dot(up));
             }
-            else if (!input.boost)
-            {
-                const float coast = std::min(T.coastDecel * dt, std::fabs(forwardSpeed));
-                deltaSpeed = forwardSpeed > 0.0f ? -coast : coast;
-            }
-            ground += forwardOnSurface * (deltaSpeed * driveScale);
-            body.SetLinearVelocityClamped(ground);
-
-            if (landing && onGround && std::fabs(input.steer) < 0.1f)
-            {
-                // the yaw rate left over from the air: without steering the car goes where its nose points
-                const Vec3 angular = body.GetAngularVelocity();
-                const Vec3 along = surfaceNormal * angular.Dot(surfaceNormal);
-                body.SetAngularVelocityClamped(angular - along * (1.0f - std::exp(-T.landingYawDamping * dt)));
-            }
-            if (onGround && T.groundAngularDamping > 0.0f)
-            {
-                // pitch and roll about the surface die out
-                const Vec3 angular = body.GetAngularVelocity();
-                const float keep = std::exp(-T.groundAngularDamping * dt);
-                const Vec3 along = surfaceNormal * angular.Dot(surfaceNormal);
-                body.SetAngularVelocityClamped(along + (angular - along) * keep);
-            }
-
-            // The pull into the surface (RocketSim "sticky force"): half a gravity always, and in proportion to the steepness of the
-            // surface another one while the car has the throttle or moves. On the floor that is the weight of the car, on a wall what
-            // holds it there; a car that stands still on a wall has only the half and slides down.
-            {
-                const float throttleNow = input.boost && rt.boost > 0.0f ? 1.0f : throttle;
-                const bool fullStick = std::fabs(throttleNow) > 0.001f || std::fabs(forwardSpeed) > T.stickStopSpeed;
-                float share = T.stickBase;
-                if (fullStick)
-                {
-                    share += T.stickSteep * (1.0f - std::fabs(surfaceNormal.GetY()));
-                }
-                body.AddImpulse(-surfaceNormal * (mass * gravity * share * dt));
-            }
-            velocity = body.GetLinearVelocity();
         }
-        else if (velocityChanged)
+
+        rt.tyreSteer = steerAngle;
+        rt.tyreEngine = engineImpulse;
+        rt.tyreBrake = brakeMaxImpulse;
+        for (int w = 0; w < kWheelCount; ++w)
+        {
+            rt.tyreLat[w] = nextLat[w];
+            rt.tyreLong[w] = nextLong[w];
+        }
+
+        // the pull into the surface (RocketSim "sticky force"): half a gravity always, and in proportion to the steepness of the surface
+        // another one while the car has the throttle or moves; on the floor that is the weight of the car, on a wall what holds it there
+        Vec3 stickImpulse = Vec3::sZero();
+        if (contacts > 0)
+        {
+            const bool fullStick = realThrottle != 0.0f || absForwardSpeed > T.stickStopSpeed;
+            float share = T.stickBase;
+            if (fullStick)
+            {
+                share += T.stickSteep * (1.0f - std::fabs(surfaceNormal.GetY()));
+            }
+            stickImpulse = -surfaceNormal * (mass * ctx.tuning.gravity * share * dt);
+        }
+
+        // ---- 5. the auto-roll: with the throttle, while the car does not stand on all four wheels or the hitbox touches a surface,
+        // a pull into the surface and a torque that turns the wheels to it (RocketSim Car::_UpdateAutoRoll)
+        Vec3 autoRollImpulse = Vec3::sZero();
+        if (input.throttle != 0.0f && ((contacts > 0 && contacts < 4) || hasBodyContact))
+        {
+            const Vec3 groundUp = contacts > 0 ? surfaceNormal : bodyNormal;
+            const Vec3 groundDown = -groundUp;
+            const Vec3 crossRight = groundUp.Cross(forward);
+            const Vec3 crossForward = groundDown.Cross(crossRight);
+            const float rightFactor = 1.0f - Clamp(right.Dot(crossRight), 0.0f, 1.0f);
+            const float forwardFactor = 1.0f - Clamp(forward.Dot(crossForward), 0.0f, 1.0f);
+            const Vec3 torqueRight = forward * (right.Dot(groundUp) >= 0.0f ? -1.0f : 1.0f) * rightFactor;
+            const Vec3 torqueForward = right * (forward.Dot(groundUp) >= 0.0f ? 1.0f : -1.0f) * forwardFactor;
+            autoRollImpulse = groundDown * (mass * T.autoRollForce * dt);
+            angularAdd += (torqueForward + torqueRight) * (T.autoRollTorque * dt);
+        }
+
+        // ---- apply what the tick worked out
+        if (velocityChanged)
         {
             body.SetLinearVelocityClamped(velocity);
-            velocityChanged = false;
         }
+        for (int w = 0; w < kWheelCount; ++w)
+        {
+            if (!wheels[w].contact)
+            {
+                continue;
+            }
+            body.AddImpulse(springImpulse[w], wheels[w].point);
+            body.AddImpulse(tyreImpulse[w], tyrePoint[w]);
+        }
+        if (contacts > 0)
+        {
+            body.AddImpulse(stickImpulse);
+        }
+        body.AddImpulse(autoRollImpulse);
 
-        // ---- 5. in the air: the flip spin and the air control (RocketSim Car::_UpdateAirTorque)
+        // ---- 6. in the air: the flip spin and the air control (RocketSim Car::_UpdateAirTorque)
+        Vec3 local = basis.Multiply3x3Transposed(body.GetAngularVelocity() + angularAdd);
+        bool turn = angularAdd.LengthSq() > 0.0f;
+        const bool startedNow = rt.dodging != 0 && !dodgingAtStart;
         if (onGround)
         {
             rt.dodging = 0;
         }
         else
         {
-            Vec3 local = basis.Multiply3x3Transposed(body.GetAngularVelocity());
-            bool turn = false;
-
-            if (rt.selfRight != 0)
+            bool airControl = false;
+            const bool flipping = dodgingAtStart && flippedAtStart && flipTimeAtStart < T.dodgeTorqueTime;
+            if (flipping)
             {
-                // the car lying on its roof or side is turned back by a spin that runs as long as it needs
-                if (contacts >= 2 || rt.rightSpinLeft <= 0.0f)
+                if (rt.flipPitch != 0.0f || rt.flipRoll != 0.0f)
                 {
-                    rt.selfRight = 0;
-                    rt.rightSpinLeft = 0.0f;
-                }
-                else
-                {
-                    local.SetX(rt.rightSpinX);
-                    local.SetZ(rt.rightSpinZ);
-                    rt.rightSpinLeft -= dt;
+                    // flip cancel: the pitch stick against the flip takes its pitch spin away (and gives the air control back)
+                    float pitchScale = 1.0f;
+                    if (rt.flipPitch != 0.0f && stickPitch != 0.0f && Sign(rt.flipPitch) == Sign(stickPitch))
+                    {
+                        pitchScale = 1.0f - std::min(std::fabs(stickPitch), 1.0f);
+                        airControl = true;
+                    }
+                    local += Vec3(rt.flipPitch * pitchScale * T.dodgeTorquePitch, 0.0f, rt.flipRoll * T.dodgeTorqueRoll) * dt;
                     turn = true;
                 }
-            }
-
-            bool airControl = false;
-            if (rt.dodging != 0)
-            {
-                rt.dodging = (rt.flipped != 0 && rt.flipTime < T.dodgeTorqueTime) ? 1 : 0;
-            }
-            if (rt.selfRight == 0)
-            {
-                if (rt.dodging != 0)
-                {
-                    if (rt.flipPitch != 0.0f || rt.flipRoll != 0.0f)
-                    {
-                        // flip cancel: the pitch stick against the flip takes its pitch spin away (and gives the air control back)
-                        float pitchScale = 1.0f;
-                        if (rt.flipPitch != 0.0f && stickPitch != 0.0f && Sign(rt.flipPitch) == Sign(stickPitch))
-                        {
-                            pitchScale = 1.0f - std::min(std::fabs(stickPitch), 1.0f);
-                            airControl = true;
-                        }
-                        local += Vec3(rt.flipPitch * pitchScale * T.dodgeTorquePitch, 0.0f, rt.flipRoll * T.dodgeTorqueRoll) * dt;
-                        turn = true;
-                    }
-                    else
-                    {
-                        airControl = true;  // a stall: the dodge had no direction
-                    }
-                }
                 else
                 {
-                    airControl = true;
+                    airControl = true;  // a stall: the dodge had no direction
                 }
             }
+            else
+            {
+                airControl = true;
+            }
+            airControl = airControl && rt.autoFlipping == 0;
             if (airControl && contacts == 0)
             {
                 float pitchScale = 1.0f;
                 Vec3 torque = Vec3::sZero();
                 if (stickPitch != 0.0f || stickYaw != 0.0f || stickRoll != 0.0f)
                 {
-                    if (rt.dodging != 0)
+                    if (flipping)
                     {
                         pitchScale = 0.0f;
                     }
-                    else if (rt.flipped != 0 && rt.flipTime < T.dodgeTorqueTime + T.dodgePitchLockExtra)
+                    else if (flippedAtStart && flipTimeAtStart < T.dodgeTorqueTime + T.dodgePitchLockExtra)
                     {
                         pitchScale = 0.0f;  // the pitch stick stays off a moment after a flip
                     }
@@ -563,10 +618,7 @@ namespace rl::detail
                 local += (torque - damping) * dt;
                 turn = true;
             }
-            if (turn)
-            {
-                body.SetAngularVelocityClamped(basis.Multiply3x3(local));
-            }
+            rt.dodging = (flipping || startedNow) ? 1 : 0;
 
             // the dodge's clock and what it does to the vertical speed: the flip hangs in the air
             if (rt.dodging != 0)
@@ -587,36 +639,42 @@ namespace rl::detail
                 rt.flipTime += dt;  // counted on: the pitch lock after the flip needs it
             }
 
-            const float throttleAir = Clamp(input.throttle, -1.0f, 1.0f);
-            if (throttleAir != 0.0f)
+            if (throttleIn != 0.0f)
             {
-                body.SetLinearVelocityClamped(body.GetLinearVelocity() + forward * (throttleAir * T.airThrottleAccel * dt));
+                body.SetLinearVelocityClamped(body.GetLinearVelocity() + forward * (throttleIn * T.airThrottleAccel * dt));
             }
         }
-
-        // ---- 6. boost
-        if (input.boost && rt.boost > 0.0f)
+        if (turn)
         {
-            const float use = std::min(rt.boost, T.boostUsePerSecond * dt);
-            const float share = use / (T.boostUsePerSecond * dt);
-            rt.boost -= use;
-            Vec3 direction = forward;
-            float accel = T.boostAccelAir;
-            if (contacts > 0)
-            {
-                const Vec3 rightOnSurface = SafeNormalized(right - surfaceNormal * right.Dot(surfaceNormal), right);
-                direction = SafeNormalized(rightOnSurface.Cross(surfaceNormal), forward);
-                accel = T.boostAccelGround * driveScale;
-            }
-            body.SetLinearVelocityClamped(body.GetLinearVelocity() + direction * (accel * share * dt));
+            // not limited here: RocketSim limits the angular speed after the step, so a flip that is driven at the limit still turns a
+            // tick's worth of its torque faster than the limit (5.5 + 1.9 rad/s)
+            body.SetAngularVelocity(basis.Multiply3x3(local));
         }
 
-        // ---- 7. top speed
-        const Vec3 final = body.GetLinearVelocity();
-        const float speed = final.Length();
-        if (speed > T.maxSpeed)
+        // ---- 7. boost (RocketSim Car::_UpdateBoost): a started boost runs at least boostMinTime, along the nose of the car
         {
-            body.SetLinearVelocityClamped(final * (T.maxSpeed / speed));
+            if (rt.boost > 0.0f)
+            {
+                if (rt.boosting != 0)
+                {
+                    rt.boosting = (input.boost || rt.boostingTime < T.boostMinTime) ? 1 : 0;
+                }
+                else if (input.boost)
+                {
+                    rt.boosting = 1;
+                }
+            }
+            else
+            {
+                rt.boosting = 0;
+            }
+            rt.boostingTime = rt.boosting != 0 ? rt.boostingTime + dt : 0.0f;
+            if (rt.boosting != 0)
+            {
+                rt.boost = std::max(rt.boost - T.boostUsePerSecond * dt, 0.0f);
+                const float accel = onGround ? T.boostAccelGround : T.boostAccelAir;
+                body.SetLinearVelocityClamped(body.GetLinearVelocity() + forward * (accel * dt));
+            }
         }
     }
 }

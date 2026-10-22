@@ -24,6 +24,7 @@ namespace rl
         constexpr uint64_t kUserDataArena = 200;
         constexpr uint32_t kSnapshotMagic = 0x31534C52;  // "RLS1"
         constexpr float kParkY = -60.0f;
+        constexpr float kContactMargin = 0.01f;  // m: a contact further apart than this is not a hit (Bullet's breaking threshold of 0.02 bt)
 
         static_assert(std::is_trivially_copyable_v<CarRuntime>, "the car runtime is copied as bytes");
 
@@ -47,6 +48,7 @@ namespace rl
         }
 
         // Contact callbacks may come in any order from any thread; the listener only writes them down, Step sorts and applies them.
+        // It also sets the friction and the restitution of the pairs the way RocketSim does (the numbers are in the tuning).
         class Listener final : public JPH::ContactListener
         {
         public:
@@ -61,13 +63,16 @@ namespace rl
                 int kind = 0;
                 int a = 0;  // car (the lower index for CarCar)
                 int b = 0;  // the other car for CarCar
-                JPH::Vec3 point = JPH::Vec3::sZero();
-                JPH::Vec3 velocityA = JPH::Vec3::sZero();  // ball velocity for BallCar
-                JPH::Vec3 velocityB = JPH::Vec3::sZero();
-                JPH::Vec3 positionA = JPH::Vec3::sZero();
+                JPH::Vec3 point = JPH::Vec3::sZero();      // the contact point in the world
+                JPH::Vec3 velocityA = JPH::Vec3::sZero();  // ball velocity for BallCar, the lower car for CarCar
+                JPH::Vec3 velocityB = JPH::Vec3::sZero();  // the car
+                JPH::Vec3 positionA = JPH::Vec3::sZero();  // centres of mass
                 JPH::Vec3 positionB = JPH::Vec3::sZero();
-                JPH::Quat carRotation = JPH::Quat::sIdentity();  // of the car in a BallCar event
+                JPH::Quat rotationA = JPH::Quat::sIdentity();
+                JPH::Quat rotationB = JPH::Quat::sIdentity();
             };
+
+            void SetTuning(const RlTuning* tuning) { tuning_ = tuning; }
 
             void Clear()
             {
@@ -77,14 +82,14 @@ namespace rl
                 arenaNormal_.fill(JPH::Vec3::sZero());
             }
 
-            void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings&) override
+            void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override
             {
-                Record(b1, b2, manifold, true);
+                Record(b1, b2, manifold, settings);
             }
 
-            void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings&) override
+            void OnContactPersisted(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override
             {
-                Record(b1, b2, manifold, false);
+                Record(b1, b2, manifold, settings);
             }
 
             std::vector<Event> TakeEvents(std::array<bool, kMaxCars>& arenaTouch, std::array<JPH::Vec3, kMaxCars>& arenaNormal)
@@ -124,53 +129,79 @@ namespace rl
 
             static bool IsCar(const JPH::Body& body) { return body.GetUserData() < static_cast<uint64_t>(kMaxCars); }
 
-            void Record(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, bool added)
+            void Record(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings)
             {
                 const uint64_t u1 = b1.GetUserData();
                 const uint64_t u2 = b2.GetUserData();
                 std::lock_guard<std::mutex> lock(mutex_);
+                const RlTuning& t = *tuning_;
                 if ((u1 == kUserDataArena && IsCar(b2)) || (u2 == kUserDataArena && IsCar(b1)))
                 {
                     const size_t car = static_cast<size_t>(IsCar(b1) ? u1 : u2);
                     arenaTouch_[car] = true;
                     // the manifold normal runs from body 1 to body 2: from the arena to the car when the arena is body 1
                     arenaNormal_[car] += (u1 == kUserDataArena) ? manifold.mWorldSpaceNormal : -manifold.mWorldSpaceNormal;
+                    settings.mCombinedFriction = t.car.friction;
+                    settings.mCombinedRestitution = t.car.restitution;
                     return;
                 }
-                if (!added)
+                if ((u1 == kUserDataArena && u2 == kUserDataBall) || (u2 == kUserDataArena && u1 == kUserDataBall))
                 {
+                    settings.mCombinedFriction = t.ball.friction;
+                    settings.mCombinedRestitution = t.ball.restitution;
                     return;
                 }
-                Event e;
-                e.point = JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
                 if ((u1 == kUserDataBall && IsCar(b2)) || (u2 == kUserDataBall && IsCar(b1)))
                 {
                     const JPH::Body& ball = u1 == kUserDataBall ? b1 : b2;
                     const JPH::Body& car = u1 == kUserDataBall ? b2 : b1;
+                    settings.mCombinedFriction = t.car.carBallFriction;
+                    settings.mCombinedRestitution = t.car.carBallRestitution;
+                    if (manifold.mPenetrationDepth < -kContactMargin)
+                    {
+                        return;  // Jolt reports contacts that are about to happen; Bullet only the ones that are there
+                    }
+                    Event e;
                     e.kind = BallCar;
                     e.a = static_cast<int>(car.GetUserData());
+                    e.point = JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(0));
                     e.velocityA = ball.GetLinearVelocity();
                     e.velocityB = car.GetLinearVelocity();
-                    e.positionA = JPH::Vec3(ball.GetPosition());
-                    e.positionB = JPH::Vec3(car.GetPosition());
-                    e.carRotation = car.GetRotation();
+                    e.positionA = JPH::Vec3(ball.GetCenterOfMassPosition());
+                    e.positionB = JPH::Vec3(car.GetCenterOfMassPosition());
+                    e.rotationB = car.GetRotation();
                     events_.push_back(e);
                 }
                 else if (IsCar(b1) && IsCar(b2))
                 {
+                    settings.mCombinedFriction = t.car.carCarFriction;
+                    settings.mCombinedRestitution = t.car.carCarRestitution;
+                    if (manifold.mPenetrationDepth < -kContactMargin)
+                    {
+                        return;
+                    }
                     const JPH::Body& lo = u1 < u2 ? b1 : b2;
                     const JPH::Body& hi = u1 < u2 ? b2 : b1;
-                    e.kind = CarCar;
-                    e.a = static_cast<int>(lo.GetUserData());
-                    e.b = static_cast<int>(hi.GetUserData());
-                    e.velocityA = lo.GetLinearVelocity();
-                    e.velocityB = hi.GetLinearVelocity();
-                    e.positionA = JPH::Vec3(lo.GetPosition());
-                    e.positionB = JPH::Vec3(hi.GetPosition());
-                    events_.push_back(e);
+                    // one event for every contact point: the bumper test looks at where on the car the hit is
+                    for (JPH::uint i = 0; i < manifold.mRelativeContactPointsOn1.size(); ++i)
+                    {
+                        Event e;
+                        e.kind = CarCar;
+                        e.a = static_cast<int>(lo.GetUserData());
+                        e.b = static_cast<int>(hi.GetUserData());
+                        e.point = JPH::Vec3(manifold.GetWorldSpaceContactPointOn1(i));
+                        e.velocityA = lo.GetLinearVelocity();
+                        e.velocityB = hi.GetLinearVelocity();
+                        e.positionA = JPH::Vec3(lo.GetCenterOfMassPosition());
+                        e.positionB = JPH::Vec3(hi.GetCenterOfMassPosition());
+                        e.rotationA = lo.GetRotation();
+                        e.rotationB = hi.GetRotation();
+                        events_.push_back(e);
+                    }
                 }
             }
 
+            const RlTuning* tuning_ = nullptr;
             std::mutex mutex_;
             std::vector<Event> events_;
             std::array<bool, kMaxCars> arenaTouch_{};
@@ -205,6 +236,7 @@ namespace rl
         JPH::BodyID carIds[kMaxCars];
 
         CarRuntime runtimes[kMaxCars];
+        int teams[kMaxCars] = {0, 1, 2, 3, 4, 5, 6, 7};  // cars of one team only bump each other; by default every car is its own team
         CarFrame frames[kMaxCars];
         uint32_t tick = 0;
         int lastToucher = -1;
@@ -222,6 +254,7 @@ namespace rl
             jobSystem = std::make_unique<JPH::JobSystemSingleThreaded>(JPH::cMaxPhysicsJobs);
             physics.Init(32, 0, 1024, 1024, broadPhaseMap, objectVsBroadPhase, pairFilter);
             physics.SetGravity(JPH::Vec3(0.0f, -tuning.gravity, 0.0f));
+            listener.SetTuning(&tuning);
             physics.SetContactListener(&listener);
             JPH::PhysicsSettings settings = physics.GetPhysicsSettings();
             settings.mAllowSleeping = false;
@@ -322,7 +355,7 @@ namespace rl
             settings.mLinearDamping = 0.0f;
             settings.mAngularDamping = 0.0f;
             settings.mMaxLinearVelocity = c.maxSpeed * 2.0f;
-            settings.mMaxAngularVelocity = c.maxAngularSpeed;
+            settings.mMaxAngularVelocity = c.maxAngularSpeed * 4.0f;  // the sim limits it after the step (PostStep), as RocketSim does
             settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
             settings.mMassPropertiesOverride = CarMassProperties(c);
             settings.mUserData = static_cast<uint64_t>(index);
@@ -375,7 +408,13 @@ namespace rl
             std::memset(&rt, 0, sizeof(rt));
             rt.boost = tuning.car.boostStart;
             rt.jumpTime = 1000.0f;
-            rt.gripScale = 1.0f;
+            rt.lastExtraTick = -10;
+            rt.bumpOther = -1;
+            for (int w = 0; w < kWheelCount; ++w)
+            {
+                rt.tyreLat[w] = 1.0f;
+                rt.tyreLong[w] = 1.0f;
+            }
             rt.spawnX = x;
             rt.spawnY = tuning.car.spawnHeight;
             rt.spawnZ = z;
@@ -493,6 +532,7 @@ namespace rl
                 }
             }
             ApplyContacts(contacts);
+            PostStep();
             LimitBall();
             RecoverEscaped();
 
@@ -500,75 +540,149 @@ namespace rl
             FillState();
         }
 
+        static float Interp3(const float* xs, const float* ys, int count, float x)
+        {
+            return Interp(xs, ys, count, x);
+        }
+
+        // What the contacts of the tick do on top of the solver (RocketSim Ball::_OnHit and Arena::_BtCallback_OnCarCarCollision): the extra
+        // push of a ball hit, the bump and the demolition of a car hit with the bumper. The speeds added here are the ones RocketSim
+        // collects in its velocity caches and adds at the end of the tick.
         void ApplyContacts(const std::vector<Listener::Event>& contacts)
         {
             const RlBallTuning& b = tuning.ball;
+            const RlCarTuning& c = tuning.car;
             JPH::BodyInterface& bodies = physics.GetBodyInterfaceNoLock();
-            int lastCar = -1;
-            int lastA = -1;
-            int lastB = -1;
             for (const Listener::Event& e : contacts)
             {
                 if (e.kind == Listener::BallCar)
                 {
-                    if (e.a == lastCar || runtimes[e.a].demolished != 0)
+                    if (runtimes[e.a].demolished != 0)
                     {
                         continue;
                     }
-                    lastCar = e.a;
                     CarRuntime& rt = runtimes[e.a];
                     lastToucher = e.a;
-                    if (rt.ballHitCooldown > 0)
+                    // once a car has given its extra push it waits at least one tick for the next one
+                    const int now = static_cast<int>(tick);
+                    if (!(now > rt.lastExtraTick + 1 || rt.lastExtraTick > now))
                     {
                         continue;
                     }
-                    rt.ballHitCooldown = b.hitCooldownTicks;
-                    // RL pushes the ball along the line from the hit point to its centre, flattened vertically
-                    JPH::Vec3 direction = e.positionA - e.point;
-                    direction.SetY(direction.GetY() * b.hitNormalYScale);
-                    const float length = direction.Length();
-                    if (length < 1e-4f)
+                    rt.lastExtraTick = now;
+                    const JPH::Vec3 relativePosition = e.positionA - e.positionB;  // from the centre of the car to the ball
+                    const JPH::Vec3 relativeVelocity = e.velocityA - e.velocityB;
+                    const float relativeSpeed = std::min(relativeVelocity.Length(), b.hitMaxRelativeSpeed);
+                    if (relativeSpeed > 0.0f)
                     {
-                        continue;
+                        const JPH::Vec3 carForward = JPH::Mat44::sRotation(e.rotationB).GetAxisZ();
+                        JPH::Vec3 hitDirection = relativePosition;
+                        hitDirection.SetY(hitDirection.GetY() * b.hitNormalYScale);
+                        hitDirection = hitDirection.NormalizedOr(JPH::Vec3::sAxisY());
+                        const JPH::Vec3 adjustment = carForward * hitDirection.Dot(carForward) * (1.0f - b.hitForwardScale);
+                        hitDirection = (hitDirection - adjustment).NormalizedOr(hitDirection);
+                        const JPH::Vec3 added = hitDirection * (relativeSpeed * Interp3(b.hitSpeed, b.hitScale, 4, relativeSpeed) * b.hitForceScale);
+                        bodies.SetLinearVelocity(ballId, bodies.GetLinearVelocity(ballId) + added);
+                        ++events.ballHits;
                     }
-                    direction /= length;
-                    float relative = (e.velocityA - e.velocityB).Length();
-                    float scale = Interp(b.hitSpeed, b.hitScale, 4, relative);
-                    // where on the car the ball was hit and how: the roof pushes less, a hit during a dodge pushes more
-                    const JPH::Vec3 local = e.carRotation.Conjugated() * (e.point - e.positionB);
-                    if (local.GetY() > 0.12f && local.GetZ() < 0.4f)
-                    {
-                        scale *= b.roofHitScale;
-                    }
-                    if (rt.dodging != 0)
-                    {
-                        scale *= b.dodgeHitScale;
-                    }
-                    JPH::Vec3 velocity = bodies.GetLinearVelocity(ballId) + direction * (relative * scale);
-                    bodies.SetLinearVelocity(ballId, velocity);
-                    ++events.ballHits;
                 }
                 else if (e.kind == Listener::CarCar)
                 {
-                    if (e.a == lastA && e.b == lastB)
+                    // both cars are tried as the one that hits
+                    for (int swap = 0; swap < 2; ++swap)
                     {
-                        continue;
-                    }
-                    lastA = e.a;
-                    lastB = e.b;
-                    const float supersonic = tuning.car.supersonicSpeed;
-                    const JPH::Vec3 ab = e.positionB - e.positionA;
-                    const bool aHits = e.velocityA.Length() >= supersonic && e.velocityA.Dot(ab) > 0.0f;
-                    const bool bHits = e.velocityB.Length() >= supersonic && e.velocityB.Dot(-ab) > 0.0f;
-                    if (aHits && runtimes[e.b].demolished == 0)
-                    {
-                        Demolish(e.b);
-                    }
-                    if (bHits && runtimes[e.a].demolished == 0)
-                    {
-                        Demolish(e.a);
+                        const int one = swap == 0 ? e.a : e.b;
+                        const int other = swap == 0 ? e.b : e.a;
+                        const JPH::Vec3 positionOne = swap == 0 ? e.positionA : e.positionB;
+                        const JPH::Vec3 positionOther = swap == 0 ? e.positionB : e.positionA;
+                        const JPH::Vec3 velocityOne = swap == 0 ? e.velocityA : e.velocityB;
+                        const JPH::Vec3 velocityOther = swap == 0 ? e.velocityB : e.velocityA;
+                        const JPH::Quat rotationOne = swap == 0 ? e.rotationA : e.rotationB;
+                        CarRuntime& rtOne = runtimes[one];
+                        CarRuntime& rtOther = runtimes[other];
+                        if (rtOne.demolished != 0 || rtOther.demolished != 0)
+                        {
+                            break;
+                        }
+                        if (rtOne.bumpOther == other && rtOne.bumpTimer > 0.0f)
+                        {
+                            continue;
+                        }
+                        const JPH::Vec3 delta = positionOther - positionOne;
+                        if (velocityOne.Dot(delta) <= 0.0f)
+                        {
+                            continue;
+                        }
+                        const JPH::Vec3 velocityDirection = velocityOne.NormalizedOr(JPH::Vec3::sAxisZ());
+                        const JPH::Vec3 directionToOther = delta.NormalizedOr(JPH::Vec3::sAxisZ());
+                        const float speedTowardsOther = velocityOne.Dot(directionToOther);
+                        const float otherAwaySpeed = velocityOther.Dot(velocityDirection);
+                        if (speedTowardsOther <= otherAwaySpeed)
+                        {
+                            continue;
+                        }
+                        const JPH::Vec3 local = rotationOne.Conjugated() * (e.point - positionOne);
+                        if (local.GetZ() <= c.bumpMinForward)
+                        {
+                            continue;  // not with the bumper
+                        }
+                        const bool demolish = rtOne.supersonic != 0 && teams[one] != teams[other];
+                        if (demolish)
+                        {
+                            Demolish(other);
+                        }
+                        else
+                        {
+                            const bool groundHit = rtOther.wheelContacts >= 3;
+                            const float baseScale = Interp3(c.bumpSpeed, groundHit ? c.bumpGroundVelocity : c.bumpAirVelocity, 3, speedTowardsOther);
+                            const JPH::Vec3 otherUp = JPH::Mat44::sRotation(swap == 0 ? e.rotationB : e.rotationA).GetAxisY();
+                            const JPH::Vec3 hitUp = groundHit ? otherUp : JPH::Vec3::sAxisY();
+                            const JPH::Vec3 bump = velocityDirection * baseScale + hitUp * Interp3(c.bumpSpeed, c.bumpUpVelocity, 3, speedTowardsOther);
+                            bodies.SetLinearVelocity(carIds[other], bodies.GetLinearVelocity(carIds[other]) + bump);
+                        }
+                        rtOne.bumpOther = other;
+                        rtOne.bumpTimer = c.bumpCooldown;
                     }
                 }
+            }
+        }
+
+        // After the solver, like RocketSim's _FinishPhysicsTick and _PostTickUpdate: the speed limits, the supersonic state, the timers.
+        void PostStep()
+        {
+            JPH::BodyInterface& bodies = physics.GetBodyInterfaceNoLock();
+            const RlCarTuning& c = tuning.car;
+            for (int i = 0; i < carCount; ++i)
+            {
+                CarRuntime& rt = runtimes[i];
+                rt.bumpTimer = std::max(rt.bumpTimer - kTickDt, 0.0f);
+                if (rt.demolished != 0)
+                {
+                    continue;
+                }
+                JPH::Vec3 velocity = bodies.GetLinearVelocity(carIds[i]);
+                const float speed = velocity.Length();
+                if (speed > c.maxSpeed)
+                {
+                    velocity *= c.maxSpeed / speed;
+                    bodies.SetLinearVelocity(carIds[i], velocity);
+                }
+                const JPH::Vec3 angular = bodies.GetAngularVelocity(carIds[i]);
+                const float spin = angular.Length();
+                if (spin > c.maxAngularSpeed)
+                {
+                    bodies.SetAngularVelocity(carIds[i], angular * (c.maxAngularSpeed / spin));
+                }
+                const float limited = std::min(speed, c.maxSpeed);
+                if (rt.supersonic != 0 && rt.supersonicTime < c.supersonicMaintainTime)
+                {
+                    rt.supersonic = limited >= c.supersonicMaintainSpeed ? 1 : 0;
+                }
+                else
+                {
+                    rt.supersonic = limited >= c.supersonicSpeed ? 1 : 0;
+                }
+                rt.supersonicTime = rt.supersonic != 0 ? rt.supersonicTime + kTickDt : 0.0f;
             }
         }
 
@@ -612,7 +726,6 @@ namespace rl
             state.tick = tick;
             state.carCount = carCount;
             state.lastBallToucher = lastToucher;
-            const float supersonic = tuning.car.supersonicSpeed;
             for (int i = 0; i < carCount; ++i)
             {
                 RlCarState& s = state.cars[i];
@@ -626,7 +739,7 @@ namespace rl
                 s.wheelContacts = frames[i].wheelContacts;
                 s.onGround = frames[i].wheelContacts > 0;
                 s.demolished = rt.demolished != 0;
-                s.supersonic = !s.demolished && velocity.Length() >= supersonic;
+                s.supersonic = !s.demolished && rt.supersonic != 0;
                 s.jumped = rt.jumpUsed != 0;
                 s.canDodge = frames[i].wheelContacts < 3 && rt.secondUsed == 0 && rt.airTime < tuning.car.dodgeWindow;
                 s.dodging = rt.dodging != 0;
@@ -751,6 +864,14 @@ namespace rl
             impl_->ResetCar(index, x, z, yaw);
             impl_->FillState();
             impl_->previous = impl_->state;
+        }
+    }
+
+    void RlSim::SetCarTeam(int index, int team)
+    {
+        if (index >= 0 && index < impl_->carCount)
+        {
+            impl_->teams[index] = team;
         }
     }
 

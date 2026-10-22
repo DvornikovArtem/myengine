@@ -407,18 +407,18 @@ namespace rl
         {
             mem.wallTimer = 0.0f;
         }
-        if (mem.recoverStage == 0 && mem.stuckTimer > 1.5f)
-        {
-            mem.recoverStage = 1;
-            mem.recoverTimer = 0.9f;
-            mem.recoverSteer = rng.Float01() < 0.5f ? 1.0f : -1.0f;
-        }
         if (mem.recoverStage == 0 && (mem.stuckTimer > 4.0f || (mem.stuckTimer > 2.2f && up.y < 0.75f)))
         {
             mem.recoverStage = 3;
             mem.recoverTimer = 0.0f;
             mem.recoverSteer = rng.Float01() < 0.5f ? 1.0f : -1.0f;
             mem.stuckTimer = 1.0f;
+        }
+        if (mem.recoverStage == 0 && mem.stuckTimer > 1.5f)
+        {
+            mem.recoverStage = 1;
+            mem.recoverTimer = 0.9f;
+            mem.recoverSteer = rng.Float01() < 0.5f ? 1.0f : -1.0f;
         }
 
         // ---- lying on the roof or a side: one press of the jump turns the car back onto its wheels
@@ -634,8 +634,18 @@ namespace rl
             if (mem.recoverTimer <= 0.0f)
             {
                 mem.recoverStage = 0;
-                mem.stuckTimer = 0.6f;
+                // still stuck after the reversing: the next try (the hop or the dodge) comes soon, not after another round of reversing
+                mem.stuckTimer = std::min(mem.stuckTimer, 2.4f);
             }
+        }
+        else if (mem.recoverStage == 3 && car.wheelContacts < 3)
+        {
+            // wedged on two wheels: that is not the ground for a jump, the press is a dodge (RocketSim): a flip backwards and to the side
+            in.jump = wantsJumpEdge;
+            in.pitch = 1.0f;
+            in.steer = mem.recoverSteer;
+            mem.recoverStage = 0;
+            mem.dodgeCooldown = 1.0f;
         }
         else if (mem.recoverStage == 3)
         {

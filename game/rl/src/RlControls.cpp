@@ -440,4 +440,41 @@ namespace rl
         file.write(text.data(), static_cast<std::streamsize>(text.size()));
         return static_cast<bool>(file);
     }
+
+    namespace
+    {
+        float Larger(float held, float tapped) { return std::fabs(tapped) > std::fabs(held) ? tapped : held; }
+    }
+
+    void RlInputLatch::Press(const RlCarInput& tapped)
+    {
+        latched_.throttle = Larger(latched_.throttle, tapped.throttle);
+        latched_.steer = Larger(latched_.steer, tapped.steer);
+        latched_.pitch = Larger(latched_.pitch, tapped.pitch);
+        latched_.roll = Larger(latched_.roll, tapped.roll);
+        latched_.boost = latched_.boost || tapped.boost;
+        latched_.jump = latched_.jump || tapped.jump;
+        latched_.handbrake = latched_.handbrake || tapped.handbrake;
+        latched_.airRoll = latched_.airRoll || tapped.airRoll;
+        pending_ = pending_ || tapped.throttle != 0.0f || tapped.steer != 0.0f || tapped.pitch != 0.0f || tapped.roll != 0.0f || tapped.boost || tapped.jump ||
+                   tapped.handbrake || tapped.airRoll;
+    }
+
+    RlCarInput RlInputLatch::Take(const RlCarInput& held)
+    {
+        RlCarInput result = held;
+        if (pending_)
+        {
+            result.throttle = Larger(held.throttle, latched_.throttle);
+            result.steer = Larger(held.steer, latched_.steer);
+            result.pitch = Larger(held.pitch, latched_.pitch);
+            result.roll = Larger(held.roll, latched_.roll);
+            result.boost = held.boost || latched_.boost;
+            result.jump = held.jump || latched_.jump;
+            result.handbrake = held.handbrake || latched_.handbrake;
+            result.airRoll = held.airRoll || latched_.airRoll;
+        }
+        Clear();
+        return result;
+    }
 }
