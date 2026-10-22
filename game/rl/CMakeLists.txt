@@ -1,15 +1,22 @@
 set(RL_HEADERS
   include/rl/RlArena.h
+  include/rl/RlBotForecast.h
   include/rl/RlCamera.h
+  include/rl/RlCinematic.h
   include/rl/RlControls.h
   include/rl/RlMatch.h
   include/rl/RlNet.h
   include/rl/RlNetProtocol.h
+  include/rl/net/LobbyLan.h
+  include/rl/net/LobbyService.h
+  include/rl/net/LobbySteam.h
+  include/rl/RlReplay.h
   include/rl/net/NetLink.h
   include/rl/net/NetReliable.h
   include/rl/net/NetTransport.h
   include/rl/RlRng.h
   include/rl/RlSim.h
+  include/rl/RlTraining.h
   include/rl/RlTuning.h
   include/rl/RlTypes.h
 )
@@ -18,7 +25,12 @@ set(RL_SOURCES
   src/RlArena.cpp
   src/RlBots.cpp
   src/RlBots.h
+  src/RlBotsBrain.cpp
+  src/RlBotsBrain.h
+  src/RlBotsV1.cpp
+  src/RlBotsV1.h
   src/RlCamera.cpp
+  src/RlCinematic.cpp
   src/RlCarController.cpp
   src/RlControls.cpp
   src/RlCarController.h
@@ -28,9 +40,14 @@ set(RL_SOURCES
   src/RlNetClient.cpp
   src/RlNetHost.cpp
   src/RlNetProtocol.cpp
+  src/net/LobbyLan.cpp
+  src/net/LobbySteamStub.cpp
+  src/RlReplay.cpp
+  src/RlV3.h
   src/net/NetLink.cpp
   src/net/NetReliable.cpp
   src/RlSim.cpp
+  src/RlTraining.cpp
   src/RlTuning.cpp
 )
 
@@ -49,6 +66,31 @@ target_link_libraries(myengine_rl
     TracyClient
     myengine_nlohmann_json
     ws2_32)
+
+# Steam (docs/game/steam-setup.md): the lobby and the transport over the Steamworks SDK. OFF by default, the SDK is not in the repository.
+set(RL_STEAM_SOURCES
+  src/net/steam/SteamLobbyService.cpp
+  src/net/steam/SteamTransport.cpp
+  src/net/steam/SteamTransport.h)
+option(MYENGINE_STEAM "Build the Steam lobby and transport (needs the Steamworks SDK in STEAMWORKS_SDK_DIR)" OFF)
+set(STEAMWORKS_SDK_DIR "" CACHE PATH "Folder of the unpacked Steamworks SDK (the one with public/ and redistributable_bin/)")
+option(MYENGINE_STEAM_CHECK "Compile the Steam sources against game/rl/steam_mock (syntax check only, nothing is linked)" OFF)
+
+if(MYENGINE_STEAM)
+  if(NOT EXISTS "${STEAMWORKS_SDK_DIR}/public/steam/steam_api.h")
+    message(FATAL_ERROR "MYENGINE_STEAM is ON but STEAMWORKS_SDK_DIR ('${STEAMWORKS_SDK_DIR}') has no public/steam/steam_api.h. See docs/game/steam-setup.md")
+  endif()
+  target_sources(myengine_rl PRIVATE ${RL_STEAM_SOURCES})
+  target_include_directories(myengine_rl PRIVATE "${STEAMWORKS_SDK_DIR}/public")
+  target_compile_definitions(myengine_rl PUBLIC MYENGINE_STEAM=1)
+  target_link_libraries(myengine_rl PUBLIC "${STEAMWORKS_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
+elseif(MYENGINE_STEAM_CHECK)
+  add_library(myengine_rl_steam_check OBJECT ${RL_STEAM_SOURCES})
+  target_include_directories(myengine_rl_steam_check PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/steam_mock ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_definitions(myengine_rl_steam_check PRIVATE MYENGINE_STEAM=1)
+  myengine_apply_compiler_options(myengine_rl_steam_check)
+  set_property(TARGET myengine_rl_steam_check PROPERTY FOLDER "Game")
+endif()
 
 myengine_apply_compiler_options(myengine_rl)
 set_property(TARGET myengine_rl PROPERTY FOLDER "Game")

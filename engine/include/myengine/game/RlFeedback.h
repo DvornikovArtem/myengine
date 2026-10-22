@@ -67,6 +67,7 @@ namespace myengine::game
         float strength = 0.0f;
         rl::RlVec3 position{};
         rl::RlVec3 direction{0.0f, 1.0f, 0.0f};
+        bool replay = false;   // found in the replay of a goal (RlFeedback::BeginReplay), not in the live match
     };
 
     // One line of the journal: "tick 1481 (12.34 s) BallHit slot 1 team 0 strength 0.62 at (x, y, z)"
@@ -107,6 +108,16 @@ namespace myengine::game
         // interpolates by); a client that already has an interpolated world passes it as both and 0. `listener` (the camera) is put
         // to the audio system when given; FxUpdateSystem already does it from the primary camera, then pass nullptr.
         void Frame(float deltaTime, const rl::RlWorldState& previous, const rl::RlWorldState& current, float alpha, const audio::ListenerState* listener = nullptr);
+
+        // The replay of a goal (docs/game/rl-replay.md): between BeginReplay and EndReplay the module plays the events of the recorded ticks that the
+        // game passes to OnTick, and Frame follows the replayed cars. The events of the live match are not touched and do not suppress the replayed ones
+        // (the memory of what was played is kept apart and comes back at EndReplay). The sounds are quieter (`gain`), the announcer ones (countdown, the
+        // horn and the roar of a goal, the overtime, the end of the match, the gasp of the stands) are not repeated, the stands are muted.
+        void BeginReplay(float gain = 0.7f);
+        void EndReplay();
+        bool Replaying() const { return replaying_; }
+        // The speed of the replay (1, 0.5 in the slow motion): the loops and the sounds drop their pitch a little with it
+        void SetReplaySpeed(float speed) { replaySpeed_ = speed; }
 
         // The settings: the buses 0..1 (G1 gives the sliders)
         void SetVolumes(float master, float sfx, float music, float ui = 1.0f);
@@ -161,6 +172,14 @@ namespace myengine::game
         audio::VoiceHandle crowd_{};
         audio::VoiceHandle menuMusic_{};
         fx::EffectId ballTrail_{};
+
+        bool replaying_ = false;
+        float replayGain_ = 0.7f;
+        float replaySpeed_ = 1.0f;
+        std::unordered_map<std::uint32_t, std::uint32_t> liveLastByKey_;   // the memory of the live match while a replay runs
+        std::unordered_set<std::uint64_t> liveAnnounced_;
+        std::uint32_t liveLastTick_ = 0;
+        bool liveHaveTick_ = false;
 
         bool journalOn_ = false;
         std::vector<RlFeedbackEvent> journal_;

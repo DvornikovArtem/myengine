@@ -5,6 +5,8 @@
 
 #include <rl/RlNet.h>
 #include <rl/RlNetProtocol.h>
+#include <rl/net/LobbyLan.h>
+#include <rl/net/LobbySteam.h>
 #include <rl/net/NetLink.h>
 #include <rl/net/NetReliable.h>
 
@@ -831,7 +833,7 @@ namespace
             rig.Run(6.0);
             CHECK(late.State() == RlNetClientState::Failed);
             Note("late: \"%s\"", late.Error().c_str());
-            CHECK(late.Error().find("started") != std::string::npos);
+            CHECK(late.Error().find("slot") != std::string::npos);  // the match is full: a running match is not the reason any more
         }
         {
             // a lossy start: Join, Welcome and MatchStart all have to be repeated
@@ -848,6 +850,381 @@ namespace
             Note("45%% loss: client state %d, tick %u", static_cast<int>(client.State()), client.Stats().tick);
             CHECK(client.Stats().tick > 100);
         }
+    }
+
+    // A player joins a match that has been running for a minute: he takes the slot of a bot, gets the state of the match, catches up
+    void TestLateJoin(const char* title, const net::NetSimParams& sim)
+    {
+        std::printf("a player joins a running match, %s\n", title);
+        Rig rig(sim, 2);
+        rig.recordHashes = true;
+        RlNetClient& first = rig.AddClient();
+        CHECK(rig.RunUntil(10.0, &AllInLobby));
+        CHECK(rig.host->StartMatch(rig.now));
+        rig.Run(60.0);
+        CHECK(first.State() == RlNetClientState::Playing);
+        CHECK(first.Stats().hardCorrections == 0);
+        const uint32_t hostTickAtJoin = rig.host->Stats().tick;
+        const uint32_t maskBefore = rig.host->HumanMask();
+
+        RlNetClient& late = rig.AddClient();
+        rig.Run(1.5);
+        Note("  after 1.5 s: the new player is in state %d", static_cast<int>(late.State()));
+        rig.Run(12.0);
+        Report("the player who joined late", rig, late);
+        CHECK(late.State() == RlNetClientState::Playing);
+        CHECK(late.Slot() == 1 || late.Slot() == 3);              // the slots of the bots
+        CHECK((maskBefore & (1u << late.Slot())) == 0);
+        CHECK((rig.host->HumanMask() & (1u << late.Slot())) != 0);
+        CHECK(!rig.host->Match()->IsBot(late.Slot()) && !late.Match()->IsBot(late.Slot()));
+        CHECK(rig.host->Stats().lateJoins == 1);
+        CHECK(late.Stats().tick > hostTickAtJoin);                 // he has caught up with the host
+        CHECK(late.Stats().hardCorrections == 0);
+        CHECK(late.Stats().hashMismatches == 0);
+        int compared = 0;
+        const int equal = CompareWithHost(rig, late, 60, &compared);
+        Note("states of the last %d verified ticks equal to the host's: %d", compared, equal);
+        CHECK(compared >= 30 && equal == compared);
+        // the player who was there stays in step with the host: the slot changed under him at an agreed tick
+        CHECK(first.Stats().hardCorrections == 0);
+        compared = 0;
+        const int firstEqual = CompareWithHost(rig, first, 60, &compared);
+        CHECK(compared >= 30 && firstEqual == compared);
+        CHECK(first.Match()->IsBot(late.Slot()) == false);
+    }
+
+
+    // ------------------------------------------------------------------------------------------------------------------------------
+    // The LAN lobby on a loopback network with a virtual clock
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    std::unique_ptr<net::ILobbyService> MakeTestLobby(net::LoopbackHub& hub, const std::string& name, const net::NetSimParams& sim, uint64_t seed, int version = net::kLobbyProtocolVersion)
+    {
+        net::LanLobbyOptions options;
+        options.name = name;
+        options.protocolVersion = version;
+        options.seed = seed;
+        auto counter = std::make_shared<uint64_t>(seed * 100);
+        options.makeLink = [&hub, sim, counter]() -> std::unique_ptr<net::IDatagramLink>
+        {
+            std::unique_ptr<net::IDatagramLink> link = net::MakeLoopbackLink(hub);
+            return sim.Active() ? net::MakeSimLink(std::move(link), sim, ++*counter) : std::move(link);
+        };
+        options.makeMatchTransport = [&hub, seed](const net::NetSimParams& matchSim) { return net::MakeLoopbackTransport(hub, matchSim, seed * 31); };
+        return net::MakeLanLobbyService(options);
+    }
+
+    void StepLobbies(double& now, double seconds, std::vector<net::ILobbyService*> services)
+    {
+        const double end = now + seconds;
+        while (now < end)
+        {
+            now += 0.01;
+            for (net::ILobbyService* service : services)
+            {
+                service->Update(now);
+            }
+        }
+    }
+
+    bool HasEvent(const std::vector<net::LobbyEvent>& events, net::LobbyEventKind kind)
+    {
+        return std::any_of(events.begin(), events.end(), [&](const net::LobbyEvent& e) { return e.kind == kind; });
+    }
+
+    void TestLanLobby()
+    {
+        std::printf("LAN lobby: beacon, list with ping, join, ready, start\n");
+        net::NetSimParams sim;
+        sim.latencyMs = 20.0f;
+        sim.jitterMs = 5.0f;
+        net::LoopbackHub hub;
+        double now = 0.0;
+        auto host = MakeTestLobby(hub, "alice", sim, 1);
+        auto guest = MakeTestLobby(hub, "bob", sim, 2);
+        std::string error;
+
+        CHECK(host->Name() == std::string("LAN"));
+        std::string whyNot;
+        CHECK(host->Available(whyNot));
+        net::LobbyCreateOptions create;
+        create.hostName = "alice";
+        create.mode = 2;
+        create.maxPlayers = 4;
+        create.lobbyPort = 5100;
+        create.gamePort = 5000;
+        CHECK(host->Create(create, error));
+        CHECK(host->State() == net::LobbyState::Hosting);
+        CHECK(HasEvent(host->TakeEvents(), net::LobbyEventKind::Created));
+        CHECK(host->Members().size() == 1 && host->Members()[0].isHost && host->Members()[0].isLocal);
+        CHECK(!host->InviteText().empty() && !host->InviteFriends());
+        CHECK(!host->Create(create, error));  // already hosting
+
+        // the guest searches: the beacon of the host is on the list with a ping
+        guest->RefreshList();
+        StepLobbies(now, 4.0, {host.get(), guest.get()});
+        CHECK(guest->Lobbies().size() == 1);
+        if (!guest->Lobbies().empty())
+        {
+            const net::LobbyInfo& entry = guest->Lobbies()[0];
+            Note("list: \"%s\" %dv%d, %d/%d players, ping %d ms, id %s", entry.hostName.c_str(), entry.mode, entry.mode, entry.players, entry.maxPlayers, entry.pingMs, entry.id.c_str());
+            CHECK(entry.hostName == "alice" && entry.mode == 2 && entry.maxPlayers == 4 && entry.players == 1);
+            CHECK(entry.joinable);
+            CHECK(entry.pingMs >= 20 && entry.pingMs < 120);  // 20 ms each way plus the jitter
+        }
+        CHECK(HasEvent(guest->TakeEvents(), net::LobbyEventKind::ListUpdated));
+
+        // joining by the entry of the list
+        CHECK(!guest->Lobbies().empty() && guest->Join(guest->Lobbies()[0].id, error));
+        CHECK(guest->State() == net::LobbyState::Joining);
+        StepLobbies(now, 2.0, {host.get(), guest.get()});
+        CHECK(guest->State() == net::LobbyState::Joined);
+        std::vector<net::LobbyEvent> hostEvents = host->TakeEvents();
+        std::vector<net::LobbyEvent> guestEvents = guest->TakeEvents();
+        CHECK(HasEvent(hostEvents, net::LobbyEventKind::MemberJoined));
+        CHECK(HasEvent(guestEvents, net::LobbyEventKind::Joined));
+        CHECK(host->Members().size() == 2 && guest->Members().size() == 2);
+        CHECK(guest->Members().size() == 2 && guest->Members()[0].isHost && guest->Members()[0].name == "alice" && guest->Members()[1].isLocal &&
+              guest->Members()[1].name == "bob");
+        CHECK(guest->Current().hostName == "alice" && guest->Current().mode == 2);
+
+        // the match does not start until everybody is ready
+        CHECK(!host->StartMatch(error));
+        CHECK(error.find("bob") != std::string::npos);
+        guest->SetReady(true);
+        StepLobbies(now, 1.0, {host.get(), guest.get()});
+        CHECK(host->Members()[1].ready);
+        CHECK(HasEvent(host->TakeEvents(), net::LobbyEventKind::MemberChanged));
+
+        // the list of a third who searches now: the lobby shows two players
+        auto third = MakeTestLobby(hub, "carol", sim, 3);
+        third->RefreshList();
+        StepLobbies(now, 3.0, {host.get(), guest.get(), third.get()});
+        CHECK(third->Lobbies().size() == 1 && third->Lobbies()[0].players == 2);
+
+        CHECK(host->StartMatch(error));
+        StepLobbies(now, 1.0, {host.get(), guest.get(), third.get()});
+        CHECK(host->State() == net::LobbyState::Starting && guest->State() == net::LobbyState::Starting);
+        CHECK(HasEvent(host->TakeEvents(), net::LobbyEventKind::MatchStarting));
+        CHECK(HasEvent(guest->TakeEvents(), net::LobbyEventKind::MatchStarting));
+        CHECK(host->StartInfo().isHost && host->StartInfo().gamePort == 5000 && host->StartInfo().members.size() == 2);
+        CHECK(!guest->StartInfo().isHost && guest->StartInfo().hostAddress == "5000" && guest->StartInfo().members.size() == 2);
+        // a match in progress is not offered any more
+        StepLobbies(now, 3.0, {host.get(), guest.get(), third.get()});
+        CHECK(third->Lobbies().size() == 1 && !third->Lobbies()[0].joinable && third->Lobbies()[0].note.find("match") != std::string::npos);
+
+        // and the match itself over the transports of the services: the host listens, the guest connects to the address of StartInfo
+        net::NetSimParams matchSim;
+        matchSim.latencyMs = 30.0f;
+        matchSim.lossPercent = 3.0f;
+        auto hostTransport = host->CreateMatchTransport(matchSim);
+        auto guestTransport = guest->CreateMatchTransport(matchSim);
+        RlNetHostOptions hostOptions;
+        hostOptions.match.mode = host->StartInfo().mode;
+        hostOptions.match.seed = 9;
+        RlNetHost netHost(*hostTransport, g_tuning, hostOptions);
+        CHECK(netHost.Listen(host->StartInfo().gamePort, error));
+        RlNetClient netClient(*guestTransport, g_tuning);
+        CHECK(netClient.Connect(guest->StartInfo().hostAddress, guest->StartInfo().members[1].name, error));
+        double matchNow = now;
+        bool started = false;
+        for (int step = 0; step < 100 * 30; ++step)
+        {
+            matchNow += 0.01;
+            netHost.SetLocalInput(Script(0, matchNow));
+            netClient.SetLocalInput(Script(1, matchNow));
+            netHost.Update(matchNow);
+            netClient.Update(matchNow);
+            if (!started && netClient.State() == RlNetClientState::Lobby)
+            {
+                started = netHost.StartMatch(matchNow);
+            }
+        }
+        Note("the match over the lobby: host tick %u, client tick %u (verified %u)", netHost.Stats().tick, netClient.Stats().tick, netClient.Stats().verifiedTick);
+        CHECK(started && netClient.State() == RlNetClientState::Playing);
+        CHECK(netClient.Stats().verifiedTick > 1000 && netClient.Stats().hardCorrections == 0);
+
+        // the lobby is closed by its host: the guests learn it
+        host->Leave();
+        StepLobbies(now, 8.0, {host.get(), guest.get(), third.get()});
+        CHECK(host->State() == net::LobbyState::Idle);
+        guest->Leave();
+        CHECK(guest->State() == net::LobbyState::Idle);
+    }
+
+    void TestLanLobbyEdges()
+    {
+        std::printf("LAN lobby: full, other version, by hand, leaving, the list forgets\n");
+        net::NetSimParams none;
+        net::LoopbackHub hub;
+        double now = 0.0;
+        auto host = MakeTestLobby(hub, "alice", none, 11);
+        auto bob = MakeTestLobby(hub, "bob", none, 12);
+        auto carol = MakeTestLobby(hub, "carol", none, 13);
+        auto old = MakeTestLobby(hub, "dave", none, 14, 99);
+        std::string error;
+        net::LobbyCreateOptions create;
+        create.hostName = "alice";
+        create.maxPlayers = 2;
+        create.lobbyPort = 5200;
+        CHECK(host->Create(create, error));
+
+        // by hand: the address of the host, no list
+        CHECK(bob->Join("5200", error));
+        StepLobbies(now, 2.0, {host.get(), bob.get()});
+        CHECK(bob->State() == net::LobbyState::Joined && host->Members().size() == 2);
+
+        // full
+        CHECK(carol->Join("5200", error));
+        StepLobbies(now, 3.0, {host.get(), bob.get(), carol.get()});
+        CHECK(carol->State() == net::LobbyState::Failed);
+        Note("full: \"%s\"", carol->LastError().c_str());
+        CHECK(carol->LastError().find("full") != std::string::npos);
+        CHECK(host->Members().size() == 2);
+
+        // another version of the game: refused with a text; in the list it is marked
+        bob->Leave();
+        StepLobbies(now, 1.0, {host.get(), bob.get()});
+        CHECK(host->Members().size() == 1);
+        std::vector<net::LobbyEvent> hostEvents = host->TakeEvents();
+        CHECK(HasEvent(hostEvents, net::LobbyEventKind::MemberLeft));
+        old->RefreshList();
+        StepLobbies(now, 3.0, {host.get(), old.get()});
+        CHECK(old->Lobbies().size() == 1 && !old->Lobbies()[0].joinable && old->Lobbies()[0].note == "other version");
+        CHECK(old->Join("5200", error));
+        StepLobbies(now, 3.0, {host.get(), old.get()});
+        CHECK(old->State() == net::LobbyState::Failed);
+        Note("other version: \"%s\"", old->LastError().c_str());
+        CHECK(old->LastError().find("version") != std::string::npos);
+
+        // a guest that goes silent is dropped by the timeout, the one who stays learns the host is gone when it closes
+        auto erin = MakeTestLobby(hub, "erin", none, 15);
+        CHECK(erin->Join("5200", error));
+        StepLobbies(now, 2.0, {host.get(), erin.get()});
+        CHECK(erin->State() == net::LobbyState::Joined);
+        StepLobbies(now, 8.0, {host.get()});  // erin does not update any more
+        CHECK(host->Members().size() == 1);
+        host->TakeEvents();
+        host->Leave();
+        // the list forgets a lobby that stopped its beacon
+        old->RefreshList();
+        auto host2 = MakeTestLobby(hub, "frank", none, 16);
+        create.hostName = "frank";
+        create.lobbyPort = 5201;
+        CHECK(host2->Create(create, error));
+        StepLobbies(now, 3.0, {host2.get(), old.get()});
+        CHECK(old->Lobbies().size() == 1);
+        host2->Leave();
+        StepLobbies(now, 6.0, {old.get()});
+        CHECK(old->Lobbies().empty());
+        // the host going away is told to a guest in the lobby
+        auto host3 = MakeTestLobby(hub, "gina", none, 17);
+        auto guest3 = MakeTestLobby(hub, "hank", none, 18);
+        create.hostName = "gina";
+        create.lobbyPort = 5202;
+        CHECK(host3->Create(create, error));
+        CHECK(guest3->Join("5202", error));
+        StepLobbies(now, 2.0, {host3.get(), guest3.get()});
+        CHECK(guest3->State() == net::LobbyState::Joined);
+        guest3->TakeEvents();
+        host3->Leave();
+        StepLobbies(now, 2.0, {guest3.get()});
+        CHECK(HasEvent(guest3->TakeEvents(), net::LobbyEventKind::HostLeft));
+        CHECK(guest3->State() == net::LobbyState::Idle);
+        // nobody there at all: the connection gives up with a text
+        auto lonely = MakeTestLobby(hub, "ida", none, 19);
+        CHECK(lonely->Join("5999", error));
+        StepLobbies(now, 12.0, {lonely.get()});
+        CHECK(lonely->State() == net::LobbyState::Failed);
+        Note("nobody there: \"%s\"", lonely->LastError().c_str());
+        CHECK(!lonely->LastError().empty());
+    }
+
+    // The same over the real network of this PC: the broadcast of the beacon, the ping, the join. A firewall or a network without
+    // broadcasts (some virtual adapters) can keep the beacon from arriving: that is reported, the join by hand is checked anyway.
+    void TestLanLobbyUdp()
+    {
+        std::printf("LAN lobby over real UDP on this PC\n");
+        auto host = net::MakeLanLobbyService("udp-host");
+        auto guest = net::MakeLanLobbyService("udp-guest");
+        std::string error;
+        net::LobbyCreateOptions create;
+        create.hostName = "udp-host";
+        create.lobbyPort = 5300;
+        create.gamePort = 5301;
+        CHECK(host->Create(create, error));
+        guest->RefreshList();
+        const auto start = std::chrono::steady_clock::now();
+        const auto seconds = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+        bool seen = false;
+        while (seconds() < 6.0 && !seen)
+        {
+            host->Update(seconds());
+            guest->Update(seconds());
+            seen = !guest->Lobbies().empty() && guest->Lobbies()[0].pingMs >= 0;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        if (seen)
+        {
+            const net::LobbyInfo& entry = guest->Lobbies()[0];
+            Note("found by the broadcast: \"%s\" id %s ping %d ms", entry.hostName.c_str(), entry.id.c_str(), entry.pingMs);
+            CHECK(entry.hostName == "udp-host" && entry.joinable);
+        }
+        else
+        {
+            Note("the beacon did not arrive in 6 s (firewall or no broadcasts here): not verified");
+        }
+        CHECK(guest->Join(seen ? guest->Lobbies()[0].id : "127.0.0.1:5300", error));
+        bool joined = false;
+        while (seconds() < 12.0 && !joined)
+        {
+            host->Update(seconds());
+            guest->Update(seconds());
+            joined = guest->State() == net::LobbyState::Joined && host->Members().size() == 2;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(joined);
+        guest->SetReady(true);
+        for (int i = 0; i < 100; ++i)
+        {
+            host->Update(seconds());
+            guest->Update(seconds());
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(host->StartMatch(error));
+        for (int i = 0; i < 200 && guest->State() != net::LobbyState::Starting; ++i)
+        {
+            host->Update(seconds());
+            guest->Update(seconds());
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(guest->State() == net::LobbyState::Starting);
+        Note("the match address for the guest: %s", guest->StartInfo().hostAddress.c_str());
+        CHECK(guest->StartInfo().hostAddress == "127.0.0.1:5301" || guest->StartInfo().hostAddress.size() > 6);
+    }
+
+    void TestSteamWithoutSdk()
+    {
+        std::printf("Steam: the command line of an invitation, and the service of a build without the SDK\n");
+        CHECK(net::FindConnectLobbyInCommandLine("myengine.exe --play +connect_lobby 109775241012345678") == "109775241012345678");
+        CHECK(net::FindConnectLobbyInCommandLine("myengine.exe +connect_lobby 42 --scene x") == "42");
+        CHECK(net::FindConnectLobbyInCommandLine("myengine.exe --play").empty());
+        CHECK(net::FindConnectLobbyInCommandLine("+connect_lobby").empty());
+#ifndef MYENGINE_STEAM
+        auto service = net::MakeSteamLobbyService();
+        std::string why;
+        CHECK(!service->Available(why));
+        Note("Available: \"%s\"", why.c_str());
+        CHECK(why.find("MYENGINE_STEAM") != std::string::npos);
+        net::LobbyCreateOptions create;
+        std::string error;
+        CHECK(!service->Create(create, error) && !error.empty());
+        CHECK(!service->Join("123", error));
+        CHECK(service->State() == net::LobbyState::Idle && service->Lobbies().empty() && service->TakeEvents().empty());
+        CHECK(service->CreateMatchTransport(net::NetSimParams{}) == nullptr && net::MakeSteamTransport() == nullptr);
+        service->Update(0.0);
+        service->Leave();
+#endif
     }
 
     void TestUdp()
@@ -1057,7 +1434,22 @@ int main(int argc, char** argv)
     TestGoalAndOutOfBandChange();
     TestStatisticsOverNet();
     TestSeveralClientsAndLeaving();
+    {
+        net::NetSimParams sim;
+        sim.latencyMs = 50.0f;
+        sim.jitterMs = 20.0f;
+        sim.lossPercent = 5.0f;
+        TestLateJoin("RTT 100 +-40 ms, 5% loss", sim);
+        sim.latencyMs = 100.0f;
+        sim.jitterMs = 30.0f;
+        sim.lossPercent = 10.0f;
+        TestLateJoin("RTT 200 +-60 ms, 10% loss", sim);
+    }
     TestJoinRefusals();
+    TestLanLobby();
+    TestLanLobbyEdges();
+    TestLanLobbyUdp();
+    TestSteamWithoutSdk();
     TestUdp();
     TestRollbackBudget();
 

@@ -3,6 +3,7 @@
 #include <rl/RlMatch.h>
 
 #include "RlBots.h"
+#include "RlBotsV1.h"
 
 #include <tracy/Tracy.hpp>
 
@@ -19,6 +20,7 @@ namespace rl
         constexpr float kPi = 3.14159265f;
         constexpr uint32_t kMatchMagic = 0x314D4C52;  // "RLM1"
         constexpr float kRoleInterval = 0.3f;
+        constexpr float kRoleInterval2 = 0.2f;
 
         // RLBot field info, uu: kick-off spots of blue (orange is the same turned by half a turn)
         struct SpotUu
@@ -123,6 +125,8 @@ namespace rl
             RlRng rng;
             RlMatchState match;
             RlBotMemory bots[kMaxCars];
+            v1::RlBotMemory botsV1[kMaxCars];
+            RlBotTeamPlan plans[2];
             float roleTimer[2];
             int32_t wasDemolished[kMaxCars];
             float stillSeconds[kMaxCars];  // how long a bot has not moved (the rescue of a wedged bot)
@@ -144,6 +148,8 @@ namespace rl
         RlWorldState world;
         RlWorldState previous;
         RlEvents events;
+        RlForecast forecast;           // made again from the world at every tick when a v2 bot needs it: not part of the state
+        int64_t forecastTick = -1;
 
         Impl(const RlTuning& t, const RlMatchConfig& c)
             : tuning(t)
@@ -162,6 +168,7 @@ namespace rl
             for (int i = 0; i < kMaxCars; ++i)
             {
                 rt.bots[i] = RlBotMemory{};
+                rt.botsV1[i] = v1::RlBotMemory{};
                 rt.wasDemolished[i] = 0;
             }
             rt.roleTimer[0] = rt.roleTimer[1] = 0.0f;
@@ -181,6 +188,20 @@ namespace rl
 
         int TeamOf(int slot) const { return config.mode == 0 ? 0 : (slot < teamSize ? 0 : 1); }
         bool IsBot(int slot) const { return (config.humanMask & (1u << slot)) == 0; }
+        int BotVersionOf(int team) const { return team == 1 && config.botVersionOrange >= 0 ? config.botVersionOrange : config.botVersion; }
+        int BotLevelOf(int team) const { return team == 1 && config.botLevelOrange >= 0 ? config.botLevelOrange : config.botLevel; }
+
+        // The forecast of the ball for this tick (a pure function of the ball, see RlForecastBall)
+        void RefreshForecast(bool needed)
+        {
+            if (!needed || forecastTick == static_cast<int64_t>(world.tick))
+            {
+                return;
+            }
+            ZoneScopedN("Rl::BallForecast");
+            RlForecastBall(tuning, world.ball, world.tick, forecast);
+            forecastTick = static_cast<int64_t>(world.tick);
+        }
 
         void RefreshWorld()
         {
@@ -290,8 +311,16 @@ namespace rl
                 rt.bots[slot].decisionTimer = 0.0f;
                 rt.bots[slot].recoverStage = 0;
                 rt.bots[slot].stuckTimer = 0.0f;
+                rt.bots[slot].speedFlip = 0;
+                rt.bots[slot].aerialMode = 0;
+                rt.bots[slot].kickoffMode = 0;
+                rt.bots[slot].dodgeCooldown = 0.0f;
+                rt.botsV1[slot].decisionTimer = 0.0f;
+                rt.botsV1[slot].recoverStage = 0;
+                rt.botsV1[slot].stuckTimer = 0.0f;
             }
             sim->ResetBall({0.0f, tuning.ball.radius + 0.05f, 0.0f});
+            forecastTick = -1;
         }
 
         void Step(const RlCarInput* inputs)
@@ -306,21 +335,43 @@ namespace rl
             if (live)
             {
                 ZoneScopedN("Rl::Bots");
+                bool needsForecast = false;
+                for (int slot = 0; slot < slots; ++slot)
+                {
+                    needsForecast = needsForecast || (IsBot(slot) && BotVersionOf(TeamOf(slot)) >= 2);
+                }
+                RefreshForecast(needsForecast);
                 for (int team = 0; team < 2 && config.mode != 0; ++team)
                 {
                     rt.roleTimer[team] -= kTickDt;
                     if (rt.roleTimer[team] <= 0.0f)
                     {
-                        rt.roleTimer[team] = kRoleInterval;
-                        RlBotsAssignRoles(tuning, world, team, teamSize, rt.bots);
+                        rt.roleTimer[team] = BotVersionOf(team) >= 2 ? kRoleInterval2 : kRoleInterval;
+                        if (BotVersionOf(team) >= 2)
+                        {
+                            RlBotsPlan(tuning, world, forecast, team, teamSize, BotLevelOf(team), rt.plans[team], rt.bots);
+                        }
+                        else
+                        {
+                            v1::RlBotsAssignRoles(tuning, world, team, teamSize, rt.botsV1);
+                        }
                     }
                 }
                 for (int slot = 0; slot < slots; ++slot)
                 {
                     if (IsBot(slot))
                     {
-                        const RlBotContext context{tuning, world, slot, TeamOf(slot), teamSize, config.botLevel};
-                        effective[slot] = RlBotThink(context, rt.bots[slot], rt.rng);
+                        const int team = TeamOf(slot);
+                        if (BotVersionOf(team) >= 2)
+                        {
+                            const RlBotContext context{tuning, world, forecast, rt.plans[team], slot, team, teamSize, BotLevelOf(team)};
+                            effective[slot] = RlBotThink(context, rt.bots[slot], rt.rng);
+                        }
+                        else
+                        {
+                            const v1::RlBotContext context{tuning, world, slot, team, teamSize, BotLevelOf(team)};
+                            effective[slot] = v1::RlBotThink(context, rt.botsV1[slot], rt.rng);
+                        }
                     }
                     else
                     {
@@ -598,6 +649,7 @@ namespace rl
             RefreshWorld();
             previous = world;
             events = {};
+            forecastTick = -1;
             return true;
         }
     };
@@ -647,6 +699,7 @@ namespace rl
     {
         impl_->sim->SetTuning(tuning);
         impl_->tuning = impl_->sim->Tuning();  // with the numbers that stay fixed put back
+        impl_->forecastTick = -1;
     }
     const RlSim& RlMatch::Sim() const { return *impl_->sim; }
     RlSim& RlMatch::MutableSim() { return *impl_->sim; }

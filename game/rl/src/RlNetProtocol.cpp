@@ -648,4 +648,96 @@ namespace rl
         }
         return r.Ok();
     }
+
+    // ---- the state of a running match for a player who joins it ----------------------------------------------------------------------
+
+    void RlEncode(const RlStateChunkMsg& msg, std::vector<uint8_t>& out)
+    {
+        Writer w(out);
+        w.U8(static_cast<uint8_t>(RlMsg::StateChunk));
+        w.U32(msg.tick);
+        w.U32(msg.total);
+        w.U32(msg.offset);
+        w.U16(static_cast<uint16_t>(msg.bytes.size()));
+        w.Bytes(msg.bytes.data(), msg.bytes.size());
+    }
+
+    void RlEncode(const RlInputRequestMsg& msg, std::vector<uint8_t>& out)
+    {
+        Writer w(out);
+        w.U8(static_cast<uint8_t>(RlMsg::InputRequest));
+        w.U32(msg.first);
+        w.U32(msg.count);
+    }
+
+    void RlEncode(const RlInputHistoryMsg& msg, std::vector<uint8_t>& out)
+    {
+        Writer w(out);
+        w.U8(static_cast<uint8_t>(RlMsg::InputHistory));
+        w.U32(msg.first);
+        const int count = std::clamp(msg.count, 0, kHistoryTicksPerMessage);
+        w.U8(static_cast<uint8_t>(count));
+        for (int t = 0; t < count; ++t)
+        {
+            for (int slot = 0; slot < kMaxCars; ++slot)
+            {
+                w.Bytes(msg.inputs[t][slot], kNetInputBytes);
+            }
+        }
+    }
+
+    bool RlDecode(const uint8_t* data, size_t size, RlStateChunkMsg& msg)
+    {
+        Reader r(data, size);
+        if (r.U8() != static_cast<uint8_t>(RlMsg::StateChunk))
+        {
+            return false;
+        }
+        msg.tick = r.U32();
+        msg.total = r.U32();
+        msg.offset = r.U32();
+        const size_t length = r.U16();
+        if (length > kStateChunkBytes || msg.total > (1u << 20) || msg.offset + length > msg.total)
+        {
+            return false;
+        }
+        msg.bytes.resize(length);
+        r.Bytes(msg.bytes.data(), length);
+        return r.Ok();
+    }
+
+    bool RlDecode(const uint8_t* data, size_t size, RlInputRequestMsg& msg)
+    {
+        Reader r(data, size);
+        if (r.U8() != static_cast<uint8_t>(RlMsg::InputRequest))
+        {
+            return false;
+        }
+        msg.first = r.U32();
+        msg.count = r.U32();
+        return r.Ok();
+    }
+
+    bool RlDecode(const uint8_t* data, size_t size, RlInputHistoryMsg& msg)
+    {
+        Reader r(data, size);
+        if (r.U8() != static_cast<uint8_t>(RlMsg::InputHistory))
+        {
+            return false;
+        }
+        msg.first = r.U32();
+        msg.count = r.U8();
+        if (msg.count > kHistoryTicksPerMessage)
+        {
+            return false;
+        }
+        for (int t = 0; t < msg.count; ++t)
+        {
+            for (int slot = 0; slot < kMaxCars; ++slot)
+            {
+                r.Bytes(msg.inputs[t][slot], kNetInputBytes);
+            }
+        }
+        return r.Ok();
+    }
 }

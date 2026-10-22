@@ -152,6 +152,7 @@ namespace myengine::rlui
         }
         feed_.erase(std::remove_if(feed_.begin(), feed_.end(), [](const FeedLine& line) { return line.age > kFeedLife; }), feed_.end());
         goAge_ += deltaTime;
+        replayAge_ = state_.replay.active ? replayAge_ + deltaTime : 0.0f;
         boostFlash_ = std::max(boostFlash_ - deltaTime, 0.0f);
         ballCamHint_ = std::max(ballCamHint_ - deltaTime, 0.0f);
         if (state_.phase != HudPhase::Countdown)
@@ -491,6 +492,316 @@ namespace myengine::rlui
         Text(f, FontStyle::SemiBold, 22.0f, {x + keyWidth + 12.0f, y + 6.0f}, style::kTextDim, label);
     }
 
+    void Hud::DrawReplay(Frame& f) const
+    {
+        ScreenSpace space(f);
+        const Vec2 window = f.metrics().designWindow;
+        const float slide = EaseOut(replayAge_ / 0.35f);
+        const float bar = window.y * 0.108f * slide;           // the top bar holds the scoreboard
+        const float barBottom = window.y * 0.078f * slide;
+        // the letterbox bars
+        FillRect(f, {0.0f, 0.0f, window.x, bar}, Color::Hex(0x02050e, 0.82f));
+        FillRect(f, {0.0f, window.y - barBottom, window.x, barBottom}, Color::Hex(0x02050e, 0.82f));
+        // the progress of the clip along the lower edge of the top bar
+        const float progress = std::clamp(state_.replay.progress, 0.0f, 1.0f);
+        FillRect(f, {0.0f, bar - 3.0f, window.x, 3.0f}, style::kNavy3.Faded(0.7f));
+        FillRect(f, {0.0f, bar - 3.0f, window.x * progress, 3.0f}, style::kAccent);
+
+        // the label: a pulsing red dot and REPLAY, under it the author and the speed of the ball, and the tag of the slow motion
+        const float x = 60.0f;
+        const float y = bar + 26.0f * slide;
+        const float pulse = 0.55f + 0.45f * std::sin(replayAge_ * 6.0f);
+        Circle(f, {x + 14.0f, y + 34.0f}, 11.0f, style::kBad.Faded(pulse));
+        TextShadow(f, FontStyle::BlackItalic, 60.0f, {x + 40.0f, y}, style::kText, "REPLAY", style::kBlueDark, 4.0f);
+        float lineX = x + 42.0f;
+        const float lineY = y + 76.0f;
+        if (!state_.replay.author.empty() || state_.replay.goalSpeedKmh > 0.5f)
+        {
+            std::string text = Upper(state_.replay.author);
+            if (state_.replay.goalSpeedKmh > 0.5f)
+            {
+                char speed[32];
+                std::snprintf(speed, sizeof(speed), "%d km/h", static_cast<int>(std::lround(state_.replay.goalSpeedKmh)));
+                text += text.empty() ? std::string(speed) : " \xC2\xB7 " + std::string(speed);
+            }
+            const Color team = state_.replay.team >= 0 ? style::TeamHi(state_.replay.team) : style::kText;
+            Text(f, FontStyle::ExtraBoldItalic, 26.0f, {lineX, lineY}, team, text);
+            lineX += TextWidth(f, FontStyle::ExtraBoldItalic, 26.0f, text) + 18.0f;
+        }
+        if (state_.replay.speed < 0.95f)
+        {
+            char tag[16];
+            std::snprintf(tag, sizeof(tag), "%.1fx", static_cast<double>(state_.replay.speed));
+            const float tagWidth = TextWidth(f, FontStyle::Bold, 22.0f, tag) + 22.0f;
+            const Rect box{lineX, lineY - 2.0f, tagWidth, 34.0f};
+            Parallelogram(f, box, style::kAccent.Faded(0.9f));
+            TextIn(f, FontStyle::Bold, 22.0f, box, Color::Hex(0x08142c), tag, Align::Center);
+        }
+        // the hint in the lower bar (the same row as the hints of the menus, in the space of the menu)
+        f.SetSpace(Space::Menu);
+        const Hint hint[] = {{Glyph::Space, Glyph::PadA, "Skip replay"}};
+        HintBar(f, Span<Hint>(hint));
+    }
+
+    namespace
+    {
+        std::string OneDecimal(const float value)
+        {
+            char text[24];
+            std::snprintf(text, sizeof(text), "%.1f", static_cast<double>(value));
+            return text;
+        }
+
+        std::string Kmh(const float kmh) { return std::to_string(static_cast<int>(std::lround(kmh))) + " km/h"; }
+    }
+
+    void Hud::DrawTrainingPlate(Frame& f) const
+    {
+        ScreenSpace space(f);
+        const HudTraining& t = state_.training;
+        const float x = style::kHudMargin + 18.0f;
+        const float y = style::kHudMargin;
+        const bool freePlay = t.phase == HudTrainingPhase::FreePlay;
+        const float width = 600.0f;
+        const float height = freePlay ? 188.0f : 168.0f;
+        const Rect plate{x, y, width, height};
+        Glow(f, plate, style::kAccent.Faded(0.16f), 16.0f, 3);
+        Parallelogram(f, plate, style::kNavySolid.Faded(0.92f));
+        Parallelogram(f, {plate.x, plate.y, plate.w, 4.0f}, style::kAccent, Bevel(plate.h));
+        const float b = Bevel(plate.h);
+        const float left = plate.x + b * 0.5f + 28.0f;
+
+        IconGlyph(f, Icon::Target, 22.0f, {left + 10.0f, y + 30.0f}, style::kAccent);
+        Text(f, FontStyle::Bold, 22.0f, {left + 30.0f, y + 16.0f}, style::kAccent, Upper(t.pack), Align::Left, 0.12f);
+
+        if (freePlay)
+        {
+            // the counters of the hits in two columns
+            struct Counter
+            {
+                const char* caption;
+                std::string value;
+            };
+            const Counter counters[4] = {
+                {"HITS", std::to_string(t.hits)},
+                {"LAST HIT", t.hits > 0 ? Kmh(t.lastHitKmh) : std::string("-")},
+                {"BEST HIT", t.hits > 0 ? Kmh(t.bestHitKmh) : std::string("-")},
+                {"TOUCH HEIGHT", t.hits > 0 ? OneDecimal(t.maxTouchHeight) + " m" : std::string("-")},
+            };
+            for (int i = 0; i < 4; ++i)
+            {
+                const float cx = left + static_cast<float>(i % 2) * 270.0f;
+                const float cy = y + 58.0f + static_cast<float>(i / 2) * 58.0f;
+                Text(f, FontStyle::Bold, 16.0f, {cx, cy}, style::kTextDim, counters[i].caption, Align::Left, 0.1f);
+                Text(f, FontStyle::BlackItalic, 34.0f, {cx, cy + 18.0f}, style::kText, counters[i].value);
+            }
+            if (t.infiniteBoost)
+            {
+                const Rect chip{plate.x + plate.w - 190.0f, y + 12.0f, 150.0f, 32.0f};
+                Parallelogram(f, chip, style::kBoostA.Faded(0.9f));
+                TextIn(f, FontStyle::Bold, 18.0f, chip, Color::Hex(0x08142c), "ENDLESS BOOST", Align::Center);
+            }
+            return;
+        }
+
+        // the number of the exercise on the right
+        const std::string number = t.phase == HudTrainingPhase::PackDone ? std::to_string(t.done) + " / " + std::to_string(t.count)
+                                                                         : std::to_string(t.index + 1) + " / " + std::to_string(t.count);
+        TextIn(f, FontStyle::BlackItalic, 52.0f, {plate.x + plate.w - 230.0f, y + 6.0f, 200.0f, 60.0f}, style::kText, number, Align::Right);
+        if (t.phase == HudTrainingPhase::PackDone)
+        {
+            Text(f, FontStyle::ExtraBoldItalic, 34.0f, {left, y + 58.0f}, style::kText, "PACK COMPLETE");
+            Text(f, FontStyle::SemiBold, 22.0f, {left, y + 104.0f}, style::kTextDim, "exercises done at least once");
+            return;
+        }
+        Text(f, FontStyle::ExtraBoldItalic, 34.0f, {left, y + 50.0f}, style::kText, t.exercise);
+        PushClip(f, {left, y + 92.0f, plate.w - 90.0f, 30.0f});
+        Text(f, FontStyle::SemiBold, 22.0f, {left, y + 94.0f}, style::kTextDim, t.hint);
+        PopClip(f);
+
+        // the attempts: a pip each (spent, now, to come) and the record of the exercise
+        const float pipY = y + height - 32.0f;
+        float pipX = left;
+        for (int a = 1; a <= std::max(t.attempts, 1); ++a)
+        {
+            const bool spent = a < t.attempt || (a == t.attempt && t.phase == HudTrainingPhase::Miss);
+            const bool now = a == t.attempt && t.phase != HudTrainingPhase::Miss;
+            const Color color = spent ? style::kBad.Faded(0.85f) : (now ? style::kAccent : style::kNavy3);
+            Parallelogram(f, {pipX, pipY, 34.0f, 12.0f}, color, 3.0f);
+            pipX += 42.0f;
+        }
+        char label[48];
+        std::snprintf(label, sizeof(label), "ATTEMPT %d / %d", std::min(t.attempt, std::max(t.attempts, 1)), std::max(t.attempts, 1));
+        Text(f, FontStyle::Bold, 18.0f, {pipX + 8.0f, pipY - 5.0f}, style::kTextDim, label, Align::Left, 0.08f);
+        if (t.recordTime > 0.0f)
+        {
+            const std::string best = "BEST " + OneDecimal(t.recordTime) + " s" + (t.recordHitKmh > 0.5f ? " \xC2\xB7 " + Kmh(t.recordHitKmh) : std::string());
+            Text(f, FontStyle::Bold, 18.0f, {plate.x + plate.w - 40.0f, pipY - 5.0f}, style::kGood, best, Align::Right, 0.05f);
+        }
+    }
+
+    void Hud::DrawTrainingTimer(Frame& f) const
+    {
+        const HudTraining& t = state_.training;
+        if (t.phase == HudTrainingPhase::PackDone)
+        {
+            return;
+        }
+        ScreenSpace space(f);
+        const float centre = f.metrics().designWindow.x * 0.5f;
+        const float top = style::kHudMargin;
+        const float height = style::kScoreBlockHeight;
+        const float b = Bevel(height);
+        const float width = 210.0f;
+        const bool freePlay = t.phase == HudTrainingPhase::FreePlay || t.timeLimit <= 0.0f;
+        const Rect timer{centre - (width + b) * 0.5f, top, width + b, height};
+        Parallelogram(f, timer, style::kNavySolid);
+        Parallelogram(f, {timer.x, timer.y, timer.w, 4.0f}, style::kText, b);
+        const float seconds = freePlay ? t.elapsed : (t.phase == HudTrainingPhase::Ready ? t.timeLimit : t.timeLeft);
+        Color color = style::kText;
+        if (!freePlay && t.phase == HudTrainingPhase::Running && t.timeLeft <= 3.0f)
+        {
+            const int whole = static_cast<int>(std::ceil(t.timeLeft));
+            color = (whole % 2 == 0) ? style::kText : style::kBad;
+        }
+        // a pack counts down, the session of free play counts up (the seconds are cut, not rounded up)
+        std::string text;
+        if (freePlay)
+        {
+            const int whole = std::max(static_cast<int>(seconds), 0);
+            char buffer[24];
+            std::snprintf(buffer, sizeof(buffer), "%d:%02d", whole / 60, whole % 60);
+            text = buffer;
+        }
+        else
+        {
+            text = ClockTextOf(seconds, false);
+        }
+        TextIn(f, FontStyle::BlackItalic, 52.0f, {timer.x + b * 0.5f, timer.y - 4.0f, width, timer.h}, color, text, Align::Center);
+        if (freePlay)
+        {
+            Text(f, FontStyle::Bold, 16.0f, {timer.x + b * 0.5f + width * 0.5f, timer.y + 60.0f}, style::kTextDim, "SESSION", Align::Center, 0.1f);
+        }
+        else
+        {
+            const float share = std::clamp(t.timeLeft / std::max(t.timeLimit, 0.01f), 0.0f, 1.0f);
+            const Rect track{timer.x + b + 20.0f, timer.y + height - 16.0f, width - 40.0f, 6.0f};
+            FillRect(f, track, style::kNavy3);
+            FillRect(f, {track.x, track.y, track.w * share, track.h}, share > 0.25f ? style::kAccent : style::kBad);
+        }
+    }
+
+    void Hud::DrawTrainingBanner(Frame& f) const
+    {
+        const HudTraining& t = state_.training;
+        ScreenSpace space(f);
+        const Vec2 window = f.metrics().designWindow;
+        if (t.phase == HudTrainingPhase::Ready)
+        {
+            const float pulse = 0.7f + 0.3f * std::sin(pulse_ * 5.0f);
+            AlphaScope fade(f, pulse);
+            TextShadow(f, FontStyle::BlackItalic, 64.0f, {window.x * 0.5f, window.y * 0.24f}, style::kText, "GET READY", style::kBlueDark, 4.0f, Align::Center);
+            return;
+        }
+        const bool success = t.phase == HudTrainingPhase::Success;
+        const bool miss = t.phase == HudTrainingPhase::Miss;
+        const bool done = t.phase == HudTrainingPhase::PackDone;
+        if (!success && !miss && !done)
+        {
+            return;
+        }
+        float offset = 0.0f;
+        float alpha = 1.0f;
+        const float in = style::kGoalIn;
+        const float out = style::kGoalOut;
+        if (t.bannerTime < in)
+        {
+            const float k = EaseOut(t.bannerTime / in);
+            offset = (1.0f - k) * window.x * 0.5f;
+            alpha = k;
+        }
+        else if (!done && t.bannerTime > t.bannerDuration - out)
+        {
+            const float k = EaseOut((t.bannerTime - (t.bannerDuration - out)) / out);
+            offset = -k * window.x * 0.4f;
+            alpha = 1.0f - k;
+        }
+        AlphaScope fade(f, alpha);
+        const Rect rect{window.x * 0.5f - 400.0f + offset, window.y * 0.34f - 95.0f, 800.0f, 190.0f};
+        const Color base = success ? style::kGood : (miss ? style::kBad : style::kBlueDark);
+        const Color shadow = success ? Color::Hex(0x0d5a35) : (miss ? Color::Hex(0x7a1424) : Color::Hex(0x061a40));
+        Glow(f, rect, (done ? style::kAccent : base).Faded(0.3f), 24.0f, 4);
+        ParallelogramGradient3(f, rect, base.Faded(0.12f), base, base.Faded(0.12f));
+        const std::string title = success ? "SUCCESS" : (miss ? "MISS" : "PACK COMPLETE");
+        TextShadow(f, FontStyle::BlackItalic, done ? 64.0f : 96.0f, {rect.x + rect.w * 0.5f, rect.y + (done ? 30.0f : 10.0f)}, style::kText, title, shadow, 5.0f, Align::Center);
+        std::string subtitle;
+        if (success)
+        {
+            subtitle = OneDecimal(t.elapsed) + " s";
+            if (t.lastHitKmh > 0.5f)
+            {
+                subtitle += " \xC2\xB7 " + Kmh(t.lastHitKmh);
+            }
+            if (t.newBest)
+            {
+                subtitle += " \xC2\xB7 NEW BEST";
+            }
+        }
+        else if (miss)
+        {
+            subtitle = t.missReason;
+            subtitle += subtitle.empty() ? std::string() : " \xC2\xB7 ";
+            subtitle += t.outOfAttempts ? "NO ATTEMPTS LEFT" : "TRY AGAIN";
+        }
+        else
+        {
+            subtitle = std::to_string(t.done) + " OF " + std::to_string(t.count) + " EXERCISES DONE";
+        }
+        Text(f, FontStyle::ExtraBoldItalic, 34.0f, {rect.x + rect.w * 0.5f, rect.y + rect.h - 52.0f}, style::kText, subtitle, Align::Center);
+    }
+
+    void Hud::DrawTrainingHints(Frame& f) const
+    {
+        const HudTraining& t = state_.training;
+        std::vector<HudKeyHint> hints = t.hints;
+        if (hints.empty())
+        {
+            if (t.phase == HudTrainingPhase::FreePlay)
+            {
+                hints = {{"R", "Y", "Ball to car"}, {"T", "X", "Ball in the air"}, {"B", "LB", "Endless boost"}, {"Esc", "Start", "Menu"}};
+            }
+            else if (t.phase == HudTrainingPhase::PackDone)
+            {
+                hints = {{"R", "Y", "Start over"}, {"P", "LB", "Previous"}, {"Esc", "Start", "Menu"}};
+            }
+            else
+            {
+                hints = {{"R", "Y", "Retry"}, {"N", "RB", "Next"}, {"P", "LB", "Previous"}, {"Esc", "Start", "Menu"}};
+            }
+        }
+        const Space saved = f.space();
+        f.SetSpace(Space::Menu);
+        const bool pad = f.LastDevice() == Device::Gamepad;
+        float x = 80.0f;
+        const float y = 1006.0f;
+        for (const HudKeyHint& hint : hints)
+        {
+            const std::string& key = pad && !hint.pad.empty() ? hint.pad : hint.key;
+            x += KeyCap(f, {x, y}, key) + 10.0f;
+            Text(f, FontStyle::SemiBold, 22.0f, {x, y + 4.0f}, style::kTextDim, hint.label);
+            x += TextWidth(f, FontStyle::SemiBold, 22.0f, hint.label) + 36.0f;
+        }
+        f.SetSpace(saved);
+    }
+
+    void Hud::DrawTraining(Frame& f) const
+    {
+        DrawTrainingPlate(f);
+        DrawTrainingTimer(f);
+        DrawTrainingBanner(f);
+        DrawTrainingHints(f);
+    }
+
     void Hud::DrawPing(Frame& f) const
     {
         ScreenSpace space(f);
@@ -606,6 +917,26 @@ namespace myengine::rlui
         {
             AlphaScope dim(f, 0.45f);
             DrawScorebar(f);
+            return;
+        }
+        if (state_.replay.active)
+        {
+            DrawReplay(f);      // the bars first: the scoreboard and the ping are drawn over them
+            DrawScorebar(f);
+            DrawPing(f);
+            return;
+        }
+        if (state_.training.active)
+        {
+            // the training has no match: the plate, the timer, the banner and the keys instead of the scoreboard
+            DrawPing(f);
+            DrawCountdown(f);
+            if (state_.localPlayer >= 0)
+            {
+                DrawBoostRing(f);
+            }
+            DrawTraining(f);
+            DrawBallCamHint(f);
             return;
         }
         if (scoreboardHeld)

@@ -30,6 +30,10 @@ namespace rl
         // Names for the HUD and the results; an empty one gets "Player" (a human) or a name of the list of the bots (Comet, Blaze, Nova, Spark,
         // Bolt, Drift, Flux, in the order of the bot slots).
         std::string names[kMaxCars];
+        int botVersion = 2;           // 1: the bots of G4b (kept for comparison), 2: the bots of G4f
+        // The orange team plays with other bots (tests that measure one kind against another); -1: the same as the blue team
+        int botLevelOrange = -1;
+        int botVersionOrange = -1;
     };
 
     // Whether a ball with this state, flying without any touch (the gravity, bounces on the floor), crosses the plane of the goal at

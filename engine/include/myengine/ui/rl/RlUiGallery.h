@@ -30,6 +30,8 @@ namespace myengine::rlui
         HudKickoff,      // rl-hud-kickoff
         HudGoal,         // rl-hud-goal
         HudScoreboard,   // rl-hud-scoreboard
+        HudReplay,       // no mock-up: the replay of a goal (G7e)
+        HudTraining,     // no mock-up: the training (G4g), a cycle of 10 s: an exercise, SUCCESS, MISS, free play, the summary of a pack
         Count
     };
 

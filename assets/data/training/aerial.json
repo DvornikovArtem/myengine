@@ -1,0 +1,162 @@
+{
+  "id": "aerial",
+  "name": "Aerial",
+  "order": 3,
+  "description": "The ball flies up: take off, boost and touch it high.",
+  "exercises": [
+    {
+      "id": "easy-lift",
+      "name": "Easy lift",
+      "hint": "A ball in front of you: jump and boost.",
+      "car": {
+        "x": 0,
+        "z": -10,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [0.0, 3.0, 12.0],
+        "velocity": [0.0, 9.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 4
+      }
+    },
+    {
+      "id": "higher",
+      "name": "Higher",
+      "hint": "It goes higher this time.",
+      "car": {
+        "x": 0,
+        "z": -10,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [0.0, 3.0, 18.0],
+        "velocity": [0.0, 11.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 6
+      }
+    },
+    {
+      "id": "moving-ball",
+      "name": "Moving ball",
+      "hint": "The ball drifts: aim ahead of it.",
+      "car": {
+        "x": -8,
+        "z": -12,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [-8.0, 3.0, 10.0],
+        "velocity": [3.0, 10.0, 5.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 5
+      }
+    },
+    {
+      "id": "from-distance",
+      "name": "From a distance",
+      "hint": "A long run-up, then up.",
+      "car": {
+        "x": 0,
+        "z": -35,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [0.0, 3.0, 0.0],
+        "velocity": [0.0, 12.0, 2.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 7
+      }
+    },
+    {
+      "id": "crossing",
+      "name": "Crossing",
+      "hint": "The ball crosses your path.",
+      "car": {
+        "x": -15,
+        "z": -15,
+        "yaw": 0.4,
+        "boost": 100
+      },
+      "ball": {
+        "position": [10.0, 3.0, 10.0],
+        "velocity": [-2.0, 11.0, 3.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 6
+      }
+    },
+    {
+      "id": "near-the-wall",
+      "name": "Near the wall",
+      "hint": "Careful: the wall is close.",
+      "car": {
+        "x": 20,
+        "z": 0,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [34.0, 3.0, 12.0],
+        "velocity": [0.0, 12.0, 2.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 7
+      }
+    },
+    {
+      "id": "sky-high",
+      "name": "Sky high",
+      "hint": "As high as the ceiling lets you.",
+      "car": {
+        "x": 0,
+        "z": -10,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [0.0, 3.0, 15.0],
+        "velocity": [0.0, 14.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 8,
+      "attempts": 5,
+      "success": {
+        "type": "touchAbove",
+        "height": 10
+      }
+    }
+  ]
+}

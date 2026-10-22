@@ -384,6 +384,17 @@ set_property(TARGET myengine_rl_match_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_match COMMAND myengine_rl_match_tests)
 set_tests_properties(rl_match PROPERTIES TIMEOUT 600)
 
+# G4f: the bots of the second version against the first ones and against each other (many headless matches)
+add_executable(myengine_rl_bots_tests
+  rl/RlBotsTests.cpp)
+
+target_link_libraries(myengine_rl_bots_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_bots_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
+myengine_apply_compiler_options(myengine_rl_bots_tests)
+set_property(TARGET myengine_rl_bots_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_bots COMMAND myengine_rl_bots_tests)
+set_tests_properties(rl_bots PROPERTIES TIMEOUT 900)
+
 # G4e: the car of the game against RocketSim (reference traces written by tests/rl/rocketsim_diff, no RocketSim in this build)
 add_executable(myengine_rl_rocketsim_diff
   rl/RlRocketSimDiffTests.cpp)
@@ -453,6 +464,30 @@ myengine_apply_compiler_options(myengine_rl_feedback_tests)
 set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
 set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
+
+
+# G4g: the training: free play, the packs of exercises (assets/data/training), the conditions of success, the attempts, the results file (no window)
+add_executable(myengine_rl_training_tests
+  rl/RlTrainingTests.cpp)
+
+target_link_libraries(myengine_rl_training_tests PRIVATE myengine_engine)
+target_compile_definitions(myengine_rl_training_tests PRIVATE TRAINING_PACKS_DIR="${CMAKE_SOURCE_DIR}/assets/data/training")
+myengine_apply_compiler_options(myengine_rl_training_tests)
+set_property(TARGET myengine_rl_training_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_training COMMAND myengine_rl_training_tests)
+set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
+
+
+# G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
+# RlFeedback in the replay mode (no window)
+add_executable(myengine_rl_replay_tests
+  rl/RlReplayTests.cpp)
+
+target_link_libraries(myengine_rl_replay_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_replay_tests)
+set_property(TARGET myengine_rl_replay_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_replay COMMAND myengine_rl_replay_tests)
+set_tests_properties(rl_replay PROPERTIES TIMEOUT 300)
 
 
 # G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery

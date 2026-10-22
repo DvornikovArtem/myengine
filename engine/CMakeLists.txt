@@ -79,6 +79,7 @@
   include/myengine/game/RlFeedback.h
   include/myengine/game/RlGameFlow.h
   include/myengine/game/RlGameSettings.h
+  include/myengine/game/RlTrainingStore.h
   include/myengine/ecs/components/FxComponents.h
   include/myengine/ecs/systems/FxSystem.h
   include/myengine/render/dx12/InputLayoutBuilder.h
@@ -179,6 +180,7 @@ set(ENGINE_SOURCES
   src/game/RlFeedback.cpp
   src/game/RlGameFlow.cpp
   src/game/RlGameSettings.cpp
+  src/game/RlTrainingStore.cpp
   src/ecs/systems/FxSystem.cpp
   src/render/dx12/Dx12ScenePass.cpp
   src/render/dx12/InputLayoutBuilder.cpp

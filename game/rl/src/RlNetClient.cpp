@@ -99,6 +99,19 @@ namespace rl
 
         // time
         double lastNow = -1.0;
+
+        // joining a running match: the state comes in pieces, then the client replays what the host did since and catches up with it
+        bool lateJoin = false;
+        bool catchUp = false;
+        std::vector<uint8_t> stateBytes;
+        uint32_t stateTick = 0;
+        size_t stateGot = 0;
+        uint32_t joinTick = 0;
+        uint32_t joinMask = 0;
+        bool firstSnapshotSeen = false;
+        uint32_t firstSnapshotTick = 0;
+        double firstSnapshotTime = 0.0;
+        uint32_t historyEnd = 0;   // the inputs of the ticks joinTick .. historyEnd - 1 come from the host on request
         double accumulator = 0.0;
         double scale = 1.0;
         int holdTicks = 0;
@@ -403,7 +416,145 @@ namespace rl
                 match.reset();
                 return;
             }
+            if (welcome.started != 0)
+            {
+                lateJoin = true;
+                joinMask = welcome.humanMask;
+                stateBytes.clear();
+                stateGot = 0;
+                state = RlNetClientState::Syncing;
+                return;
+            }
             state = RlNetClientState::Lobby;
+        }
+
+        // ---- joining a running match ---------------------------------------------------------------------------------------------------
+
+        void OnStateChunk(const std::vector<uint8_t>& data)
+        {
+            RlStateChunkMsg chunk;
+            if (state != RlNetClientState::Syncing || !RlDecode(data.data(), data.size(), chunk))
+            {
+                return;
+            }
+            if (stateBytes.size() != chunk.total || stateTick != chunk.tick)
+            {
+                stateBytes.assign(chunk.total, 0);
+                stateTick = chunk.tick;
+                stateGot = 0;
+            }
+            std::copy(chunk.bytes.begin(), chunk.bytes.end(), stateBytes.begin() + static_cast<std::ptrdiff_t>(chunk.offset));
+            stateGot += chunk.bytes.size();
+            if (stateGot < stateBytes.size())
+            {
+                return;
+            }
+            if (!match->RestoreState(stateBytes))
+            {
+                Fail("cannot restore the state of the match that the host sent (another build?)");
+                return;
+            }
+            tick = stateTick;
+            joinTick = tick;
+            AddMask(tick, joinMask);
+            catchUp = true;
+            firstSnapshotSeen = false;
+            state = RlNetClientState::Playing;  // the stepping starts when the host's inputs since the state are known
+            stats.tick = tick;
+        }
+
+        // the inputs of the host for the ticks of the window of a snapshot or of a history message
+        void StoreCanonical(int slotIndex, uint32_t t, const RlCarInput& input)
+        {
+            canonical[slotIndex][t % kHistory] = input;
+            canonicalTick[slotIndex][t % kHistory] = t;
+            if (lastCanonicalTick[slotIndex] == kNoTick || static_cast<int32_t>(t - lastCanonicalTick[slotIndex]) >= 0)
+            {
+                lastCanonical[slotIndex] = input;
+                lastCanonicalTick[slotIndex] = t;
+            }
+        }
+
+        void OnInputHistory(const std::vector<uint8_t>& data, double now)
+        {
+            RlInputHistoryMsg msg;
+            if (!RlDecode(data.data(), data.size(), msg))
+            {
+                return;
+            }
+            for (int t = 0; t < msg.count; ++t)
+            {
+                for (int s = 0; s < kMaxCars; ++s)
+                {
+                    StoreCanonical(s, msg.first + static_cast<uint32_t>(t), RlUnpackInput(msg.inputs[t][s]));
+                }
+            }
+            TryFinishCatchUp(now);
+        }
+
+        // the first snapshot after the restore says where the host is; what the host did between the state and that snapshot is asked for
+        void OnSnapshotWhileCatchingUp(const RlSnapshotMsg& msg, double now)
+        {
+            const uint32_t first = msg.tick - static_cast<uint32_t>(msg.inputCount);
+            for (int j = 0; j < msg.inputCount; ++j)
+            {
+                for (int s = 0; s < slotCount; ++s)
+                {
+                    if ((msg.humanMask & (1u << s)) != 0)
+                    {
+                        StoreCanonical(s, first + static_cast<uint32_t>(j), RlUnpackInput(msg.inputs[s][j]));
+                    }
+                }
+            }
+            if (!firstSnapshotSeen)
+            {
+                firstSnapshotSeen = true;
+                firstSnapshotTick = msg.tick;
+                firstSnapshotTime = now;
+                historyEnd = static_cast<int32_t>(first - joinTick) > 0 ? first : joinTick;
+                if (historyEnd > joinTick)
+                {
+                    RlInputRequestMsg request;
+                    request.first = joinTick;
+                    request.count = historyEnd - joinTick;
+                    RlEncode(request, packet);
+                    transport.Send(host, packet.data(), packet.size(), true);
+                }
+            }
+            TryFinishCatchUp(now);
+        }
+
+        void TryFinishCatchUp(double now)
+        {
+            if (!catchUp || !firstSnapshotSeen)
+            {
+                return;
+            }
+            for (uint32_t t = joinTick; t != historyEnd; ++t)
+            {
+                if (canonicalTick[0][t % kHistory] != t)
+                {
+                    return;  // the answer is still on its way
+                }
+            }
+            // be ahead of the host as a client of a match from the start would be: the host is at the tick of the snapshot plus what has passed,
+            // and our inputs need a round trip to get to it
+            double rtt = transport.RoundTripSeconds(host);
+            if (rtt <= 0.0)
+            {
+                rtt = 0.1;
+            }
+            const uint32_t target = firstSnapshotTick + static_cast<uint32_t>(std::ceil((now - firstSnapshotTime) * kTickRate)) +
+                                    static_cast<uint32_t>(std::ceil(rtt * kTickRate)) + kTargetMargin;
+            lastNow = now;
+            for (int steps = 0; tick < target && steps < 1200; ++steps)
+            {
+                StepFresh();
+            }
+            catchUp = false;
+            accumulator = 0.0;
+            scale = 1.0;
+            ignoreMarginUntil = now + 0.7;
         }
 
         void OnEvent(const RlEventMsg& event, double now)
@@ -423,7 +574,11 @@ namespace rl
                 }
                 break;
             case RlEventKind::SlotMask:
-                if (state == RlNetClientState::Playing)
+                if (state == RlNetClientState::Syncing || catchUp)
+                {
+                    AddMask(event.tick, event.mask);  // another player came or went while we were getting the state
+                }
+                else if (state == RlNetClientState::Playing)
                 {
                     AddMask(event.tick, event.mask);
                     if (event.tick < tick && tick - event.tick < kRingSize - 1)
@@ -468,6 +623,11 @@ namespace rl
                 return;
             }
             ZoneScopedN("Rl::Net::Snapshot");
+            if (catchUp)
+            {
+                OnSnapshotWhileCatchingUp(msg, now);
+                return;
+            }
             ++stats.snapshots;
             stats.margin = msg.margin;
             stats.lead = static_cast<int>(tick) - static_cast<int>(msg.tick);
@@ -700,6 +860,8 @@ namespace rl
                         }
                         break;
                     }
+                    case RlMsg::StateChunk: OnStateChunk(event.data); break;
+                    case RlMsg::InputHistory: OnInputHistory(event.data, now); break;
                     case RlMsg::Event:
                     {
                         RlEventMsg msg;
@@ -722,7 +884,7 @@ namespace rl
             const double dt = lastNow < 0.0 ? 0.0 : std::max(0.0, now - lastNow);
             lastNow = now;
             stats.rttMs = host != net::kInvalidPeer ? transport.RoundTripSeconds(host) * 1000.0 : 0.0;
-            if (state != RlNetClientState::Playing || match == nullptr)
+            if (state != RlNetClientState::Playing || match == nullptr || catchUp)
             {
                 return;
             }
