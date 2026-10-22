@@ -19,7 +19,7 @@ namespace myengine::rlui
 
     namespace
     {
-        const char* const kScreenNames[] = {"main", "play", "private", "loading", "pause", "results", "controls", "rebind", "camera", "video", "hud-kickoff", "hud-goal", "hud-scoreboard", "hud-replay"};
+        const char* const kScreenNames[] = {"main", "play", "private", "loading", "pause", "results", "controls", "rebind", "camera", "video", "hud-kickoff", "hud-goal", "hud-scoreboard", "hud-replay", "hud-training"};
 
         // ---- the fake data of the mock-ups
         std::vector<HudPlayer> FakePlayers()
@@ -286,6 +286,67 @@ namespace myengine::rlui
             return s;
         }
 
+        // The training of the gallery: a cycle of 10 s over the phases of rl::RlTraining (an exercise runs, SUCCESS, MISS, free play, the summary)
+        HudTraining TrainingState(const float t)
+        {
+            HudTraining s;
+            s.active = true;
+            s.pack = "Striker";
+            s.exercise = "Rolling ball";
+            s.hint = "Catch up with the ball and shoot.";
+            s.index = 1;
+            s.count = 8;
+            s.attempt = 2;
+            s.attempts = 3;
+            s.timeLimit = 10.0f;
+            s.recordTime = 4.2f;
+            s.recordHitKmh = 112.0f;
+            if (t < 2.5f)
+            {
+                s.phase = HudTrainingPhase::Running;
+                s.elapsed = 2.6f + t;
+                s.timeLeft = s.timeLimit - s.elapsed;
+            }
+            else if (t < 4.3f)
+            {
+                s.phase = HudTrainingPhase::Success;
+                s.elapsed = 3.1f;
+                s.timeLeft = s.timeLimit - s.elapsed;
+                s.bannerTime = t - 2.5f;
+                s.lastHitKmh = 98.0f;
+                s.newBest = true;
+                s.recordTime = 3.1f;
+            }
+            else if (t < 6.1f)
+            {
+                s.phase = HudTrainingPhase::Miss;
+                s.elapsed = 10.0f;
+                s.timeLeft = 0.0f;
+                s.bannerTime = t - 4.3f;
+                s.missReason = "TIME UP";
+            }
+            else if (t < 8.0f)
+            {
+                s.phase = HudTrainingPhase::FreePlay;
+                s.pack = "Free play";
+                s.timeLimit = 0.0f;
+                s.elapsed = 83.0f + (t - 6.1f);
+                s.hits = 3;
+                s.lastHitKmh = 87.0f;
+                s.bestHitKmh = 112.0f;
+                s.maxTouchHeight = 5.4f;
+                s.infiniteBoost = true;
+            }
+            else
+            {
+                s.phase = HudTrainingPhase::PackDone;
+                s.bannerTime = t - 8.0f;
+                s.index = 7;
+                s.done = 6;
+            }
+            return s;
+        }
+
         void PauseScreen(Frame& f)
         {
             FakeGameView(f, false, {}, 1.0f);
@@ -458,7 +519,9 @@ namespace myengine::rlui
             const bool goal = screen == GalleryScreen::HudGoal;
             const bool kickoff = screen == GalleryScreen::HudKickoff;
             const bool replay = screen == GalleryScreen::HudReplay;
-            FakeGameView(f, kickoff || goal || replay, kickoff ? Vec2{690.0f, 790.0f} : (replay ? Vec2{880.0f, 700.0f} : Vec2{340.0f, 820.0f}), kickoff ? 0.84f : 0.8f);
+            const bool training = screen == GalleryScreen::HudTraining;
+            FakeGameView(f, kickoff || goal || replay || training, kickoff ? Vec2{690.0f, 790.0f} : (replay ? Vec2{880.0f, 700.0f} : (training ? Vec2{760.0f, 760.0f} : Vec2{340.0f, 820.0f})),
+                         kickoff ? 0.84f : 0.8f);
             f.SetSpace(Space::Screen);
 
             HudState state;
@@ -487,6 +550,11 @@ namespace myengine::rlui
                 state.replay.goalSpeedKmh = 98.0f;
                 state.replay.speed = 0.5f;
                 state.replay.progress = 0.62f;
+            }
+            else if (training)
+            {
+                state = GameState(HudPhase::Playing, 0.0f, 0, 2, 74.0f);
+                state.training = TrainingState(std::fmod(g.hudTime, 10.0f));
             }
             else
             {
@@ -545,7 +613,8 @@ namespace myengine::rlui
         case GalleryScreen::HudKickoff:
         case GalleryScreen::HudGoal:
         case GalleryScreen::HudScoreboard:
-        case GalleryScreen::HudReplay: HudScreen(f, screen); break;
+        case GalleryScreen::HudReplay:
+        case GalleryScreen::HudTraining: HudScreen(f, screen); break;
         case GalleryScreen::Count: break;
         }
     }
