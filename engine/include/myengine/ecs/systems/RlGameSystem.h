@@ -11,9 +11,12 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <rl/net/NetTransport.h>
 
 #include <myengine/ecs/System.h>
 #include <myengine/ui/rl/RlUiHud.h>
@@ -81,6 +84,9 @@ namespace myengine::ecs::systems
         std::string address;            // Join: "ip" or "ip:port"
         std::uint16_t port = 27015;     // Host: the UDP port
         std::string playerName;         // the name in the table
+        // Host / Join: the transport of the match made by the lobby service (LAN, Steam; docs/game/rl-lobby.md). Empty: UDP. The system calls it once
+        // when the network starts and forgets it; `address` and `port` then mean what that transport means (Steam: the Steam id of the host).
+        std::function<std::unique_ptr<rl::net::INetTransport>(const rl::net::NetSimParams&)> transportFactory;
     };
 
     struct RlLobbySlot
