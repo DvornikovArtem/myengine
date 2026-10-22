@@ -21,6 +21,7 @@
 #include <myengine/ecs/components/ColliderComponent.h>
 #include <myengine/ecs/components/HierarchyComponent.h>
 #include <myengine/ecs/components/MeshRendererComponent.h>
+#include <myengine/ecs/components/FxComponents.h>
 #include <myengine/ecs/components/MotionComponent.h>
 #include <myengine/ecs/components/PlayerControllerComponent.h>
 #include <myengine/ecs/components/RigidbodyComponent.h>
@@ -209,6 +210,37 @@ namespace myengine::scene
             };
         }
 
+        if (const auto* emitter = world.TryGet<ecs::components::ParticleEmitterComponent>(entity); emitter != nullptr)
+        {
+            entityJson["ParticleEmitter"] =
+            {
+                {"effect", emitter->effect},
+                {"playing", emitter->playing},
+                {"retriggerInterval", emitter->retriggerInterval},
+                {"scale", emitter->scale},
+                {"intensity", emitter->intensity},
+                {"rateScale", emitter->rateScale},
+                {"tint", {emitter->tint[0], emitter->tint[1], emitter->tint[2], emitter->tint[3]}},
+                {"direction", VecToJson(emitter->direction)},
+                {"directionLocal", emitter->directionLocal},
+                {"orbitRadius", emitter->orbitRadius},
+                {"orbitSpeedDeg", emitter->orbitSpeedDeg},
+            };
+        }
+
+        if (const auto* source = world.TryGet<ecs::components::AudioSourceComponent>(entity); source != nullptr)
+        {
+            entityJson["AudioSource"] =
+            {
+                {"event", source->event},
+                {"playing", source->playing},
+                {"retriggerInterval", source->retriggerInterval},
+                {"volume", source->volume},
+                {"pitch", source->pitch},
+                {"spatial", source->spatial},
+            };
+        }
+
         if (const auto* motion = world.TryGet<ecs::components::MotionComponent>(entity); motion != nullptr)
         {
             entityJson["Motion"] =
@@ -334,6 +366,44 @@ namespace myengine::scene
             renderer.meshPath = rendererJson.value("meshPath", std::string());
             renderer.materialPath = rendererJson.value("materialPath", std::string());
             renderer.visible = rendererJson.value("visible", true);
+        }
+
+        if (entityJson.contains("ParticleEmitter"))
+        {
+            auto& emitter = world.Emplace<ecs::components::ParticleEmitterComponent>(entity);
+            const auto& emitterJson = entityJson["ParticleEmitter"];
+            emitter.effect = emitterJson.value("effect", std::string());
+            emitter.playing = emitterJson.value("playing", true);
+            emitter.retriggerInterval = emitterJson.value("retriggerInterval", 0.0f);
+            emitter.scale = emitterJson.value("scale", 1.0f);
+            emitter.intensity = emitterJson.value("intensity", 1.0f);
+            emitter.rateScale = emitterJson.value("rateScale", 1.0f);
+            if (const auto tint = emitterJson.find("tint"); tint != emitterJson.end() && tint->is_array() && tint->size() == 4)
+            {
+                for (std::size_t i = 0; i < 4; ++i)
+                {
+                    emitter.tint[i] = (*tint)[i].get<float>();
+                }
+            }
+            if (emitterJson.contains("direction"))
+            {
+                emitter.direction = VecFromJson(emitterJson["direction"]);
+            }
+            emitter.directionLocal = emitterJson.value("directionLocal", false);
+            emitter.orbitRadius = emitterJson.value("orbitRadius", 0.0f);
+            emitter.orbitSpeedDeg = emitterJson.value("orbitSpeedDeg", 90.0f);
+        }
+
+        if (entityJson.contains("AudioSource"))
+        {
+            auto& source = world.Emplace<ecs::components::AudioSourceComponent>(entity);
+            const auto& sourceJson = entityJson["AudioSource"];
+            source.event = sourceJson.value("event", std::string());
+            source.playing = sourceJson.value("playing", true);
+            source.retriggerInterval = sourceJson.value("retriggerInterval", 0.0f);
+            source.volume = sourceJson.value("volume", 1.0f);
+            source.pitch = sourceJson.value("pitch", 1.0f);
+            source.spatial = sourceJson.value("spatial", true);
         }
 
         if (entityJson.contains("Motion"))

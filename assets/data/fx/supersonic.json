@@ -1,0 +1,115 @@
+{
+  "name": "supersonic",
+  "comment": "The trail of a car at supersonic speed: loop it at the car, direction = backwards, SetTransform every frame, tint = the team.",
+  "emitters": [
+    {
+      "name": "streaks",
+      "blend": "additive",
+      "frame": 2,
+      "loop": true,
+      "rate": 90,
+      "maxParticles": 140,
+      "shape": "disc",
+      "shapeRadius": 0.45,
+      "coneAngle": 3,
+      "lifetime": [
+        0.22,
+        0.38
+      ],
+      "speed": [
+        3,
+        6
+      ],
+      "size": [
+        0.6,
+        0.95
+      ],
+      "stretch": 4,
+      "stretchSpeed": 0.2,
+      "intensity": 2.2,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            0.9
+          ]
+        ],
+        [
+          0.5,
+          [
+            0.7,
+            0.85,
+            1,
+            0.5
+          ]
+        ],
+        [
+          1,
+          [
+            0.5,
+            0.7,
+            1,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "wake",
+      "blend": "additive",
+      "frame": 0,
+      "loop": true,
+      "rate": 60,
+      "maxParticles": 80,
+      "shape": "disc",
+      "shapeRadius": 0.3,
+      "coneAngle": 8,
+      "lifetime": [
+        0.15,
+        0.3
+      ],
+      "speed": [
+        5,
+        9
+      ],
+      "size": [
+        0.3,
+        0.45
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0.1
+        ]
+      ],
+      "intensity": 2.0,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            0.8
+          ]
+        ],
+        [
+          1,
+          [
+            0.6,
+            0.8,
+            1,
+            0
+          ]
+        ]
+      ]
+    }
+  ]
+}

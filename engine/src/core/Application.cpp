@@ -7,6 +7,7 @@
 #include <exception>
 #include <filesystem>
 #include <sstream>
+#include <cstdlib>
 #include <string>
 
 #include <myengine/core/Application.h>
@@ -24,7 +25,10 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
 #include <myengine/ecs/systems/CameraControlSystem.h>
+#include <myengine/audio/AudioSystem.h>
 #include <myengine/ecs/systems/DebugRenderSystem.h>
+#include <myengine/ecs/systems/FxSystem.h>
+#include <myengine/fx/ParticleSystem.h>
 #include <myengine/ecs/systems/MotionSystem.h>
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/ecs/systems/PlayerControlSystem.h>
@@ -526,7 +530,33 @@ namespace myengine::core
             scriptSystem_ = scriptSystem.get();
             world_.AddUpdateSystem(std::move(scriptSystem));
         }
+        // Sound and particles (G7c): the device and the sound bank, the presets of the effects; the systems play the components of the scene
+        {
+            auto& audioSystem = audio::GetAudioSystem();
+            audio::AudioConfig audioConfig;
+            {
+                char* off = nullptr;
+                std::size_t offLength = 0;
+                if (_dupenv_s(&off, &offLength, "MYENGINE_AUDIO") == 0 && off != nullptr)
+                {
+                    audioConfig.useDevice = std::string(off) != "0"; // MYENGINE_AUDIO=0: no device (machines without sound, the capture of a frame)
+                    std::free(off);
+                }
+            }
+            audioSystem.SetLogger(&logger_);
+            audioSystem.Initialize(audioConfig);
+            audioSystem.LoadBank(ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/audio_bank.json"));
+            std::vector<std::string> fxMessages;
+            const std::uint32_t effects = fx::GetParticleSystem().LoadEffects(ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/fx"), &fxMessages);
+            logger_.Info("Particle effects loaded: " + std::to_string(effects));
+            for (const std::string& message : fxMessages)
+            {
+                logger_.Warning("Particle effect: " + message);
+            }
+        }
+        world_.AddUpdateSystem(std::make_unique<ecs::systems::FxUpdateSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
+        world_.AddRenderSystem(std::make_unique<ecs::systems::FxRenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
         // --scene is a file path or a path inside the project; without it the project's default map is opened
         std::error_code scenePathError;
@@ -847,6 +877,7 @@ namespace myengine::core
         }
 
         uiManager_.Shutdown();
+        audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
         resourceManager_.reset();
 

@@ -71,6 +71,7 @@ namespace myengine::render::dx12
         void SetRenderRegion(RenderSurfaceHandle surface, const IntRect* region) override;
         void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) override;
         void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) override;
+        void DrawInstances(RenderSurfaceHandle surface, const DrawItem& drawItem, const float* instanceData, std::uint32_t instanceCount) override;
         void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) override;
         void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) override;
         void EndFrame(RenderSurfaceHandle surface) override;
@@ -152,6 +153,8 @@ namespace myengine::render::dx12
             D3D12_RECT scissorRect{};
             Matrix4 viewProjection = Matrix4::Identity();
             Float3 cameraPosition{};
+            Float3 cameraRight{1.0f, 0.0f, 0.0f};
+            Float3 cameraUp{0.0f, 1.0f, 0.0f};
         };
 
         struct DxVertex
@@ -268,6 +271,8 @@ namespace myengine::render::dx12
             std::uint32_t shadowParams = kNoOffset;        // gShadowParams: x 1/size, y depth bias, z normal offset, w enabled
             std::uint32_t postParams = kNoOffset;          // gPostParams (post passes)
             std::uint32_t texelSize = kNoOffset;           // gTexelSize (post passes)
+            std::uint32_t cameraRight = kNoOffset;         // gCameraRight (billboards)
+            std::uint32_t cameraUp = kNoOffset;            // gCameraUp
         };
         // A texture of the program: where its descriptor table is and which texture of MaterialParams it takes
         struct TextureSlot
@@ -372,6 +377,8 @@ namespace myengine::render::dx12
             bool castShadow = true;
             Float3 boundsCenter{};
             float boundsRadius = 0.0f;
+            std::uint32_t instanceCount = 0;   // > 0: a batch (DrawInstances): its instances are pendingInstanceData_[instanceOffset ...]
+            std::size_t instanceOffset = 0;    // in floats
         };
         // How a pass writes the engine values (the light, the camera, the shadow map) into the constant buffers
         struct PassParams
@@ -379,6 +386,8 @@ namespace myengine::render::dx12
             Matrix4 viewProjection;
             Matrix4 lightViewProjection;
             Float3 cameraPosition{};
+            Float3 cameraRight{1.0f, 0.0f, 0.0f};
+            Float3 cameraUp{0.0f, 1.0f, 0.0f};
             float shadowParams[4] = {0.0f, 0.0f, 0.0f, 0.0f};
             bool depthOnly = false;
             PipelineKey key;
@@ -482,6 +491,7 @@ namespace myengine::render::dx12
         RenderSettings settings_;
         SceneLighting lighting_;
         std::vector<PendingDraw> pendingDraws_;
+        std::vector<float> pendingInstanceData_;  // the instances of the batches in pendingDraws_ (16 floats each)
         bool sceneOutputActive_ = false;       // the commands of the surface go to the HDR scene targets
         bool useSceneTargets_ = false;         // this frame uses them (MSAA or bloom on)
         core::Color sceneClearColor_{0.0f, 0.0f, 0.0f, 1.0f};

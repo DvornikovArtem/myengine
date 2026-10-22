@@ -120,6 +120,17 @@ namespace myengine::render
         virtual void SetRenderRegion(RenderSurfaceHandle surface, const IntRect* region) = 0;
         virtual void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) = 0;
         virtual void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) = 0;
+        // A batch of instances of one mesh with one material, one draw (particles): instanceData has 16 floats per instance, what
+        // the instance stream of the program reads as INSTANCE0..3 (a model matrix for the lit shader, the particle data for
+        // particle.hlsl). Only for programs that read the instance stream; only on the surface of the frame (not in render targets).
+        // drawItem.model is not used; its bounds (centre, radius) sort a transparent batch among the other transparent draws.
+        virtual void DrawInstances(RenderSurfaceHandle surface, const DrawItem& drawItem, const float* instanceData, std::uint32_t instanceCount)
+        {
+            (void)surface;
+            (void)drawItem;
+            (void)instanceData;
+            (void)instanceCount;
+        }
         virtual void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) = 0;
         virtual void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) = 0;
         virtual void EndFrame(RenderSurfaceHandle surface) = 0;

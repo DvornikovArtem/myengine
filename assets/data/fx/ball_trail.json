@@ -1,0 +1,132 @@
+{
+  "name": "ball_trail",
+  "comment": "The trail of the ball at speed: loop it while the ball is fast, SetTransform to the ball every frame, tint = the team of the last touch, rateScale = speed / supersonic speed.",
+  "emitters": [
+    {
+      "name": "ribbon",
+      "blend": "additive",
+      "frame": 0,
+      "loop": true,
+      "rate": 130,
+      "maxParticles": 150,
+      "shape": "point",
+      "lifetime": [
+        0.3,
+        0.45
+      ],
+      "speed": [
+        0,
+        0.4
+      ],
+      "size": [
+        0.55,
+        0.75
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          0.05
+        ]
+      ],
+      "intensity": 1.8,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            0.9
+          ]
+        ],
+        [
+          0.5,
+          [
+            0.6,
+            0.8,
+            1,
+            0.5
+          ]
+        ],
+        [
+          1,
+          [
+            0.3,
+            0.5,
+            1,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "glints",
+      "blend": "additive",
+      "frame": 5,
+      "loop": true,
+      "rate": 26,
+      "maxParticles": 40,
+      "shape": "sphere",
+      "shapeRadius": 0.6,
+      "lifetime": [
+        0.35,
+        0.6
+      ],
+      "speed": [
+        0.2,
+        0.8
+      ],
+      "size": [
+        0.2,
+        0.35
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.2
+        ],
+        [
+          0.3,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "rotation": [
+        0,
+        90
+      ],
+      "rotationSpeed": [
+        -90,
+        90
+      ],
+      "intensity": 2.4,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            0.7,
+            0.85,
+            1,
+            0
+          ]
+        ]
+      ]
+    }
+  ]
+}

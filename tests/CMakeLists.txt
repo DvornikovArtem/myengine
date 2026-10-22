@@ -406,3 +406,25 @@ if(MYENGINE_ASAN)
     endif()
   endforeach()
 endif()
+
+
+# G7c: the audio module without a sound device: WAV, 3D, the pool of voices, buses, fades, the sound bank, the sounds of the project
+add_executable(myengine_audio_tests
+  audio/AudioTests.cpp)
+
+target_link_libraries(myengine_audio_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_audio_tests)
+set_property(TARGET myengine_audio_tests PROPERTY FOLDER "Tests")
+add_test(NAME audio COMMAND myengine_audio_tests)
+set_tests_properties(audio PROPERTIES TIMEOUT 120)
+
+
+# G7c: the particle simulation without a renderer: presets, bursts and rates, the budget, batches, the cost of 5000 particles
+add_executable(myengine_fx_tests
+  fx/FxTests.cpp)
+
+target_link_libraries(myengine_fx_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_fx_tests)
+set_property(TARGET myengine_fx_tests PROPERTY FOLDER "Tests")
+add_test(NAME fx COMMAND myengine_fx_tests)
+set_tests_properties(fx PROPERTIES TIMEOUT 120)

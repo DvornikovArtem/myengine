@@ -1,0 +1,17 @@
+{
+  "shader": "../../shaders/particle.shader.json",
+  "texture": "../../textures/fx/particles.tga",
+  "tint": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "params": {
+    "gIntensity": 1.0,
+    "gAtlasColumns": 6.0
+  },
+  "blend": "additive",
+  "doubleSided": true,
+  "castShadow": false
+}
