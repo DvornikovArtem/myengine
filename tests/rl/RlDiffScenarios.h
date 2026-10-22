@@ -37,7 +37,7 @@ namespace rldiff
         float boostStart = 33.3f;
     };
 
-    constexpr int kScenarioCount = 230;
+    constexpr int kScenarioCount = 430;
 
     // G4j: flights of a player who flips, rolls and recovers at random: a jump, a dodge in a random direction, a roll or two against it, the throttle at
     // a random time. They are made from the index with a fixed hash, so the generator of the traces and the test see the same inputs. The outcomes
@@ -47,6 +47,10 @@ namespace rldiff
     constexpr int kFuzzTicks = 540;
     // the second family: a long roll, pitch or yaw that is let go of (no recovery), the throttle late: where the car lands and how it rests
     constexpr int kSpinFirst = 110;
+    // G4j2: the flights of the same kind in a large number, for the measure of how the touchdown of a spinning car ends: 100 without the throttle (ext_000 ..),
+    // the same 100 with the throttle held from the first tick (ext_100 ..)
+    constexpr int kExtFirst = 230;
+    constexpr int kExtCount = 200;
     constexpr int kSpinCount = 120;  // the second 60 are the same flights without the throttle at all (spin_60 ..): how the car rests when nobody drives it
     inline unsigned Hash(unsigned x)
     {
@@ -76,7 +80,7 @@ namespace rldiff
         {
             return false;  // the Octane only
         }
-        if (std::strncmp(name, "spin_", 5) == 0)
+        if (std::strncmp(name, "spin_", 5) == 0 || std::strncmp(name, "ext_", 4) == 0)
         {
             return false;
         }
@@ -215,6 +219,13 @@ namespace rldiff
                     char* name = names[index - kFuzzFirst];
                     std::snprintf(name, 16, "fuzz_%02d", index - kFuzzFirst);
                     ground(name, kFuzzTicks, 4.0f + static_cast<float>(Pick(index, 0, 13)), -45.0f);
+                }
+                else if (index >= kExtFirst && index < kExtFirst + kExtCount)
+                {
+                    static char names[kExtCount][16];
+                    char* name = names[index - kExtFirst];
+                    std::snprintf(name, 16, "ext_%03d", index - kExtFirst);
+                    ground(name, 420, 4.0f + static_cast<float>(Pick(5000 + (index - kExtFirst) % 100, 0, 13)), -30.0f);   // short enough that a car with the throttle held does not reach the far wall
                 }
                 else if (index >= kSpinFirst && index < kSpinFirst + kSpinCount)
                 {
@@ -388,9 +399,10 @@ namespace rldiff
                     }
                     if (t >= 120 + Pick(index, 15, 250)) in.throttle = 1.0f;
                 }
-                else if (index >= kSpinFirst && index < kSpinFirst + kSpinCount)
+                else if ((index >= kSpinFirst && index < kSpinFirst + kSpinCount) || (index >= kExtFirst && index < kExtFirst + kExtCount))
                 {
-                    const int key = kSpinFirst + (index - kSpinFirst) % 60;   // the second 60 are the same flights
+                    const bool ext = index >= kExtFirst;
+                    const int key = ext ? 5000 + (index - kExtFirst) % 100 : kSpinFirst + (index - kSpinFirst) % 60;   // the second half is the same flights
                     const int jumpHold = 8 + Pick(key, 1, 40);
                     const int dodgeAt = 10 + jumpHold + 6 + Pick(key, 2, 60);
                     in.jump = (t >= 10 && t < 10 + jumpHold) || (Pick(key, 3, 3) != 0 && t >= dodgeAt && t < dodgeAt + 3);
@@ -409,7 +421,8 @@ namespace rldiff
                         in.steer = Stick(key, 12);
                         if (in.roll == 0.0f && in.pitch == 0.0f && in.steer == 0.0f) in.roll = 1.0f;
                     }
-                    if (index < kSpinFirst + 60 && t >= 330 + Pick(key, 13, 60)) in.throttle = 1.0f;
+                    if (!ext && index < kSpinFirst + 60 && t >= 330 + Pick(key, 13, 60)) in.throttle = 1.0f;
+                    if (ext && index >= kExtFirst + 100) in.throttle = 1.0f;   // the throttle held from the first tick, as a player holds W
                 }
                 break;
         }
