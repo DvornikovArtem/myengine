@@ -19,6 +19,10 @@ namespace rl
         float groundBlend = 1.0f;          // 1 the car drives on a surface, 0 it is in the air (changes over a quarter of a second)
         float ballPitch = 0.0f;            // the sine of the angle the ball cam looks up (smoothed)
         float pitchOffset = 0.0f;          // radians the camera tilts to keep the car in the picture (a wall, a fall)
+        RlVec3 ballHeading{0.0f, 0.0f, 1.0f};  // the horizontal direction of the ball cam (heading is the one of the car cam; the camera looks along a mix of the two)
+        float pull = 0.0f;                 // how far the arena has pulled the camera in (0: the whole distance, 1: 0.6 of it)
+        bool lowering = false;             // the way that the camera was pulled in by: down to the level of the car (true) or up
+        float stretch = 0.0f;              // 0..1: how fast the car goes (the camera is a little farther on speed)
         bool ready = false;
     };
 

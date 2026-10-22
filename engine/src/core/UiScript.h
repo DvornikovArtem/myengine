@@ -74,5 +74,6 @@ namespace myengine::core
         bool mouse_[3] = {};
         rlui::Vec2 mousePosition_{};
         float wheel_ = 0.0f;
+        std::string typed_;   // `text <utf8>`: what is typed this frame
     };
 }

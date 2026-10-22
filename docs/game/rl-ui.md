@@ -157,7 +157,7 @@ myengine.exe --scene assets/scenes/scene.json --screenshot out.tga --screenshot-
 Boot ─▶ Main menu ─▶ Play (Offline · bots | Private match) ─▶ Loading ─▶ Match (HUD) ◀▶ Pause ─▶ Settings ─▶ Pause
           │  │                │ Create / Join ─▶ Room ─▶ Lobby ─────▲        │ Leave (подтверждение)
           │  └▶ Training ─────┘                                              ▼
-          └▶ Settings (Controls · Camera · Video · Audio)             Results ─▶ Play again / Main menu
+          └▶ Settings (Controls · Camera · Video · Audio · Player)            Results ─▶ Play again / Main menu
 ```
 
 - **Boot** — чёрный экран с логотипом, пока грузится карта (`sceneReady`), не меньше 0.9 с. **Main menu**: Play, Garage (выбор машины, [rl-cars.md](rl-cars.md)), Training (экран тренировки, см. ниже), Settings, Exit (подтверждение «Quit to desktop?»); Back фокусирует Exit. За меню — 3D-сцена: синяя машина на подиуме, камера делает оборот за 40 с и качается на ±5°, машина стоит справа кадра; позади тёмное небо стадиона (свет меню мягче, чем в матче).
@@ -195,7 +195,7 @@ Boot ─▶ Main menu ─▶ Play (Offline · bots | Private match) ─▶ Loadi
 
 ### Проверка без человека
 
-- `MYENGINE_UI_SCRIPT=<файл>` — скрипт из строк `<секунды> <команда>`: `key <имя> [down|up|tap]`, `pad <кнопка>`, `axis <ось> <значение>`, `mouse x y`, `click [left|right]`, `wheel n`, `shot <файл.tga>`, `game <команда>`, `note`, `quit`. Клавиши и мышь попадают и в кит (через `Host::SetRawInputHook`), и в игровой `InputManager`. `game goal-blue | goal-orange | demolish | boost` кладёт мяч в ворота и т. п. в офлайн-матче.
+- `MYENGINE_UI_SCRIPT=<файл>` — скрипт из строк `<секунды> <команда>`: `key <имя> [down|up|tap]`, `text <строка>` (набранный текст UTF-8 без пробелов), `pad <кнопка>`, `axis <ось> <значение>`, `mouse x y`, `click [left|right]`, `wheel n`, `shot <файл.tga>`, `game <команда>`, `note`, `quit`. Клавиши и мышь попадают и в кит (через `Host::SetRawInputHook`), и в игровой `InputManager`. `game goal-blue | goal-orange | demolish | boost` кладёт мяч в ворота и т. п. в офлайн-матче.
 - `MYENGINE_GAME_SETTINGS=<файл>` — другой файл настроек (чтобы тест не трогал настройки человека); `APPDATA` на тест подменяется отдельно. `MYENGINE_RL_MATCH_SECONDS=<n>` — короткий матч для экрана итогов.
 - `.team/tasks/g1-evidence/run.sh <скрипт> [настройки.json]` запускает игру со своей папкой пользователя и превращает скриншоты в PNG; сценарии — `.team/tasks/g1-evidence/scripts/` (`mockups.txt` снимает все 13 экранов мокапов в 1920×1080: `rl-main.png`, `rl-play.png`, …).
 - Тест `rl_game` (`tests/ui/RlGameTests.cpp`, `ctest -R rl_game`, без окна): файл настроек (умолчания, круг записи и чтения, зажим, битый файл, имя на границе символа), разбор и порядок команд скрипта, и `RlGameSystem` через команды экранов — матч от старта до итогов (часы, пауза стоит, гол, лента, победитель, MVP, повторный старт и рестарт), лобби хоста и занятый порт, переназначение и сброс клавиш, камера игрока.
@@ -233,4 +233,4 @@ Boot ─▶ Main menu ─▶ Play (Offline · bots | Private match) ─▶ Loadi
 - Геймпад: экраны читают XInput и подсказки переключаются на кнопки, но устройства на машине разработки не было — проверены только клавиатура и мышь и скриптовые события пада (`pad`, `axis` в `MYENGINE_UI_SCRIPT`), а не настоящий контроллер.
 - Fullscreen с разрешением, отличным от рабочего стола, не запускался на мониторе разработчика (смена режима дисплея мигает экраном); проверены Windowed, Borderless и Fullscreen на разрешении рабочего стола, подтверждение и откат за 15 с.
 - Раскладка проверена на 1280×720, 1600×900 и 1920×1080 (и кит — на 1440p, 4K, 21:9 в `rl_ui`); живой запуск на 21:9 и 4K не делался.
-- Имя игрока — имя пользователя Windows (до 15 байт); поле имени в Settings нет, Steam — G6.
+- Ник игрока (G1n) — имя профиля Steam (в Settings → PLAYER оно показано с подписью «FROM STEAM» и не правится); без Steam игрок вводит ник в том же поле (2–16 символов), по умолчанию — имя пользователя Windows. Подробности и порядок источников: [rl-lobby.md](rl-lobby.md), «Ник игрока». В главном меню справа вверху плашка с ником. `TextRow` добавляет введённое посимвольно (UTF-8): символ, который не помещается, не режется на байты.

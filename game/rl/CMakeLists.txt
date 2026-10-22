@@ -5,6 +5,7 @@ set(RL_HEADERS
   include/rl/RlCinematic.h
   include/rl/RlControls.h
   include/rl/RlMatch.h
+  include/rl/RlName.h
   include/rl/RlNet.h
   include/rl/RlNetProtocol.h
   include/rl/net/LobbyLan.h

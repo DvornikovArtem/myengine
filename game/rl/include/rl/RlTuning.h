@@ -206,7 +206,7 @@ namespace rl
         // G4h: the horizon. 0 (the default, "Wall tilt" of the settings): the camera is always level, on walls, on the ceiling and in the air; 1: its up follows the
         // surface under the car (the behaviour before G4h). In the air the camera never follows the pitch or the roll of the car either way.
         float rollFollow = 0.0f;
-        float maxTurnRate = 240.0f;       // degrees per second: the heading of the camera never turns faster than this (a flip, the car upside down, a wall)
+        float maxTurnRate = 540.0f;       // degrees per second: the heading of the camera never turns faster than this (a flip, the car upside down, a wall)
     };
 
     struct RlMatchTuning
