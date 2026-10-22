@@ -564,6 +564,80 @@ namespace
         match.SaveState(replay);
         CHECK(RlSim::HashState(replay) == hashAt1200);
     }
+
+    // A demolished car comes back on a spot of its team (G-bugball): above the floor, inside the arena, on its wheels, whatever the car and the team.
+    // The parked car (under the map while it is down) must not stay there, and a tall hitbox must not start inside the floor.
+    void TestDemolishRespawnEveryCar()
+    {
+        std::printf("a demolished car comes back on its wheels (6 cars x 2 teams)%c", 10);
+        const RlCarCatalog catalog = LoadCatalog();
+        RlTuning tuning;
+        for (int car = 0; car < catalog.Count(); ++car)
+        {
+            for (int victimSlot = 0; victimSlot < 2; ++victimSlot)
+            {
+                RlMatchConfig config;
+                config.mode = 1;
+                config.seed = 5;
+                config.humanMask = 0x3u;
+                for (int slot = 0; slot < 2; ++slot)
+                {
+                    config.carIds[slot] = static_cast<uint8_t>(car);
+                    config.cars[slot] = catalog.Spec(car).variant;
+                }
+                RlMatch match(tuning, config);
+                RlCarInput idle[kMaxCars] = {};
+                for (int t = 0; t < 3 * kTickRate + 40; ++t)
+                {
+                    match.Step(idle);
+                }
+                RlSim& sim = match.MutableSim();
+                // the victim was driving somewhere (not on a kick-off spot) when it was demolished
+                sim.SetCarPose(victimSlot, {-5.0f, catalog.Tuning(tuning.car, car).spawnHeight, -10.0f}, {0, 0.70710678f, 0, 0.70710678f}, {10.0f, 0.0f, 0.0f});
+                sim.DemolishCar(victimSlot);
+                RlCarInput inputs[kMaxCars] = {};
+                bool down = false;
+                bool back = false;
+                float lowest = 100.0f;
+                for (int t = 0; t < 12 * kTickRate && !(back && t > 0); ++t)
+                {
+                    match.Step(inputs);
+                    const RlCarState& v = match.World().cars[victimSlot];
+                    if (v.demolished)
+                    {
+                        down = true;
+                    }
+                    else if (down)
+                    {
+                        back = true;
+                        lowest = v.position.y;
+                    }
+                }
+                CHECK(down);
+                CHECK(back);
+                // the first tick after the respawn: over the floor and in the arena
+                const RlCarState& placed = match.World().cars[victimSlot];
+                CHECK(lowest > 0.15f && lowest < 1.5f);
+                CHECK(std::fabs(placed.position.x) < tuning.arena.halfWidth && std::fabs(placed.position.z) < tuning.arena.halfLength);
+                // and a few seconds later it stands on its wheels (nobody touches it: the other car is at its kick-off spot on the other side)
+                RlCarInput quiet[kMaxCars] = {};
+                for (int t = 0; t < 4 * kTickRate; ++t)
+                {
+                    match.Step(quiet);
+                }
+                const RlCarState& rested = match.World().cars[victimSlot];
+                const float upY = 1.0f - 2.0f * (rested.rotation.x * rested.rotation.x + rested.rotation.z * rested.rotation.z);
+                std::printf("  car %s, slot %d: back at y %.2f, rests at (%.1f, %.2f, %.1f), up %.2f, wheels %d%c", catalog.Spec(car).id.c_str(), victimSlot,
+                            static_cast<double>(lowest), static_cast<double>(rested.position.x), static_cast<double>(rested.position.y),
+                            static_cast<double>(rested.position.z), static_cast<double>(upY), rested.wheelContacts, 10);
+                CHECK(!rested.demolished);
+                CHECK(rested.position.y > 0.15f && rested.position.y < 1.5f);
+                CHECK(rested.wheelContacts >= 3);
+                CHECK(upY > 0.95f);
+                CHECK(std::fabs(rested.position.x) < tuning.arena.halfWidth && std::fabs(rested.position.z) < tuning.arena.halfLength);
+            }
+        }
+    }
 }
 
 int main()
@@ -575,6 +649,7 @@ int main()
     TestMixedWorld();
     TestChooseCars();
     TestMatchWithCars();
+    TestDemolishRespawnEveryCar();
     std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "OK" : "FAILED", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
