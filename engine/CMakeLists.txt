@@ -77,6 +77,7 @@
   include/myengine/fx/ParticleEffect.h
   include/myengine/fx/ParticleSystem.h
   include/myengine/game/RlFeedback.h
+  include/myengine/game/RlTrainingStore.h
   include/myengine/ecs/components/FxComponents.h
   include/myengine/ecs/systems/FxSystem.h
   include/myengine/render/dx12/InputLayoutBuilder.h
@@ -173,6 +174,7 @@ set(ENGINE_SOURCES
   src/fx/ParticleEffect.cpp
   src/fx/ParticleSystem.cpp
   src/game/RlFeedback.cpp
+  src/game/RlTrainingStore.cpp
   src/ecs/systems/FxSystem.cpp
   src/render/dx12/Dx12ScenePass.cpp
   src/render/dx12/InputLayoutBuilder.cpp

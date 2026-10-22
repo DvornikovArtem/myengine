@@ -13,6 +13,7 @@ set(RL_HEADERS
   include/rl/net/NetTransport.h
   include/rl/RlRng.h
   include/rl/RlSim.h
+  include/rl/RlTraining.h
   include/rl/RlTuning.h
   include/rl/RlTypes.h
 )
@@ -41,6 +42,7 @@ set(RL_SOURCES
   src/net/NetLink.cpp
   src/net/NetReliable.cpp
   src/RlSim.cpp
+  src/RlTraining.cpp
   src/RlTuning.cpp
 )
 

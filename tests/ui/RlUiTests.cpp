@@ -694,6 +694,68 @@ namespace
         Check(other.DemolitionTitle().empty() && other.FeedSize() == 1, "a demolition between others is only in the feed");
     }
 
+    // The training component: every phase draws, the banner adds to the drawing, a pack without attempts and free play draw as well, and a HUD
+    // whose training is not active draws the match (the scoreboard) and nothing of the training.
+    void TestHudTraining()
+    {
+        const auto draw = [](const HudTraining& training, const bool active)
+        {
+            Harness h(1920.0f, 1080.0f);
+            Hud hud;
+            HudState s = SampleState(HudPhase::Playing);
+            s.training = training;
+            s.training.active = active;
+            for (int frame = 0; frame < 3; ++frame)
+            {
+                h.Run([&](Frame& f) { hud.Update(f.DeltaTime(), s); hud.Draw(f, false); }, RawInput{});
+            }
+            return h.vertices();
+        };
+        HudTraining t;
+        t.pack = "Striker";
+        t.exercise = "Rolling ball";
+        t.hint = "Catch up with the ball and shoot.";
+        t.index = 2;
+        t.count = 8;
+        t.attempt = 2;
+        t.attempts = 3;
+        t.timeLimit = 10.0f;
+        t.timeLeft = 6.0f;
+        t.elapsed = 4.0f;
+        t.recordTime = 4.2f;
+        t.recordHitKmh = 112.0f;
+        const int plain = draw(t, false);
+
+        t.phase = HudTrainingPhase::Running;
+        const int running = draw(t, true);
+        Check(running > 300, "the training plate and the timer draw (" + std::to_string(running) + " vertices)");
+        t.phase = HudTrainingPhase::Ready;
+        Check(draw(t, true) > running, "GET READY adds to the plate");
+        t.phase = HudTrainingPhase::Success;
+        t.bannerTime = 0.8f;
+        t.lastHitKmh = 98.0f;
+        t.newBest = true;
+        const int success = draw(t, true);
+        Check(success > running + 100, "the SUCCESS banner is drawn (" + std::to_string(success) + " vs " + std::to_string(running) + ")");
+        t.phase = HudTrainingPhase::Miss;
+        t.missReason = "TIME UP";
+        Check(draw(t, true) > running + 100, "the MISS banner is drawn");
+        t.phase = HudTrainingPhase::PackDone;
+        t.done = 6;
+        Check(draw(t, true) > plain + 100, "the summary of the pack is drawn");
+        t.phase = HudTrainingPhase::FreePlay;
+        t.pack = "Free play";
+        t.timeLimit = 0.0f;
+        t.hits = 3;
+        t.infiniteBoost = true;
+        Check(draw(t, true) > plain + 100, "free play is drawn with its counters");
+        Check(plain > 100 && plain < running + 2000, "an inactive training is the usual match HUD (" + std::to_string(plain) + ")");
+        // the keys of the game replace the usual ones
+        t.phase = HudTrainingPhase::Running;
+        t.hints = {{"F5", "A", "Restart"}};
+        Check(draw(t, true) > 200, "own hints draw");
+    }
+
     // ---------------------------------------------------------------- the layout
 
     void TestLayout()
@@ -856,6 +918,7 @@ int main()
         TestDialogs();
         TestScrollView();
         TestHudLogic();
+        TestHudTraining();
         TestLayout();
         TestGalleryDraw();
         TestCost();

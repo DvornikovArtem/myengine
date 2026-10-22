@@ -113,7 +113,7 @@ hud.Draw(f, scoreboardHeld);            // Tab / Back зажаты: затемн
 ## Галерея
 
 ```
-set MYENGINE_UI_GALLERY=<имя>     имена: main, play, private, loading, pause, results, controls, rebind, camera, video, hud-kickoff, hud-goal, hud-scoreboard; all — по кругу, 4 с на экран
+set MYENGINE_UI_GALLERY=<имя>     имена: main, play, private, loading, pause, results, controls, rebind, camera, video, hud-kickoff, hud-goal, hud-scoreboard, hud-replay, hud-training; all — по кругу, 4 с на экран
 myengine.exe --scene assets/scenes/scene.json --screenshot out.tga --screenshot-frame 70 --exit-after-frames 75
 ```
 
@@ -146,3 +146,9 @@ myengine.exe --scene assets/scenes/scene.json --screenshot out.tga --screenshot-
 ## Повтор гола (G7e)
 
 `HudState::replay` (`HudReplay`: `active`, `author`, `team`, `goalSpeedKmh`, `progress`, `speed`): пока `active`, `Hud::Draw` рисует вместо баннеров, отсчёта, ленты и буст-кольца рамки letterbox (сверху 10.8 %, снизу 7.8 % высоты, выезжают за 0.35 с), метку REPLAY с мигающей красной точкой, автора и скорость мяча на голе цветом команды, метку скорости `0.5x` в замедлении, линию прогресса клипа и подсказку «Space / A — Skip replay»; табло и пинг остаются поверх рамок. В галерее — экран `hud-replay` (`MYENGINE_UI_GALLERY=hud-replay`). Заполняет структуру игра из `RlDirectorFrame::replay` ([rl-replay.md](rl-replay.md)).
+
+## Тренировка (G4g)
+
+`HudState::training` (`HudTraining`): пока `active`, `Hud::Draw` вместо табло рисует компонент тренировки (остаются пинг, обратный отсчёт кик-оффа, буст-кольцо и подсказка ball cam). Поля: `phase` (`HudTrainingPhase`: `Ready`, `Running`, `Success`, `Miss`, `PackDone` — те же числа, что у `rl::RlTrainingPhase`, и `FreePlay`), `pack`, `exercise`, `hint`, `index` / `count` («3 / 8»), `attempt` / `attempts`, `timeLeft` / `timeLimit` / `elapsed`, `bannerTime` / `bannerDuration`, `missReason` («TIME UP», «OWN GOAL», «LOST KICK-OFF»), `outOfAttempts`, `newBest`, счётчики (`hits`, `lastHitKmh`, `bestHitKmh`, `maxTouchHeight`), `infiniteBoost`, рекорд упражнения (`recordTime`, `recordHitKmh`), `done` (сводка набора) и `hints` (список `HudKeyHint {key, pad, label}`; пусто — обычные подсказки фазы).
+
+Куски по отдельности (в `Space::Screen`, подсказки — в `Space::Menu` на строке подсказок меню): `DrawTrainingPlate` (плашка слева сверху: набор, «3 / 8» справа, название, подсказка, точки попыток — потраченные красные, текущая голубая, и «BEST 4.2 s · 112 km/h»; в свободной игре — четыре счётчика и метка ENDLESS BOOST), `DrawTrainingTimer` (таймер сверху посередине, обратный отсчёт с полосой, последние 3 с мигает красным; в свободной игре — время сессии), `DrawTrainingBanner` (SUCCESS зелёный, MISS красный, PACK COMPLETE синий и GET READY мигающим текстом; въезжает за 0.25 с, уезжает за 0.2 с до конца `bannerDuration`), `DrawTrainingHints` (ряд клавиш внизу слева; на геймпаде надписи кнопок). Экран галереи — `hud-training` (цикл 10 с). Заполняет структуру игра из `RlTrainingInfo` ([rl-training.md](rl-training.md)).

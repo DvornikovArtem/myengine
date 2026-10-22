@@ -466,6 +466,18 @@ add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
 set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
 
 
+# G4g: the training: free play, the packs of exercises (assets/data/training), the conditions of success, the attempts, the results file (no window)
+add_executable(myengine_rl_training_tests
+  rl/RlTrainingTests.cpp)
+
+target_link_libraries(myengine_rl_training_tests PRIVATE myengine_engine)
+target_compile_definitions(myengine_rl_training_tests PRIVATE TRAINING_PACKS_DIR="${CMAKE_SOURCE_DIR}/assets/data/training")
+myengine_apply_compiler_options(myengine_rl_training_tests)
+set_property(TARGET myengine_rl_training_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_training COMMAND myengine_rl_training_tests)
+set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
+
+
 # G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
 # RlFeedback in the replay mode (no window)
 add_executable(myengine_rl_replay_tests
