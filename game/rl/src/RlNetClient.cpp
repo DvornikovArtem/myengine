@@ -1,5 +1,6 @@
 // RlNetClient.cpp
 
+#include <rl/RlClock.h>
 #include <rl/RlNet.h>
 
 #include <tracy/Tracy.hpp>
@@ -16,6 +17,7 @@ namespace rl
     {
         constexpr int kHistory = 256;        // ticks of inputs the client remembers
         constexpr int kRingSize = 128;       // ticks of saved states (7.1 / 5.3)
+        constexpr uint32_t kConfirmLookback = 48;  // ticks back from a snapshot in which the missing inputs of the host may still explain a state that differs
         constexpr uint32_t kNoTick = 0xFFFFFFFFu;
         constexpr int kTargetMargin = 4;     // ticks by which an input should reach the host before the host needs it
         constexpr int kJumpMargin = 12;      // a margin error bigger than this is corrected at once, not by the tick rate
@@ -266,7 +268,7 @@ namespace rl
         void StepFresh()
         {
             ZoneScopedN("Rl::Client::Step");
-            const auto begin = std::chrono::steady_clock::now();
+            const double begin = ThreadCpuMs();
             const RlCarInput quantized = RlQuantizeInput(localInput);
             localHistory[tick % kHistory] = quantized;
             localTick[tick % kHistory] = tick;
@@ -279,7 +281,7 @@ namespace rl
             {
                 observer(tick, *match);
             }
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const double ms = ThreadCpuMs() - begin;
             stats.stepMsMax = std::max(stats.stepMsMax, ms);
         }
 
@@ -328,7 +330,7 @@ namespace rl
         void Resimulate(uint32_t from, bool restore, const Shown& shown)
         {
             ZoneScopedN("Rl::Rollback");
-            const auto begin = std::chrono::steady_clock::now();
+            const double begin = ThreadCpuMs();
             if (restore)
             {
                 const StateSlot* slotState = RingAt(from);
@@ -350,7 +352,7 @@ namespace rl
             }
             SetOffset(ballOffset, shown.ball, shown.ballRotation, after.ball.position, after.ball.rotation);
 
-            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const double ms = ThreadCpuMs() - begin;
             ++stats.rollbacks;
             stats.lastResimTicks = static_cast<int>(tick - from);
             stats.lastRollbackMs = ms;
@@ -637,6 +639,25 @@ namespace rl
             }
         }
 
+        // Whether the host's inputs are known for every human slot on every tick that the state of tick `upTo` was built from (the ticks after the last
+        // verified one, at most kConfirmLookback of them)
+        bool InputsConfirmed(uint32_t upTo) const
+        {
+            const uint32_t from = std::max<uint32_t>({1u, stats.verifiedTick + 1, upTo > kConfirmLookback ? upTo - kConfirmLookback : 1u});
+            for (uint32_t t = from; t < upTo; ++t)
+            {
+                const uint32_t mask = MaskAt(t);
+                for (int s = 0; s < slotCount; ++s)
+                {
+                    if ((mask & (1u << s)) != 0 && canonicalTick[s][t % kHistory] != t)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
         void OnSnapshot(const std::vector<uint8_t>& data, double now)
         {
             if (state != RlNetClientState::Playing)
@@ -702,6 +723,14 @@ namespace rl
                     if (RlSim::HashState(at->bytes) == msg.stateHash)
                     {
                         stats.verifiedTick = std::max(stats.verifiedTick, msg.tick);
+                    }
+                    else if (!InputsConfirmed(msg.tick))
+                    {
+                        // Our ticks since the last verified one were simulated with the inputs we guessed for some player, and the host's real ones have not
+                        // come yet (a snapshot that carries them was lost, or it is late behind this newer one: the jitter reorders them). The state is
+                        // expected to differ; the snapshot that brings the inputs makes the replay, and a state that is still wrong when they are all there
+                        // is caught by the hash of a later snapshot.
+                        ++stats.unconfirmedHashes;
                     }
                     else
                     {
