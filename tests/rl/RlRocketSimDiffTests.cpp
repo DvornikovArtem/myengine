@@ -445,7 +445,7 @@ int main(int argc, char** argv)
     for (int index = 0; index < rldiff::kScenarioCount; ++index)
     {
         const rldiff::Scenario sc = rldiff::Get(index);
-        if (sc.ticks <= 0 || (only != nullptr && std::strcmp(only, sc.name) != 0) || std::strncmp(sc.name, "fuzz_", 5) == 0 || std::strncmp(sc.name, "spin_", 5) == 0)
+        if (sc.ticks <= 0 || (only != nullptr && std::strcmp(only, sc.name) != 0) || std::strncmp(sc.name, "fuzz_", 5) == 0 || std::strncmp(sc.name, "spin_", 5) == 0 || std::strncmp(sc.name, "ext_", 4) == 0)
         {
             continue;
         }
@@ -496,14 +496,17 @@ int main(int argc, char** argv)
     }
 
     // ---- G4j: the flights at random (rldiff::kFuzzFirst ..., rldiff::kSpinFirst ...): where the car ends and how fast it gets onto its wheels, against RocketSim
-    for (const auto& family : {std::make_pair(rldiff::kFuzzFirst, 60), std::make_pair(rldiff::kSpinFirst, 60), std::make_pair(rldiff::kSpinFirst + 60, 60)})
+    for (const auto& family : {std::make_pair(rldiff::kFuzzFirst, 60), std::make_pair(rldiff::kSpinFirst, 60), std::make_pair(rldiff::kSpinFirst + 60, 60), std::make_pair(rldiff::kExtFirst, 100), std::make_pair(rldiff::kExtFirst + 100, 100)})
     {
         int outcomes = 0, sameOutcome = 0, both = 0, slower = 0, faster = 0;
         int rsWheels = 0, ourWheels = 0, rsRoof = 0, ourRoof = 0, rsSide = 0, ourSide = 0;
+        std::vector<float> lastOffRs, lastOffOurs;   // ticks from the first touchdown to the last tick off the wheels
         std::printf("random flights from %d (%s): the end of the flight, up.y and the last tick off its wheels\n", family.first,
                     family.first == rldiff::kFuzzFirst ? "flip, roll, recover; the throttle at a random time"
                     : family.first == rldiff::kSpinFirst ? "a long roll, pitch or yaw let go of; the throttle late"
-                                                         : "the same without the throttle: how the car rests when nobody drives it");
+                                                         : family.first == rldiff::kSpinFirst + 60 ? "the same without the throttle: how the car rests when nobody drives it"
+                    : family.first == rldiff::kExtFirst ? "100 flights of the same kind, no throttle"
+                                                        : "the same 100 flights with the throttle held from the first tick");
         for (int index = family.first; index < family.first + family.second; ++index)
         {
             const rldiff::Scenario sc = rldiff::Get(index);
@@ -513,6 +516,9 @@ int main(int argc, char** argv)
                 continue;
             }
             const Result r = Run(index, rows, tuning);
+            const int touch = ImpactTick(rows) > 0 ? ImpactTick(rows) : 0;
+            lastOffRs.push_back(static_cast<float>(r.unsettledRs - touch));
+            lastOffOurs.push_back(static_cast<float>(r.unsettledOurs - touch));
             const bool rsOn = r.upRs > 0.8f && r.wheelsRs >= 3;
             const bool ourOn = r.upOurs > 0.8f && r.wheelsOurs >= 3;
             ++outcomes;
@@ -539,6 +545,28 @@ int main(int argc, char** argv)
         std::printf("  %d flights: at the end on the wheels RocketSim %d, ours %d; on the roof %d / %d; on the side or in the air %d / %d; the same end in %d;\n"
                     "  of the %d that both end on the wheels ours is more than 0.1 s later in %d, earlier in %d\n",
                     outcomes, rsWheels, ourWheels, rsRoof, ourRoof, rsSide, ourSide, sameOutcome, both, slower, faster);
+        {
+            const auto quantile = [](std::vector<float> v, float q) {
+                std::sort(v.begin(), v.end());
+                return v.empty() ? 0.0f : v[std::min(v.size() - 1, static_cast<size_t>(q * static_cast<float>(v.size())))];
+            };
+            std::printf("  ticks from the first touchdown to the last tick off the wheels (median / 90 %% / worst): RocketSim %.0f / %.0f / %.0f, ours %.0f / %.0f / %.0f%c",
+                        static_cast<double>(quantile(lastOffRs, 0.5f)), static_cast<double>(quantile(lastOffRs, 0.9f)), static_cast<double>(quantile(lastOffRs, 1.0f)),
+                        static_cast<double>(quantile(lastOffOurs, 0.5f)), static_cast<double>(quantile(lastOffOurs, 0.9f)), static_cast<double>(quantile(lastOffOurs, 1.0f)), 10);
+        }
+        // the flights end the same way in nine of ten, ours is on its wheels as often as RocketSim's (a few per cent less), and it is on them for good as soon
+        CHECK(outcomes > 0 && sameOutcome * 100 >= outcomes * 88);
+        CHECK(ourWheels * 100 >= rsWheels * 92);
+        CHECK(!lastOffRs.empty() && !lastOffOurs.empty());
+        if (!lastOffRs.empty() && !lastOffOurs.empty())
+        {
+            const auto at = [](std::vector<float> v, float q) {
+                std::sort(v.begin(), v.end());
+                return v[std::min(v.size() - 1, static_cast<size_t>(q * static_cast<float>(v.size())))];
+            };
+            CHECK(at(lastOffOurs, 0.5f) <= at(lastOffRs, 0.5f) + 12.0f);   // 0.1 s
+            CHECK(at(lastOffOurs, 0.9f) <= at(lastOffRs, 0.9f) + 36.0f);   // 0.3 s
+        }
         g_fuzzOutcomes += outcomes;
         g_fuzzSame += sameOutcome;
         g_fuzzRsWheels += rsWheels;
