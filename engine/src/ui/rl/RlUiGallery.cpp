@@ -19,7 +19,7 @@ namespace myengine::rlui
 
     namespace
     {
-        const char* const kScreenNames[] = {"main", "play", "private", "loading", "pause", "results", "controls", "rebind", "camera", "video", "hud-kickoff", "hud-goal", "hud-scoreboard"};
+        const char* const kScreenNames[] = {"main", "play", "private", "loading", "pause", "results", "controls", "rebind", "camera", "video", "hud-kickoff", "hud-goal", "hud-scoreboard", "hud-replay"};
 
         // ---- the fake data of the mock-ups
         std::vector<HudPlayer> FakePlayers()
@@ -457,7 +457,8 @@ namespace myengine::rlui
             g.hudTime += f.DeltaTime();
             const bool goal = screen == GalleryScreen::HudGoal;
             const bool kickoff = screen == GalleryScreen::HudKickoff;
-            FakeGameView(f, kickoff || goal, kickoff ? Vec2{690.0f, 790.0f} : Vec2{340.0f, 820.0f}, kickoff ? 0.84f : 0.8f);
+            const bool replay = screen == GalleryScreen::HudReplay;
+            FakeGameView(f, kickoff || goal || replay, kickoff ? Vec2{690.0f, 790.0f} : (replay ? Vec2{880.0f, 700.0f} : Vec2{340.0f, 820.0f}), kickoff ? 0.84f : 0.8f);
             f.SetSpace(Space::Screen);
 
             HudState state;
@@ -476,6 +477,16 @@ namespace myengine::rlui
                 state.lastGoalScorer = 0;
                 state.lastGoalSpeedKmh = 98.0f;
                 state.ballCam = g.hudStep != 0 || true;
+            }
+            else if (replay)
+            {
+                state = GameState(HudPhase::GoalScored, 67.0f, 2, 2, 74.0f);
+                state.replay.active = true;
+                state.replay.author = "Artem";
+                state.replay.team = 0;
+                state.replay.goalSpeedKmh = 98.0f;
+                state.replay.speed = 0.5f;
+                state.replay.progress = 0.62f;
             }
             else
             {
@@ -533,7 +544,8 @@ namespace myengine::rlui
         case GalleryScreen::Video: VideoScreen(f); break;
         case GalleryScreen::HudKickoff:
         case GalleryScreen::HudGoal:
-        case GalleryScreen::HudScoreboard: HudScreen(f, screen); break;
+        case GalleryScreen::HudScoreboard:
+        case GalleryScreen::HudReplay: HudScreen(f, screen); break;
         case GalleryScreen::Count: break;
         }
     }

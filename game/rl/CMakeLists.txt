@@ -1,10 +1,12 @@
 set(RL_HEADERS
   include/rl/RlArena.h
   include/rl/RlCamera.h
+  include/rl/RlCinematic.h
   include/rl/RlControls.h
   include/rl/RlMatch.h
   include/rl/RlNet.h
   include/rl/RlNetProtocol.h
+  include/rl/RlReplay.h
   include/rl/net/NetLink.h
   include/rl/net/NetReliable.h
   include/rl/net/NetTransport.h
@@ -19,6 +21,7 @@ set(RL_SOURCES
   src/RlBots.cpp
   src/RlBots.h
   src/RlCamera.cpp
+  src/RlCinematic.cpp
   src/RlCarController.cpp
   src/RlControls.cpp
   src/RlCarController.h
@@ -28,6 +31,8 @@ set(RL_SOURCES
   src/RlNetClient.cpp
   src/RlNetHost.cpp
   src/RlNetProtocol.cpp
+  src/RlReplay.cpp
+  src/RlV3.h
   src/net/NetLink.cpp
   src/net/NetReliable.cpp
   src/RlSim.cpp

@@ -104,7 +104,7 @@ s.players = ...;  // имя, команда, бот, очки, голы, асс�
 hud.Update(dt, s);                      // анимации и смены: фаза → баннер, флаг овертайма → OVERTIME!, рост буста → вспышка пада, отсчёт, GO!
 for (const auto& e : newEventsOfTheRing) hud.PushEvent({rlui::HudEventType::Goal, scorerIndex, -1});
 f.SetSpace(rlui::Space::Screen);
-hud.Draw(f, scoreboardHeld);            // Tab / Back зажаты: затемнение, табло и таблица игроков
+hud.Draw(f, scoreboardHeld);            // Tab / Back зажаты: затемнение, табло и таблица игроков; при state.replay.active — только REPLAY
 // в паузе: hud.Draw(f, false, true) — только табло, приглушённое; в итогах HUD не рисуется, а таблицу берёт экран: Hud::DrawScoreTable(...)
 ```
 
@@ -142,3 +142,7 @@ myengine.exe --scene assets/scenes/scene.json --screenshot out.tga --screenshot-
 - 3D-сцена за меню (машина на подиуме) — не часть кита.
 - Размер окна 1080p и выше на экране 1080p система обрезает: для скриншотов 1:1 с мокапами нужен экран больше.
 - `Host::Install` пересоздаёт ImGui-контекст окна при смене размерного класса шрифтов (редактор в этот момент недоступен: вместе с игровым UI он и не показывается).
+
+## Повтор гола (G7e)
+
+`HudState::replay` (`HudReplay`: `active`, `author`, `team`, `goalSpeedKmh`, `progress`, `speed`): пока `active`, `Hud::Draw` рисует вместо баннеров, отсчёта, ленты и буст-кольца рамки letterbox (сверху 10.8 %, снизу 7.8 % высоты, выезжают за 0.35 с), метку REPLAY с мигающей красной точкой, автора и скорость мяча на голе цветом команды, метку скорости `0.5x` в замедлении, линию прогресса клипа и подсказку «Space / A — Skip replay»; табло и пинг остаются поверх рамок. В галерее — экран `hud-replay` (`MYENGINE_UI_GALLERY=hud-replay`). Заполняет структуру игра из `RlDirectorFrame::replay` ([rl-replay.md](rl-replay.md)).

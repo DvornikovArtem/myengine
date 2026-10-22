@@ -152,6 +152,7 @@ namespace myengine::rlui
         }
         feed_.erase(std::remove_if(feed_.begin(), feed_.end(), [](const FeedLine& line) { return line.age > kFeedLife; }), feed_.end());
         goAge_ += deltaTime;
+        replayAge_ = state_.replay.active ? replayAge_ + deltaTime : 0.0f;
         boostFlash_ = std::max(boostFlash_ - deltaTime, 0.0f);
         ballCamHint_ = std::max(ballCamHint_ - deltaTime, 0.0f);
         if (state_.phase != HudPhase::Countdown)
@@ -490,6 +491,57 @@ namespace myengine::rlui
         Text(f, FontStyle::SemiBold, 22.0f, {x + keyWidth + 12.0f, y + 6.0f}, style::kTextDim, label);
     }
 
+    void Hud::DrawReplay(Frame& f) const
+    {
+        ScreenSpace space(f);
+        const Vec2 window = f.metrics().designWindow;
+        const float slide = EaseOut(replayAge_ / 0.35f);
+        const float bar = window.y * 0.108f * slide;           // the top bar holds the scoreboard
+        const float barBottom = window.y * 0.078f * slide;
+        // the letterbox bars
+        FillRect(f, {0.0f, 0.0f, window.x, bar}, Color::Hex(0x02050e, 0.82f));
+        FillRect(f, {0.0f, window.y - barBottom, window.x, barBottom}, Color::Hex(0x02050e, 0.82f));
+        // the progress of the clip along the lower edge of the top bar
+        const float progress = std::clamp(state_.replay.progress, 0.0f, 1.0f);
+        FillRect(f, {0.0f, bar - 3.0f, window.x, 3.0f}, style::kNavy3.Faded(0.7f));
+        FillRect(f, {0.0f, bar - 3.0f, window.x * progress, 3.0f}, style::kAccent);
+
+        // the label: a pulsing red dot and REPLAY, under it the author and the speed of the ball, and the tag of the slow motion
+        const float x = 60.0f;
+        const float y = bar + 26.0f * slide;
+        const float pulse = 0.55f + 0.45f * std::sin(replayAge_ * 6.0f);
+        Circle(f, {x + 14.0f, y + 34.0f}, 11.0f, style::kBad.Faded(pulse));
+        TextShadow(f, FontStyle::BlackItalic, 60.0f, {x + 40.0f, y}, style::kText, "REPLAY", style::kBlueDark, 4.0f);
+        float lineX = x + 42.0f;
+        const float lineY = y + 76.0f;
+        if (!state_.replay.author.empty() || state_.replay.goalSpeedKmh > 0.5f)
+        {
+            std::string text = Upper(state_.replay.author);
+            if (state_.replay.goalSpeedKmh > 0.5f)
+            {
+                char speed[32];
+                std::snprintf(speed, sizeof(speed), "%d km/h", static_cast<int>(std::lround(state_.replay.goalSpeedKmh)));
+                text += text.empty() ? std::string(speed) : " \xC2\xB7 " + std::string(speed);
+            }
+            const Color team = state_.replay.team >= 0 ? style::TeamHi(state_.replay.team) : style::kText;
+            Text(f, FontStyle::ExtraBoldItalic, 26.0f, {lineX, lineY}, team, text);
+            lineX += TextWidth(f, FontStyle::ExtraBoldItalic, 26.0f, text) + 18.0f;
+        }
+        if (state_.replay.speed < 0.95f)
+        {
+            char tag[16];
+            std::snprintf(tag, sizeof(tag), "%.1fx", static_cast<double>(state_.replay.speed));
+            const float tagWidth = TextWidth(f, FontStyle::Bold, 22.0f, tag) + 22.0f;
+            const Rect box{lineX, lineY - 2.0f, tagWidth, 34.0f};
+            Parallelogram(f, box, style::kAccent.Faded(0.9f));
+            TextIn(f, FontStyle::Bold, 22.0f, box, Color::Hex(0x08142c), tag, Align::Center);
+        }
+        // the hint in the lower bar (the same row as the hints of the menus, in the space of the menu)
+        f.SetSpace(Space::Menu);
+        const Hint hint[] = {{Glyph::Space, Glyph::PadA, "Skip replay"}};
+        HintBar(f, Span<Hint>(hint));
+    }
+
     void Hud::DrawPing(Frame& f) const
     {
         ScreenSpace space(f);
@@ -604,6 +656,13 @@ namespace myengine::rlui
         {
             AlphaScope dim(f, 0.45f);
             DrawScorebar(f);
+            return;
+        }
+        if (state_.replay.active)
+        {
+            DrawReplay(f);      // the bars first: the scoreboard and the ping are drawn over them
+            DrawScorebar(f);
+            DrawPing(f);
             return;
         }
         if (scoreboardHeld)

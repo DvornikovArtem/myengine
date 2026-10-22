@@ -455,6 +455,18 @@ add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
 set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
 
 
+# G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
+# RlFeedback in the replay mode (no window)
+add_executable(myengine_rl_replay_tests
+  rl/RlReplayTests.cpp)
+
+target_link_libraries(myengine_rl_replay_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_replay_tests)
+set_property(TARGET myengine_rl_replay_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_replay COMMAND myengine_rl_replay_tests)
+set_tests_properties(rl_replay PROPERTIES TIMEOUT 300)
+
+
 # G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery
 add_executable(myengine_rl_ui_tests
   ui/RlUiTests.cpp)
