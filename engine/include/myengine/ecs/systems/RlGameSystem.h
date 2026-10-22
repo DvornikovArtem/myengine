@@ -144,6 +144,9 @@ namespace myengine::ecs::systems
         const RlGameStatus& Status() const;
         // Starts (or joins) a match on the next frame. The previous one, if any, ends. When it cannot start, Status().stage turns Failed with an error.
         void StartMatch(const RlGameMatchSetup& setup);
+        // The screen of the match is on the screen (the loading screen is gone): the flight over the stadium before the first kick-off starts and the
+        // countdown begins. Without this call an offline match waits for at most four seconds.
+        void MatchViewBegins();
         // The host of a private match starts it (the lobby has the players it is going to have)
         void StartHostedMatch();
         // Back to the menu: the match, the lobby or the connection ends
@@ -171,7 +174,7 @@ namespace myengine::ecs::systems
         // The name of the player in the table
         void SetPlayerName(const std::string& name);
         // Commands of the tests (UiScript: `game <command>`): "goal-blue" / "goal-orange" put the ball into that goal, "demolish" demolishes the car of the player,
-        // "boost" fills its boost, "time <seconds>" sets the clock. They work in a running match only.
+        // "boost" fills its boost, "wallrun" sends the car up the wall, "airroll" puts it in the air, "time <seconds>" sets the clock. They work in a running match only.
         void DebugCommand(const std::string& command);
         // The aspect ratio of the window (RL's field of view is the horizontal one)
         void SetViewAspect(float aspect);

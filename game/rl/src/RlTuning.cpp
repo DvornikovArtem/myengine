@@ -191,6 +191,8 @@ namespace rl
             v.Float("minDistance", t.camera.minDistance);
             v.Float("wallMargin", t.camera.wallMargin);
             v.Float("ballCamMaxPitch", t.camera.ballCamMaxPitch);
+            v.Float("rollFollow", t.camera.rollFollow);
+            v.Float("maxTurnRate", t.camera.maxTurnRate);
             v.End();
 
             v.Begin("match");

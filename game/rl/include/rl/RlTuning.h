@@ -203,6 +203,10 @@ namespace rl
         float minDistance = 0.45f;        // the camera never comes closer to the car than this, whatever stands behind it
         float wallMargin = 0.3f;          // m kept between the camera and the arena
         float ballCamMaxPitch = 35.0f;    // degrees: the ball cam does not look further up or down than this
+        // G4h: the horizon. 0 (the default, "Wall tilt" of the settings): the camera is always level, on walls, on the ceiling and in the air; 1: its up follows the
+        // surface under the car (the behaviour before G4h). In the air the camera never follows the pitch or the roll of the car either way.
+        float rollFollow = 0.0f;
+        float maxTurnRate = 240.0f;       // degrees per second: the heading of the camera never turns faster than this (a flip, the car upside down, a wall)
     };
 
     struct RlMatchTuning

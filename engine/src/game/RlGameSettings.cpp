@@ -84,6 +84,7 @@ namespace myengine::game
         settings.stiffness = tuning.stiffness;
         settings.swivelSpeed = tuning.swivelSpeed;
         settings.transitionSpeed = tuning.transitionSpeed;
+        settings.wallTilt = tuning.rollFollow;
         return settings;
     }
 
@@ -97,6 +98,7 @@ namespace myengine::game
         tuning.stiffness = stiffness;
         tuning.swivelSpeed = swivelSpeed;
         tuning.transitionSpeed = transitionSpeed;
+        tuning.rollFollow = wallTilt;
         return tuning;
     }
 
@@ -117,6 +119,7 @@ namespace myengine::game
         camera.stiffness = std::clamp(camera.stiffness, 0.0f, 1.0f);
         camera.swivelSpeed = std::clamp(camera.swivelSpeed, 1.0f, 10.0f);
         camera.transitionSpeed = std::clamp(camera.transitionSpeed, 1.0f, 2.0f);
+        camera.wallTilt = std::clamp(camera.wallTilt, 0.0f, 1.0f);
 
         audio.master = std::clamp(audio.master, 0.0f, 1.0f);
         audio.effects = std::clamp(audio.effects, 0.0f, 1.0f);
@@ -158,6 +161,7 @@ namespace myengine::game
         c["stiffness"] = camera.stiffness;
         c["swivelSpeed"] = camera.swivelSpeed;
         c["transitionSpeed"] = camera.transitionSpeed;
+        c["wallTilt"] = camera.wallTilt;
         c["ballCamHold"] = camera.ballCamHold;
         root["camera"] = c;
         json a;
@@ -213,6 +217,7 @@ namespace myengine::game
             Read(*it, "stiffness", loaded.camera.stiffness);
             Read(*it, "swivelSpeed", loaded.camera.swivelSpeed);
             Read(*it, "transitionSpeed", loaded.camera.transitionSpeed);
+            Read(*it, "wallTilt", loaded.camera.wallTilt);
             Read(*it, "ballCamHold", loaded.camera.ballCamHold);
         }
         if (const auto it = root.find("audio"); it != root.end() && it->is_object())

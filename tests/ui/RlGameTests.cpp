@@ -87,6 +87,7 @@ namespace
         changed.camera.fov = 95.0f;
         changed.camera.distanceCm = 300.0f;
         changed.camera.ballCamHold = true;
+        changed.camera.wallTilt = 0.4f;
         changed.audio.music = 0.25f;
         changed.invertPitch = true;
         changed.play.mode = 3;
@@ -99,6 +100,7 @@ namespace
         Check(back.video.windowMode == 1 && back.video.width == 2560 && back.video.height == 1440 && !back.video.vsync && back.video.fpsLimit == 144 &&
                   back.video.shadows == 1 && back.video.msaa == 1 && back.video.uiScalePercent == 110,
               "the video settings come back");
+        Check(back.camera.wallTilt == 0.4f, "Wall tilt comes back");
         Check(back.camera.fov == 95.0f && back.camera.distanceCm == 300.0f && back.camera.ballCamHold && back.audio.music == 0.25f && back.invertPitch,
               "the camera, the audio and the pitch come back");
         Check(back.play.mode == 3 && back.play.joinAddress == "192.168.1.42:27015" && back.play.recent.size() == 2 && back.play.playerName == changed.play.playerName,
@@ -148,6 +150,9 @@ namespace
         custom.distanceCm = 350.0f;
         custom.fov = 90.0f;
         const rl::RlCameraTuning applied = custom.ToTuning(tuning);
+        Check(fromTuning.wallTilt == 0.0f && defaults.camera.wallTilt == 0.0f, "the horizon is level by default");
+        custom.wallTilt = 0.5f;
+        Check(custom.ToTuning(tuning).rollFollow == 0.5f, "Wall tilt is the rollFollow of the camera");
         Check(applied.distance == 3.5f && applied.fov == 90.0f && applied.wallMargin == 0.77f, "the settings replace what the menu has a row for and keep the rest");
     }
 
@@ -317,15 +322,32 @@ namespace
         // a goal: the score, the banner data, the event of the feed
         rig.system.TakeHudEvents();
         rig.system.DebugCommand("goal-blue");
-        Check(rig.Until([&] { return status.hud.score[0] == 1; }, 200), "a goal for blue is counted");
-        Check(rig.Until([&] { return status.hud.phase == rlui::HudPhase::GoalScored; }, 60) || status.hud.phase == rlui::HudPhase::GoalScored, "the phase is GoalScored");
+        bool sawReplay = false;
+        bool matchWaitedInReplay = false;
+        float clockInReplay = -1.0f;
+        const auto watch = [&]
+        {
+            if (status.hud.replay.active)
+            {
+                sawReplay = true;
+                if (clockInReplay < 0.0f)
+                {
+                    clockInReplay = status.hud.clock;
+                }
+                matchWaitedInReplay = status.hud.clock == clockInReplay;
+            }
+        };
+        Check(rig.Until([&] { watch(); return status.hud.score[0] == 1; }, 200), "a goal for blue is counted");
+        Check(rig.Until([&] { watch(); return status.hud.phase == rlui::HudPhase::GoalScored; }, 60) || status.hud.phase == rlui::HudPhase::GoalScored, "the phase is GoalScored");
         Check(status.hud.lastGoalTeam == 0 && status.hud.lastGoalSpeedKmh > 30.0f, "the last goal has its team and its speed in km/h");
         const std::vector<rlui::HudEvent> events = rig.system.TakeHudEvents();
         Check(std::any_of(events.begin(), events.end(), [](const rlui::HudEvent& e) { return e.type == rlui::HudEventType::Goal; }), "the goal reaches the feed");
         Check(rig.system.TakeHudEvents().empty(), "an event comes once");
 
         // the end of the match: the winner, the MVP, the stage
-        Check(rig.Until([&] { return status.stage == sys::RlGameStage::Finished; }, 1200), "the match ends and the stage turns Finished");
+        Check(rig.Until([&] { watch(); return status.stage == sys::RlGameStage::Finished; }, 1200), "the match ends and the stage turns Finished");
+        Check(sawReplay, "the replay of the goal played (HudState::replay)");
+        Check(matchWaitedInReplay, "the clock of the offline match stood still during the replay");
         Check(status.winner == 0, "blue leads: blue wins");
         Check(status.mvp == 0, "the MVP is the best player of the winning team");
         Check(status.hud.phase == rlui::HudPhase::Finished, "the table says Finished");
