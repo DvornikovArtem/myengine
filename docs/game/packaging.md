@@ -89,7 +89,7 @@ RocketArena/
 
 ## Steam
 
-Задел под Steamworks ([rl-online.md](rl-online.md), раздел 7.4): SDK в репозиторий не кладётся. `-WithSteam -SteamSdk <папка SDK>` копирует `redistributable_bin\win64\steam_api64.dll` рядом с exe и пишет `steam_appid.txt` со значением 480 (тестовый Spacewar). Условия распространения SDK нужно подтвердить с Артёмом до того, как что-то из SDK попадёт в zip. Без `-WithSteam` в пакете нет ничего от Steam.
+Задел под Steamworks ([rl-online.md](rl-online.md), раздел 7.4): SDK в репозиторий не кладётся. `-WithSteam -SteamSdk <папка SDK>` собирает exe с `MYENGINE_STEAM=ON` (папка сборки должна быть настроена так же: иначе скрипт останавливается), копирует `redistributable_bin\win64\steam_api64.dll` рядом с exe и пишет `steam_appid.txt` со значением 480 (тестовый Spacewar). Путь к SDK проверяется до долгой сборки. Условия распространения SDK нужно подтвердить с Артёмом до того, как что-то из SDK попадёт в zip. Без `-WithSteam` в пакете нет ничего от Steam.
 
 ## Лицензии
 

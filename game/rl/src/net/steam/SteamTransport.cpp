@@ -1,6 +1,6 @@
 // SteamTransport.cpp
-// Written from the Steamworks documentation (ISteamNetworkingMessages, steam_api.h): it has never been linked against the real SDK; the first
-// build with MYENGINE_STEAM=ON may need small fixes (docs/game/steam-setup.md).
+// ISteamNetworkingMessages over the Steamworks SDK. Compiled and linked against the real SDK 1.65 in G6b; the connection of two accounts is still
+// to be tried (docs/game/steam-setup.md), one account checks only that the transport starts (tests/rl/RlSteamSmoke.cpp).
 //
 // Wire format of this transport: the first byte of a message is its kind.
 //   Hello  client -> host, repeated every 0.25 s until Accept      Accept host -> client      Bye  either side      Ping  either side, unreliable

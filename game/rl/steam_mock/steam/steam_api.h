@@ -1,8 +1,9 @@
 // steam_api.h (MOCK)
-// NOT the Steamworks SDK. Only the declarations of the part of the API that game/rl/src/net/steam/*.cpp uses, written down from the Steamworks
-// documentation, so that the Steam code can be compiled (but not linked or run) without the SDK: CMake option MYENGINE_STEAM_CHECK builds the
-// object library myengine_rl_steam_check against this file. It finds typos and wrong signatures in OUR code; if the real SDK differs from this
-// file the real build with MYENGINE_STEAM=ON shows it, and then this file is corrected. Never include it in a build that links Steam.
+// NOT the Steamworks SDK. Only the declarations of the part of the API that game/rl/src/net/steam/*.cpp uses, so that the Steam code can be
+// compiled (but not linked or run) without the SDK: CMake option MYENGINE_STEAM_CHECK builds the object library myengine_rl_steam_check against
+// this file. It finds typos and wrong signatures in OUR code. Compared with the headers of the Steamworks SDK 1.65 in G6b (the real build compiled
+// and ran with the same sources); when the code starts to use another call, add it here after looking it up in the real isteam*.h. Never include
+// it in a build that links Steam.
 
 #pragma once
 
@@ -15,6 +16,7 @@ typedef uint32_t uint32;
 typedef uint64_t uint64;
 typedef int64_t int64;
 typedef uint64 SteamAPICall_t;
+typedef uint32 AppId_t;
 
 enum EResult
 {
@@ -35,6 +37,16 @@ public:
     uint64 ConvertToUint64() const { return id_; }
     bool IsValid() const { return id_ != 0; }
     bool operator==(const CSteamID& other) const { return id_ == other.id_; }
+
+private:
+    uint64 id_ = 0;
+};
+
+class CGameID
+{
+public:
+    bool IsValid() const { return id_ != 0; }
+    uint32 AppID() const { return static_cast<uint32>(id_ & 0xFFFFFF); }
 
 private:
     uint64 id_ = 0;
@@ -62,6 +74,11 @@ enum EChatMemberStateChange
     k_EChatMemberStateChangeDisconnected = 0x0004,
     k_EChatMemberStateChangeKicked = 0x0008,
     k_EChatMemberStateChangeBanned = 0x0010,
+};
+
+enum EChatRoomEnterResponse
+{
+    k_EChatRoomEnterResponseSuccess = 1,
 };
 
 struct LobbyCreated_t
@@ -117,6 +134,21 @@ public:
     void AddRequestLobbyListResultCountFilter(int maxResults);
     SteamAPICall_t RequestLobbyList();
     CSteamID GetLobbyByIndex(int lobby);
+    bool RequestLobbyData(CSteamID lobby);
+};
+
+enum EFriendFlags
+{
+    k_EFriendFlagImmediate = 0x04,
+};
+
+struct FriendGameInfo_t
+{
+    CGameID m_gameID;
+    uint32 m_unGameIP;
+    uint16 m_usGamePort;
+    uint16 m_usQueryPort;
+    CSteamID m_steamIDLobby;
 };
 
 class ISteamFriends
@@ -125,6 +157,9 @@ public:
     const char* GetPersonaName();
     const char* GetFriendPersonaName(CSteamID friendId);
     void ActivateGameOverlayInviteDialog(CSteamID lobby);
+    int GetFriendCount(int friendFlags);
+    CSteamID GetFriendByIndex(int friend_, int friendFlags);
+    bool GetFriendGamePlayed(CSteamID friendId, FriendGameInfo_t* info);
 };
 
 class ISteamUser

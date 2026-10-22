@@ -22,7 +22,7 @@
 .PARAMETER NoZip
     Do not write the zip.
 .PARAMETER WithSteam
-    Put steam_api64.dll (from -SteamSdk) next to the exe and write steam_appid.txt.
+    Build the exe with Steam (MYENGINE_STEAM=ON against -SteamSdk), put steam_api64.dll next to it and write steam_appid.txt.
 .PARAMETER SteamSdk
     The folder of the unpacked Steamworks SDK (the one with redistributable_bin).
 #>
@@ -79,21 +79,38 @@ function Find-VisualStudio {
 # ---------------------------------------------------------------- build
 $exe = Join-Path $buildPath 'app\Release\RocketArena.exe'
 $vs = $null
+$steamDll = $null
+if ($WithSteam) {
+    # before the long build: the SDK must be there (a path with non-ASCII letters is fine for CMake and the linker)
+    if (-not $SteamSdk) { throw '-WithSteam needs -SteamSdk <folder of the Steamworks SDK>' }
+    $SteamSdk = [System.IO.Path]::GetFullPath($SteamSdk)
+    $steamDll = Join-Path $SteamSdk ($manifest.steam.dll.Replace('/', '\'))
+    if (-not (Test-Path $steamDll)) { throw "steam_api64.dll not found: $steamDll" }
+    if (-not (Test-Path (Join-Path $SteamSdk 'public\steam\steam_api.h'))) { throw "public\steam\steam_api.h not found in $SteamSdk" }
+}
 if (-not $SkipBuild) {
     $vs = Find-VisualStudio
     $cache = Join-Path $buildPath 'CMakeCache.txt'
     if (-not (Test-Path $cache)) {
         Write-Step "Configuring $BuildDir ($($vs.Generator))"
-        Invoke-Native 'cmake' @('-S', $root, '-B', $buildPath, '-G', $vs.Generator, '-A', 'x64',
+        $configure = @('-S', $root, '-B', $buildPath, '-G', $vs.Generator, '-A', 'x64',
             '-DMYENGINE_SHIPPING=ON', '-DMYENGINE_BUILD_TESTS=OFF', '-DMYENGINE_COPY_RUNTIME_ASSETS=OFF')
+        if ($WithSteam) { $configure += @('-DMYENGINE_STEAM=ON', "-DSTEAMWORKS_SDK_DIR=$($SteamSdk.Replace('\', '/'))") }
+        Invoke-Native 'cmake' $configure
     }
     elseif (-not (Select-String -Path $cache -Pattern '^MYENGINE_SHIPPING:BOOL=ON' -Quiet)) {
         throw "$BuildDir was configured without MYENGINE_SHIPPING=ON: use another folder or delete it"
+    }
+    elseif ($WithSteam -and -not (Select-String -Path $cache -Pattern '^MYENGINE_STEAM:BOOL=ON' -Quiet)) {
+        throw "$BuildDir was configured without MYENGINE_STEAM=ON: use another folder (-BuildDir) or delete it"
     }
     Write-Step 'Building the myengine target (Release)'
     Invoke-Native 'cmake' @('--build', $buildPath, '--config', 'Release', '--target', 'myengine')
 }
 if (-not (Test-Path $exe)) { throw "$exe not found" }
+if ($WithSteam -and -not (Select-String -Path (Join-Path $buildPath 'CMakeCache.txt') -Pattern '^MYENGINE_STEAM:BOOL=ON' -Quiet)) {
+    throw "$BuildDir was built without MYENGINE_STEAM=ON: the exe has no Steam code, steam_api64.dll next to it would do nothing"
+}
 
 # ---------------------------------------------------------------- assets by the manifest
 function ConvertTo-Relative([string]$full) {
@@ -226,9 +243,6 @@ Write-TextFile (Join-Path $dist 'version.txt') ("$gameName $version`r`ncommit $c
 
 # Steam (only with the SDK; see docs/game/rl-online.md section 7.4)
 if ($WithSteam) {
-    if (-not $SteamSdk) { throw '-WithSteam needs -SteamSdk <folder of the Steamworks SDK>' }
-    $steamDll = Join-Path $SteamSdk ($manifest.steam.dll.Replace('/', '\'))
-    if (-not (Test-Path $steamDll)) { throw "steam_api64.dll not found: $steamDll" }
     Copy-Item $steamDll $dist
     [System.IO.File]::WriteAllText((Join-Path $dist 'steam_appid.txt'), $manifest.steam.appId, [System.Text.Encoding]::ASCII)
     Write-Step "Steam: steam_api64.dll and steam_appid.txt ($($manifest.steam.appId))"

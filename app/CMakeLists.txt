@@ -35,6 +35,8 @@ endif()
 
 myengine_apply_compiler_options(myengine)
 myengine_copy_runtime_assets(myengine)
+# With MYENGINE_STEAM: steam_api64.dll and steam_appid.txt next to the exe (docs/game/steam-setup.md)
+myengine_rl_steam_runtime(myengine)
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Include" FILES ${APP_HEADERS})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Source" FILES ${APP_CPP})
