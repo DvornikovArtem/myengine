@@ -30,6 +30,7 @@ namespace myengine::rlui
         HudKickoff,      // rl-hud-kickoff
         HudGoal,         // rl-hud-goal
         HudScoreboard,   // rl-hud-scoreboard
+        HudReplay,       // no mock-up: the replay of a goal (G7e)
         Count
     };
 

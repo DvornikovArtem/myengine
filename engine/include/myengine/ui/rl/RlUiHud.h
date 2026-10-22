@@ -48,6 +48,18 @@ namespace myengine::rlui
         int pingMs = -1;            // online; -1 none
     };
 
+    // The replay of a goal (RlReplay): while `active` the HUD shows the REPLAY label, the author and the speed of the goal, the letterbox bars, the
+    // progress of the clip and the hint "Skip replay" instead of the usual pieces (the scoreboard stays)
+    struct HudReplay
+    {
+        bool active = false;
+        std::string author;          // the scorer, "" when nobody touched the ball
+        int team = -1;               // the team the goal counts for (the colour of the label)
+        float goalSpeedKmh = 0.0f;
+        float progress = 0.0f;       // 0..1 of the clip
+        float speed = 1.0f;          // the playback speed now (1, 0.5): a tag "0.5x" is shown in the slow motion
+    };
+
     struct HudState
     {
         HudPhase phase = HudPhase::Playing;
@@ -76,6 +88,7 @@ namespace myengine::rlui
         std::string ballCamKey = "Space"; // what is shown on the key cap of the hint (the binding of the player)
         bool showFps = false;
         float fps = 0.0f;
+        HudReplay replay;
     };
 
     enum class HudEventType : int
@@ -126,6 +139,8 @@ namespace myengine::rlui
         void DrawFeed(Frame& f) const;
         void DrawBallCamHint(Frame& f) const;
         void DrawPing(Frame& f) const;
+        // The REPLAY overlay (the letterbox bars, the label, the author, the progress, the hint): drawn by Draw while HudState::replay.active
+        void DrawReplay(Frame& f) const;
         // The table of the players (the scoreboard, the results): the header of the columns, a bar per team, a row per player, the row of the
         // local player lighter. `rect` is in Space::Screen / Menu, the width 1200 of the spec at x = rect.x. Returns the bottom of the table.
         // `teamBars`: a bar per team with its score (the scoreboard); without them the rows follow each other as the players are listed (the results).
@@ -161,5 +176,6 @@ namespace myengine::rlui
         float boostFlash_ = 0.0f;
         float pulse_ = 0.0f;
         float goAge_ = 1e9f;               // seconds since the countdown ended (the GO!)
+        float replayAge_ = 0.0f;           // seconds since the replay began (the bars slide in, the dot pulses)
     };
 }
