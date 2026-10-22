@@ -7,6 +7,8 @@
 build/
 build-*/
 out/
+# the packaged game (tools/package_game.ps1)
+dist/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake

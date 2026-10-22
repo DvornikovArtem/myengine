@@ -15,6 +15,7 @@
 #include <imgui/imgui.h>
 #include "ImGuizmo.h"
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ui/UiManager.h>
@@ -293,10 +294,15 @@ namespace myengine::ui
 
         std::filesystem::path ResolveFontRoot()
         {
-            std::filesystem::path sourceRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/fonts";
-            if (HasFontFiles(sourceRoot))
+            // The sources of a development build first (none in a shipping build)
+            std::filesystem::path sourceRoot = core::apppaths::SourceRoot();
+            if (!sourceRoot.empty())
             {
-                return sourceRoot;
+                sourceRoot /= "assets/fonts";
+                if (HasFontFiles(sourceRoot))
+                {
+                    return sourceRoot;
+                }
             }
 
             std::filesystem::path executableRoot = GetExecutableDirectory() / "assets/fonts";
@@ -312,24 +318,15 @@ namespace myengine::ui
                 return currentRoot;
             }
 
-            return sourceRoot;
+            return sourceRoot.empty() ? executableRoot : sourceRoot;
         }
 
-        // Window layout file: %APPDATA%\myengine\editor_layout.ini (the executable directory if APPDATA is unavailable).
+        // Window layout file: %APPDATA%\myengine\editor_layout.ini (the executable directory if APPDATA is unavailable;
+        // %LOCALAPPDATA%\RocketArena in a shipping build).
         // Dock layout and floating windows survive restarts; "Window > Reset Layout" rebuilds the default.
         std::string ResolveLayoutIniPath(const core::WindowId windowId)
         {
-            std::filesystem::path directory;
-            wchar_t appData[MAX_PATH]{};
-            const DWORD length = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
-            if (length > 0 && length < MAX_PATH)
-            {
-                directory = std::filesystem::path(appData) / L"myengine";
-            }
-            else
-            {
-                directory = GetExecutableDirectory();
-            }
+            const std::filesystem::path directory = core::apppaths::UserDataDirectory();
 
             std::error_code ec;
             std::filesystem::create_directories(directory, ec);

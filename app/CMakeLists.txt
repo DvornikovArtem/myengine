@@ -26,7 +26,12 @@ set_source_files_properties(${APP_SHADER_FILES} PROPERTIES HEADER_FILE_ONLY TRUE
 add_executable(myengine WIN32 ${APP_HEADERS} ${APP_CPP} ${APP_SHADER_FILES})
 target_link_libraries(myengine PRIVATE myengine_engine myengine_directxtk myengine_directxtex)
 target_include_directories(myengine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_compile_definitions(myengine PRIVATE MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+if(MYENGINE_SHIPPING)
+  # The game for players: RocketArena.exe, without the repository path (docs/game/packaging.md)
+  set_target_properties(myengine PROPERTIES OUTPUT_NAME RocketArena)
+else()
+  target_compile_definitions(myengine PRIVATE MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+endif()
 
 myengine_apply_compiler_options(myengine)
 myengine_copy_runtime_assets(myengine)
@@ -35,9 +40,12 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Include" FILES ${APP
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Source" FILES ${APP_CPP})
 source_group("Shaders" FILES ${APP_SHADER_FILES})
 
-# MCP server for the assistant: the Claude Code CLI starts it and it talks to the editor through a named pipe
-add_executable(myengine_mcp mcp_bridge/main.cpp)
-target_include_directories(myengine_mcp PRIVATE ${CMAKE_SOURCE_DIR}/engine/include)
-target_link_libraries(myengine_mcp PRIVATE myengine_nlohmann_json)
-myengine_apply_compiler_options(myengine_mcp)
-add_dependencies(myengine myengine_mcp)
+# MCP server for the assistant: the Claude Code CLI starts it and it talks to the editor through a named pipe.
+# The shipping build has no assistant.
+if(NOT MYENGINE_SHIPPING)
+  add_executable(myengine_mcp mcp_bridge/main.cpp)
+  target_include_directories(myengine_mcp PRIVATE ${CMAKE_SOURCE_DIR}/engine/include)
+  target_link_libraries(myengine_mcp PRIVATE myengine_nlohmann_json)
+  myengine_apply_compiler_options(myengine_mcp)
+  add_dependencies(myengine myengine_mcp)
+endif()

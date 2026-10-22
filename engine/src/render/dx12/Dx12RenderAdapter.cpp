@@ -14,6 +14,7 @@
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Logger.h>
 #include <myengine/render/MaterialParams.h>
 #include <myengine/render/ShaderDescriptor.h>
@@ -109,7 +110,9 @@ namespace myengine::render::dx12
                 }
             }
 
-            return std::filesystem::u8path(MYENGINE_SOURCE_DIR) / relative;
+            // Next to nothing else was found: the sources of a development build, otherwise the path as it is
+            const std::filesystem::path sourceRoot = core::apppaths::SourceRoot();
+            return sourceRoot.empty() ? relative : sourceRoot / relative;
         }
 
         // The number of levels of a full mip chain
