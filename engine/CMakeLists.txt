@@ -269,6 +269,7 @@ set(IMGUI_HEADERS
   ${IMGUI_ROOT}/Include/imgui/imstb_rectpack.h
   ${IMGUI_ROOT}/Include/imgui/imstb_textedit.h
   ${IMGUI_ROOT}/Include/imgui/imstb_truetype.h
+  ${IMGUI_ROOT}/Include/imgui/misc/imgui_freetype.h
   ${IMGUI_ROOT}/Include/imgui/misc/imgui_stdlib.h
 )
 
@@ -278,6 +279,7 @@ set(IMGUI_SOURCES
   ${IMGUI_ROOT}/src/imgui_draw.cpp
   ${IMGUI_ROOT}/src/imgui_tables.cpp
   ${IMGUI_ROOT}/src/imgui_widgets.cpp
+  ${IMGUI_ROOT}/src/misc/imgui_freetype.cpp
   ${IMGUI_ROOT}/src/misc/imgui_stdlib.cpp
 )
 
@@ -306,6 +308,7 @@ target_include_directories(myengine_engine
   PRIVATE
     ${IMGUI_ROOT}/Include
     ${IMGUI_ROOT}/Include/imgui
+    ${IMGUI_ROOT}/Include/imgui/misc
     ${IMGUIZMO_ROOT}
     ${CMAKE_SOURCE_DIR}/external/renderdoc)
 
@@ -317,6 +320,9 @@ else()
 endif()
 
 target_link_libraries(myengine_engine
+  PRIVATE
+    # the rasteriser of the fonts of the game UI (ImGuiFreeType::GetFontLoader(), engine/src/ui/rl/RlUiFonts.cpp); the editor keeps stb_truetype
+    Freetype::Freetype
   PUBLIC
     myengine_stb
     myengine_nlohmann_json

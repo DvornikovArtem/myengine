@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fstream>
 #include <imgui/imgui.h>
+#include <imgui/misc/imgui_freetype.h>
 
 namespace myengine::rlui
 {
@@ -143,10 +144,30 @@ namespace myengine::rlui
         ready_ = false;
     }
 
+    namespace
+    {
+        // How a font of the kit is rasterised and sized. Text that is "soft" on a screen of 1920 x 1080 had three causes, all in this file or its user:
+        //   - stb_truetype has no hinting and OversampleH = 2 blurs every glyph horizontally by a box filter: FreeType (the native hinting of the file where it
+        //     has one, the auto-hinter where not) snaps the stems and the baseline to the pixels, and OversampleH = 1 leaves the glyph as it was rasterised;
+        //   - ImGui keeps a baked font at a WHOLE number of pixels (ImGui::GetRoundedFontSize), a quarter of a pixel in the baked size came out as a different size
+        //     than the one the text was drawn at, and the glyphs were scaled by a fraction (FontHandle::DrawSize draws at the baked size when it is close);
+        //   - a glyph advance that is not a whole number of pixels puts the next glyph between two pixels: PixelSnapH rounds it.
+        // The loader is the one of the atlas, so it is set for the atlas in Bake (the editor keeps stb_truetype in its own atlas, without the game UI).
+        // Returns the size to bake in pixels.
+        float Configure(ImFontConfig& config, const float pixelsWanted)
+        {
+            config.OversampleH = 1;
+            config.OversampleV = 1;
+            config.PixelSnapH = true;
+            return std::max(std::round(pixelsWanted), 1.0f);
+        }
+    }
+
     bool Fonts::Bake(ImFontAtlas& atlas, const std::filesystem::path& fontDirectory, const float scale, std::string* error)
     {
         Clear();
         scale_ = std::max(scale, 0.25f);
+        atlas.SetFontLoader(ImGuiFreeType::GetFontLoader());
         for (int s = 0; s < kStyleCount; ++s)
         {
             if (!LoadFile(fontDirectory / kStyleFiles[s], g_styleData[s]))
@@ -166,9 +187,7 @@ namespace myengine::rlui
             {
                 ImFontConfig config;
                 config.FontDataOwnedByAtlas = false;
-                config.OversampleH = design >= 80.0f ? 1 : 2;
-                config.OversampleV = 1;
-                const float pixels = std::round(design * scale_ * g_styleData[s].lineScale * 4.0f) / 4.0f;
+                const float pixels = Configure(config, design * scale_ * g_styleData[s].lineScale);
                 ImFont* font = atlas.AddFontFromMemoryTTF(g_styleData[s].bytes.data(), static_cast<int>(g_styleData[s].bytes.size()), pixels, &config, RangesFor(design));
                 Slot slot;
                 slot.style = static_cast<FontStyle>(s);
@@ -195,10 +214,7 @@ namespace myengine::rlui
             {
                 ImFontConfig config;
                 config.FontDataOwnedByAtlas = false;
-                config.PixelSnapH = true;
-                config.OversampleH = 1;
-                config.OversampleV = 1;
-                const float pixels = std::round(design * scale_ * g_iconData.lineScale * 4.0f) / 4.0f;
+                const float pixels = Configure(config, design * scale_ * g_iconData.lineScale);
                 ImFont* font = atlas.AddFontFromMemoryTTF(g_iconData.bytes.data(), static_cast<int>(g_iconData.bytes.size()), pixels, &config, iconRanges.data());
                 Slot slot;
                 slot.icons = true;

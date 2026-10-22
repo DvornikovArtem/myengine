@@ -309,7 +309,7 @@ namespace myengine::rlui::paint
         const FontHandle handle = f.fonts().Ready() ? f.fonts().Get(StyleFor(style, text), designSize) : FontHandle{};
         const float scale = f.metrics().scale;
         ImFont* font = handle.Valid() ? handle.font : ImGui::GetFont();
-        const float size = handle.Valid() ? designSize * scale * handle.lineScale : designSize * scale;
+        const float size = handle.Valid() ? handle.DrawSize(designSize, scale) : designSize * scale;
         const float width = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.data(), text.data() + text.size()).x;
         int glyphs = 0;
         for (const char c : text)
@@ -335,7 +335,7 @@ namespace myengine::rlui::paint
         const FontHandle handle = f.fonts().Ready() ? f.fonts().Get(StyleFor(style, text), designSize) : FontHandle{};
         const float scale = f.metrics().scale;
         ImFont* font = handle.Valid() ? handle.font : ImGui::GetFont();
-        const float size = handle.Valid() ? designSize * scale * handle.lineScale : designSize * scale;
+        const float size = handle.Valid() ? handle.DrawSize(designSize, scale) : designSize * scale;
         const float width = TextWidth(f, style, designSize, text, letterSpacing);
         float x = pos.x;
         if (align == Align::Center)
@@ -409,7 +409,7 @@ namespace myengine::rlui::paint
         char buffer[8];
         const char* text = Utf8Icon(codepoint, buffer);
         const float scale = f.metrics().scale;
-        const float size = designSize * scale * handle.lineScale;
+        const float size = handle.DrawSize(designSize, scale);
         const ImVec2 extent = handle.font->CalcTextSizeA(size, FLT_MAX, 0.0f, text, text + 3);
         const Vec2 c = f.ToScreen(center);
         f.DrawList()->AddText(handle.font, size, ImVec2(c.x - extent.x * 0.5f, c.y - size * 0.5f), Tint(f, color), text, text + 3);

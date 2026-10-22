@@ -33,10 +33,19 @@ namespace myengine::rlui
     struct FontHandle
     {
         ImFont* font = nullptr;
-        float pixelSize = 0.0f;
+        float pixelSize = 0.0f;   // a whole number of pixels: ImGui rounds the size of a baked font to one
         float designSize = 0.0f;
         float lineScale = 1.0f;   // line height / em of the file: the size to draw at is design size * scale * lineScale (ImGui sizes a font by its line height)
         bool Valid() const { return font != nullptr; }
+
+        /// The size to hand to AddText for a design size at the scale of the screen. Within half a pixel of the baked size it IS the baked size: the glyphs are
+        /// then put on the pixels as they were rasterised (and hinted). Any other size would scale the baked glyphs by a fraction, and every edge of every letter
+        /// would fall between two pixels (that is the "soft" text). Further away (a window dragged between the size classes) it is the wanted size, scaled.
+        float DrawSize(const float designSizeWanted, const float screenScale) const
+        {
+            const float wanted = designSizeWanted * screenScale * lineScale;
+            return pixelSize > 0.0f && wanted > pixelSize - 0.5f && wanted < pixelSize + 0.5f ? pixelSize : wanted;
+        }
     };
 
     class Fonts
