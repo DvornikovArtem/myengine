@@ -19,6 +19,9 @@
     "ui_click": { "files": ["ui_click.wav"], "bus": "ui", "volume": 0.7, "priority": 10 },
     "ui_hover": { "files": ["ui_hover.wav"], "bus": "ui", "volume": 0.5, "priority": 9, "maxInstances": 2 },
     "ui_back": { "files": ["ui_back.wav"], "bus": "ui", "volume": 0.7, "priority": 10 },
+    "skid": { "files": ["skid_loop.wav"], "bus": "sfx", "volume": 0.45, "loop": true, "spatial": true, "minDistance": 3, "maxDistance": 50, "priority": 3 },
+    "bump": { "files": ["bump.wav"], "bus": "sfx", "volume": 0.8, "pitchMin": 0.9, "pitchMax": 1.1, "spatial": true, "minDistance": 3, "maxDistance": 60, "priority": 5, "maxInstances": 4 },
+    "whistle": { "files": ["whistle.wav"], "bus": "sfx", "volume": 0.7, "priority": 19, "maxInstances": 1 },
     "menu_music": { "files": ["menu_music.wav"], "bus": "music", "volume": 0.5, "loop": true, "priority": 30, "maxInstances": 1 }
   }
 }
