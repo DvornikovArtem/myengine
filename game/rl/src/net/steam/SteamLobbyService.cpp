@@ -35,7 +35,7 @@ namespace rl::net
         {
             if (g_steamUsers == 0 && !SteamAPI_Init())
             {
-                why = "Steam is not available: SteamAPI_Init failed. Start the Steam client, log in, and put steam_appid.txt (the line 480) next to the exe";
+                why = "Start the Steam client and restart the game.";
                 return false;
             }
             ++g_steamUsers;
@@ -218,7 +218,7 @@ namespace rl::net
                 const uint64_t id = std::strtoull(idOrAddress.c_str(), &end, 10);
                 if (id == 0 || end == idOrAddress.c_str())
                 {
-                    error = "'" + idOrAddress + "' is not a lobby id of Steam (take one from the list or from an invitation)";
+                    error = "This is not a Steam lobby: pick one from the list or accept an invitation.";
                     return false;
                 }
                 const SteamAPICall_t call = SteamMatchmaking()->JoinLobby(CSteamID(id));
@@ -338,7 +338,7 @@ namespace rl::net
             {
                 if (ioFailure || entered->m_EChatRoomEnterResponse != k_EChatRoomEnterResponseSuccess)
                 {
-                    Fail("cannot enter the lobby (it may be full, closed or gone)");
+                    Fail("Cannot enter the lobby: it may be full, closed or gone.");
                     return;
                 }
                 lobby_ = CSteamID(entered->m_ulSteamIDLobby);

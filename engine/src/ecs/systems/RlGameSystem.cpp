@@ -1587,7 +1587,7 @@ namespace myengine::ecs::systems
                 status_.setup.transportFactory = nullptr;  // used once; it holds the lobby service
                 if (!transport)
                 {
-                    error = "The lobby could not make the transport of the match";
+                    error = "The match could not start: the network connection is not available.";
                     return false;
                 }
             }
@@ -1609,7 +1609,7 @@ namespace myengine::ecs::systems
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(setup.port, error))
                 {
-                    error = "Cannot listen on port " + std::to_string(setup.port) + ": " + error;
+                    error = "Cannot start the match. " + error;
                     netHost.reset();
                     transport->Close();
                     transport.reset();
