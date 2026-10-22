@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <rl/RlCars.h>
 #include <rl/RlMatch.h>
 #include <rl/RlNetProtocol.h>
 #include <rl/net/NetTransport.h>
@@ -60,13 +61,18 @@ namespace rl
         int slot = -1;
         std::string name;
         double rttMs = 0.0;
+        int car = 0;              // the car the guest wants (an index of the catalog)
     };
 
     struct RlNetHostOptions
     {
-        RlMatchConfig match;      // mode, seed, botLevel; humanMask is made from the players
+        RlMatchConfig match;      // mode, seed, botLevel; humanMask is made from the players, the cars from the wishes (below)
         bool hostPlays = true;    // slot 0 is the player of the host (false: a dedicated host, slot 0 is a bot)
         int maxClients = 7;
+        const RlCarCatalog* cars = nullptr;  // the cars of the game (must outlive the host); null: the catalog with Pulse alone
+        int hostCar = 0;                     // the car of the player of the host
+        // The guests say their car with the Join and may change it in the lobby; the bots draw theirs from the seed of the match; the choice is
+        // sent to everybody before the match starts (and in the Welcome of a player who joins a running one).
     };
 
     class RlNetHost
@@ -118,12 +124,15 @@ namespace rl
     class RlNetClient
     {
     public:
-        RlNetClient(net::INetTransport& transport, const RlTuning& tuning);
+        // `cars`: the catalog of the game (must outlive the client); null: the catalog with Pulse alone. The host refuses a client with other cars.
+        RlNetClient(net::INetTransport& transport, const RlTuning& tuning, const RlCarCatalog* cars = nullptr);
         ~RlNetClient();
         RlNetClient(const RlNetClient&) = delete;
         RlNetClient& operator=(const RlNetClient&) = delete;
 
         bool Connect(const std::string& address, const std::string& name, std::string& error);
+        // The car this player wants (an index of the catalog): before Connect, or in the lobby (the host hears it until the match starts)
+        void SetCar(int car);
         void Update(double now);
         void Close();
 

@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <rl/RlCars.h>
+
 namespace myengine::game
 {
     constexpr int kSegmentsMin = 3;
@@ -91,4 +93,8 @@ namespace myengine::game
     std::filesystem::path CarsDirectory();
     // The catalog of the game, read once (the shipped files)
     const RlCarCatalog& Cars();
+    // The same files as the simulation reads them (game/rl/RlCars.h: the hitbox, the wheels and the numbers of the car of every slot of a match, the id of a
+    // car on the wire is its index here). The catalog above is what the garage shows, this one is what the match plays with; both are ordered by "order".
+    const rl::RlCarCatalog& SimCars();
+    int SimCarIndex(const std::string& id);   // the index of the car in SimCars(); the default car when there is no such id
 }

@@ -166,7 +166,8 @@ namespace rl
     class RlTraining
     {
     public:
-        explicit RlTraining(const RlTuning& tuning);
+        // `playerCar`: the car of the player (the car of the garage); null: the car of the tuning
+        explicit RlTraining(const RlTuning& tuning, const RlCarVariant* playerCar = nullptr);
         ~RlTraining();
         RlTraining(const RlTraining&) = delete;
         RlTraining& operator=(const RlTraining&) = delete;
