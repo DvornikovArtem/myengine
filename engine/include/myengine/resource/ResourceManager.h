@@ -61,6 +61,7 @@ namespace myengine::resource
     {
         render::MeshData data;
         render::MeshHandle gpuHandle;
+        render::MeshBounds bounds;  // computed when the mesh is uploaded; the culling of the scene uses it
     };
 
     struct TextureAsset
@@ -93,6 +94,11 @@ namespace myengine::resource
         bool tintSet = false;
         std::map<std::string, std::string> textures;             // "textures": the name of a shader texture -> path (a normalized key)
         std::map<std::string, render::MaterialValue> params;     // "params": the name of a shader variable -> raw value
+        // How the mesh is drawn (the state of the pass, not a shader value): "blend": "opaque" | "alpha" | "additive",
+        // "doubleSided": true, "castShadow": false
+        render::BlendMode blend = render::BlendMode::Opaque;
+        bool doubleSided = false;
+        bool castShadow = true;
     };
 
     // The content of a material for render::ApplyMaterialValues

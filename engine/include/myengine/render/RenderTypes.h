@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -130,6 +131,47 @@ namespace myengine::render
         std::vector<std::uint32_t> indices;
     };
 
+    // The bounds of a mesh in its own space: the axis aligned box and the sphere around its centre. The culling of the scene
+    // takes them (scaled by the entity) instead of a fixed radius around the origin of the entity.
+    struct MeshBounds
+    {
+        Float3 center{};
+        Float3 extents{};      // half sizes of the box
+        float radius = 0.0f;   // sphere around `center` that holds every vertex
+        bool valid = false;
+    };
+
+    inline MeshBounds ComputeMeshBounds(const MeshData& data)
+    {
+        MeshBounds bounds;
+        if (data.vertices.empty())
+        {
+            return bounds;
+        }
+        Float3 lo = data.vertices.front().position;
+        Float3 hi = lo;
+        for (const MeshVertex& vertex : data.vertices)
+        {
+            const Float3& p = vertex.position;
+            lo = {p.x < lo.x ? p.x : lo.x, p.y < lo.y ? p.y : lo.y, p.z < lo.z ? p.z : lo.z};
+            hi = {p.x > hi.x ? p.x : hi.x, p.y > hi.y ? p.y : hi.y, p.z > hi.z ? p.z : hi.z};
+        }
+        bounds.center = {(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
+        bounds.extents = {(hi.x - lo.x) * 0.5f, (hi.y - lo.y) * 0.5f, (hi.z - lo.z) * 0.5f};
+        float radiusSquared = 0.0f;
+        for (const MeshVertex& vertex : data.vertices)
+        {
+            const float dx = vertex.position.x - bounds.center.x;
+            const float dy = vertex.position.y - bounds.center.y;
+            const float dz = vertex.position.z - bounds.center.z;
+            const float d = dx * dx + dy * dy + dz * dz;
+            radiusSquared = d > radiusSquared ? d : radiusSquared;
+        }
+        bounds.radius = std::sqrt(radiusSquared);
+        bounds.valid = true;
+        return bounds;
+    }
+
     struct TextureData
     {
         std::uint32_t width = 0;
@@ -155,6 +197,15 @@ namespace myengine::render
         std::string vertexStream = "mesh";
     };
 
+    // How a material is drawn: opaque (the depth pass of the scene), alpha blended (back to front after the opaque ones, no depth
+    // write) or additive (after them, no depth write, order does not matter: flames, glows, orbs)
+    enum class BlendMode : std::uint8_t
+    {
+        Opaque = 0,
+        Alpha = 1,
+        Additive = 2,
+    };
+
     class MaterialParams;
 
     struct DrawItem
@@ -170,6 +221,14 @@ namespace myengine::render
         TextureHandle texture;
         Matrix4 model = Matrix4::Identity();
         core::Color color{1.0f, 1.0f, 1.0f, 1.0f};
+        // From the material ("blend", "doubleSided", "castShadow" of the .material.json)
+        BlendMode blend = BlendMode::Opaque;
+        bool doubleSided = false;   // no back face culling (nets, flames, thin panels)
+        bool castShadow = true;     // drawn into the shadow map
+        // The world sphere of the draw (the culling sphere of the entity): the shadow map is fitted to the casters, the transparent
+        // draws are sorted by its centre. radius 0: unknown, the translation of `model` is used.
+        Float3 boundsCenter{};
+        float boundsRadius = 0.0f;
     };
 
     struct DebugLine

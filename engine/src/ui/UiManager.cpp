@@ -15,6 +15,7 @@
 #include <imgui/imgui.h>
 #include "ImGuizmo.h"
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ui/UiManager.h>
@@ -293,10 +294,15 @@ namespace myengine::ui
 
         std::filesystem::path ResolveFontRoot()
         {
-            std::filesystem::path sourceRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets/fonts";
-            if (HasFontFiles(sourceRoot))
+            // The sources of a development build first (none in a shipping build)
+            std::filesystem::path sourceRoot = core::apppaths::SourceRoot();
+            if (!sourceRoot.empty())
             {
-                return sourceRoot;
+                sourceRoot /= "assets/fonts";
+                if (HasFontFiles(sourceRoot))
+                {
+                    return sourceRoot;
+                }
             }
 
             std::filesystem::path executableRoot = GetExecutableDirectory() / "assets/fonts";
@@ -312,24 +318,15 @@ namespace myengine::ui
                 return currentRoot;
             }
 
-            return sourceRoot;
+            return sourceRoot.empty() ? executableRoot : sourceRoot;
         }
 
-        // Window layout file: %APPDATA%\myengine\editor_layout.ini (the executable directory if APPDATA is unavailable).
+        // Window layout file: %APPDATA%\myengine\editor_layout.ini (the executable directory if APPDATA is unavailable;
+        // %LOCALAPPDATA%\RocketArena in a shipping build).
         // Dock layout and floating windows survive restarts; "Window > Reset Layout" rebuilds the default.
         std::string ResolveLayoutIniPath(const core::WindowId windowId)
         {
-            std::filesystem::path directory;
-            wchar_t appData[MAX_PATH]{};
-            const DWORD length = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
-            if (length > 0 && length < MAX_PATH)
-            {
-                directory = std::filesystem::path(appData) / L"myengine";
-            }
-            else
-            {
-                directory = GetExecutableDirectory();
-            }
+            const std::filesystem::path directory = core::apppaths::UserDataDirectory();
 
             std::error_code ec;
             std::filesystem::create_directories(directory, ec);
@@ -669,11 +666,48 @@ namespace myengine::ui
         }
     }
 
+    void UiManager::SetGameUi(GameUiHooks hooks)
+    {
+        gameUi_ = std::move(hooks);
+        fontRebuild_ = true;
+    }
+
+    // Every window gets a new ImGui context (and with it a new atlas): the way to change the fonts of a built atlas
+    void UiManager::RebuildWindowContexts()
+    {
+        struct Saved
+        {
+            core::WindowId id;
+            HWND hwnd;
+            render::RenderSurfaceHandle surface;
+            std::uint32_t width;
+            std::uint32_t height;
+        };
+        std::vector<Saved> saved;
+        for (const auto& [windowId, context] : windows_)
+        {
+            if (context != nullptr)
+            {
+                saved.push_back({windowId, context->hwnd, context->surface, context->width, context->height});
+            }
+        }
+        for (const Saved& window : saved)
+        {
+            UnregisterWindow(window.id);
+            RegisterWindow(window.id, window.hwnd, window.surface, window.width, window.height);
+        }
+    }
+
     void UiManager::Update(const float deltaTime)
     {
         if (!initialized_)
         {
             return;
+        }
+        if (fontRebuild_)
+        {
+            fontRebuild_ = false;
+            RebuildWindowContexts();
         }
 
         for (auto& [windowId, windowContextPtr] : windows_)
@@ -717,13 +751,27 @@ namespace myengine::ui
                 }
             }
 
-            BuildWindowUi(windowContext);
+            if (gameUi_.build)
+            {
+                gameUi_.build(windowId, windowContext.width, windowContext.height, deltaTime);
+            }
+            else
+            {
+                BuildWindowUi(windowContext);
+            }
 
             const auto* editorWindowState = core::ServiceLocator::GetEditorRuntimeState().FindWindowState(windowId);
             const bool gizmoCapture = editorWindowState != nullptr && (editorWindowState->gizmoHovered || editorWindowState->gizmoActive);
             windowContext.wantMouseCapture = io.WantCaptureMouse || gizmoCapture;
             windowContext.wantKeyboardCapture = io.WantCaptureKeyboard || io.WantTextInput;
             windowContext.wantTextInput = io.WantTextInput;
+            if (gameUi_.build)
+            {
+                // the game UI has no ImGui windows: whether a menu owns the input is the game's word
+                windowContext.wantMouseCapture = gameUiCaptures_;
+                windowContext.wantKeyboardCapture = gameUiCaptures_;
+                windowContext.wantTextInput = false;
+            }
             ImGui::Render();
         }
     }
@@ -1071,6 +1119,12 @@ namespace myengine::ui
             logger_->Info(
                 "UiManager: fonts ready (body=" + std::string(customBodyFont ? "custom" : "fallback") +
                 ", mono=" + std::string(customMonoFont ? "custom" : "fallback") + ")");
+        }
+
+        // The fonts of the game UI go into the same atlas (before it is built)
+        if (gameUi_.bakeFonts)
+        {
+            gameUi_.bakeFonts(*io.Fonts, width, height);
         }
 
         unsigned char* fontPixels = nullptr;

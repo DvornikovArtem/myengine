@@ -6,6 +6,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <fstream>
@@ -26,6 +27,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/LoadingService.h>
@@ -230,6 +232,29 @@ namespace myengine::resource
             return ToLower(NarrowText(path.extension())) == ".myetex";
         }
 
+        // The binary cache of a source file: next to it, or in the cache folder of the user when the sources may lie
+        // where nothing is written (shipping: <UserData>\Cache\<hash of the path>.<extension>)
+        std::filesystem::path BuildCachePath(const std::filesystem::path& sourcePath, const char* extension)
+        {
+            const std::filesystem::path cacheDirectory = core::apppaths::AssetCacheDirectory();
+            if (cacheDirectory.empty())
+            {
+                std::filesystem::path binaryPath = sourcePath;
+                binaryPath.replace_extension(extension);
+                return binaryPath;
+            }
+
+            // FNV-1a over the normalized path text: the same file always lands on the same name
+            std::uint64_t hash = 14695981039346656037ull;
+            for (const unsigned char c : ToLower(GenericNarrowText(sourcePath)))
+            {
+                hash = (hash ^ c) * 1099511628211ull;
+            }
+            char name[40]{};
+            std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(hash));
+            return cacheDirectory / (std::string(name) + extension);
+        }
+
         std::filesystem::path BuildMeshBinaryPath(const std::filesystem::path& sourcePath)
         {
             if (IsMeshBinaryPath(sourcePath))
@@ -237,9 +262,7 @@ namespace myengine::resource
                 return sourcePath;
             }
 
-            std::filesystem::path binaryPath = sourcePath;
-            binaryPath.replace_extension(".myemesh");
-            return binaryPath;
+            return BuildCachePath(sourcePath, ".myemesh");
         }
 
         std::filesystem::path BuildTextureBinaryPath(const std::filesystem::path& sourcePath)
@@ -249,9 +272,7 @@ namespace myengine::resource
                 return sourcePath;
             }
 
-            std::filesystem::path binaryPath = sourcePath;
-            binaryPath.replace_extension(".myetex");
-            return binaryPath;
+            return BuildCachePath(sourcePath, ".myetex");
         }
 
         bool TryGetFileStamp(const std::filesystem::path& path, FileStamp& outStamp)
@@ -1438,7 +1459,7 @@ namespace myengine::resource
                 {
                     roots.push_back(project.Root());
                 }
-                roots.push_back(std::filesystem::u8path(MYENGINE_SOURCE_DIR));
+                roots.push_back(core::apppaths::SourceRoot()); // empty in a shipping build: skipped below
                 roots.push_back(GetExecutableDirectory());
 
                 for (const auto& root : roots)
@@ -1655,6 +1676,22 @@ namespace myengine::resource
         {
             descriptor["tint"] = TintToJson(asset.tint);
         }
+        if (asset.blend == render::BlendMode::Alpha)
+        {
+            descriptor["blend"] = "alpha";
+        }
+        else if (asset.blend == render::BlendMode::Additive)
+        {
+            descriptor["blend"] = "additive";
+        }
+        if (asset.doubleSided)
+        {
+            descriptor["doubleSided"] = true;
+        }
+        if (!asset.castShadow)
+        {
+            descriptor["castShadow"] = false;
+        }
         if (!asset.params.empty())
         {
             json params = json::object();
@@ -1727,8 +1764,10 @@ namespace myengine::resource
             return ec ? candidate.lexically_normal() : canonical;
         };
 
-        const std::filesystem::path projectRelative = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / path;
-        if (std::filesystem::exists(projectRelative, ec))
+        // The sources the executable was built from (none in a shipping build)
+        const std::filesystem::path sourceRoot = core::apppaths::SourceRoot();
+        const std::filesystem::path projectRelative = sourceRoot.empty() ? path : sourceRoot / path;
+        if (!sourceRoot.empty() && std::filesystem::exists(projectRelative, ec))
         {
             return normalizeExisting(projectRelative);
         }
@@ -2435,6 +2474,7 @@ namespace myengine::resource
 
         MeshAsset asset;
         asset.data = std::move(cpuAsset.data);
+        asset.bounds = render::ComputeMeshBounds(asset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
         if (!asset.gpuHandle.IsValid())
         {
@@ -2591,6 +2631,23 @@ namespace myengine::resource
         if (!legacyTexture.empty())
         {
             asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / legacyTexture));
+        }
+        {
+            const std::string blend = descriptor.value("blend", std::string("opaque"));
+            if (blend == "alpha")
+            {
+                asset.blend = render::BlendMode::Alpha;
+            }
+            else if (blend == "additive")
+            {
+                asset.blend = render::BlendMode::Additive;
+            }
+            else if (blend != "opaque")
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": unknown blend '" + blend + "' (opaque, alpha, additive): opaque is used");
+            }
+            asset.doubleSided = descriptor.value("doubleSided", false);
+            asset.castShadow = descriptor.value("castShadow", true);
         }
         const bool hasTint = descriptor.contains("tint");
         asset.tintSet = hasTint;
@@ -2809,6 +2866,7 @@ namespace myengine::resource
 
         MeshAsset asset;
         asset.data = meshData;
+        asset.bounds = render::ComputeMeshBounds(asset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
 
         return CreateResource("__fallback_mesh__", {}, std::move(asset));

@@ -2,6 +2,7 @@
 
 #include <myengine/assistant/AssistantSettings.h>
 #include <myengine/assistant/AssistantTools.h>
+#include <myengine/core/AppPaths.h>
 #include <myengine/editor/LoadingService.h>
 #include <myengine/scripting/PrefabLibrary.h>
 
@@ -13,10 +14,14 @@ namespace myengine::ui
     // and the script information. Everything stays on the main thread.
     void SceneEditor::InitializeAssistant()
     {
+#ifdef MYENGINE_SHIPPING
+        // The game for players has no assistant: no panel, no pipe for the MCP bridge, no CLI process
+        return;
+#else
         assistant::AssistantToolContext context;
         context.world = services_.world;
         context.prefabs = services_.prefabLibrary;
-        context.scriptsDirectory = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / "assets" / "scripts";
+        context.scriptsDirectory = core::apppaths::SourceRoot() / "assets" / "scripts";
         context.captureSnapshot = [this]() { return CaptureSceneSnapshot(); };
         context.restoreSnapshot = services_.restoreSceneSnapshot;
         context.recordUndo = [this](const std::string& label, const std::string& before)
@@ -32,7 +37,7 @@ namespace myengine::ui
         assistantTools_ = std::make_unique<assistant::AssistantTools>(std::move(context));
 
         AssistantPanelConfig config;
-        config.repositoryRoot = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
+        config.repositoryRoot = core::apppaths::SourceRoot();
         config.logger = services_.logger;
         config.tools = assistantTools_.get();
         config.createTexture = services_.createUiTexture;
@@ -52,5 +57,6 @@ namespace myengine::ui
             services_.logger->Warning("Assistant: " + settingsProblem);
         }
         assistantPanel_ = std::make_unique<AssistantPanel>(config);
+#endif
     }
 }

@@ -1,0 +1,27 @@
+{
+  "directory": "assets/audio",
+  "events": {
+    "engine": { "files": ["engine_loop.wav"], "bus": "sfx", "volume": 0.5, "loop": true, "spatial": true, "minDistance": 3, "maxDistance": 70, "priority": 6 },
+    "boost": { "files": ["boost_loop.wav"], "bus": "sfx", "volume": 0.55, "loop": true, "spatial": true, "minDistance": 3, "maxDistance": 70, "priority": 6 },
+    "ball_hit": { "files": ["ball_hit_1.wav", "ball_hit_2.wav", "ball_hit_3.wav"], "bus": "sfx", "volume": 0.9, "pitchMin": 0.94, "pitchMax": 1.06, "spatial": true, "minDistance": 4, "maxDistance": 100, "priority": 8, "maxInstances": 4 },
+    "ball_bounce": { "files": ["ball_bounce.wav"], "bus": "sfx", "volume": 0.7, "pitchMin": 0.92, "pitchMax": 1.08, "spatial": true, "minDistance": 4, "maxDistance": 90, "priority": 4, "maxInstances": 3 },
+    "jump": { "files": ["jump.wav"], "bus": "sfx", "volume": 0.8, "pitchMin": 0.95, "pitchMax": 1.05, "spatial": true, "minDistance": 3, "maxDistance": 60, "priority": 5, "maxInstances": 6 },
+    "dodge": { "files": ["dodge.wav"], "bus": "sfx", "volume": 0.8, "pitchMin": 0.95, "pitchMax": 1.05, "spatial": true, "minDistance": 3, "maxDistance": 60, "priority": 5, "maxInstances": 6 },
+    "land": { "files": ["land.wav"], "bus": "sfx", "volume": 0.7, "pitchMin": 0.9, "pitchMax": 1.1, "spatial": true, "minDistance": 3, "maxDistance": 60, "priority": 3, "maxInstances": 6 },
+    "pad_small": { "files": ["pad_small.wav"], "bus": "sfx", "volume": 0.7, "spatial": true, "minDistance": 3, "maxDistance": 50, "priority": 4, "maxInstances": 6 },
+    "pad_big": { "files": ["pad_big.wav"], "bus": "sfx", "volume": 0.85, "spatial": true, "minDistance": 4, "maxDistance": 70, "priority": 6, "maxInstances": 4 },
+    "demolish": { "files": ["demolish.wav"], "bus": "sfx", "volume": 1.0, "pitchMin": 0.95, "pitchMax": 1.05, "spatial": true, "minDistance": 6, "maxDistance": 120, "priority": 12, "maxInstances": 4 },
+    "goal_horn": { "files": ["goal_horn.wav"], "bus": "sfx", "volume": 0.85, "priority": 20, "maxInstances": 1 },
+    "crowd_roar": { "files": ["crowd_roar.wav"], "bus": "sfx", "volume": 0.9, "priority": 15, "maxInstances": 1 },
+    "crowd_ambience": { "files": ["crowd_loop.wav"], "bus": "sfx", "volume": 0.35, "loop": true, "priority": 2 },
+    "countdown_beep": { "files": ["countdown_beep.wav"], "bus": "sfx", "volume": 0.8, "priority": 18 },
+    "countdown_go": { "files": ["countdown_go.wav"], "bus": "sfx", "volume": 0.85, "priority": 18 },
+    "ui_click": { "files": ["ui_click.wav"], "bus": "ui", "volume": 0.7, "priority": 10 },
+    "ui_hover": { "files": ["ui_hover.wav"], "bus": "ui", "volume": 0.5, "priority": 9, "maxInstances": 2 },
+    "ui_back": { "files": ["ui_back.wav"], "bus": "ui", "volume": 0.7, "priority": 10 },
+    "skid": { "files": ["skid_loop.wav"], "bus": "sfx", "volume": 0.45, "loop": true, "spatial": true, "minDistance": 3, "maxDistance": 50, "priority": 3 },
+    "bump": { "files": ["bump.wav"], "bus": "sfx", "volume": 0.8, "pitchMin": 0.9, "pitchMax": 1.1, "spatial": true, "minDistance": 3, "maxDistance": 60, "priority": 5, "maxInstances": 4 },
+    "whistle": { "files": ["whistle.wav"], "bus": "sfx", "volume": 0.7, "priority": 19, "maxInstances": 1 },
+    "menu_music": { "files": ["menu_music.wav"], "bus": "music", "volume": 0.5, "loop": true, "priority": 30, "maxInstances": 1 }
+  }
+}

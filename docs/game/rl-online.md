@@ -222,8 +222,8 @@ INetTransport { Send(peer, data, reliable), Poll() }
 ## 8. Игровой режим и упаковка
 
 - Режим игры без редактора (`--game` или отдельная цель `RocketLeague.exe`): окно или полный экран, меню (с ботами / создать лобби / пригласить / настройки), HUD (счёт, время, буст-кольцо, сообщения), ввод XInput + клавиатура, камера (ball cam / свободная). Сейчас exe всегда поднимает редактор (раздел 2), это отдельная задача G1.
-- Shipping-сборка: без `MYENGINE_SOURCE_DIR`, без ассистента и MCP; логи и настройки в `%LOCALAPPDATA%\RocketLeagueMyEngine`.
-- `tools/package_game.ps1` → `dist/RocketLeague/`: exe, нужные ассеты и шейдеры (HLSL компилируется при запуске `D3DCompile`, значит исходники шейдеров и `d3dcompiler_47.dll` нужны), `steam_api64.dll`, `steam_appid.txt`, CRT app-local (каталог `Microsoft.VC*.CRT` из `VC\Redist\MSVC\<версия>\x64`), zip. Проверка — запуск из чистой папки на машине без репозитория и без Visual Studio.
+- Shipping-сборка: без `MYENGINE_SOURCE_DIR`, без ассистента и MCP; логи и настройки в `%LOCALAPPDATA%\RocketArena` (сделано в G2, см. [packaging.md](packaging.md)).
+- `tools/package_game.ps1` → `dist/RocketArena/`: exe, нужные ассеты и шейдеры (HLSL компилируется при запуске `D3DCompile`, значит исходники шейдеров и `d3dcompiler_47.dll` нужны), `steam_api64.dll`, `steam_appid.txt`, CRT app-local (каталог `Microsoft.VC*.CRT` из `VC\Redist\MSVC\<версия>\x64`), zip. Проверка — запуск из чистой папки на машине без репозитория и без Visual Studio.
 
 ## 9. Графика и производительность
 

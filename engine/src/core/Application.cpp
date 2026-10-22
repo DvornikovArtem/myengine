@@ -7,8 +7,10 @@
 #include <exception>
 #include <filesystem>
 #include <sstream>
+#include <cstdlib>
 #include <string>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
@@ -24,7 +26,10 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
 #include <myengine/ecs/systems/CameraControlSystem.h>
+#include <myengine/audio/AudioSystem.h>
 #include <myengine/ecs/systems/DebugRenderSystem.h>
+#include <myengine/ecs/systems/FxSystem.h>
+#include <myengine/fx/ParticleSystem.h>
 #include <myengine/ecs/systems/MotionSystem.h>
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/ecs/systems/PlayerControlSystem.h>
@@ -36,6 +41,8 @@
 #include <myengine/scene/SceneEvents.h>
 #include <myengine/scene/SceneSerializer.h>
 #include <myengine/scripting/ScriptSystem.h>
+#include <myengine/ui/rl/RlUiGallery.h>
+#include <myengine/ui/rl/RlUiHost.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -157,11 +164,17 @@ namespace myengine::core
         Shutdown();
     }
 
-    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath, const bool startInPlay)
+    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& requestedScene, const bool requestedPlay)
     {
         config_ = config;
 
-        const auto logPath = GetExecutableDirectory() / "logs/myengine.log";
+        // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json (the shipped
+        // game starts the Rocket League map this way; TODO(G1): the --game flag replaces it)
+        const bool sceneFromConfig = requestedScene.empty() && !config.startScene.empty();
+        const std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
+        const bool startInPlay = requestedPlay || (sceneFromConfig && config.startInPlay);
+
+        const auto logPath = apppaths::LogDirectory() / "myengine.log";
         if (!logger_.Initialize(logPath))
         {
             return false;
@@ -295,11 +308,11 @@ namespace myengine::core
         resourceManager_ = std::make_unique<resource::ResourceManager>(*renderAdapter_, logger_);
 
         {
-            // Asset previews: images are cached under <project>/Saved/Thumbnails
+            // Asset previews: images are cached under <project>/Saved/Thumbnails (%LOCALAPPDATA%\RocketArena\Saved in shipping)
             editor::ThumbnailServiceConfig thumbnailConfig;
             if (const auto& projectContext = ServiceLocator::GetProjectContext(); projectContext.IsInitialized())
             {
-                thumbnailConfig.cacheDirectory = projectContext.Root() / "Saved" / "Thumbnails";
+                thumbnailConfig.cacheDirectory = apppaths::SavedDirectory(projectContext.Root()) / "Thumbnails";
             }
             thumbnailService_ = std::make_unique<editor::ThumbnailService>(*renderAdapter_, *resourceManager_, logger_, std::move(thumbnailConfig));
         }
@@ -496,6 +509,47 @@ namespace myengine::core
             return false;
         }
 
+        // MYENGINE_UI_GALLERY=<screen> or "all": the gallery of the UI kit of the game instead of the editor (docs/game/rl-ui.md)
+        {
+            char* gallery = nullptr;
+            std::size_t galleryLength = 0;
+            _dupenv_s(&gallery, &galleryLength, "MYENGINE_UI_GALLERY");
+            if (gallery != nullptr && *gallery != '\0')
+            {
+                struct Cycle
+                {
+                    rlui::GalleryScreen screen = rlui::GalleryScreen::Main;
+                    bool all = false;
+                    double clock = 0.0;
+                    int shown = -1;
+                };
+                auto cycle = std::make_shared<Cycle>();
+                cycle->all = std::string(gallery) == "all";
+                if (!cycle->all && !rlui::ParseGalleryScreen(gallery, cycle->screen))
+                {
+                    logger_.Warning(std::string("MYENGINE_UI_GALLERY: unknown screen '") + gallery + "', showing main");
+                }
+                uiGallery_ = std::make_unique<rlui::Host>();
+                uiGallery_->Install(uiManager_, {});
+                uiGallery_->SetScreen([cycle](rlui::Frame& frame)
+                {
+                    cycle->clock += static_cast<double>(frame.DeltaTime());
+                    if (cycle->all)
+                    {
+                        cycle->screen = static_cast<rlui::GalleryScreen>(static_cast<int>(cycle->clock / 4.0) % static_cast<int>(rlui::GalleryScreen::Count));
+                    }
+                    if (cycle->shown != static_cast<int>(cycle->screen))
+                    {
+                        cycle->shown = static_cast<int>(cycle->screen);
+                        frame.ResetFocus();
+                    }
+                    rlui::DrawGalleryScreen(frame, cycle->screen);
+                });
+                logger_.Info(std::string("UI gallery: ") + gallery);
+            }
+            std::free(gallery);
+        }
+
         for (const auto& runtime : windows_)
         {
             if (runtime.window != nullptr && runtime.surface.IsValid())
@@ -514,6 +568,7 @@ namespace myengine::core
         {
             // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena
             auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
+            rlGame->SetOnlineOptions(rlOnline_);
             rlGameSystem_ = rlGame.get();
             world_.AddUpdateSystem(std::move(rlGame));
         }
@@ -525,7 +580,33 @@ namespace myengine::core
             scriptSystem_ = scriptSystem.get();
             world_.AddUpdateSystem(std::move(scriptSystem));
         }
+        // Sound and particles (G7c): the device and the sound bank, the presets of the effects; the systems play the components of the scene
+        {
+            auto& audioSystem = audio::GetAudioSystem();
+            audio::AudioConfig audioConfig;
+            {
+                char* off = nullptr;
+                std::size_t offLength = 0;
+                if (_dupenv_s(&off, &offLength, "MYENGINE_AUDIO") == 0 && off != nullptr)
+                {
+                    audioConfig.useDevice = std::string(off) != "0"; // MYENGINE_AUDIO=0: no device (machines without sound, the capture of a frame)
+                    std::free(off);
+                }
+            }
+            audioSystem.SetLogger(&logger_);
+            audioSystem.Initialize(audioConfig);
+            audioSystem.LoadBank(ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/audio_bank.json"));
+            std::vector<std::string> fxMessages;
+            const std::uint32_t effects = fx::GetParticleSystem().LoadEffects(ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/fx"), &fxMessages);
+            logger_.Info("Particle effects loaded: " + std::to_string(effects));
+            for (const std::string& message : fxMessages)
+            {
+                logger_.Warning("Particle effect: " + message);
+            }
+        }
+        world_.AddUpdateSystem(std::make_unique<ecs::systems::FxUpdateSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
+        world_.AddRenderSystem(std::make_unique<ecs::systems::FxRenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
         // --scene is a file path or a path inside the project; without it the project's default map is opened
         std::error_code scenePathError;
@@ -542,7 +623,7 @@ namespace myengine::core
             sceneSavePath_ = project.ResolveContentPath(scenePath);
         }
 
-        gpuCapture_.SetOutput(project.Root() / "Saved" / "Captures", sceneSavePath_.stem().u8string());
+        gpuCapture_.SetOutput(apppaths::SavedDirectory(project.Root()) / "Captures", sceneSavePath_.stem().u8string());
 
         BindRuntimeEventListeners();
 
@@ -840,12 +921,15 @@ namespace myengine::core
             core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         }
 
-        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_)
+        // The maps of a shipping build are never written: they lie next to the exe, where nothing may be changed
+        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_ && !apppaths::IsShipping())
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
 
+        uiGallery_.reset();   // before the UiManager it is hooked into
         uiManager_.Shutdown();
+        audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
         resourceManager_.reset();
 
@@ -881,6 +965,11 @@ namespace myengine::core
         diagnostics_ = options;
     }
 
+    void Application::SetRlOnlineOptions(const ecs::systems::RlOnlineOptions& options)
+    {
+        rlOnline_ = options;
+    }
+
     int Application::GetExitCode() const
     {
         return exitCode_;
@@ -907,7 +996,7 @@ namespace myengine::core
         if (triggered)
         {
             message = "GPU capture of the next frame requested; the file goes to " +
-                      (core::ServiceLocator::GetProjectContext().Root() / "Saved" / "Captures").u8string();
+                      (apppaths::SavedDirectory(core::ServiceLocator::GetProjectContext().Root()) / "Captures").u8string();
             logger_.Info(message);
         }
         return triggered;
@@ -1002,7 +1091,7 @@ namespace myengine::core
         std::filesystem::path target = diagnostics_.frameStatsOut;
         if (target.empty())
         {
-            target = core::ServiceLocator::GetProjectContext().Root() / "Saved" / "FrameStats" /
+            target = apppaths::SavedDirectory(core::ServiceLocator::GetProjectContext().Root()) / "FrameStats" /
                      std::filesystem::u8path("frame_stats_" + map + "_" + std::to_string(diagnostics_.frameStatsFrame) + ".json");
         }
 
@@ -1463,7 +1552,7 @@ namespace myengine::core
 
     bool Application::SaveSceneToDisk()
     {
-        if (!sceneLoaded_ || sceneSavePath_.empty())
+        if (!sceneLoaded_ || sceneSavePath_.empty() || apppaths::IsShipping())
         {
             return false;
         }
@@ -1667,7 +1756,7 @@ namespace myengine::core
 
     bool Application::SaveSceneAs(const std::string& scenePath)
     {
-        if (!sceneLoaded_ || scenePath.empty())
+        if (!sceneLoaded_ || scenePath.empty() || apppaths::IsShipping())
         {
             return false;
         }

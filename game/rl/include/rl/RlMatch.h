@@ -58,6 +58,10 @@ namespace rl
         int SlotCount() const;
         int Team(int slot) const;  // 0 blue, 1 orange
         bool IsBot(int slot) const;
+        // Bit i set: slot i takes its input from Step(), the others are bots. The mask is not part of SaveState: the netcode changes it at
+        // an agreed tick (a player joins or leaves) and sets it again before each replayed tick of a rollback.
+        uint32_t HumanMask() const;
+        void SetHumanMask(uint32_t mask);
         const RlTuning& Tuning() const;
         void SetTuning(const RlTuning& tuning);  // see RlSim::SetTuning
         const RlSim& Sim() const;

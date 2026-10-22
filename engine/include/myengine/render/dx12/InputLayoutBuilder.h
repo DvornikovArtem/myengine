@@ -21,6 +21,7 @@ namespace myengine::render::dx12
     constexpr std::uint32_t kMeshVertexStride = 32;      // float3 position, float3 normal, float2 uv
     constexpr std::uint32_t kDebugLineVertexStride = 32; // float4 position (clip space), float4 colour
     constexpr std::uint32_t kUiVertexStride = 20;        // float2 position, rgba8 colour, float2 uv
+    constexpr std::uint32_t kInstanceStride = 64;        // slot 1 of the "mesh_instanced" stream: the model matrix, four float4 rows
 
     // The format of an attribute in the vertex buffer
     enum class StreamFormat : std::uint8_t
@@ -37,6 +38,7 @@ namespace myengine::render::dx12
         std::uint32_t semanticIndex = 0;
         StreamFormat format = StreamFormat::Float;
         std::uint32_t offset = 0;               // in bytes from the start of the vertex
+        std::uint32_t slot = 0;                 // the vertex buffer slot: 0 the mesh, 1 the per-instance data
     };
 
     // One vertex stream: what the vertex buffer holds
@@ -45,27 +47,31 @@ namespace myengine::render::dx12
         std::string name;                       // "mesh"
         std::uint32_t stride = 0;
         std::vector<StreamAttribute> attributes;
+        std::uint32_t instanceStride = 0;       // > 0: the attributes of slot 1 are per instance data of this size
     };
 
-    // One element of the input layout (slot 0, per vertex data)
+    // One element of the input layout (slot 0: per vertex data; slot 1: per instance data)
     struct InputElement
     {
         std::string semantic;                   // as the shader writes it
         std::uint32_t semanticIndex = 0;
         StreamFormat format = StreamFormat::Float;
         std::uint32_t offset = 0;
+        std::uint32_t slot = 0;
     };
 
     struct InputLayoutBuild
     {
         std::string stream;                     // the name of the vertex stream
         std::uint32_t stride = 0;
+        std::uint32_t instanceStride = 0;       // > 0: the program reads per instance data from slot 1
         std::vector<InputElement> elements;     // in the order of the vertex shader inputs
         std::vector<ShaderDiagnostic> diagnostics;
         bool ok = false;
     };
 
-    // The streams of the renderer: "mesh", "debug_lines", "ui". nullptr: no such stream
+    // The streams of the renderer: "mesh", "mesh_instanced" (the mesh plus the model matrix per instance as INSTANCE0..3),
+    // "debug_lines", "ui". nullptr: no such stream
     const VertexStreamDesc* FindVertexStream(const std::string& name);
 
     // `layout.vertexInputs` against the stream. A semantic that the stream does not have, or an input that the format of the

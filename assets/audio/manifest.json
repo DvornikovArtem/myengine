@@ -1,0 +1,222 @@
+{
+ "sampleRate": 44100,
+ "sounds": [
+  {
+   "name": "engine_loop",
+   "file": "engine_loop.wav",
+   "seconds": 2.0,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 176444,
+   "loop": true
+  },
+  {
+   "name": "boost_loop",
+   "file": "boost_loop.wav",
+   "seconds": 1.5,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 132344,
+   "loop": true
+  },
+  {
+   "name": "ball_hit_1",
+   "file": "ball_hit_1.wav",
+   "seconds": 0.45,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 39734,
+   "loop": false
+  },
+  {
+   "name": "ball_hit_2",
+   "file": "ball_hit_2.wav",
+   "seconds": 0.45,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 39734,
+   "loop": false
+  },
+  {
+   "name": "ball_hit_3",
+   "file": "ball_hit_3.wav",
+   "seconds": 0.45,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 39734,
+   "loop": false
+  },
+  {
+   "name": "ball_bounce",
+   "file": "ball_bounce.wav",
+   "seconds": 0.3,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 26504,
+   "loop": false
+  },
+  {
+   "name": "jump",
+   "file": "jump.wav",
+   "seconds": 0.35,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 30914,
+   "loop": false
+  },
+  {
+   "name": "dodge",
+   "file": "dodge.wav",
+   "seconds": 0.28,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 24740,
+   "loop": false
+  },
+  {
+   "name": "land",
+   "file": "land.wav",
+   "seconds": 0.4,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 35324,
+   "loop": false
+  },
+  {
+   "name": "pad_small",
+   "file": "pad_small.wav",
+   "seconds": 0.5,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 44144,
+   "loop": false
+  },
+  {
+   "name": "pad_big",
+   "file": "pad_big.wav",
+   "seconds": 0.9,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 79424,
+   "loop": false
+  },
+  {
+   "name": "demolish",
+   "file": "demolish.wav",
+   "seconds": 1.6,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 141164,
+   "loop": false
+  },
+  {
+   "name": "goal_horn",
+   "file": "goal_horn.wav",
+   "seconds": 2.6,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 229364,
+   "loop": false
+  },
+  {
+   "name": "crowd_roar",
+   "file": "crowd_roar.wav",
+   "seconds": 4.0,
+   "channels": 2,
+   "sampleRate": 44100,
+   "bytes": 705644,
+   "loop": false
+  },
+  {
+   "name": "crowd_loop",
+   "file": "crowd_loop.wav",
+   "seconds": 6.0,
+   "channels": 2,
+   "sampleRate": 44100,
+   "bytes": 1058444,
+   "loop": true
+  },
+  {
+   "name": "countdown_beep",
+   "file": "countdown_beep.wav",
+   "seconds": 0.22,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 19448,
+   "loop": false
+  },
+  {
+   "name": "countdown_go",
+   "file": "countdown_go.wav",
+   "seconds": 0.7,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 61784,
+   "loop": false
+  },
+  {
+   "name": "ui_click",
+   "file": "ui_click.wav",
+   "seconds": 0.06,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 5336,
+   "loop": false
+  },
+  {
+   "name": "ui_hover",
+   "file": "ui_hover.wav",
+   "seconds": 0.04,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 3572,
+   "loop": false
+  },
+  {
+   "name": "ui_back",
+   "file": "ui_back.wav",
+   "seconds": 0.09,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 7982,
+   "loop": false
+  },
+  {
+   "name": "menu_music",
+   "file": "menu_music.wav",
+   "seconds": 16.0,
+   "channels": 2,
+   "sampleRate": 44100,
+   "bytes": 2822444,
+   "loop": true
+  },
+  {
+   "name": "whistle",
+   "file": "whistle.wav",
+   "seconds": 1.5,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 132344,
+   "loop": false
+  },
+  {
+   "name": "skid_loop",
+   "file": "skid_loop.wav",
+   "seconds": 1.0,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 88244,
+   "loop": true
+  },
+  {
+   "name": "bump",
+   "file": "bump.wav",
+   "seconds": 0.5,
+   "channels": 1,
+   "sampleRate": 44100,
+   "bytes": 44144,
+   "loop": false
+  }
+ ],
+ "totalBytes": 5988954
+}

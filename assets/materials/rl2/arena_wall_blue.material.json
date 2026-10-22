@@ -1,0 +1,17 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/arena_wall_blue.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 0.35,
+    "gGloss": 28,
+    "gFresnel": 0.3,
+    "gEmissiveStrength": 0.45
+  },
+  "castShadow": false
+}

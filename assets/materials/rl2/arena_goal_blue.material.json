@@ -1,0 +1,20 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/arena_goal_blue.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 0.2,
+    "gGloss": 16,
+    "gFresnel": 0.0,
+    "gEmissiveStrength": 1.0,
+    "gAlphaCutoff": 0.35,
+    "gUnlit": 0.3
+  },
+  "doubleSided": true,
+  "castShadow": false
+}

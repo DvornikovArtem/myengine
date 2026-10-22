@@ -8,6 +8,10 @@ set(CMAKE_SUPPRESS_REGENERATION ON)
 
 option(MYENGINE_COPY_RUNTIME_ASSETS "Copy assets/config to target output directory" ON)
 option(MYENGINE_BUILD_TESTS "Build myengine tests" ON)
+# The game for players (tools/package_game.ps1, docs/game/packaging.md): RocketArena.exe without the path to the sources,
+# without the assistant and its MCP bridge, without tests; logs and settings go to %LOCALAPPDATA%\RocketArena.
+# Build it in its own folder (build-shipping/) in the Release configuration: Tracy is only on in RelWithDebInfo.
+option(MYENGINE_SHIPPING "Build the shipping game (RocketArena.exe)" OFF)
 # Checks for C++ errors (tools/check.ps1 runs them, docs/dev/cpp-checks.md). Each one needs its own build directory:
 #   MYENGINE_ASAN    AddressSanitizer (MSVC /fsanitize=address) for our targets, build-asan/
 #   MYENGINE_ANALYZE MSVC /analyze for our targets, build-analyze/
@@ -190,7 +194,7 @@ add_subdirectory(engine)
 add_subdirectory(game/rl)
 add_subdirectory(app)
 
-if(MYENGINE_BUILD_TESTS)
+if(MYENGINE_BUILD_TESTS AND NOT MYENGINE_SHIPPING)
   enable_testing()
   add_subdirectory(tests)
 endif()
