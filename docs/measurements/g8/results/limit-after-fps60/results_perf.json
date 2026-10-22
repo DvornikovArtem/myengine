@@ -1,0 +1,447 @@
+{
+ "window": [
+  12.0,
+  38.0
+ ],
+ "groups": {
+  "offline": [
+   {
+    "frames": 1536,
+    "seconds": 25.621542067,
+    "fps": 59.91052357371757,
+    "interval_ms": {
+     "median": 16.666911,
+     "p95": 16.678157300000002,
+     "p99": 16.72420606,
+     "p999": 24.978835761998376,
+     "max": 51.546519
+    },
+    "over_7ms": 1534,
+    "over_10ms": 1534,
+    "over_16_7ms": 31,
+    "zones": {
+     "Jobs::Wait": {
+      "calls_per_frame": 2.0703125,
+      "median": 0.00041,
+      "p99": 0.0020061000000000007,
+      "max": 1.411363,
+      "per_frame": 0.0019803014322916667
+     },
+     "Rl::BallForecast": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.008771500000000002,
+      "p99": 0.020832930000000003,
+      "max": 0.228304,
+      "per_frame": 0.01929616731770833
+     },
+     "myengine::render::dx12::Dx12RenderAdapter::EndFrame": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.807024,
+      "p99": 1.9682487599999983,
+      "max": 44.514533,
+      "per_frame": 0.887217265625
+     },
+     "World::UpdateSystems": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.533063,
+      "p99": 1.9588101199999954,
+      "max": 6.474632,
+      "per_frame": 0.5820580247395833
+     },
+     "UiManager::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.117042,
+      "p99": 0.32757027999999755,
+      "max": 1.265041,
+      "per_frame": 0.12843277473958334
+     },
+     "RlGame::Camera": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.007324,
+      "p99": 0.03212139999999999,
+      "max": 0.200401,
+      "per_frame": 0.008717893880208332
+     },
+     "myengine::ecs::systems::PlayerControlSystem::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.001703,
+      "p99": 0.005563439999999998,
+      "max": 0.192532,
+      "per_frame": 0.002116115234375
+     },
+     "Scripts::HotReload": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000802,
+      "p99": 0.009354439999999953,
+      "max": 0.016682,
+      "per_frame": 0.00118405078125
+     },
+     "Physics::RebuildDebugGeometry": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.012083,
+      "p99": 0.039582799999999634,
+      "max": 2.116118,
+      "per_frame": 0.015492733723958332
+     },
+     "Frame": {
+      "calls_per_frame": 1.0,
+      "median": 16.6664795,
+      "p99": 16.723744800000002,
+      "max": 51.546349,
+      "per_frame": 16.69096439778646
+     },
+     "RenderFrame": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 2.36811,
+      "p99": 4.780403719999992,
+      "max": 49.692224,
+      "per_frame": 2.5464733899739582
+     },
+     "myengine::render::dx12::Dx12RenderAdapter::DrawUiGeometry": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.00548,
+      "p99": 0.028521479999999908,
+      "max": 0.140518,
+      "per_frame": 0.006982520833333333
+     },
+     "StateMachine::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000982,
+      "p99": 0.003226399999999986,
+      "max": 0.030428,
+      "per_frame": 0.0011799680989583333
+     },
+     "Fx::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.009368,
+      "p99": 0.048141199999999995,
+      "max": 0.085683,
+      "per_frame": 0.011773728515625
+     },
+     "myengine::ecs::systems::PhysicsSystem::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.077347,
+      "p99": 0.20224727999999936,
+      "max": 5.685933,
+      "per_frame": 0.087659
+     },
+     "myengine::ecs::systems::RenderSystem::Render": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 1.063952,
+      "p99": 2.3408625599999913,
+      "max": 3.536517,
+      "per_frame": 1.1716803977864583
+     },
+     "RlFeedback::Frame": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.033423,
+      "p99": 0.10481675999999975,
+      "max": 0.297375,
+      "per_frame": 0.037725693359375
+     },
+     "RecordDraws": {
+      "calls_per_frame": 4.002604166666667,
+      "median": 0.01822,
+      "p99": 0.08212292999999977,
+      "max": 0.545537,
+      "per_frame": 0.08525077799479168
+     },
+     "Scripts::Flush": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000661,
+      "p99": 0.002513039999999992,
+      "max": 0.043781,
+      "per_frame": 0.0008590345052083333
+     },
+     "Rl::Control": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.024757,
+      "p99": 0.075976,
+      "max": 0.304705,
+      "per_frame": 0.054127303385416665
+     },
+     "Fx::Render": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.041048,
+      "p99": 0.12596263999999968,
+      "max": 0.308146,
+      "per_frame": 0.04685561197916666
+     },
+     "HotReload::Scan": {
+      "calls_per_frame": 0.032552083333333336,
+      "median": 18.607353500000002,
+      "p99": 39.14504666,
+      "max": 39.316383,
+      "per_frame": 0.6883376640625
+     },
+     "UpdateEditorRenderStats": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.01015,
+      "p99": 0.03464047999999988,
+      "max": 0.27352,
+      "per_frame": 0.012502167317708333
+     },
+     "SubmitDraws": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.00528,
+      "p99": 0.032668559999999985,
+      "max": 0.212915,
+      "per_frame": 0.007356078776041667
+     },
+     "Physics::BroadPhase": {
+      "calls_per_frame": 1.001953125,
+      "median": 0.024767,
+      "p99": 0.09621733999999954,
+      "max": 2.969214,
+      "per_frame": 0.030041485026041665
+     },
+     "Jobs::RunJob": {
+      "calls_per_frame": 0.06640625,
+      "median": 0.417764,
+      "p99": 0.7561810099999999,
+      "max": 0.756879,
+      "per_frame": 0.02920936328125
+     },
+     "myengine::ecs::systems::CameraControlSystem::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.00016,
+      "p99": 0.0008973999999999987,
+      "max": 0.024106,
+      "per_frame": 0.0002331875
+     },
+     "Scripts::Start": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000902,
+      "p99": 0.003155199999999996,
+      "max": 0.029466,
+      "per_frame": 0.0011197955729166666
+     },
+     "FileWatcher::Scan": {
+      "calls_per_frame": 0.06640625,
+      "median": 0.416406,
+      "p99": 0.74658247,
+      "max": 0.754866,
+      "per_frame": 0.0290788046875
+     },
+     "Rl::Physics": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.044019,
+      "p99": 0.18081450000000002,
+      "max": 0.251328,
+      "per_frame": 0.10295869596354167
+     },
+     "Rl::Step": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.07239799999999999,
+      "p99": 0.25092746,
+      "max": 0.432108,
+      "per_frame": 0.16469778906250002
+     },
+     "myengine::render::dx12::Dx12RenderAdapter::Draw": {
+      "calls_per_frame": 77.66796875,
+      "median": 2e-05,
+      "p99": 0.000371,
+      "max": 0.20542,
+      "per_frame": 0.0035437350260416668
+     },
+     "Fx::BuildBatches": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.020499,
+      "p99": 0.06458443999999966,
+      "max": 0.268641,
+      "per_frame": 0.023322486328125
+     },
+     "Rl::Match": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.08962999999999999,
+      "p99": 0.29278765000000007,
+      "max": 0.497481,
+      "per_frame": 0.20326161197916667
+     },
+     "ResourceManager::UpdateHotReload": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.004429,
+      "p99": 0.17906215999999933,
+      "max": 0.331106,
+      "per_frame": 0.012154292317708334
+     },
+     "ShadowPass": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.050546,
+      "p99": 0.18364455999999896,
+      "max": 0.589822,
+      "per_frame": 0.05907118229166666
+     },
+     "CollectRenderables": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.307905,
+      "p99": 0.7376044399999986,
+      "max": 1.291247,
+      "per_frame": 0.32977355143229165
+     },
+     "myengine::ui::UiManager::RenderWindow": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.014488,
+      "p99": 0.06327643999999977,
+      "max": 0.462302,
+      "per_frame": 0.017882862630208333
+     },
+     "myengine::ecs::systems::RlGameSystem::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.331901,
+      "p99": 0.7751347599999997,
+      "max": 1.045889,
+      "per_frame": 0.3499069733072917
+     },
+     "Physics::Integrate": {
+      "calls_per_frame": 1.001953125,
+      "median": 0.028033,
+      "p99": 0.08165679999999996,
+      "max": 0.179689,
+      "per_frame": 0.0304861796875
+     },
+     "BuildDrawItems": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.324787,
+      "p99": 0.8674525599999965,
+      "max": 1.484842,
+      "per_frame": 0.3633173815104167
+     },
+     "myengine::ecs::systems::DebugRenderSystem::Render": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000171,
+      "p99": 0.0012079599999999951,
+      "max": 0.003446,
+      "per_frame": 0.00023036132812500002
+     },
+     "Scripts::Events": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.00019,
+      "p99": 0.0012747999999999974,
+      "max": 0.014418,
+      "per_frame": 0.000282751953125
+     },
+     "Scripts::OnUpdate": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000201,
+      "p99": 0.0012290399999999985,
+      "max": 0.075673,
+      "per_frame": 0.00033893164062500004
+     },
+     "Composite": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.085472,
+      "p99": 0.25119259999999993,
+      "max": 0.749625,
+      "per_frame": 0.09666692447916668
+     },
+     "Fx::UpdateSystem": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.0578,
+      "p99": 0.15713935999999978,
+      "max": 0.44191,
+      "per_frame": 0.06481988671875
+     },
+     "Scripts::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.008296,
+      "p99": 1.3563459999999992,
+      "max": 2.495374,
+      "per_frame": 0.03524456705729167
+     },
+     "myengine::ecs::systems::MotionSystem::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.0314,
+      "p99": 0.0880755199999998,
+      "max": 0.225016,
+      "per_frame": 0.03415576692708334
+     },
+     "HotReload::Snapshot": {
+      "calls_per_frame": 0.032552083333333336,
+      "median": 0.12897,
+      "p99": 0.29110380999999985,
+      "max": 0.320666,
+      "per_frame": 0.004618036458333333
+     },
+     "Audio::Update": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.015229,
+      "p99": 0.06388367999999991,
+      "max": 0.35796,
+      "per_frame": 0.0182709140625
+     },
+     "Present": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.581265,
+      "p99": 1.577358959999996,
+      "max": 43.963043,
+      "per_frame": 0.6655747447916667
+     },
+     "Physics::Step": {
+      "calls_per_frame": 1.001953125,
+      "median": 0.062609,
+      "p99": 0.17772287999999953,
+      "max": 3.409251,
+      "per_frame": 0.07113654752604166
+     },
+     "FlushScene": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.144565,
+      "p99": 0.4491977999999993,
+      "max": 0.76834,
+      "per_frame": 0.16372918554687502
+     },
+     "RlGame::ApplyToScene": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.091033,
+      "p99": 0.239282839999999,
+      "max": 0.61065,
+      "per_frame": 0.09842530403645833
+     },
+     "RlFeedback::OnTick": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.001774,
+      "p99": 0.03520683000000001,
+      "max": 0.127202,
+      "per_frame": 0.005985172526041666
+     },
+     "FrustumCulling": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.398147,
+      "p99": 0.8858261599999994,
+      "max": 2.220645,
+      "per_frame": 0.4495444375
+     },
+     "myengine::render::dx12::Dx12RenderAdapter::BeginFrame": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.134987,
+      "p99": 0.3691113599999994,
+      "max": 0.701221,
+      "per_frame": 0.14767465104166666
+     },
+     "Rl::Bots": {
+      "calls_per_frame": 2.00390625,
+      "median": 0.013927,
+      "p99": 0.0478071,
+      "max": 0.24769,
+      "per_frame": 0.03198148893229167
+     },
+     "Physics::NarrowPhaseAndSolve": {
+      "calls_per_frame": 1.001953125,
+      "median": 0.001703,
+      "p99": 0.006637219999999964,
+      "max": 0.068003,
+      "per_frame": 0.002097641927083333
+     },
+     "myengine::resource::ResourceManager::PumpAsyncLoads": {
+      "calls_per_frame": 1.0006510416666667,
+      "median": 0.000882,
+      "p99": 0.00388764,
+      "max": 0.043954,
+      "per_frame": 0.0012332246093750001
+     }
+    }
+   }
+  ]
+ }
+}

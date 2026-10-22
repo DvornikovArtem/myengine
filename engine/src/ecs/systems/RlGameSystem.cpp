@@ -844,6 +844,7 @@ namespace myengine::ecs::systems
 
         void ApplyToScene(World& world, const float deltaTime)
         {
+            ZoneScopedN("RlGame::ApplyToScene");
             // the match (or the network), or the training when there is no match
             const rl::RlMatch* view = View();
             float alpha = std::clamp(accumulator / rl::kTickDt, 0.0f, 1.0f);
@@ -1059,6 +1060,7 @@ namespace myengine::ecs::systems
         void UpdateCamera(World& world, const float deltaTime, const rl::RlCarState& car, dx::FXMVECTOR carPosition, dx::FXMVECTOR carRotation,
                           dx::FXMVECTOR ballPosition, const rl::RlTuning& arenaTuning, const rl::RlSim& sim, const rl::RlCinematicView* cinematic = nullptr)
         {
+            ZoneScopedN("RlGame::Camera");
             if (camera == kInvalidEntity)
             {
                 return;

@@ -134,6 +134,7 @@ set(ENGINE_SOURCES
   src/core/AppPaths.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
+  src/core/FramePacer.cpp
   src/core/Logger.cpp
   src/core/ProjectContext.cpp
   src/core/Timer.cpp

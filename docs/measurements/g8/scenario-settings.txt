@@ -1,0 +1,13 @@
+# Video settings through the screens, as a player does it: Settings > Video > VSync Off, Frame rate limit 144; then 25 s on the screen (the frame rate shows whether the limit works)
+5.5 key Down
+6.0 key Down
+6.5 key Enter
+7.5 key E
+8.0 key E
+8.5 key Down
+9.0 key Left
+9.5 key Down
+10.0 key Right
+10.5 key Right
+11.0 key Right
+40.0 quit

@@ -241,6 +241,7 @@ namespace myengine::core
         bool deferredSceneLoad_ = false;
         bool gameMode_ = false;
         int fpsLimit_ = 0; // frames per second the main loop is held to, 0: none
+        int slowMessageLogs_ = 0; // the slow window messages that were written to the log (a few, to find what holds the loop)
         bool videoApplied_ = false;
         int lastVideoWidth_ = 0;
         int lastVideoHeight_ = 0;
