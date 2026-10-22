@@ -31,6 +31,8 @@ namespace rl::net
     }
 
 #ifndef MYENGINE_STEAM
+    bool SteamPersonaName(std::string&) { return false; }
+
     namespace
     {
         class UnavailableSteamLobbyService final : public ILobbyService

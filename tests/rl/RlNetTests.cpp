@@ -3,6 +3,7 @@
 // messages, and a host with clients that predict and roll back. Time is a virtual clock, so a minute of play takes seconds; one test
 // goes over real UDP sockets on 127.0.0.1. `--verbose` prints more.
 
+#include <rl/RlName.h>
 #include <rl/RlNet.h>
 #include <rl/RlNetProtocol.h>
 #include <rl/net/LobbyLan.h>
@@ -74,6 +75,7 @@ namespace
         std::vector<std::unique_ptr<net::INetTransport>> clientTransports;
         std::unique_ptr<RlNetHost> host;
         std::vector<std::unique_ptr<RlNetClient>> clients;
+        std::string nextClientName;  // the name of the next AddClient (empty: "player<index>")
         std::vector<bool> clientActive;
         std::map<uint32_t, uint64_t> hostHashes;  // tick -> hash of the host's state at that tick
         std::map<uint32_t, RlWorldState> hostWorlds;  // tick -> the host's world at that tick
@@ -112,7 +114,7 @@ namespace
             clients.push_back(std::make_unique<RlNetClient>(*clientTransports.back(), tuning));
             clientActive.push_back(true);
             std::string error;
-            CHECK(clients.back()->Connect("5000", "player" + std::to_string(index), error));
+            CHECK(clients.back()->Connect("5000", nextClientName.empty() ? "player" + std::to_string(index) : nextClientName, error));
             return *clients.back();
         }
 
@@ -1052,6 +1054,121 @@ namespace
         CHECK(guest->State() == net::LobbyState::Idle);
     }
 
+    // The nickname (G1n): the name that the player has (the Steam profile, the typed one, the Windows user) is cleaned once for every place that shows or
+    // sends it, and it gets through the lobby and the slot of the net match whole, Cyrillic included
+    void TestNicknames()
+    {
+        std::printf("nicknames: cleaning, the field, the lobby, the slot of the match\n");
+        const std::string artem = "\xD0\x90\xD1\x80\xD1\x82\xD1\x91\xD0\xBC";  // "Артём"
+        const std::string sixteen = std::string("\xD0\x90\xD1\x80\xD1\x82\xD1\x91\xD0\xBC") + "\xD0\x94\xD0\xB2\xD0\xBE\xD1\x80\xD0\xBD\xD0\xB8\xD0\xBA\xD0\xBE\xD0\xB2" + "\xD1\x8B\xD0\xB9";  // "АртёмДворниковый": 16 letters
+        const std::string pk = "\xD0\xBF\xD0\xBA";                                // "пк"
+        // what may stay: Latin, Cyrillic, digits and signs; the rest is "?", the length is cut by the bytes of the slot, never inside a character
+        CHECK(SanitizePlayerName("Artem") == "Artem");
+        CHECK(SanitizePlayerName(pk) == pk);
+        CHECK(SanitizePlayerName("  " + artem + "  ") == artem);                      // spaces cut, the Cyrillic stays
+        CHECK(SanitizePlayerName("Ann\xF0\x9F\x98\x80") == "Ann?");                  // an emoji has no glyph
+        CHECK(SanitizePlayerName("\xE6\x97\xA5\xE6\x9C\xAC") == "??");                // CJK as well
+        CHECK(SanitizePlayerName("a\tb\nc") == "abc");                                // control characters are dropped
+        CHECK(SanitizePlayerName("bad\xFF" "byte") == "bad?byte");                    // not UTF-8
+        CHECK(SanitizePlayerName("").empty() && SanitizePlayerName("   ").empty());
+        std::string longCyrillic;
+        for (int i = 0; i < 20; ++i)
+        {
+            longCyrillic += "\xD0\xB6";  // 40 bytes
+        }
+        const std::string cut = SanitizePlayerName(longCyrillic);
+        CHECK(cut.size() == 32 && NameCharCount(cut) == 16 && SanitizePlayerName(cut) == cut);  // 16 Cyrillic letters of two bytes fill the slot whole
+        CHECK(SanitizePlayerName(std::string(40, 'x')).size() == kPlayerNameBytes);
+
+        // the field of the nickname (Settings, without Steam): what is typed, what is kept
+        CHECK(FilterNicknameInput("  " + artem) == artem);                                          // no space at the start
+        CHECK(FilterNicknameInput("Ann\xF0\x9F\x98\x80 B!\tc") == "Ann Bc");                        // an emoji, "!" and a tab are not typed
+        CHECK(FilterNicknameInput(std::string(30, 'x')).size() == static_cast<size_t>(kNicknameMaxChars));
+        CHECK(FilterNicknameInput(longCyrillic).size() == 32);                                      // 16 letters: the characters and the bytes of the slot agree
+        CHECK(!NicknameValid("") && !NicknameValid("a") && !NicknameValid(" ab") && !NicknameValid("ab ") && !NicknameValid("A\tB") && !NicknameValid("a?"));
+        CHECK(NicknameValid("ab") && NicknameValid(pk) && NicknameValid("Artem_2000") && NicknameValid(std::string(16, 'x')) && !NicknameValid(std::string(17, 'x')));
+        CHECK(TrimNickname("  ab c  ") == "ab c" && TrimNickname("   ").empty());
+
+        // Join carries the whole name of the slot (it was 15 bytes, cutting a Cyrillic name in the middle; now 32: 16 Cyrillic letters)
+        std::vector<uint8_t> bytes;
+        RlJoinMsg join;
+        join.name = cut;
+        RlEncode(join, bytes);
+        RlJoinMsg back;
+        CHECK(RlDecode(bytes.data(), bytes.size(), back) && back.name == cut);
+
+        // over the net: the guest joins with its name, the table of the host and the table of the guest have it
+        {
+            net::NetSimParams sim;
+            Rig rig(sim, 1);
+            rig.scripted = false;
+            rig.nextClientName = artem;
+            RlNetClient& client = rig.AddClient();
+            CHECK(rig.RunUntil(10.0, &AllInLobby));
+            CHECK(rig.host->StartMatch(rig.now));
+            rig.Run(1.0);
+            CHECK(std::strcmp(rig.host->Match()->World().match.names[1], artem.c_str()) == 0);
+            CHECK(std::strcmp(client.Match()->World().match.names[1], artem.c_str()) == 0);
+        }
+
+        // a name of 16 Cyrillic letters (32 bytes) is in the table of the host and of the guest whole, and it stays the same through the rollback of the
+        // guest, the snapshots and a late join (the late joiner takes a bot's slot and its name, like before: the names are fixed at the start)
+        {
+            net::NetSimParams sim;
+            sim.latencyMs = 40.0f;
+            sim.lossPercent = 3.0f;
+            Rig rig(sim, 2);
+            rig.scripted = false;
+            rig.nextClientName = sixteen;
+            RlNetClient& first = rig.AddClient();
+            CHECK(rig.RunUntil(10.0, &AllInLobby));
+            CHECK(rig.host->StartMatch(rig.now));
+            rig.Run(4.0);
+            rig.nextClientName = artem;
+            RlNetClient& late = rig.AddClient();
+            rig.Run(5.0);
+            CHECK(late.State() == RlNetClientState::Playing && late.Match() != nullptr);
+            const int lateSlot = late.Slot();
+            const int firstSlot = first.Slot();
+            CHECK(lateSlot > 0 && firstSlot > 0 && lateSlot != firstSlot);
+            CHECK(std::strlen(rig.host->Match()->World().match.names[firstSlot]) == 32);
+            CHECK(std::strcmp(rig.host->Match()->World().match.names[firstSlot], sixteen.c_str()) == 0);
+            CHECK(std::strcmp(first.Match()->World().match.names[firstSlot], sixteen.c_str()) == 0);
+            CHECK(std::memcmp(rig.host->Match()->World().match.names, late.Match()->World().match.names, sizeof(rig.host->Match()->World().match.names)) == 0);
+            CHECK(std::memcmp(rig.host->Match()->World().match.names, first.Match()->World().match.names, sizeof(rig.host->Match()->World().match.names)) == 0);
+            CHECK(late.Stats().hardCorrections == 0 && late.Stats().hashMismatches == 0 && first.Stats().hashMismatches == 0);
+        }
+
+        // the LAN lobby: the names of the members arrive as they are, an emoji becomes "?"
+        net::LoopbackHub hub;
+        double now = 0.0;
+        net::NetSimParams none;
+        auto host = MakeTestLobby(hub, sixteen, none, 21);
+        auto guest = MakeTestLobby(hub, pk + " \xF0\x9F\x98\x80", none, 22);
+        net::LobbyCreateOptions create;
+        create.hostName = sixteen;
+        create.mode = 1;
+        create.maxPlayers = 2;
+        create.lobbyPort = 5300;
+        create.gamePort = 5200;
+        std::string error;
+        CHECK(host->Create(create, error));
+        guest->RefreshList();
+        StepLobbies(now, 3.0, {host.get(), guest.get()});
+        CHECK(!guest->Lobbies().empty() && guest->Lobbies()[0].hostName == sixteen);
+        CHECK(!guest->Lobbies().empty() && guest->Join(guest->Lobbies()[0].id, error));
+        StepLobbies(now, 2.0, {host.get(), guest.get()});
+        CHECK(guest->Members().size() == 2 && guest->Members()[0].name == sixteen && guest->Members()[1].name == pk + " ?");
+        CHECK(host->Members().size() == 2 && host->Members()[1].name == pk + " ?");
+        guest->Leave();
+        host->Leave();
+
+#ifndef MYENGINE_STEAM
+        std::string steamName;
+        CHECK(!net::SteamPersonaName(steamName));  // without Steam the game takes the Windows user
+#endif
+    }
+
     void TestLanLobbyEdges()
     {
         std::printf("LAN lobby: full, other version, by hand, leaving, the list forgets\n");
@@ -1448,6 +1565,7 @@ int main(int argc, char** argv)
     TestJoinRefusals();
     TestLanLobby();
     TestLanLobbyEdges();
+    TestNicknames();
     TestLanLobbyUdp();
     TestSteamWithoutSdk();
     TestUdp();

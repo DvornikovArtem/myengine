@@ -86,7 +86,7 @@ namespace rl
     };
 
     constexpr int kEventRing = 16;     // events of the match the UI shows (the feed): the ring keeps the last ones
-    constexpr int kNameBytes = 24;     // a player's name, UTF-8 with a zero at the end
+    constexpr int kNameBytes = 33;     // a player's name, UTF-8 with a zero at the end: 32 bytes, 16 Cyrillic letters (G1n; it was 24)
 
     // What happened in the match, for the feed and the tables of the UI and for the sound.
     enum class RlMatchEventType : int32_t

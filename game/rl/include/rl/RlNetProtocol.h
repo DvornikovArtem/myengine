@@ -23,7 +23,7 @@
 
 namespace rl
 {
-    constexpr uint16_t kNetProtocolVersion = 2;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot
+    constexpr uint16_t kNetProtocolVersion = 3;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: names up to 32 bytes (G1n, kNameBytes 33)
     constexpr int kNetInputBytes = 5;
     constexpr int kNetInputWindow = 8;   // ticks of input carried by one Input and one Snapshot message
     constexpr int kSnapshotInterval = 2; // ticks between snapshots: 60 Hz
@@ -65,7 +65,7 @@ namespace rl
     {
         uint16_t version = kNetProtocolVersion;
         uint64_t tuningHash = 0;
-        std::string name;  // up to 15 characters
+        std::string name;  // up to kPlayerNameBytes bytes (RlName.h)
     };
 
     struct RlWelcomeMsg

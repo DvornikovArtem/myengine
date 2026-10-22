@@ -69,7 +69,7 @@ namespace
     {
         RlReplayBuffer buffer(1200);
         Check(buffer.Empty() && buffer.Capacity() == 1200, "an empty ring of 1200 ticks (10 s)");
-        Check(buffer.Bytes() <= 2u * 1024u * 1024u, "the ring is under 2 MB (" + std::to_string(buffer.Bytes()) + " bytes, " + std::to_string(sizeof(RlWorldState)) + " per tick)");
+        Check(buffer.Bytes() <= 2304u * 1024u, "the ring is under 2.25 MB (" + std::to_string(buffer.Bytes()) + " bytes, " + std::to_string(sizeof(RlWorldState)) + " per tick; it was 2 MB until the names of the table grew to 33 bytes, G1n)");
 
         for (uint32_t tick = 1; tick <= 1500; ++tick)
         {

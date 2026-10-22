@@ -13,6 +13,7 @@
 // that appears when the host starts the match), game_port. In the data of a member: ready=0|1.
 
 #include <rl/RlTypes.h>
+#include <rl/RlName.h>
 #include <rl/net/LobbySteam.h>
 
 #include "SteamTransport.h"
@@ -74,7 +75,7 @@ namespace rl::net
                     callbacks_ = std::make_unique<Callbacks>(this);
                     if (name_.empty() && SteamFriends() != nullptr)
                     {
-                        name_ = SteamFriends()->GetPersonaName();
+                        name_ = SanitizePlayerName(SteamFriends()->GetPersonaName());
                     }
                 }
             }
@@ -539,7 +540,7 @@ namespace rl::net
                     const CSteamID id = matchmaking->GetLobbyMemberByIndex(lobby_, i);
                     LobbyMember member;
                     member.id = IdToString(id);
-                    member.name = SteamFriends() != nullptr ? SteamFriends()->GetFriendPersonaName(id) : member.id;
+                    member.name = SanitizePlayerName(SteamFriends() != nullptr ? SteamFriends()->GetFriendPersonaName(id) : member.id);
                     const char* ready = matchmaking->GetLobbyMemberData(lobby_, id, "ready");
                     member.ready = ready != nullptr && ready[0] == '1';
                     member.isHost = id.ConvertToUint64() == hostId_;
@@ -599,6 +600,33 @@ namespace rl::net
             CSteamID lobby_;
             uint64_t hostId_ = 0;
         };
+    }
+
+    bool SteamPersonaName(std::string& name)
+    {
+        // a lobby service holds Steam up: the name is read live; without one Steam is started for the moment (once: the answer is kept)
+        static bool tried = false;
+        static std::string cached;
+        if (g_steamUsers > 0 && SteamFriends() != nullptr)
+        {
+            name = SanitizePlayerName(SteamFriends()->GetPersonaName());
+            return !name.empty();
+        }
+        if (!tried)
+        {
+            tried = true;
+            std::string why;
+            if (AcquireSteam(why))
+            {
+                if (SteamFriends() != nullptr)
+                {
+                    cached = SanitizePlayerName(SteamFriends()->GetPersonaName());
+                }
+                ReleaseSteam();
+            }
+        }
+        name = cached;
+        return !name.empty();
     }
 
     std::unique_ptr<ILobbyService> MakeSteamLobbyService(const std::string& name) { return std::make_unique<SteamLobbyService>(name); }

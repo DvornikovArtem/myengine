@@ -1,6 +1,7 @@
 // RlMatch.cpp
 
 #include <rl/RlMatch.h>
+#include <rl/RlName.h>
 
 #include "RlBots.h"
 #include "RlBotsV1.h"
@@ -216,7 +217,7 @@ namespace rl
             int bots = 0;
             for (int slot = 0; slot < slots; ++slot)
             {
-                std::string name = config.names[slot];
+                std::string name = SanitizePlayerName(config.names[slot]);
                 if (name.empty())
                 {
                     name = IsBot(slot) ? kBotNames[bots % 7] : "Player";
