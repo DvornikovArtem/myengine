@@ -579,6 +579,57 @@ namespace
 
     RlRawInput Raw() { return RlRawInput{}; }
 
+    // a tap shorter than a frame (and a frame with no tick in it) is not lost: the latch keeps it until a tick takes it
+    void TestInputLatch()
+    {
+        std::printf("input latch: a tap is never lost between two ticks\n");
+        RlInputLatch latch;
+        RlCarInput held;
+        // nothing pressed: the tick sees what is held
+        held.throttle = 1.0f;
+        RlCarInput tick = latch.Take(held);
+        CHECK(tick.throttle == 1.0f && !tick.jump && !latch.Pending());
+        // a click of the jump button inside a frame, let go before the tick: the tick still gets it, the next one does not
+        RlCarInput tapped;
+        tapped.jump = true;
+        latch.Press(tapped);
+        CHECK(latch.Pending());
+        tick = latch.Take(held);
+        CHECK(tick.jump && tick.throttle == 1.0f);
+        tick = latch.Take(held);
+        CHECK(!tick.jump && !latch.Pending());
+        // two frames with no tick between them: both taps are kept (the larger steering, both buttons)
+        RlCarInput first, second;
+        first.steer = -0.4f;
+        first.boost = true;
+        second.steer = 1.0f;
+        second.jump = true;
+        latch.Press(first);
+        latch.Press(second);
+        RlCarInput heldSteer;
+        heldSteer.steer = 0.2f;
+        tick = latch.Take(heldSteer);
+        CHECK(tick.steer == 1.0f && tick.boost && tick.jump);
+        // a stick held the other way beyond the tap wins (the larger value)
+        RlCarInput small;
+        small.steer = 0.3f;
+        latch.Press(small);
+        RlCarInput heldFull;
+        heldFull.steer = -1.0f;
+        tick = latch.Take(heldFull);
+        CHECK(tick.steer == -1.0f);
+        // the whole way: a key that goes down and up inside a frame (the "pressed" events of the controls) gives one tick of its action
+        const RlControls controls = RlControls::Defaults();
+        RlRawInput none;
+        RlRawInput pressedD;
+        pressedD.keys['D'] = true;  // the event of the frame; the key is no longer down at the end of it
+        latch.Press(controls.Evaluate(pressedD).car);
+        tick = latch.Take(controls.Evaluate(none).car);
+        CHECK(tick.steer > 0.9f);
+        tick = latch.Take(controls.Evaluate(none).car);
+        CHECK(tick.steer == 0.0f);
+    }
+
     void TestControls()
     {
         std::printf("controls as data\n");
@@ -799,6 +850,39 @@ namespace
 
 int main(int argc, char** argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--find-stuck") == 0)
+    {
+        const int mode = argc > 2 ? std::atoi(argv[2]) : 1;
+        const uint64_t seed = argc > 3 ? static_cast<uint64_t>(std::atoi(argv[3])) : 3;
+        const int level = argc > 4 ? std::atoi(argv[4]) : 2;
+        RlMatchConfig config;
+        config.mode = mode;
+        config.seed = seed;
+        config.humanMask = 0;
+        config.botLevel = level;
+        RlMatch match(g_tuning, config);
+        std::vector<RlCarInput> inputs(static_cast<size_t>(match.SlotCount()));
+        float still[8] = {};
+        for (int t = 0; t < Ticks(180.0f); ++t)
+        {
+            match.Step(inputs.data());
+            const RlWorldState& w = match.World();
+            for (int i = 0; i < w.carCount; ++i)
+            {
+                const RlCarState& c = w.cars[i];
+                const float v = std::sqrt(c.linearVelocity.x * c.linearVelocity.x + c.linearVelocity.y * c.linearVelocity.y + c.linearVelocity.z * c.linearVelocity.z);
+                still[i] = (v < 0.5f && !c.demolished && w.match.phase == RlMatchPhase::Playing) ? still[i] + kTickDt : 0.0f;
+                if (still[i] > 5.0f && t % 60 == 0)
+                {
+                    const float upY = 1.0f - 2.0f * (c.rotation.x * c.rotation.x + c.rotation.z * c.rotation.z);
+                    std::printf("t %.1f car %d still %.1f s pos (%.1f %.2f %.1f) up.y %.2f wheels %d boost %.0f ball (%.1f %.1f %.1f)\n", static_cast<double>(t) / 120.0, i, static_cast<double>(still[i]),
+                                static_cast<double>(c.position.x), static_cast<double>(c.position.y), static_cast<double>(c.position.z), static_cast<double>(upY), c.wheelContacts, static_cast<double>(c.boost),
+                                static_cast<double>(w.ball.position.x), static_cast<double>(w.ball.position.y), static_cast<double>(w.ball.position.z));
+                }
+            }
+        }
+        return 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "--trace-bots") == 0)
     {
         TraceBots(argc > 2 ? std::atoi(argv[2]) : 1, 1);
@@ -817,6 +901,7 @@ int main(int argc, char** argv)
         }
     }
     TestControls();
+    TestInputLatch();
     TestKickoff();
     TestCountdownAndClock();
     TestPads();

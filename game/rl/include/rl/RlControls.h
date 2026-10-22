@@ -104,4 +104,25 @@ namespace rl
         std::vector<Binding> buttons_[static_cast<int>(RlButtonAction::Count)];
         std::vector<Binding> axes_[static_cast<int>(RlAxisAction::Count)];
     };
+
+    // The frames are longer than a tick at a high refresh rate and shorter at a low one, and a key can go down and up again inside one
+    // frame: what is pressed in a frame is kept until a tick takes it, so a tap is never lost. Press() takes what was pressed in a frame
+    // (the controls evaluated on the "went down since the last frame" events), Take() gives the input of one tick: what is held, with
+    // everything pressed since the last tick added (the larger value of an axis, any button). It is empty again after a Take().
+    class RlInputLatch
+    {
+    public:
+        void Press(const RlCarInput& tapped);
+        RlCarInput Take(const RlCarInput& held);
+        bool Pending() const { return pending_; }
+        void Clear()
+        {
+            latched_ = RlCarInput{};
+            pending_ = false;
+        }
+
+    private:
+        RlCarInput latched_{};
+        bool pending_ = false;
+    };
 }

@@ -36,6 +36,8 @@ namespace rl
         void ResetCar(int index, float x, float z, float yaw);
         void ResetBall(RlVec3 position, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
         void SetCarBoost(int index, float boost);
+        // The team of a car: cars of one team bump each other, only cars of different teams demolish (every car is its own team by default).
+        void SetCarTeam(int index, int team);
         // Where a demolished car comes back (ResetCar sets it to the spot the car was reset to).
         void SetRespawnPoint(int index, float x, float z, float yaw);
         // Puts a car at any pose (tests, kick-off spots, flip resets); the car keeps its boost and its jump state.

@@ -373,6 +373,19 @@ set_property(TARGET myengine_rl_match_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_match COMMAND myengine_rl_match_tests)
 set_tests_properties(rl_match PROPERTIES TIMEOUT 600)
 
+# G4e: the car of the game against RocketSim (reference traces written by tests/rl/rocketsim_diff, no RocketSim in this build)
+add_executable(myengine_rl_rocketsim_diff
+  rl/RlRocketSimDiffTests.cpp)
+
+target_link_libraries(myengine_rl_rocketsim_diff PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_rocketsim_diff PRIVATE
+  RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json"
+  RL_DIFF_TRACES="${CMAKE_SOURCE_DIR}/tests/rl/rocketsim_diff/traces")
+myengine_apply_compiler_options(myengine_rl_rocketsim_diff)
+set_property(TARGET myengine_rl_rocketsim_diff PROPERTY FOLDER "Tests")
+add_test(NAME rl_rocketsim_diff COMMAND myengine_rl_rocketsim_diff)
+set_tests_properties(rl_rocketsim_diff PROPERTIES TIMEOUT 300)
+
 # An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
 if(MYENGINE_ASAN)
   get_property(myengine_all_tests DIRECTORY PROPERTY TESTS)

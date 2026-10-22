@@ -126,7 +126,7 @@ namespace myengine::ecs::systems
         EntityId pads[rl::kPadCount] = {};
 
         float accumulator = 0.0f;
-        bool jumpLatched = false;
+        rl::RlInputLatch latch;      // what was pressed since the last tick, even if it was let go again before the frame ended
         bool ballCam = true;
         rl::RlCameraState cameraState;
         components::CameraComponent cameraHome;
@@ -222,7 +222,7 @@ namespace myengine::ecs::systems
             hud.clear();
             accumulator = 0.0f;
             cameraState = rl::RlCameraState{};
-            jumpLatched = false;
+            latch.Clear();
             haveCameraHome = false;
             core::ServiceLocator::GetEditorRuntimeState().gameCapturesMouse = false;
         }
@@ -563,10 +563,8 @@ namespace myengine::ecs::systems
             }
             rl::RlCarInput player = state.car;
             lastPlayer = player;
-            if (justPressed.car.jump)
-            {
-                jumpLatched = true;  // a click shorter than a frame still jumps
-            }
+            // A press shorter than a frame (a tap of a key, a click) is not lost: the events of the frame are kept until a tick takes them.
+            latch.Press(justPressed.car);
 
             // ---- fixed ticks
             accumulator += std::min(deltaTime, 0.1f);
@@ -574,12 +572,7 @@ namespace myengine::ecs::systems
             while (accumulator >= rl::kTickDt)
             {
                 accumulator -= rl::kTickDt;
-                inputs[0] = player;
-                if (jumpLatched)
-                {
-                    inputs[0].jump = true;
-                    jumpLatched = false;
-                }
+                inputs[0] = latch.Take(player);
                 match->Step(inputs.data());
             }
 
@@ -635,7 +628,8 @@ namespace myengine::ecs::systems
                     const float z = frontWheel ? t.car.wheelFrontZ : t.car.wheelRearZ;
                     const float radius = frontWheel ? t.car.wheelRadiusFront : t.car.wheelRadiusRear;
                     // the wheel hangs under its mount by the length of the spring
-                    const float drop = (frontWheel ? t.car.suspensionRestFront : t.car.suspensionRestRear) - b.wheelCompression[w];
+                    const float compression = a.wheelCompression[w] + (b.wheelCompression[w] - a.wheelCompression[w]) * s;
+                    const float drop = (frontWheel ? t.car.suspensionRestFront : t.car.suspensionRestRear) - compression;
                     const dx::XMVECTOR local = dx::XMVectorSet(side * (frontWheel ? t.car.wheelMountXFront : t.car.wheelMountXRear), t.car.wheelMountYOffset - drop, z, 0.0f);
                     wheel->position = ToVec3(dx::XMVectorAdd(position, dx::XMVector3Rotate(local, rotation)));
                     wheel->rotationDeg = EulerDegrees(rotation);

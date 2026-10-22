@@ -1,7 +1,7 @@
 // RlCarController.h
-// What a Rocket League car does in one tick: four suspension rays, grip, throttle, steering, the pull into the surface, jump, double jump,
-// dodge, air control and boost. Everything is a force or a velocity change on the Jolt body; nothing sets the pose.
-// The model (air control, jump, dodge, suspension, sticky force) follows RocketSim by ZealanL (MIT), see docs/game/rl-physics.md.
+// What a Rocket League car does in one tick: four suspension rays, the tyres (friction curves), throttle, brake, steering, the pull into
+// the surface, jump, double jump, dodge, air control, auto-roll, auto-flip and boost. Everything is a force or a velocity change on the
+// Jolt body; nothing sets the pose. The model follows RocketSim by ZealanL (MIT), see docs/game/rl-physics.md.
 
 #pragma once
 
@@ -23,20 +23,28 @@ namespace rl::detail
         float flipTime = 0.0f;      // seconds since the dodge started
         float flipPitch = 0.0f;     // direction of the flip: about the car's X (+ = nose down, a front flip) ...
         float flipRoll = 0.0f;      // ... and about its Z (+ = rolls left)
-        float rightSpinLeft = 0.0f; // seconds the turn of a car lying on its roof or side still runs
-        float rightSpinX = 0.0f;    // its local angular velocity (rad/s)
-        float rightSpinZ = 0.0f;
-        float bodyNormalX = 0.0f;   // normal of the surface the hitbox touches (towards the car), valid while bodyContact
+        float handbrakeVal = 0.0f;  // the handbrake builds up and lets go over time (0..1)
+        float autoFlipTimer = 0.0f; // seconds the roll of the auto-flip still runs
+        float autoFlipScale = 0.0f; // its direction (+-1 about the car's nose)
+        // What the tyres do in a tick was worked out in the tick before (RocketSim sets the wheels after it has computed their impulses)
+        float tyreSteer = 0.0f;     // the angle of the front wheels
+        float tyreEngine = 0.0f;    // the drive impulse of a wheel
+        float tyreBrake = 0.0f;     // the largest brake impulse of a wheel
+        float tyreLat[4] = {1.0f, 1.0f, 1.0f, 1.0f};   // the sideways and the forward grip of every wheel
+        float tyreLong[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        float boostingTime = 0.0f;  // seconds the current boost has run (a started boost runs at least boostMinTime)
+        float supersonicTime = 0.0f;
+        float bumpTimer = 0.0f;     // seconds this car cannot bump again (the car it bumped is in bumpOther)
+        float bodyNormalX = 0.0f;   // normal of the surface the hitbox touches (away from the surface), valid while bodyContact
         float bodyNormalY = 1.0f;
         float bodyNormalZ = 0.0f;
-        float gripScale = 1.0f;     // grip of the rear tyres: drops with the powerslide, comes back over handbrakeRecoverTime
-        float landingTimer = 0.0f;  // seconds the landing grip is still stronger
         float spawnX = 0.0f;
         float spawnY = 0.0f;
         float spawnZ = 0.0f;
         float spawnYaw = 0.0f;
         int32_t wheelContacts = 0;
-        int32_t ballHitCooldown = 0;
+        int32_t lastExtraTick = -10;  // tick of the last extra push this car gave the ball
+        int32_t bumpOther = -1;
         uint8_t demolished = 0;
         uint8_t jumpPrev = 0;
         uint8_t jumpUsed = 0;       // the first jump was made
@@ -45,9 +53,10 @@ namespace rl::detail
         uint8_t flipped = 0;        // a dodge was made (the pitch stick stays off a little after it)
         uint8_t dodging = 0;        // the flip spin is being driven
         uint8_t bodyContact = 0;    // the hitbox touched the arena in the last tick
-        uint8_t slideLatch = 0;     // the powerslide button was held in the air: it is the air roll until it is let go
-        uint8_t wasOnSurface = 0;
-        uint8_t selfRight = 0;      // the turn of a car lying on its roof or side runs
+        uint8_t slideLatch = 0;     // the powerslide button was held in the air as the air roll: it is no handbrake until it is let go
+        uint8_t autoFlipping = 0;
+        uint8_t boosting = 0;
+        uint8_t supersonic = 0;
     };
 
     struct CarContext
