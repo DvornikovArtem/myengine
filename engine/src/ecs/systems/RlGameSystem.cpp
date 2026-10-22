@@ -2822,6 +2822,18 @@ namespace myengine::ecs::systems
         impl_->pending.push_back(command);
     }
 
+    void RlGameSystem::AcknowledgeFailure()
+    {
+        // At once, not with the next frame: the screen that shows the reason would read the stage again before a command is taken. The match and the
+        // network were closed when the failure happened (FailNetwork), so only the status is left to clear.
+        RlGameStatus& status = impl_->status_;
+        if (status.stage == RlGameStage::Failed)
+        {
+            status.stage = RlGameStage::Menu;
+            status.error.clear();
+        }
+    }
+
     void RlGameSystem::RestartMatch()
     {
         Impl::Pending command;

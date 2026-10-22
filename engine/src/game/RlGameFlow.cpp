@@ -403,11 +403,16 @@ namespace myengine::game
 
             const sys::RlGameStatus& status = system.Status();
             // the network can end a match, or fail, on any screen
-            if (status.stage == sys::RlGameStage::Failed && screen != Screen::Main && screen != Screen::Boot)
+            if (status.stage == sys::RlGameStage::Failed && screen != Screen::Boot)
             {
                 errorTitle = "CONNECTION FAILED";
                 errorText = status.error.empty() ? "The connection was lost." : status.error;
-                GoTo(f, Screen::Main);
+                // shown once: the system goes back to Menu, or the next screen that opens would be thrown back to Main with the same error
+                system.AcknowledgeFailure();
+                if (screen != Screen::Main)
+                {
+                    GoTo(f, Screen::Main);
+                }
             }
 
             // a network match that the command line started (--game --rl-host / --rl-join) arrives without the Play screen
@@ -768,6 +773,7 @@ namespace myengine::game
             {
                 errorTitle = "CANNOT START";
                 errorText = status.error;
+                System().AcknowledgeFailure();
                 GoTo(f, Screen::Main);
             }
         }

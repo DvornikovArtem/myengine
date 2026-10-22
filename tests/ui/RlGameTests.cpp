@@ -29,6 +29,7 @@
 #include <DirectXMath.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -36,6 +37,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -825,6 +827,226 @@ namespace
         }
     }
 
+    // RL-B3: the host of a private match is gone (it crashed and says nothing, or it leaves). The guest gets a Failed stage with the reason, the screens show
+    // it once and acknowledge it, and then the menu works as ever: nothing throws the player back to the main screen, an offline match and a new lobby start.
+    // The other way round (a guest goes) is no failure for the host. One scenario = one host, one guest, a loopback hub, frame by frame like the lobby screens.
+    // The lobby list always has a row for every seat of the match (a bot or an empty one in the seats nobody took): the players are the rows with a name and no bot
+    int HumansIn(const sys::RlGameStatus& status)
+    {
+        return static_cast<int>(std::count_if(status.lobby.begin(), status.lobby.end(), [](const sys::RlLobbySlot& slot) { return !slot.name.empty() && !slot.bot; }));
+    }
+
+    void RunHostLost(const bool inMatch, const bool hostCrashes, const int port)
+    {
+        const std::string title = std::string("the host is gone ") + (inMatch ? "in the match" : "in the lobby") + (hostCrashes ? ", silently" : ", leaving");
+        std::cout << "  " << title << std::endl;
+        rl::net::LoopbackHub hub;
+        Rig hostRig;
+        Rig guestRig;
+        hostRig.system.SetGameMode(true);
+        guestRig.system.SetGameMode(true);
+        hostRig.Frames(2);
+        guestRig.Frames(2);
+
+        sys::RlGameMatchSetup host;
+        host.kind = sys::RlGameMatchSetup::Kind::Host;
+        host.mode = 1;
+        host.port = static_cast<std::uint16_t>(port);
+        host.playerName = "Host";
+        host.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 1); };
+        hostRig.system.StartMatch(host);
+        hostRig.Frames(3);
+        sys::RlGameMatchSetup join;
+        join.kind = sys::RlGameMatchSetup::Kind::Join;
+        join.mode = 1;
+        join.address = std::to_string(port);
+        join.playerName = "Guest";
+        join.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 2); };
+        guestRig.system.StartMatch(join);
+
+        bool hostAlive = true;
+        bool guestAlive = true;
+        const auto step = [&](const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames; ++i)
+            {
+                if (hostAlive)
+                {
+                    hostRig.system.Update(hostRig.world, 1.0f / 60.0f);
+                }
+                if (guestAlive)
+                {
+                    guestRig.system.Update(guestRig.world, 1.0f / 60.0f);
+                }
+                if (slow)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16));  // the network clock of the game is the real one: a silence of five seconds takes five
+                }
+            }
+        };
+        const auto stageOf = [](Rig& rig) { return rig.system.Status().stage; };
+        const auto waitFor = [&](const std::function<bool()>& done, const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames && !done(); ++i)
+            {
+                step(1, slow);
+            }
+            return done();
+        };
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Lobby && HumansIn(hostRig.system.Status()) >= 2; }, 600), "the guest is in the lobby of the host");
+        if (inMatch)
+        {
+            hostRig.system.StartHostedMatch();
+            Check(waitFor([&] { return stageOf(hostRig) == sys::RlGameStage::Playing && stageOf(guestRig) == sys::RlGameStage::Playing; }, 1200), "the match is on for both");
+            step(30);
+        }
+
+        // the host goes: with its goodbye, or without one (the guest finds out when nothing has come for five seconds)
+        if (hostCrashes)
+        {
+            hostAlive = false;
+        }
+        else
+        {
+            hostRig.system.LeaveMatch();
+            step(3);
+            hostAlive = false;
+        }
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Failed; }, 900, true), "the guest's stage turns Failed");
+        Check(!guestRig.system.Status().error.empty(), "and says why");
+        step(20);
+        Check(stageOf(guestRig) == sys::RlGameStage::Failed, "the failure waits for the screen that shows it");
+
+        // the screen showed it: the failure is over, it does not come back by itself
+        guestRig.system.AcknowledgeFailure();
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu && guestRig.system.Status().error.empty(), "an acknowledged failure is the menu again, without the error");
+        step(120);
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu && guestRig.system.Status().error.empty(), "and the menu stays the menu (no network object is left to fail again)");
+        guestRig.system.AcknowledgeFailure();
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu, "acknowledging when nothing failed changes nothing");
+
+        // everything starts again: a match against bots, a new lobby of this player, another guest in it
+        sys::RlGameMatchSetup offline;
+        offline.mode = 1;
+        offline.botLevel = 1;
+        guestRig.system.StartMatch(offline);
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Playing; }, 120), "an offline match starts after the failure");
+        guestRig.system.LeaveMatch();
+        step(3);
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu, "and ends in the menu");
+
+        sys::RlGameMatchSetup again;
+        again.kind = sys::RlGameMatchSetup::Kind::Host;
+        again.mode = 1;
+        again.port = static_cast<std::uint16_t>(port + 1);
+        again.playerName = "Guest";
+        again.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 3); };
+        guestRig.system.StartMatch(again);
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Lobby; }, 120), "a new lobby opens after the failure");
+        guestRig.system.LeaveMatch();
+        step(3);
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu, "and closes into the menu");
+    }
+
+    // A guest who goes is not a failure of the host: the lobby loses a name, the match goes on, no error appears
+    void RunGuestLost(const bool inMatch, const bool guestCrashes, const int port)
+    {
+        const std::string title = std::string("the guest is gone ") + (inMatch ? "in the match" : "in the lobby") + (guestCrashes ? ", silently" : ", leaving");
+        std::cout << "  " << title << std::endl;
+        rl::net::LoopbackHub hub;
+        Rig hostRig;
+        Rig guestRig;
+        hostRig.system.SetGameMode(true);
+        guestRig.system.SetGameMode(true);
+        hostRig.Frames(2);
+        guestRig.Frames(2);
+        sys::RlGameMatchSetup host;
+        host.kind = sys::RlGameMatchSetup::Kind::Host;
+        host.mode = 1;
+        host.port = static_cast<std::uint16_t>(port);
+        host.playerName = "Host";
+        host.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 1); };
+        hostRig.system.StartMatch(host);
+        hostRig.Frames(3);
+        sys::RlGameMatchSetup join;
+        join.kind = sys::RlGameMatchSetup::Kind::Join;
+        join.mode = 1;
+        join.address = std::to_string(port);
+        join.playerName = "Guest";
+        join.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 2); };
+        guestRig.system.StartMatch(join);
+
+        bool guestAlive = true;
+        const auto step = [&](const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames; ++i)
+            {
+                hostRig.system.Update(hostRig.world, 1.0f / 60.0f);
+                if (guestAlive)
+                {
+                    guestRig.system.Update(guestRig.world, 1.0f / 60.0f);
+                }
+                if (slow)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                }
+            }
+        };
+        const auto waitFor = [&](const std::function<bool()>& done, const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames && !done(); ++i)
+            {
+                step(1, slow);
+            }
+            return done();
+        };
+        const sys::RlGameStatus& hostStatus = hostRig.system.Status();
+        Check(waitFor([&] { return guestRig.system.Status().stage == sys::RlGameStage::Lobby && HumansIn(hostStatus) >= 2; }, 600), "the guest is in the lobby of the host");
+        if (inMatch)
+        {
+            hostRig.system.StartHostedMatch();
+            Check(waitFor([&] { return hostStatus.stage == sys::RlGameStage::Playing && guestRig.system.Status().stage == sys::RlGameStage::Playing; }, 1200), "the match is on for both");
+            step(30);
+        }
+        if (guestCrashes)
+        {
+            guestAlive = false;
+        }
+        else
+        {
+            guestRig.system.LeaveMatch();
+            step(3);
+            guestAlive = false;
+        }
+        bool failed = false;
+        const auto watch = [&] { failed = failed || hostStatus.stage == sys::RlGameStage::Failed || !hostStatus.error.empty(); return false; };
+        waitFor(watch, guestCrashes ? 420 : 150, true);  // the clock of the network is the real one; a silent guest is dropped after five seconds, one that says goodbye is not heard at once
+        Check(!failed, "the host never fails because a guest went");
+        Check(hostStatus.stage == (inMatch ? sys::RlGameStage::Playing : sys::RlGameStage::Lobby), "the host stays in its lobby / match");
+        if (!inMatch)
+        {
+            Check(HumansIn(hostStatus) == 1, "the lobby lost the name of the guest");
+        }
+        hostRig.system.LeaveMatch();
+        step(3);
+        Check(hostStatus.stage == sys::RlGameStage::Menu, "the host leaves into the menu");
+    }
+
+    void TestHostLost()
+    {
+        std::cout << "RlGameSystem: a host that is gone is one error, shown once; a guest that is gone is no error" << std::endl;
+        const fs::path appdata = TempFolder("myengine_game_host_lost_test");
+        _putenv_s("APPDATA", appdata.string().c_str());
+        _putenv_s("LOCALAPPDATA", appdata.string().c_str());
+        RunHostLost(false, false, 47910);
+        RunHostLost(true, false, 47912);
+        RunHostLost(false, true, 47914);
+        RunHostLost(true, true, 47916);
+        RunGuestLost(false, false, 47920);
+        RunGuestLost(true, false, 47922);
+        RunGuestLost(true, true, 47924);
+    }
+
     // A demolished car is parked under the map until it comes back. The camera of the player must stay where the car was blown up, not follow it
     // down (the player looked at the arena from below, "under the textures", for the three seconds of the respawn).
     void TestDemolishCamera()
@@ -978,6 +1200,7 @@ int main()
         TestScript();
         TestSystem(source);
         TestOnlineVisuals();
+        TestHostLost();
         TestDemolishCamera();
         TestBallVisibleEverywhere();
         TestFloorHasNoSpotsAtTheKickoffCamera(source);
