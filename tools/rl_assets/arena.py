@@ -112,7 +112,8 @@ def floor_texture(t, ppm=20):
         L([(-14, gz - sign * 0.6 * rf), (-14, gz - sign * 17), (14, gz - sign * 17), (14, gz - sign * 0.6 * rf)])
         L([(-t["goalHalfWidth"], gz - sign * 0.6 * rf), (-t["goalHalfWidth"], gz - sign * 7.5), (t["goalHalfWidth"], gz - sign * 7.5),
            (t["goalHalfWidth"], gz - sign * 0.6 * rf)])
-        cv.ellipse(X(0), Z(gz - sign * 12.5), 0.4 * ppm, 0.4 * ppm, fill=line)
+        # (no spot in front of the goal: the kick-off camera of the back spots stands two and a half metres from it, and a white dot seen at that
+        # angle with the gloss of the floor blew up into a white blur at the corner of the screen)
         # a team coloured goal line glow
         L([(-t["goalHalfWidth"], gz - sign * 0.6 * rf), (t["goalHalfWidth"], gz - sign * 0.6 * rf)], col, 0.5)
     # the pad rings and the plates of the pads

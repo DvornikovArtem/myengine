@@ -3,6 +3,7 @@
 // the way the screens drive it: a match from the start to the results (the HUD data, the pause that stands still, the events of the feed, the winner and
 // the MVP), the lobby of a private match, the controls that the settings screen edits and saves.
 
+#include <stb_image.h>
 #include <myengine/audio/AudioSystem.h>
 #include <myengine/core/ProjectContext.h>
 #include <myengine/core/ServiceLocator.h>
@@ -822,6 +823,43 @@ namespace
             rig.Frames(2);
         }
     }
+
+    // The floor of the arena has no white spot where the kick-off camera of the back spots stands: a dot painted in the turf two and a half metres
+    // from that camera blew up into a white blur at the corner of the screen. The texture covers the field (2 x halfWidth by 2 x halfLength, +z at the
+    // top, 20 pixels per metre); the pixels around (0, +-38.7), where the dots were, are turf.
+    void TestFloorHasNoSpotsAtTheKickoffCamera(const fs::path& source)
+    {
+        std::cout << "arena floor: no white spot in front of the goals" << std::endl;
+        const std::string path = (source / "assets" / "textures" / "rl2" / "arena_floor.tga").string();
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        unsigned char* pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
+        Check(pixels != nullptr && width > 1000 && height > 1000, "the floor texture loads");
+        if (pixels == nullptr)
+        {
+            return;
+        }
+        const float ppm = static_cast<float>(height) / 102.4f;   // halfLength 51.2 m
+        const float halfWidthMetres = static_cast<float>(width) / ppm * 0.5f;
+        int brightest = 0;
+        for (const float z : {-38.7f, 38.7f})
+        {
+            const int cx = static_cast<int>(halfWidthMetres * ppm);
+            const int cy = static_cast<int>((51.2f - z) * ppm);
+            for (int dy = -12; dy <= 12; ++dy)
+            {
+                for (int dx = -12; dx <= 12; ++dx)
+                {
+                    const unsigned char* p = pixels + 4 * ((cy + dy) * width + cx + dx);
+                    brightest = std::max(brightest, static_cast<int>(p[0]));
+                }
+            }
+        }
+        std::cout << "  the brightest red in the 0.6 m squares in front of the goals: " << brightest << std::endl;
+        Check(brightest < 150, "the turf in front of the goals is turf, not a white dot");
+        stbi_image_free(pixels);
+    }
 }
 
 int main()
@@ -835,6 +873,7 @@ int main()
         TestOnlineVisuals();
         TestDemolishCamera();
         TestBallVisibleEverywhere();
+        TestFloorHasNoSpotsAtTheKickoffCamera(source);
     }
     catch (const std::exception& error)
     {
