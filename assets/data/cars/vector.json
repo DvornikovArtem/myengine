@@ -41,8 +41,8 @@
     "orange": "assets/ui/cars/vector_orange.png"
   },
   "physics": {
-    "mass": 180.0,
-    "inertiaMultiplier": 1.0,
+    "mass": 194.4,
+    "inertiaMultiplier": 1.05,
     "friction": 0.3,
     "maxSpeed": 23.0,
     "maxAngularSpeed": 5.5,
@@ -53,9 +53,9 @@
     "driveFactor": [1.0, 0.1, 0.0],
     "brakeAccel": 35.0,
     "steerSpeed": [0.0, 5.0, 10.0, 15.0, 17.5, 30.0],
-    "steerAngle": [0.53356, 0.3193, 0.18203, 0.1057, 0.08507, 0.03454],
+    "steerAngle": [0.501546, 0.300142, 0.171108, 0.099358, 0.0799658, 0.0324676],
     "powerslideSteerSpeed": [0.0, 25.0],
-    "powerslideSteerAngle": [0.39235, 0.1261],
+    "powerslideSteerAngle": [0.368809, 0.118534],
     "latFrictionSlip": [0.0, 1.0],
     "latFriction": [1.0, 0.2],
     "handbrakeLatFriction": 0.1,
@@ -63,13 +63,13 @@
     "jumpHoldAccel": 14.5833,
     "doubleJumpImpulse": 2.91667,
     "dodgeImpulse": 5.0,
-    "airPitchTorque": 12.4636,
-    "airYawTorque": 9.10795,
-    "airRollTorque": 38.3495,
+    "airPitchTorque": 12.0897,
+    "airYawTorque": 8.83471,
+    "airRollTorque": 37.199,
     "boostStart": 33.3,
     "boostMax": 100.0,
     "boostUsePerSecond": 33.3,
-    "boostAccelGround": 9.9167,
-    "boostAccelAir": 10.5833
+    "boostAccelGround": 9.71837,
+    "boostAccelAir": 10.3716
   }
 }

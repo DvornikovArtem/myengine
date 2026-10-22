@@ -123,6 +123,7 @@ namespace myengine::ecs::systems
         bool ballCam = true;
         bool scoreboardHeld = false;     // the button of the table (Tab / Back) is down
         std::vector<RlLobbySlot> lobby;  // Lobby: the slots of the two teams
+        std::vector<std::string> carIds; // the car of every slot of the match on the screen (the keys of the catalog); bots and guests have the ones the match settled
         std::string statusText;          // "Connecting to 192.168.1.5:27015 ..."
         std::string error;               // Failed
         int winner = -1;                 // Finished: 0 blue, 1 orange

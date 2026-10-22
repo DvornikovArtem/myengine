@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <rl/RlCars.h>
 #include <rl/RlRng.h>
 #include <rl/RlSim.h>
 #include <rl/RlTuning.h>
@@ -34,6 +35,11 @@ namespace rl
         // The orange team plays with other bots (tests that measure one kind against another); -1: the same as the blue team
         int botLevelOrange = -1;
         int botVersionOrange = -1;
+        // The car of every slot: the catalog index (for the tables and the HUD) and its numbers (RlCarCatalog::Variant; the default one is the car of
+        // the tuning). The netcode and the game choose them with RlChooseCars before the match is made: a car is built into its body, a match does not
+        // change it.
+        uint8_t carIds[kMaxCars] = {};
+        RlCarVariant cars[kMaxCars];
     };
 
     // Whether a ball with this state, flying without any touch (the gravity, bounces on the floor), crosses the plane of the goal at
@@ -67,6 +73,7 @@ namespace rl
         int SlotCount() const;
         int Team(int slot) const;  // 0 blue, 1 orange
         bool IsBot(int slot) const;
+        int CarId(int slot) const;  // the catalog index of the car of the slot
         // Bit i set: slot i takes its input from Step(), the others are bots. The mask is not part of SaveState: the netcode changes it at
         // an agreed tick (a player joins or leaves) and sets it again before each replayed tick of a rollback.
         uint32_t HumanMask() const;

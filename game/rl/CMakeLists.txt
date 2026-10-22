@@ -10,6 +10,7 @@ set(RL_HEADERS
   include/rl/net/LobbyLan.h
   include/rl/net/LobbyService.h
   include/rl/net/LobbySteam.h
+  include/rl/RlCars.h
   include/rl/RlReplay.h
   include/rl/net/NetLink.h
   include/rl/net/NetReliable.h
@@ -43,6 +44,7 @@ set(RL_SOURCES
   src/RlNetProtocol.cpp
   src/net/LobbyLan.cpp
   src/net/LobbySteamStub.cpp
+  src/RlCars.cpp
   src/RlReplay.cpp
   src/RlV3.h
   src/net/NetLink.cpp

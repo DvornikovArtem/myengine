@@ -28,6 +28,7 @@ namespace rl
             net::PeerId peer = net::kInvalidPeer;
             int slot = -1;
             std::string name;
+            int car = 0;
             RlCarInput inputs[kHistory];
             uint32_t inputTick[kHistory];
             RlCarInput last;
@@ -69,7 +70,10 @@ namespace rl
         net::INetTransport& transport;
         RlTuning tuning;
         RlNetHostOptions options;
+        RlCarCatalog fallbackCars = RlCarCatalog::Fallback();
         uint64_t tuningHash = 0;
+        uint64_t carsHash = 0;
+        uint8_t matchCars[kMaxCars] = {};  // the car of every slot, settled when the match starts
         int slotCount = 0;
 
         std::unique_ptr<RlMatch> match;
@@ -98,11 +102,14 @@ namespace rl
             options.match.mode = std::clamp(options.match.mode, 0, 4);
             slotCount = options.match.mode == 0 ? 1 : 2 * options.match.mode;
             tuningHash = RlTuningHash(tuning);
+            carsHash = Cars().Hash();
             if (options.hostPlays)
             {
                 humanMask = 1u;
             }
         }
+
+        const RlCarCatalog& Cars() const { return options.cars != nullptr ? *options.cars : fallbackCars; }
 
         bool FreeSlot(int& out) const
         {
@@ -186,6 +193,11 @@ namespace rl
                 Reject(peer, RlRejectReason::Tuning, now);
                 return;
             }
+            if (join.carsHash != carsHash)
+            {
+                Reject(peer, RlRejectReason::Cars, now);
+                return;
+            }
             Client& client = clients[peer];
             if (client.slot >= 0)
             {
@@ -201,6 +213,7 @@ namespace rl
             client.peer = peer;
             client.slot = slot;
             client.name = join.name;
+            client.car = Cars().Valid(join.car);
             humanMask |= 1u << slot;
 
             RlWelcomeMsg welcome;
@@ -211,6 +224,7 @@ namespace rl
             welcome.seed = options.match.seed;
             welcome.humanMask = humanMask;
             welcome.tuningHash = tuningHash;
+            std::memcpy(welcome.cars, matchCars, sizeof(welcome.cars));  // a match that runs has them; before the start they come with Names
             std::vector<uint8_t> bytes;
             RlEncode(welcome, bytes);
             Send(peer, bytes, true);
@@ -218,6 +232,18 @@ namespace rl
             {
                 LateJoin(peer, client, slot);
             }
+        }
+
+        // A guest changes his car in the lobby (the match builds its bodies at the start)
+        void OnCarSelect(net::PeerId peer, const std::vector<uint8_t>& data)
+        {
+            const auto it = clients.find(peer);
+            RlCarMsg msg;
+            if (it == clients.end() || it->second.slot < 0 || started || !RlDecode(data.data(), data.size(), msg))
+            {
+                return;
+            }
+            it->second.car = Cars().Valid(msg.car);
         }
 
         // A player joins a running match: the slot of a bot becomes his from this tick on (the others are told), and he gets the state of
@@ -363,6 +389,7 @@ namespace rl
                     case RlMsg::Join: OnJoin(event.peer, event.data, now); break;
                     case RlMsg::Input: OnInput(event.peer, event.data); break;
                     case RlMsg::InputRequest: OnInputRequest(event.peer, event.data); break;
+                    case RlMsg::CarSelect: OnCarSelect(event.peer, event.data); break;
                     default: break;
                     }
                     break;
@@ -391,12 +418,29 @@ namespace rl
             }
             RlMatchConfig config = options.match;
             config.humanMask = humanMask;
+            int wanted[kMaxCars];
+            for (int& w : wanted)
+            {
+                w = -1;
+            }
+            if (options.hostPlays)
+            {
+                wanted[0] = Cars().Valid(options.hostCar);
+            }
             for (const auto& entry : clients)
             {
                 if (entry.second.slot >= 0)
                 {
                     config.names[entry.second.slot] = entry.second.name;
+                    wanted[entry.second.slot] = entry.second.car;
                 }
+            }
+            // the bodies of the cars are built into the match: a human's choice and the bots' draw are settled here, and every side builds the same
+            RlChooseCars(Cars(), config.seed, slotCount, humanMask, wanted, matchCars);
+            for (int slot = 0; slot < kMaxCars; ++slot)
+            {
+                config.carIds[slot] = matchCars[slot];
+                config.cars[slot] = Cars().Spec(Cars().Valid(matchCars[slot])).variant;
             }
             match = std::make_unique<RlMatch>(tuning, config);
             started = true;
@@ -409,6 +453,7 @@ namespace rl
             for (int slot = 0; slot < slotCount; ++slot)
             {
                 names.names[slot] = match->World().match.names[slot];
+                names.cars[slot] = matchCars[slot];
             }
             std::vector<uint8_t> nameBytes;
             RlEncode(names, nameBytes);
@@ -639,7 +684,7 @@ namespace rl
         {
             if (entry.second.slot >= 0)
             {
-                peers.push_back({entry.second.slot, entry.second.name, impl_->transport.RoundTripSeconds(entry.first) * 1000.0});
+                peers.push_back({entry.second.slot, entry.second.name, impl_->transport.RoundTripSeconds(entry.first) * 1000.0, entry.second.car});
             }
         }
         std::sort(peers.begin(), peers.end(), [](const RlNetPeerInfo& a, const RlNetPeerInfo& b) { return a.slot < b.slot; });

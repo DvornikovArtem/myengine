@@ -38,6 +38,29 @@ namespace rldiff
 
     constexpr int kScenarioCount = 45;
 
+    // The cars of the six classes of RocketSim (G4i): the order is the order of the files of the cars
+    constexpr int kCarClassCount = 6;
+    inline const char* CarClassName(int index)
+    {
+        static const char* const names[kCarClassCount] = {"octane", "dominus", "plank", "breakout", "hybrid", "merc"};
+        return index >= 0 && index < kCarClassCount ? names[index] : "";
+    }
+
+    // The scenarios that the cars other than the Octane run: driving, jumping, flips, the air, a landing, the ball, a bump (traces/<class>_<name>.csv)
+    inline bool InCarSubset(const char* name)
+    {
+        static const char* const names[] = {"accel", "accel_boost", "brake", "turn_10", "turn_20", "powerslide_14", "jump_tap", "jump_hold", "flip_front", "flip_back",
+                                            "flip_right", "air_roll_e", "air_pitch_w", "landing_roll12", "ball_hit", "drive_and_jump_steer", "boost_air", "bump"};
+        for (const char* n : names)
+        {
+            if (std::strcmp(n, name) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     inline Scenario Get(int index)
     {
         Scenario s{};

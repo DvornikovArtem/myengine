@@ -60,7 +60,7 @@ namespace rl::detail
 
     void ControlCar(const CarContext& ctx, JPH::Body& body, const RlCarInput& input, CarRuntime& rt, CarFrame& frame)
     {
-        const RlCarTuning& T = ctx.tuning.car;
+        const RlCarTuning& T = ctx.car;
         const float dt = kTickDt;
         const float mass = T.mass;
 

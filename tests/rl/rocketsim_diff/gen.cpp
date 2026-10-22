@@ -62,8 +62,18 @@ namespace
     }
     V3 Column(const Mat& a, int c) { return {a.m[0][c], a.m[1][c], a.m[2][c]}; }
 
-    // the hitbox of the Octane sits 13.8757 uu forward and 20.755 uu up from the origin of the car (the centre of mass)
-    const Vec kHitboxOffset(13.8757f, 0.0f, 20.755f);
+    // the hitbox sits in front of and above the origin of the car (the centre of mass): 13.8757 uu forward and 20.755 uu up for the Octane
+    Vec kHitboxOffset(13.8757f, 0.0f, 20.755f);
+
+    const CarConfig& ConfigOf(const std::string& name)
+    {
+        if (name == "dominus") return CAR_CONFIG_DOMINUS;
+        if (name == "plank") return CAR_CONFIG_PLANK;
+        if (name == "breakout") return CAR_CONFIG_BREAKOUT;
+        if (name == "hybrid") return CAR_CONFIG_HYBRID;
+        if (name == "merc") return CAR_CONFIG_MERC;
+        return CAR_CONFIG_OCTANE;
+    }
 
     Vec RotateRs(const RotMat& r, const Vec& v) { return r.forward * v.x + r.right * v.y + r.up * v.z; }
 
@@ -72,13 +82,19 @@ namespace
 
 int main(int argc, char** argv)
 {
+    // rsgen <output directory> [octane | dominus | plank | breakout | hybrid | merc]: the Octane runs every scenario (traces/<name>.csv), the
+    // other classes the scenarios of rldiff::InCarSubset (traces/<class>_<name>.csv)
     const std::string outDir = argc > 1 ? argv[1] : ".";
+    const std::string carName = argc > 2 ? argv[2] : "octane";
+    const CarConfig& carConfig = ConfigOf(carName);
+    const bool octane = carName == "octane";
+    kHitboxOffset = carConfig.hitboxPosOffset;
     RocketSim::Init("none", true);
 
     for (int index = 0; index < rldiff::kScenarioCount; ++index)
     {
         const rldiff::Scenario sc = rldiff::Get(index);
-        if (sc.ticks <= 0)
+        if (sc.ticks <= 0 || (!octane && !rldiff::InCarSubset(sc.name)))
         {
             continue;
         }
@@ -112,7 +128,7 @@ int main(int argc, char** argv)
         }
 
         // car 0
-        Car* car = arena->AddCar(Team::BLUE, CAR_CONFIG_OCTANE);
+        Car* car = arena->AddCar(Team::BLUE, carConfig);
         {
             const Mat r = Mul(Mul(RotY(sc.car.yawDeg), RotX(sc.car.pitchDeg)), RotZ(sc.car.rollDeg));
             const V3 f = Column(r, 2), right = Column(r, 0), up = Column(r, 1);
@@ -133,7 +149,7 @@ int main(int argc, char** argv)
         Car* second = nullptr;
         if (sc.second)
         {
-            second = arena->AddCar(Team::ORANGE, CAR_CONFIG_OCTANE);
+            second = arena->AddCar(Team::ORANGE, carConfig);
             CarState st;
             st.pos = ToRs({sc.secondX, 0.0f, sc.secondZ}) - RotateRs(st.rotMat, kHitboxOffset);  // the centre of the hitbox is where the scenario says
             st.pos.z = RLConst::CAR_SPAWN_REST_Z;
@@ -141,7 +157,7 @@ int main(int argc, char** argv)
             second->SetState(st);
         }
 
-        const std::string path = outDir + "/" + sc.name + ".csv";
+        const std::string path = outDir + "/" + (octane ? "" : carName + "_") + sc.name + ".csv";
         FILE* file = std::fopen(path.c_str(), "wb");
         if (file == nullptr)
         {

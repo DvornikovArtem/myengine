@@ -92,7 +92,13 @@ namespace rl
         net::PeerId host = net::kInvalidPeer;
         std::string name;
         std::string pendingNames[kMaxCars];  // the host's names of the table, applied at MatchStart
+        uint8_t pendingCars[kMaxCars] = {};  // and its cars (the match is built again with them at MatchStart)
         bool haveNames = false;
+        RlCarCatalog fallbackCars = RlCarCatalog::Fallback();
+        const RlCarCatalog* cars = nullptr;
+        uint64_t carsHash = 0;
+        int wantedCar = 0;
+        RlMatchConfig baseConfig;  // what the Welcome says of the match
         int slot = -1;
         int slotCount = 0;
         std::unique_ptr<RlMatch> match;
@@ -143,11 +149,13 @@ namespace rl
         std::vector<uint8_t> packet;
         std::vector<uint8_t> scratch;
 
-        Impl(net::INetTransport& t, const RlTuning& tn)
+        Impl(net::INetTransport& t, const RlTuning& tn, const RlCarCatalog* catalog)
             : transport(t)
             , tuning(tn)
+            , cars(catalog != nullptr ? catalog : &fallbackCars)
         {
             tuningHash = RlTuningHash(tuning);
+            carsHash = cars->Hash();
             std::fill(std::begin(localTick), std::end(localTick), kNoTick);
             for (auto& row : canonicalTick)
             {
@@ -408,6 +416,16 @@ namespace rl
             config.seed = welcome.seed;
             config.botLevel = welcome.botLevel;
             config.humanMask = welcome.humanMask;
+            baseConfig = config;
+            if (welcome.started != 0)
+            {
+                // a match that runs has its cars settled: the bodies are built with them before the state of the host is put in
+                for (int s = 0; s < kMaxCars; ++s)
+                {
+                    config.carIds[s] = welcome.cars[s];
+                    config.cars[s] = cars->Spec(cars->Valid(welcome.cars[s])).variant;
+                }
+            }
             match = std::make_unique<RlMatch>(tuning, config);
             slotCount = match->SlotCount();
             if (slot >= slotCount)
@@ -567,6 +585,14 @@ namespace rl
                 {
                     if (haveNames && match != nullptr)
                     {
+                        // the cars are built into the bodies: the match of the lobby (all Pulse) is made again with the host's cars
+                        RlMatchConfig config = baseConfig;
+                        for (int s = 0; s < kMaxCars; ++s)
+                        {
+                            config.carIds[s] = pendingCars[s];
+                            config.cars[s] = cars->Spec(cars->Valid(pendingCars[s])).variant;
+                        }
+                        match = std::make_unique<RlMatch>(tuning, config);
                         match->SetPlayerNames(pendingNames);  // before tick 0, like the host
                     }
                     AddMask(0, event.mask);
@@ -819,6 +845,8 @@ namespace rl
                         state = RlNetClientState::Joining;
                         RlJoinMsg join;
                         join.tuningHash = tuningHash;
+                        join.carsHash = carsHash;
+                        join.car = static_cast<uint8_t>(cars->Valid(wantedCar));
                         join.name = name;
                         RlEncode(join, packet);
                         transport.Send(host, packet.data(), packet.size(), true);
@@ -855,6 +883,7 @@ namespace rl
                             for (int i = 0; i < kMaxCars; ++i)
                             {
                                 pendingNames[i] = names.names[i];
+                                pendingCars[i] = names.cars[i];
                             }
                             haveNames = true;
                         }
@@ -937,9 +966,22 @@ namespace rl
         }
     };
 
-    RlNetClient::RlNetClient(net::INetTransport& transport, const RlTuning& tuning)
-        : impl_(std::make_unique<Impl>(transport, tuning))
+    RlNetClient::RlNetClient(net::INetTransport& transport, const RlTuning& tuning, const RlCarCatalog* cars)
+        : impl_(std::make_unique<Impl>(transport, tuning, cars))
     {
+    }
+
+    void RlNetClient::SetCar(int car)
+    {
+        Impl& d = *impl_;
+        d.wantedCar = d.cars->Valid(car);
+        if (d.state == RlNetClientState::Lobby)
+        {
+            RlCarMsg msg;
+            msg.car = static_cast<uint8_t>(d.wantedCar);
+            RlEncode(msg, d.packet);
+            d.transport.Send(d.host, d.packet.data(), d.packet.size(), true);
+        }
     }
 
     RlNetClient::~RlNetClient() = default;
