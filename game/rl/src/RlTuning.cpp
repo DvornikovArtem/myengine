@@ -34,6 +34,8 @@ namespace rl
             v.Float("goalHalfWidth", t.arena.goalHalfWidth);
             v.Float("goalHeight", t.arena.goalHeight);
             v.Float("goalDepth", t.arena.goalDepth);
+            v.Float("goalCornerRadius", t.arena.goalCornerRadius);
+            v.Float("goalMouthBlend", t.arena.goalMouthBlend);
             v.Float("friction", t.arena.friction);
             v.Float("restitution", t.arena.restitution);
             v.End();
