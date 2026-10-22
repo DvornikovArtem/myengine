@@ -755,6 +755,34 @@
    "orientation": 1.0,
    "part_of": "stadium",
    "note": "a hanging board, the screen looks to +z"
+  },
+  "podium": {
+   "name": "podium",
+   "triangles": 432,
+   "vertices": 435,
+   "bytes": 30979,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 3.742,
+   "radius": 0.8498,
+   "bounds": [
+    [
+     -3.18,
+     0.0,
+     -3.18
+    ],
+    [
+     3.18,
+     0.264,
+     3.18
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": null,
+   "note": "plinth of the menu: radius 2 m, 0.26 m high, glowing rings; the origin is the centre of the bottom"
   }
  },
  "textures": {
@@ -925,6 +953,13 @@
     256
    ],
    "bytes": 41737
+  },
+  "podium": {
+   "size": [
+    128,
+    128
+   ],
+   "bytes": 16285
   }
  },
  "pack": "rl2",
@@ -948,6 +983,7 @@
   "floodlight",
   "pad_orb",
   "pads",
+  "podium",
   "scoreboard",
   "sky",
   "stadium_facade",
