@@ -235,6 +235,7 @@ namespace rl
             input.carRotation = Nlerp(carA.rotation, carB.rotation, alpha_);
             input.onSurface = carB.wheelContacts >= 3;
             input.surfaceNormal = carB.surfaceNormal;
+            input.carVelocity = ToRl(Lerp(FromRl(carA.linearVelocity), FromRl(carB.linearVelocity), alpha_));
             input.ballPosition = ToRl(ball);
             input.ballCam = true;
             camera_.view = RlCameraUpdate(tuning_.camera, carCamera_, sim, input, std::min(dt, 0.1f));

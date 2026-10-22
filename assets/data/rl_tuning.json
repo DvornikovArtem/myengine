@@ -228,7 +228,9 @@
     "airSwivelScale": 0.5,
     "minDistance": 0.45,
     "wallMargin": 0.3,
-    "ballCamMaxPitch": 35.0
+    "ballCamMaxPitch": 35.0,
+    "rollFollow": 0.0,
+    "maxTurnRate": 240.0
   },
   "match": {
     "matchSeconds": 300.0,

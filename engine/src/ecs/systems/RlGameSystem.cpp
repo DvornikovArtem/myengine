@@ -29,6 +29,7 @@
 #include <myengine/ui/rl/RlUiInput.h>
 
 #include <rl/RlCamera.h>
+#include <rl/RlCinematic.h>
 #include <rl/RlControls.h>
 #include <rl/RlMatch.h>
 #include <rl/RlNet.h>
@@ -165,6 +166,19 @@ namespace myengine::ecs::systems
 
         // The sounds and effects of the match (docs/game/rl-feedback.md)
         std::unique_ptr<game::RlFeedback> feedback;
+
+        // The director of the cameras and the replay of a goal (docs/game/rl-replay.md): the flight over the stadium, the explosion of a goal, the replay,
+        // the camera of the results. It records every tick; offline it freezes the match while the replay plays.
+        std::unique_ptr<rl::RlDirector> director;
+        bool directed = false;           // a real match is on (not the preview, not the menu)
+        bool frozen = false;             // offline: the replay plays, the match waits
+        bool skipPressed = false;        // the skip button (jump) went down in this frame
+        bool holdStart = false;          // the game mode: the match waits (flight not started) until the screen of the match is shown
+        float holdFor = 0.0f;
+        rl::RlCameraView lastGameCamera;
+        bool haveGameCamera = false;
+        rl::RlDirectorFrame lastShot;    // the answer of the director for this frame (its pointers are valid until the next call)
+        rl::RlReplayInfo lastReplay;
         float effectTime = 0.0f;  // the clock of the flicker of the boost flames
 
         // The game mode (RlGameFlow): the commands wait here until the next Update, because they change the scene
@@ -404,6 +418,10 @@ namespace myengine::ecs::systems
             {
                 feedback->SetTuning(tuning);
             }
+            if (director != nullptr)
+            {
+                director->SetTuning(tuning);
+            }
         }
 
         std::string ReloadTuning()
@@ -531,6 +549,7 @@ namespace myengine::ecs::systems
                 cameraSettings = tuning.camera;
             }
             feedback = std::make_unique<game::RlFeedback>(tuning, &audio::GetAudioSystem(), &fx::GetParticleSystem());
+            director = std::make_unique<rl::RlDirector>(tuning);
             tuningStamp = FileStamp();
             tuningMessage.clear();
             if (const auto* cam = camera != kInvalidEntity ? world.TryGet<components::CameraComponent>(camera) : nullptr)
@@ -567,6 +586,44 @@ namespace myengine::ecs::systems
             {
                 feedback->StartMatch(0);
             }
+            StartDirector(true);
+        }
+
+        // A new match for the director: the ring is empty, the flight over the stadium is ready. Offline the match can be frozen for the replay;
+        // online the replay is off (the match cannot wait), the flight and the cameras of the goal and of the results stay.
+        // The game mode: the screen of the match is on, the flight over the stadium and the countdown begin
+        void MatchViewBegins()
+        {
+            if (holdStart)
+            {
+                holdStart = false;
+                holdFor = 0.0f;
+                if (director != nullptr)
+                {
+                    director->Reset();
+                }
+            }
+        }
+
+        void StartDirector(const bool offline)
+        {
+            if (director == nullptr)
+            {
+                return;
+            }
+            rl::RlReplayConfig config;
+            config.replayEnabled = offline;
+            director->SetConfig(config);
+            director->SetCanFreeze(offline);
+            director->Reset();
+            directed = true;
+            frozen = false;
+            haveGameCamera = false;
+            lastShot = rl::RlDirectorFrame{};
+            lastReplay = rl::RlReplayInfo{};
+            // the game mode shows the loading screen first: the flight starts when the match is on the screen (MatchViewBegins)
+            holdStart = gameMode && offline;
+            holdFor = 0.0f;
         }
 
         // Shows the cars of the mode in menuMode, the ball, the marker and the pads
@@ -610,6 +667,8 @@ namespace myengine::ecs::systems
         void ToMenu(World& world)
         {
             match.reset();
+            directed = false;
+            frozen = false;
             if (feedback != nullptr)
             {
                 feedback->EndMatch();
@@ -810,6 +869,7 @@ namespace myengine::ecs::systems
             }
             rl::RlCarInput player = state.car;
             lastPlayer = player;
+            skipPressed = justPressed.car.jump;
             // A press shorter than a frame (a tap of a key, a click) is not lost: the events of the frame are kept until a tick takes them.
             latch.Press(justPressed.car);
 
@@ -819,11 +879,19 @@ namespace myengine::ecs::systems
             while (accumulator >= rl::kTickDt)
             {
                 accumulator -= rl::kTickDt;
+                if (frozen)
+                {
+                    continue;  // the replay plays: the match waits
+                }
                 inputs[0] = latch.Take(player);
                 match->Step(inputs.data());
                 if (feedback != nullptr)
                 {
                     feedback->OnTick(match->PreviousWorld(), match->World());
+                }
+                if (director != nullptr)
+                {
+                    director->OnTick(match->World());
                 }
             }
 
@@ -853,6 +921,30 @@ namespace myengine::ecs::systems
             {
                 alpha = netHost->TickFraction();
             }
+            // the director: the live worlds, or the clip of the replay (docs/game/rl-replay.md); the paused match and the preview have none
+            const rl::RlWorldState* liveNow = nowWorld;
+            const rl::RlWorldState* liveBefore = beforeWorld;
+            const float liveAlpha = alpha;
+            const bool directing = director != nullptr && directed && view != nullptr && !previewActive && !paused && !holdStart;
+            rl::RlDirectorFrame shot;
+            if (directing)
+            {
+                shot = director->Frame(deltaTime, skipPressed, sim, *beforeWorld, *nowWorld, alpha, haveGameCamera ? &lastGameCamera : nullptr);
+                if (shot.previous != nullptr && shot.current != nullptr)
+                {
+                    beforeWorld = shot.previous;
+                    nowWorld = shot.current;
+                    alpha = shot.alpha;
+                }
+                frozen = shot.freezeLive;
+                if (frozen)
+                {
+                    accumulator = 0.0f;
+                }
+            }
+            skipPressed = false;
+            lastShot = shot;
+            lastReplay = shot.replay;
             const rl::RlWorldState& now = *nowWorld;
             const rl::RlWorldState& before = *beforeWorld;
             const int teamSize = std::max(slotCount / 2, 1);
@@ -988,17 +1080,42 @@ namespace myengine::ecs::systems
                 SetVisible(world, marker, !now.cars[localSlot].demolished);
             }
 
-            UpdateCamera(world, deltaTime, now.cars[localSlot], playerPosition, playerRotation, ballPosition, t, sim);
+            UpdateCamera(world, deltaTime, now.cars[localSlot], playerPosition, playerRotation, ballPosition, t, sim,
+                         directing && shot.cinematicCamera ? &shot.camera : nullptr);
             if (feedback != nullptr && !previewActive)
             {
-                feedback->Frame(deltaTime, before, now, alpha);
+                // the sounds of the replay: the events of the ticks the clip passed, the loops follow the cars of the clip
+                if (directing && shot.replayStarted)
+                {
+                    feedback->BeginReplay(0.7f);
+                }
+                if (directing && (shot.replay.active || shot.replayEnded))
+                {
+                    feedback->SetReplaySpeed(shot.replay.speed);
+                    if (shot.replayTicks != nullptr)
+                    {
+                        for (const auto& tick : *shot.replayTicks)
+                        {
+                            feedback->OnTick(*tick.first, *tick.second);
+                        }
+                    }
+                    feedback->Frame(deltaTime, before, now, alpha);
+                }
+                else
+                {
+                    feedback->Frame(deltaTime, *liveBefore, *liveNow, liveAlpha);
+                }
+                if (directing && shot.replayEnded)
+                {
+                    feedback->EndReplay();
+                }
             }
         }
 
         // The camera of Rocket League (game/rl RlCamera): behind the car, over it at the ball (ball cam), the up follows the surface, and it
         // is pulled in so that it stays inside the arena.
         void UpdateCamera(World& world, const float deltaTime, const rl::RlCarState& car, dx::FXMVECTOR carPosition, dx::FXMVECTOR carRotation,
-                          dx::FXMVECTOR ballPosition, const rl::RlTuning& arenaTuning, const rl::RlSim& sim)
+                          dx::FXMVECTOR ballPosition, const rl::RlTuning& arenaTuning, const rl::RlSim& sim, const rl::RlCinematicView* cinematic = nullptr)
         {
             if (camera == kInvalidEntity)
             {
@@ -1017,12 +1134,17 @@ namespace myengine::ecs::systems
             in.carRotation = {q.x, q.y, q.z, q.w};
             in.onSurface = car.wheelContacts >= 3;
             in.surfaceNormal = car.surfaceNormal;
+            in.carVelocity = car.linearVelocity;
             const Vec3 b = ToVec3(ballPosition);
             in.ballPosition = {b.x, b.y, b.z};
             in.ballCam = ballCam;
             // the player's own camera (Settings > Camera) when the game mode has set it, else the numbers of rl_tuning.json
             const rl::RlCameraTuning& cameraTuning = haveCameraSettings ? cameraSettings : arenaTuning.camera;
-            const rl::RlCameraView cameraView = rl::RlCameraUpdate(cameraTuning, cameraState, sim, in, std::min(deltaTime, 0.1f));
+            const rl::RlCameraView gameView = rl::RlCameraUpdate(cameraTuning, cameraState, sim, in, std::min(deltaTime, 0.1f));
+            lastGameCamera = gameView;  // the camera of the game goes on every frame, so that a cinematic camera melts into it at its end
+            haveGameCamera = true;
+            const rl::RlCameraView& cameraView = cinematic != nullptr ? cinematic->view : gameView;
+            const float horizontalFov = cinematic != nullptr ? cinematic->fovDegrees : cameraTuning.fov;
 
             dx::XMMATRIX basis;
             basis.r[0] = dx::XMVectorSet(cameraView.right.x, cameraView.right.y, cameraView.right.z, 0.0f);
@@ -1032,7 +1154,7 @@ namespace myengine::ecs::systems
             cam->position = {cameraView.position.x, cameraView.position.y, cameraView.position.z};
             cam->rotationDeg = EulerDegrees(dx::XMQuaternionRotationMatrix(basis));
             // RL's field of view is the horizontal one; the camera component takes the vertical one
-            cam->fovYDeg = 2.0f * std::atan(std::tan(cameraTuning.fov * 0.5f / kRadToDeg) / viewAspect) * kRadToDeg;
+            cam->fovYDeg = 2.0f * std::atan(std::tan(horizontalFov * 0.5f / kRadToDeg) / viewAspect) * kRadToDeg;
             cam->isPrimary = true;
         }
 
@@ -1364,6 +1486,8 @@ namespace myengine::ecs::systems
             (void)world;
             previewActive = false;
             podiumCar.clear();
+            directed = false;
+            frozen = false;
             match.reset();
             training.reset();
             autopilot.reset();
@@ -1672,7 +1796,16 @@ namespace myengine::ecs::systems
                 return;
             }
             feedback->StartMatch(netClient != nullptr ? netClient->Slot() : 0);
-            auto observer = [this](std::uint32_t, const rl::RlMatch& m) { feedback->OnTick(m.PreviousWorld(), m.World()); };
+            StartDirector(false);
+            // after every tick, the ones a rollback simulates again too: the ring of the replay is rewritten, a goal is not counted twice
+            auto observer = [this](std::uint32_t, const rl::RlMatch& m)
+            {
+                feedback->OnTick(m.PreviousWorld(), m.World());
+                if (director != nullptr)
+                {
+                    director->OnTick(m.World());
+                }
+            };
             if (netHost != nullptr)
             {
                 netHost->SetTickObserver(observer);
@@ -1720,6 +1853,12 @@ namespace myengine::ecs::systems
             h.lastGoalScorer = m.lastGoalScorer;
             h.lastGoalOwn = m.lastGoalOwn != 0;
             h.lastGoalSpeedKmh = m.lastGoalSpeed * 3.6f;
+            h.replay.active = lastReplay.active;
+            h.replay.team = lastReplay.team;
+            h.replay.goalSpeedKmh = lastReplay.goalSpeedKmh;
+            h.replay.progress = lastReplay.progress;
+            h.replay.speed = lastReplay.speed;
+            h.replay.author = (lastReplay.active && lastReplay.scorerSlot >= 0 && lastReplay.scorerSlot < view->SlotCount()) ? std::string(m.names[lastReplay.scorerSlot]) : std::string();
             h.ballCam = ballCam;
             h.ballCamKey = status_.ballCamKey.empty() ? "Space" : status_.ballCamKey;
             h.localPlayer = slot;
@@ -2163,11 +2302,13 @@ namespace myengine::ecs::systems
             {
                 ballCam = state.Down(rl::RlButtonAction::BallCam);
             }
-            else if (ballCamPressed)
+            else if (ballCamPressed && !lastReplay.active)
             {
                 ballCam = !ballCam;
             }
             lastPlayer = player;
+            // the replay is skipped with the jump button or with the one that shows on the hint of the HUD (Space, the ball cam)
+            skipPressed = tapped.jump || (ballCamPressed && lastReplay.active);
             latch.Press(tapped);
 
             if (netHost != nullptr || netClient != nullptr)
@@ -2189,18 +2330,35 @@ namespace myengine::ecs::systems
             }
             else if (match != nullptr)
             {
-                if (!paused)
+                if (holdStart)
+                {
+                    // the loading screen is still up: the flight over the stadium waits for the match to be shown (and does not wait for ever)
+                    holdFor += deltaTime;
+                    if (holdFor > 4.0f)
+                    {
+                        MatchViewBegins();
+                    }
+                }
+                else if (!paused)
                 {
                     accumulator += std::min(deltaTime, 0.1f);
                     std::vector<rl::RlCarInput> inputs(static_cast<size_t>(match->SlotCount()));
                     while (accumulator >= rl::kTickDt)
                     {
                         accumulator -= rl::kTickDt;
+                        if (frozen)
+                        {
+                            continue;  // the replay plays: the match waits
+                        }
                         inputs[0] = latch.Take(player);
                         match->Step(inputs.data());
                         if (feedback != nullptr)
                         {
                             feedback->OnTick(match->PreviousWorld(), match->World());
+                        }
+                        if (director != nullptr)
+                        {
+                            director->OnTick(match->World());
                         }
                     }
                 }
@@ -2254,6 +2412,20 @@ namespace myengine::ecs::systems
                 else if (command == "boost")
                 {
                     sim.SetCarBoost(0, 100.0f);
+                }
+                else if (command == "wallrun")
+                {
+                    // the car at speed towards the side wall: with the throttle and the boost held it climbs the wall and goes over the ceiling
+                    sim.SetCarPose(0, {20.0f, 0.4f, 0.0f}, {0.0f, 0.70710678f, 0.0f, 0.70710678f}, {26.0f, 0.0f, 0.0f});
+                    sim.SetCarBoost(0, 100.0f);
+                    sim.ResetBall({-30.0f, 1.0f, 30.0f});
+                }
+                else if (command == "airroll")
+                {
+                    // the car in the air, flying along the field: the roll keys spin it
+                    sim.SetCarPose(0, {0.0f, 12.0f, -30.0f}, {0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 4.0f, 18.0f});
+                    sim.SetCarBoost(0, 100.0f);
+                    sim.ResetBall({10.0f, 1.0f, 20.0f});
                 }
                 else if (command.rfind("time", 0) == 0)
                 {
@@ -2485,6 +2657,11 @@ namespace myengine::ecs::systems
         command.command = Impl::Command::Start;
         command.setup = setup;
         impl_->pending.push_back(command);
+    }
+
+    void RlGameSystem::MatchViewBegins()
+    {
+        impl_->MatchViewBegins();
     }
 
     void RlGameSystem::StartHostedMatch()

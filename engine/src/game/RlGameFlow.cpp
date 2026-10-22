@@ -734,6 +734,7 @@ namespace myengine::game
                                                                                           static_cast<int>(std::lround(fraction * 100.0f))), Align::Right);
             if (started && loadingTime >= 0.8f)
             {
+                System().MatchViewBegins();  // the flight over the stadium starts now
                 hud.Reset();
                 GoTo(f, Screen::Match);
             }
@@ -1936,6 +1937,16 @@ namespace myengine::game
             slider("camera/stiffness", "Stiffness", c.stiffness, 0.0f, 1.0f, 0.05f, "%.2f");
             slider("camera/swivel", "Swivel speed", c.swivelSpeed, 1.0f, 10.0f, 0.1f, "%.1f");
             slider("camera/transition", "Transition speed", c.transitionSpeed, 1.0f, 2.0f, 0.1f, "%.1f");
+            {
+                // "Wall tilt": how much the camera leans with the wall and the ceiling (0: the horizon is always level)
+                const float percent = SliderRow(f, HashId("camera/walltilt"), rows.Next(), "Wall tilt", c.wallTilt * 100.0f, 0.0f, 100.0f, 5.0f,
+                                                Format("%d%%", static_cast<int>(std::lround(c.wallTilt * 100.0f))));
+                if (std::fabs(percent / 100.0f - c.wallTilt) > 1e-4f)
+                {
+                    c.wallTilt = percent / 100.0f;
+                    ApplyCamera();
+                }
+            }
             const std::string_view ball[] = {"Toggle", "Hold"};
             const int mode = OptionRow(f, HashId("camera/ball"), rows.Next(), "Ball cam", Span<std::string_view>(ball), c.ballCamHold ? 1 : 0);
             if ((mode == 1) != c.ballCamHold)
