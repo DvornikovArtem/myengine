@@ -465,3 +465,15 @@ myengine_apply_compiler_options(myengine_rl_ui_tests)
 set_property(TARGET myengine_rl_ui_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_ui COMMAND myengine_rl_ui_tests)
 set_tests_properties(rl_ui PROPERTIES TIMEOUT 120)
+
+
+# G1-flow: the game mode of Rocket League without a window: the settings file, the script of the UI tests, and RlGameSystem driven through the commands of the
+# screens (a match from the start to the results, the pause, the feed, the lobby, the controls)
+add_executable(myengine_rl_game_tests
+  ui/RlGameTests.cpp)
+
+target_link_libraries(myengine_rl_game_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_game_tests)
+set_property(TARGET myengine_rl_game_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_game COMMAND myengine_rl_game_tests)
+set_tests_properties(rl_game PROPERTIES TIMEOUT 180)

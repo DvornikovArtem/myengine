@@ -112,6 +112,10 @@ namespace myengine::config
             {
                 config.startInPlay = root["startInPlay"].get<bool>();
             }
+            if (root.contains("startInGame") && root["startInGame"].is_boolean())
+            {
+                config.startInGame = root["startInGame"].get<bool>();
+            }
 
             if (root.contains("input") && root["input"].is_object())
             {

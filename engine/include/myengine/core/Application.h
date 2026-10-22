@@ -33,6 +33,12 @@ namespace myengine::rlui
     class Host;
 }
 
+namespace myengine::game
+{
+    class RlGameFlow;
+    struct RlVideoSettings;
+}
+
 namespace myengine::scripting
 {
     class ScriptSystem;
@@ -50,6 +56,8 @@ namespace myengine::editor
 
 namespace myengine::core
 {
+    class UiScript;
+
     // Command-line diagnostics of the GPU (docs/dev/gpu-debugging.md)
     struct DiagnosticsOptions
     {
@@ -82,6 +90,17 @@ namespace myengine::core
         void SetDiagnosticsOptions(const DiagnosticsOptions& options);
         /// Before Initialize: the role of this window in an online Rocket League match (--rl-host, --rl-join).
         void SetRlOnlineOptions(const ecs::systems::RlOnlineOptions& options);
+        /// Before Initialize: the game mode (--game, docs/game/rl-ui.md): the Rocket League game without the editor: menus and HUD of the UI kit, the map
+        /// rocket_league.json in Play, the window as the video settings say.
+        void SetGameMode(bool enabled);
+        bool GameMode() const;
+        /// The video settings of the game: window mode and size, vertical sync, the limit of frames per second, shadows / MSAA / bloom. A --render-settings
+        /// request on the command line wins over the quality of the settings.
+        void ApplyVideoSettings(const game::RlVideoSettings& video);
+        /// The resolutions the display can be set to (the video settings offer them)
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> ListDisplayResolutions() const;
+        /// The size of the first window in pixels
+        std::pair<std::uint32_t, std::uint32_t> GetWindowSize() const;
         /// The code the process should return when the loop ended on purpose (a capture or statistics request).
         int GetExitCode() const;
         /// A capture of the next frame with RenderDoc (F12, Help > Developer). false: `message` says what to install.
@@ -212,12 +231,19 @@ namespace myengine::core
         std::unique_ptr<PendingSceneLoad> pendingSceneLoad_;
         ui::UiManager uiManager_;
         std::unique_ptr<rlui::Host> uiGallery_; // MYENGINE_UI_GALLERY: the gallery of the UI kit instead of the editor; after uiManager_: goes first
+        std::unique_ptr<UiScript> uiScript_; // MYENGINE_UI_SCRIPT: scripted keys, mouse and screenshots for the tests of the game
+        std::unique_ptr<game::RlGameFlow> gameFlow_; // the game mode: the screens of the game (menus, HUD) instead of the editor; after uiManager_: goes first
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
         std::filesystem::path sceneSavePath_;
         std::filesystem::path projectFile_; // from --project, empty: the project of the engine folder
         bool showProjectBrowser_ = false;
         bool deferredSceneLoad_ = false;
+        bool gameMode_ = false;
+        int fpsLimit_ = 0; // frames per second the main loop is held to, 0: none
+        bool videoApplied_ = false;
+        int lastVideoWidth_ = 0;
+        int lastVideoHeight_ = 0;
         DiagnosticsOptions diagnostics_;
         ecs::systems::RlOnlineOptions rlOnline_;
         render::GpuCapture gpuCapture_;

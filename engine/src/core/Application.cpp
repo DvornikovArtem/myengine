@@ -6,12 +6,14 @@
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <cstdlib>
 #include <string>
 
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
+#include "UiScript.h"
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
 #include <myengine/editor/ThumbnailService.h>
@@ -35,6 +37,8 @@
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
 #include <myengine/ecs/systems/RlGameSystem.h>
+#include <myengine/game/RlGameFlow.h>
+#include <myengine/game/RlGameSettings.h>
 #include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
@@ -168,11 +172,16 @@ namespace myengine::core
     {
         config_ = config;
 
-        // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json (the shipped
-        // game starts the Rocket League map this way; TODO(G1): the --game flag replaces it)
+        // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json
+        // The game mode (--game or "startInGame" of app.json) plays the Rocket League map with the screens of the game instead of the editor
+        gameMode_ = gameMode_ || config.startInGame;
         const bool sceneFromConfig = requestedScene.empty() && !config.startScene.empty();
-        const std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
-        const bool startInPlay = requestedPlay || (sceneFromConfig && config.startInPlay);
+        std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
+        if (gameMode_ && scenePath.empty())
+        {
+            scenePath = "assets/scenes/rocket_league.json";
+        }
+        const bool startInPlay = requestedPlay || gameMode_ || (sceneFromConfig && config.startInPlay);
 
         const auto logPath = apppaths::LogDirectory() / "myengine.log";
         if (!logger_.Initialize(logPath))
@@ -509,7 +518,86 @@ namespace myengine::core
             return false;
         }
 
+        // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena; it is added to the world below
+        auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
+        rlGame->SetOnlineOptions(rlOnline_);
+        rlGame->SetGameMode(gameMode_);
+        rlGameSystem_ = rlGame.get();
+
+        // The game mode: the screens of the game (menus, HUD) instead of the editor
+        if (gameMode_)
+        {
+            game::RlGameFlowServices services;
+            services.system = rlGameSystem_;
+            services.ui = &uiManager_;
+            services.quit = [this]() { RequestQuit(); };
+            services.applyVideo = [this](const game::RlVideoSettings& video) { ApplyVideoSettings(video); };
+            services.resolutions = [this]() { return ListDisplayResolutions(); };
+            services.windowSize = [this]() { return GetWindowSize(); };
+            services.sceneReady = [this]() { return sceneLoaded_; };
+            services.loadingProgress = [this]()
+            {
+                const auto operations = loadingService_.Visible();
+                return operations.empty() ? -1.0f : operations.front().progress;
+            };
+            services.fps = [this]() { return averagedFps_; };
+            services.log = [this](const std::string& text) { logger_.Info(text); };
+            services.setLighting = [this](const bool menu)
+            {
+                if (renderAdapter_ == nullptr)
+                {
+                    return;
+                }
+                render::SceneLighting lighting;  // the defaults are the light of the field
+                if (menu)
+                {
+                    // the night behind the menus: the field is dark, the car on the plinth stands in the light of the sun
+                    lighting.color = {0.95f, 0.98f, 1.1f};
+                    lighting.skyAmbient = {0.12f, 0.14f, 0.23f};
+                    lighting.groundAmbient = {0.04f, 0.05f, 0.08f};
+                }
+                renderAdapter_->SetSceneLighting(lighting);
+            };
+            // MYENGINE_GAME_SETTINGS=<file>: another settings file (the tests)
+            {
+                char* settingsPath = nullptr;
+                std::size_t settingsPathLength = 0;
+                if (_dupenv_s(&settingsPath, &settingsPathLength, "MYENGINE_GAME_SETTINGS") == 0 && settingsPath != nullptr && *settingsPath != 0)
+                {
+                    services.settingsFile = std::filesystem::path(settingsPath);
+                }
+                std::free(settingsPath);
+            }
+            gameFlow_ = std::make_unique<game::RlGameFlow>(services);
+            gameFlow_->Install();
+
+            // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md)
+            char* scriptPath = nullptr;
+            std::size_t scriptPathLength = 0;
+            if (_dupenv_s(&scriptPath, &scriptPathLength, "MYENGINE_UI_SCRIPT") == 0 && scriptPath != nullptr && *scriptPath != 0)
+            {
+                std::ifstream scriptFile(std::filesystem::path(scriptPath), std::ios::binary);
+                std::stringstream scriptText;
+                scriptText << scriptFile.rdbuf();
+                std::string scriptError;
+                auto script = std::make_unique<UiScript>();
+                if (!scriptFile || !script->Load(scriptText.str(), scriptError))
+                {
+                    logger_.Error(std::string("MYENGINE_UI_SCRIPT: ") + (scriptFile ? scriptError : std::string("cannot read ") + scriptPath));
+                }
+                else
+                {
+                    uiScript_ = std::move(script);
+                    UiScript* raw = uiScript_.get();
+                    gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    logger_.Info(std::string("UI script: ") + scriptPath);
+                }
+            }
+            std::free(scriptPath);
+        }
+
         // MYENGINE_UI_GALLERY=<screen> or "all": the gallery of the UI kit of the game instead of the editor (docs/game/rl-ui.md)
+        if (!gameMode_)
         {
             char* gallery = nullptr;
             std::size_t galleryLength = 0;
@@ -565,13 +653,7 @@ namespace myengine::core
 
         world_.AddUpdateSystem(std::make_unique<ecs::systems::CameraControlSystem>(input_, inputOwnerWindowId_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
-        {
-            // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena
-            auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
-            rlGame->SetOnlineOptions(rlOnline_);
-            rlGameSystem_ = rlGame.get();
-            world_.AddUpdateSystem(std::move(rlGame));
-        }
+        world_.AddUpdateSystem(std::move(rlGame));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
         // After physics: scripts see this frame's collision/trigger events
@@ -772,6 +854,40 @@ namespace myengine::core
             const float deltaTime = timer_.DeltaTime();
             const auto frameStartTime = std::chrono::steady_clock::now();
 
+            if (uiScript_ != nullptr)
+            {
+                UiScript::Sink sink;
+                const WindowId scriptWindow = windows_.empty() || windows_.front().window == nullptr ? 0 : windows_.front().window->Id();
+                sink.key = [this, scriptWindow](const int code, const bool down)
+                {
+                    input_.SetActiveWindow(scriptWindow);
+                    down ? input_.OnKeyDown(static_cast<std::uint32_t>(code)) : input_.OnKeyUp(static_cast<std::uint32_t>(code));
+                };
+                sink.mouseButton = [this, scriptWindow](const int button, const bool down)
+                {
+                    input_.SetActiveWindow(scriptWindow);
+                    const MouseButton which = button == 1 ? MouseButton::Right : MouseButton::Left;
+                    down ? input_.OnMouseDown(which) : input_.OnMouseUp(which);
+                };
+                sink.screenshot = [this](const std::string& path)
+                {
+                    if (renderAdapter_ != nullptr)
+                    {
+                        renderAdapter_->RequestScreenshot(path);
+                    }
+                };
+                sink.note = [this](const std::string& text) { logger_.Info("UI script: " + text); };
+                sink.game = [this](const std::string& command)
+                {
+                    if (rlGameSystem_ != nullptr)
+                    {
+                        rlGameSystem_->DebugCommand(command);
+                    }
+                };
+                sink.quit = [this]() { RequestQuit(); };
+                uiScript_->Advance(static_cast<double>(deltaTime), sink);
+            }
+
             const auto worldUpdateStartTime = std::chrono::steady_clock::now();
             {
                 ZoneScopedN("World::UpdateSystems");
@@ -873,6 +989,31 @@ namespace myengine::core
                 frameTimingStats = {};
             }
 
+            // the limit of the frames per second of the video settings: sleep most of the time that is left, spin for the last bit
+            if (fpsLimit_ > 0)
+            {
+                const auto target = frameStartTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / static_cast<double>(fpsLimit_)));
+                for (auto now = std::chrono::steady_clock::now(); now < target; now = std::chrono::steady_clock::now())
+                {
+                    if (target - now > std::chrono::milliseconds(2))
+                    {
+                        Sleep(1);
+                    }
+                    else
+                    {
+                        YieldProcessor();
+                    }
+                }
+            }
+
+            // a running match hides the cursor (only while this application is the one in front)
+            if (gameMode_ && !cameraControlActive_)
+            {
+                const bool hide = core::ServiceLocator::GetEditorRuntimeState().gameHidesCursor && GetForegroundWindow() != nullptr &&
+                                  !windows_.empty() && windows_.front().window != nullptr && GetForegroundWindow() == windows_.front().window->Handle();
+                SetCursorVisible(!hide);
+            }
+
             if (exitAfterFrames_ != 0 && ++framesRun_ >= exitAfterFrames_)
             {
                 logger_.Info("Exit after " + std::to_string(framesRun_) + " frames");
@@ -922,12 +1063,13 @@ namespace myengine::core
         }
 
         // The maps of a shipping build are never written: they lie next to the exe, where nothing may be changed
-        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_ && !apppaths::IsShipping())
+        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_ && !apppaths::IsShipping() && !gameMode_)
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
 
-        uiGallery_.reset();   // before the UiManager it is hooked into
+        gameFlow_.reset();    // before the UiManager it is hooked into (it saves the settings)
+        uiGallery_.reset();
         uiManager_.Shutdown();
         audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
@@ -968,6 +1110,71 @@ namespace myengine::core
     void Application::SetRlOnlineOptions(const ecs::systems::RlOnlineOptions& options)
     {
         rlOnline_ = options;
+    }
+
+    void Application::SetGameMode(const bool enabled)
+    {
+        gameMode_ = enabled;
+    }
+
+    bool Application::GameMode() const
+    {
+        return gameMode_;
+    }
+
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> Application::ListDisplayResolutions() const
+    {
+        if (windows_.empty() || windows_.front().window == nullptr)
+        {
+            return {};
+        }
+        return windows_.front().window->ListResolutions();
+    }
+
+    std::pair<std::uint32_t, std::uint32_t> Application::GetWindowSize() const
+    {
+        if (windows_.empty() || windows_.front().window == nullptr)
+        {
+            return {0, 0};
+        }
+        return {windows_.front().window->Width(), windows_.front().window->Height()};
+    }
+
+    void Application::ApplyVideoSettings(const game::RlVideoSettings& video)
+    {
+        if (renderAdapter_ != nullptr)
+        {
+            renderAdapter_->SetVSync(video.vsync);
+        }
+        fpsLimit_ = std::max(video.fpsLimit, 0);
+
+        // The quality of the passes: the command line (--render-settings) decides when it was given
+        char* fromCommandLine = nullptr;
+        std::size_t fromCommandLineLength = 0;
+        const bool quality = !(_dupenv_s(&fromCommandLine, &fromCommandLineLength, "MYENGINE_RENDER_SETTINGS") == 0 && fromCommandLine != nullptr && *fromCommandLine != '\0');
+        std::free(fromCommandLine);
+        if (quality && renderAdapter_ != nullptr)
+        {
+            render::RenderSettings settings = renderAdapter_->GetRenderSettings();
+            settings.shadowQuality = static_cast<std::uint8_t>(std::clamp(video.shadows, 0, 2));
+            settings.msaaSamples = video.msaa >= 4 ? 4 : 1;
+            settings.bloom = video.bloom;
+            renderAdapter_->SetRenderSettings(settings);
+        }
+
+        if (!windows_.empty() && windows_.front().window != nullptr)
+        {
+            Window& window = *windows_.front().window;
+            const auto mode = static_cast<DisplayMode>(std::clamp(video.windowMode, 0, 2));
+            const bool sameSize = lastVideoWidth_ == video.width && lastVideoHeight_ == video.height;
+            if (!videoApplied_ || mode != window.GetDisplayMode() || (mode != DisplayMode::Borderless && !sameSize))
+            {
+                window.SetDisplayMode(mode, static_cast<std::uint32_t>(video.width), static_cast<std::uint32_t>(video.height));
+                lastVideoWidth_ = video.width;
+                lastVideoHeight_ = video.height;
+                videoApplied_ = true;
+            }
+        }
     }
 
     int Application::GetExitCode() const
@@ -1137,7 +1344,8 @@ namespace myengine::core
         const editor::EditorRuntimeState& runtimeState = core::ServiceLocator::GetEditorRuntimeState();
         const editor::WindowEditorState* windowEditorState = runtimeState.FindWindowState(window.Id());
         const bool gameMouseMode = runtimeState.mode == editor::RuntimeMode::Play && runtimeState.gameCapturesMouse;
-        const bool gameMouse = gameMouseMode && windowEditorState != nullptr && windowEditorState->viewportHovered;
+        // (in the game mode the whole window is the game; in the editor only the viewport)
+        const bool gameMouse = gameMouseMode && (gameMode_ || (windowEditorState != nullptr && windowEditorState->viewportHovered));
         const bool gameClick =
             ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) && gameMouse) ||
             (msg == WM_LBUTTONUP && gameMouseMode && input_.IsMouseDown(MouseButton::Left)) ||
@@ -1528,6 +1736,17 @@ namespace myengine::core
     void Application::UpdateWindowTitles()
     {
         titleShowsPlay_ = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
+        if (gameMode_)
+        {
+            for (auto& runtime : windows_)
+            {
+                if (!runtime.closed && runtime.window)
+                {
+                    runtime.window->SetTitle(L"Rocket Arena");
+                }
+            }
+            return;
+        }
         std::wstring suffix;
         if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized() && !sceneSavePath_.empty())
         {

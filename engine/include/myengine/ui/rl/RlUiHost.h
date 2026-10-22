@@ -63,6 +63,9 @@ namespace myengine::rlui
         // The state of the devices as the Host sees it (the game may want it for its own input: the pad, the keys): the last frame
         const RawInput& LastRawInput() const { return lastRaw_; }
 
+        // A hook that may change the devices of every frame before the screen sees them (the scripted input of the tests: docs/game/rl-ui.md, MYENGINE_UI_SCRIPT)
+        void SetRawInputHook(std::function<void(RawInput&)> hook) { rawHook_ = std::move(hook); }
+
     private:
         struct Impl;
         Impl* impl_ = nullptr;
@@ -71,5 +74,6 @@ namespace myengine::rlui
         float uiScale_ = 1.0f;
         std::string fontError_;
         std::function<void(Frame&)> screen_;
+        std::function<void(RawInput&)> rawHook_;
     };
 }

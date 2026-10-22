@@ -44,13 +44,15 @@ CMake-опция `MYENGINE_SHIPPING` (по умолчанию OFF). Её вкл�
 | Недавние проекты | `%APPDATA%\myengine\recent_projects.json` | `%LOCALAPPDATA%\RocketArena\recent_projects.json` |
 | Миниатюры, захваты GPU, статистика кадра | `<проект>\Saved\…` | `%LOCALAPPDATA%\RocketArena\Saved\…` |
 | Бинарный кэш моделей и текстур | рядом с исходным файлом (`.myemesh`, `.myetex`) | `%LOCALAPPDATA%\RocketArena\Cache\<хэш пути>.myemesh` / `.myetex` |
-| Личные клавиши | `%APPDATA%\myengine\rl_controls.json` (чтение) | то же (файл только читается; см. «Ограничения») |
+| Настройки игры (видео, камера, звук, последний выбор в Play) | `%APPDATA%\myengine\game_settings.json` | `%LOCALAPPDATA%\RocketArena\game_settings.json` |
+| Личные клавиши | `%APPDATA%\myengine\rl_controls.json` | `%LOCALAPPDATA%\RocketArena\rl_controls.json` (пишет Settings > Controls) |
+| Свой `rl_tuning.json` (окно RL Tuning) | `assets/data/rl_tuning.json` проекта | `%LOCALAPPDATA%\RocketArena\rl_tuning.json` (читается вместо файла дистрибутива) |
 
 Кэш в shipping не запекается заранее: он привязан ко времени изменения исходного файла, а распаковка zip меняет время. Первый запуск строит его сам (две-три секунды на арену), следующие читают из `Cache`. Чтобы начать с нуля, достаточно удалить `%LOCALAPPDATA%\RocketArena`.
 
-Стартовая карта задаётся конфигурацией: в `AppConfig` появились поля `startScene` и `startInPlay` (`config/app.json`). Командная строка сильнее конфигурации; `main.cpp` не менялся.
+Стартовая карта задаётся конфигурацией: в `AppConfig` появились поля `startScene`, `startInPlay` и `startInGame` (`config/app.json`). Командная строка сильнее конфигурации; `main.cpp` не менялся.
 
-> TODO(G1): когда `RocketArena.exe` получит флаг `--game`, режим игры включается им (или одной строкой в `config/app.json`), а редактор в Play как стартовый режим уходит.
+**Игровой режим (G1).** `RocketArena.exe` — тот же `myengine`, собранный в Release с `MYENGINE_SHIPPING`; вместо отдельной цели режим игры включается полем `"startInGame": true` в `config/app.json` дистрибутива (на разработческом `myengine.exe` — флагом `--game`). Так не нужен второй исполняемый файл и вторая сборка: редактор и игра делят один код, а упаковка остаётся прежней. В игровом режиме открывается `assets/scenes/rocket_league.json`, вместо редактора идут экраны игры (`docs/game/rl-ui.md`), настройки лежат в `%LOCALAPPDATA%\RocketArena\game_settings.json`.
 
 ## Что в дистрибутиве
 
@@ -59,7 +61,7 @@ RocketArena/
   RocketArena.exe              Release, /MD, без PDB
   python314.dll, python314.zip встроенный Python (python314.dll нужен при загрузке exe)
   vcruntime140*.dll, msvcp140*.dll, concrt140.dll, vccorlib140.dll   Visual C++ app-local (из VC\Redist\MSVC\<версия>\x64 Visual Studio)
-  config\app.json              окно 1600x900, startScene = rocket_league.json, startInPlay = true
+  config\app.json              окно 1600x900, startScene = rocket_league.json, startInGame = true
   myengine.myproject           проект RocketArena, карта по умолчанию — rocket_league
   assets\                      сцены, модели, материалы, текстуры, шейдеры (.hlsl: компилируются при запуске), data, audio, fonts, fx
   licenses\                    лицензии сторонних компонентов
@@ -97,8 +99,8 @@ RocketArena/
 
 ## Ограничения
 
-- Игра пока стартует как редактор в Play (есть окна и панели редактора): режим без редактора и меню — G1.
-- Личные клавиши читаются из `%APPDATA%\myengine\rl_controls.json` (код `RlGameSystem`, не менялся в G2); окно RL Tuning сохраняет `rl_tuning.json` рядом с exe — в shipping это нужно перенести в `UserDataDirectory()` вместе с G1/G7d.
+- Игровой режим (`startInGame`) идёт без панелей редактора (G1).
+- Личные клавиши, настройки и свой `rl_tuning.json` в shipping лежат в `UserDataDirectory()` (`%LOCALAPPDATA%\RocketArena`): их пишут экраны игры и окно RL Tuning (G1).
 - `PrefabLibrary` пишет в лог предупреждение, что `assets/prefabs` нет: префабы редактора в дистрибутив не входят, на игру это не влияет.
 - PDB не собираются: crash-дампы читать нечем. Если понадобится, `/Zi` и `/DEBUG` добавляются в shipping отдельно, а PDB в дистрибутив не кладётся.
 - Подпись кода и установщик не делались: zip распаковывается и запускается; SmartScreen может предупредить о неподписанном exe.

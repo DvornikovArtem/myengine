@@ -28,6 +28,7 @@ namespace
         std::filesystem::path scenePath;
         std::filesystem::path projectFile;
         bool startInPlay = false;
+        bool gameMode = false;                      // --game: the Rocket League game without the editor
         bool showProjectBrowser = false;
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
@@ -76,6 +77,11 @@ namespace
             if (argument == L"--play" && !options.startInPlay)
             {
                 options.startInPlay = true;
+                continue;
+            }
+            if (argument == L"--game" && !options.gameMode)
+            {
+                options.gameMode = true;
                 continue;
             }
             if (argument == L"--project-browser" && !options.showProjectBrowser)
@@ -329,7 +335,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
     {
         MessageBoxW(
             nullptr,
-            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser]\n"
+            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game]\n"
+            L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
@@ -349,7 +356,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 
     if (options.rlOnline.role != myengine::ecs::systems::RlOnlineOptions::Role::None)
     {
-        // an online match is the Rocket League map in Play
+        // an online match is the Rocket League map in Play (with --game: its screens start the network)
         if (options.scenePath.empty())
         {
             options.scenePath = L"assets/scenes/rocket_league.json";
@@ -358,6 +365,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
     }
 
     myengine::core::Application app(hInstance);
+    app.SetGameMode(options.gameMode);
     app.SetProjectFile(options.projectFile);
     app.SetShowProjectBrowser(options.showProjectBrowser);
     // The editor window is up while the start map is read: it shows the splash instead of waiting in the dark

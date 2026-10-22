@@ -266,8 +266,8 @@ namespace rl
     {
         RlControls c;
         // Rocket League on a PC: W/S gas and reverse (nose down / up in the air), A/D steer (yaw in the air), the left mouse button boosts, the
-        // right one jumps, Space switches the ball cam, Shift is the powerslide and the air roll, Q/E roll, Tab the scoreboard, M the menu
-        // (Esc stops Play in the editor). The Xbox layout of RL: RT gas, LT reverse, the left stick steers and pitches, A jump, B boost,
+        // right one jumps, Space switches the ball cam, Shift is the powerslide and the air roll, Q/E roll, Tab the scoreboard, Esc (or M) the pause
+        // (in the editor Esc stops Play first; M is the menu there). The Xbox layout of RL: RT gas, LT reverse, the left stick steers and pitches, A jump, B boost,
         // X powerslide / air roll, Y ball cam, LB / RB roll, Back the scoreboard, Start the menu.
         c.SetAxis(RlAxisAction::Throttle, {"W", "-S", "PadRT", "-PadLT"});
         c.SetAxis(RlAxisAction::Steer, {"D", "-A", "PadLeftX"});
@@ -278,7 +278,7 @@ namespace rl
         c.SetButton(RlButtonAction::BallCam, {"Space", "PadY"});
         c.SetButton(RlButtonAction::Powerslide, {"Shift", "PadX"});
         c.SetButton(RlButtonAction::Scoreboard, {"Tab", "PadBack"});
-        c.SetButton(RlButtonAction::Menu, {"M", "PadStart"});
+        c.SetButton(RlButtonAction::Menu, {"Esc", "M", "PadStart"});
         return c;
     }
 

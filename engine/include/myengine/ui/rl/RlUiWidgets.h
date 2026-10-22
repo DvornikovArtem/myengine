@@ -43,8 +43,9 @@ namespace myengine::rlui
     // dark text, a stripe of the accent colour on the left and a glow. Returns true when confirmed.
     bool MenuButton(Frame& f, Id id, const Rect& rect, std::string_view label, Icon icon = Icon::None, bool enabled = true);
 
-    // A button of an action (START MATCH, JOIN, HOST MATCH, RESET TO DEFAULTS, PLAY AGAIN, MAIN MENU): the same look at the size of the rect.
-    bool ActionButton(Frame& f, Id id, const Rect& rect, std::string_view label, Icon icon = Icon::None, bool enabled = true);
+    // A button of an action (START MATCH, JOIN, HOST MATCH, RESET TO DEFAULTS, PLAY AGAIN, MAIN MENU): the same look at the size of the rect. `primary`: the
+    // main button of the screen, blue even without the focus.
+    bool ActionButton(Frame& f, Id id, const Rect& rect, std::string_view label, Icon icon = Icon::None, bool enabled = true, bool primary = false);
 
     // The small bevelled button of the dialogs (Confirm / Cancel)
     bool DialogButton(Frame& f, Id id, const Rect& rect, std::string_view label, bool enabled = true);
