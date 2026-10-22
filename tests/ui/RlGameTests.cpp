@@ -344,6 +344,73 @@ namespace
         rig.system.LeaveMatch();
         rig.Frames(2);
 
+        // ---- the training: free play, a pack of exercises, the bot as the player, the pause, the results file, a pack that is not there
+        {
+            sys::RlGameMatchSetup training;
+            training.kind = sys::RlGameMatchSetup::Kind::Training;
+            training.mode = 0;
+            rig.system.StartMatch(training);
+            rig.Frames(3);
+            Check(status.stage == sys::RlGameStage::Playing && !status.online, "free play is on: a stage Playing, nothing online");
+            Check(status.hud.training.active && status.hud.training.phase == rlui::HudTrainingPhase::FreePlay && status.hud.players.size() == 1, "the HUD is the training one, with the player only");
+            rig.Frames(30);
+            Check(status.hud.training.elapsed > 0.5f, "the time of the session runs");
+            rig.system.SetPaused(true);
+            rig.Frames(1);
+            const float pausedAt = status.hud.training.elapsed;
+            rig.Frames(30);
+            Check(status.stage == sys::RlGameStage::Paused && status.hud.training.elapsed == pausedAt, "the pause stops the training");
+            rig.system.SetPaused(false);
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+            Check(status.stage == sys::RlGameStage::Menu && !status.hud.training.active, "leaving the training brings the menu back and clears the HUD");
+
+            // a pack: striker, the exercise is shown, the bot drives it to a success, the results are written, the next exercise comes by itself
+            const fs::path results = appdata / "myengine" / "training.json";
+            const fs::path resultsShipping = appdata / "RocketArena" / "training.json";
+            fs::remove(results);
+            fs::remove(resultsShipping);
+            training.trainingPack = "striker";
+            rig.system.StartMatch(training);
+            rig.Frames(3);
+            Check(status.hud.training.active && status.hud.training.pack == "Striker" && status.hud.training.count == 8 && status.hud.training.index == 0, "the pack starts with its first exercise");
+            Check(status.hud.training.phase == rlui::HudTrainingPhase::Ready || status.hud.training.phase == rlui::HudTrainingPhase::Running, "Ready first, then Running");
+            Check(!status.hud.training.exercise.empty() && !status.hud.training.hint.empty() && status.hud.training.attempts == 3, "the name, the hint and the attempts of the exercise");
+            rig.system.DebugCommand("autopilot");
+            Check(rig.Until([&] { return status.hud.training.phase == rlui::HudTrainingPhase::Success; }, 600), "the bot scores the first exercise");
+            Check(status.hud.training.elapsed > 1.0f && status.hud.training.lastHitKmh > 10.0f && status.hud.training.newBest, "the time, the speed of the hit and the record are in the HUD data");
+            Check(fs::exists(results) || fs::exists(resultsShipping), "the results are written into the folder of the player after the attempt");
+            Check(rig.Until([&] { return status.hud.training.index == 1; }, 200), "a success moves on to the next exercise by itself");
+            rig.system.DebugCommand("next");
+            rig.Frames(2);
+            Check(status.hud.training.index == 2, "the key of the next exercise");
+            rig.system.DebugCommand("previous");
+            rig.Frames(2);
+            Check(status.hud.training.index == 1, "the key of the previous exercise");
+            rig.system.RestartMatch();
+            rig.Frames(3);
+            Check(status.hud.training.index == 0 && status.stage == sys::RlGameStage::Playing, "restart begins the pack again");
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+
+            // a kick-off: two cars and the countdown of the match in the HUD
+            training.trainingPack = "kickoff";
+            rig.system.StartMatch(training);
+            rig.Frames(3);
+            Check(status.hud.training.pack == "Kick-off" && status.hud.phase == rlui::HudPhase::Countdown, "a kick-off exercise has the countdown of the match");
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+
+            // a pack that is not there fails with the reason
+            training.trainingPack = "nonsense";
+            rig.system.StartMatch(training);
+            rig.Frames(3);
+            Check(status.stage == sys::RlGameStage::Failed && status.error.find("nonsense") != std::string::npos, "a pack that is not there ends in Failed with a reason that names it");
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+            Check(status.stage == sys::RlGameStage::Menu, "and the menu comes back");
+        }
+
         // ---- a private match: the host waits in the lobby
         sys::RlGameMatchSetup host;
         host.kind = sys::RlGameMatchSetup::Kind::Host;

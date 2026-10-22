@@ -17,6 +17,7 @@ set(RL_HEADERS
   include/rl/RlRng.h
   include/rl/RlSim.h
   include/rl/RlTraining.h
+  include/rl/RlTrainingAutopilot.h
   include/rl/RlTuning.h
   include/rl/RlTypes.h
 )
@@ -48,6 +49,7 @@ set(RL_SOURCES
   src/net/NetReliable.cpp
   src/RlSim.cpp
   src/RlTraining.cpp
+  src/RlTrainingAutopilot.cpp
   src/RlTuning.cpp
 )
 

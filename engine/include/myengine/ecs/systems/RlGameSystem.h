@@ -75,6 +75,7 @@ namespace myengine::ecs::systems
             Offline,   // against bots (mode 0: the practice)
             Host,      // private match, this window is the host
             Join,      // private match, this window joins `address`
+            Training,  // free play or a pack of exercises (rl::RlTraining, docs/game/rl-training.md): `trainingPack`
         };
 
         Kind kind = Kind::Offline;
@@ -87,6 +88,8 @@ namespace myengine::ecs::systems
         // Host / Join: the transport of the match made by the lobby service (LAN, Steam; docs/game/rl-lobby.md). Empty: UDP. The system calls it once
         // when the network starts and forgets it; `address` and `port` then mean what that transport means (Steam: the Steam id of the host).
         std::function<std::unique_ptr<rl::net::INetTransport>(const rl::net::NetSimParams&)> transportFactory;
+        std::string trainingPack;       // Training: the id of the pack ("striker"), empty = free play
+        int trainingExercise = 0;       // Training: the exercise to begin with
     };
 
     struct RlLobbySlot
@@ -177,7 +180,8 @@ namespace myengine::ecs::systems
         // The name of the player in the table
         void SetPlayerName(const std::string& name);
         // Commands of the tests (UiScript: `game <command>`): "goal-blue" / "goal-orange" put the ball into that goal, "demolish" demolishes the car of the player,
-        // "boost" fills its boost, "time <seconds>" sets the clock. They work in a running match only.
+        // "boost" fills its boost, "time <seconds>" sets the clock. They work in a running match only. In a training "autopilot" / "autopilot-off" hands
+        // the car to the bot of the training (RlTrainingAutopilot), "next" / "previous" / "retry" press the keys of the exercise.
         void DebugCommand(const std::string& command);
         // The aspect ratio of the window (RL's field of view is the horizontal one)
         void SetViewAspect(float aspect);
