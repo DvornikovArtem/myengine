@@ -1,0 +1,82 @@
+{
+  "name": "RocketArena",
+  "version": "0.1.0",
+  "exe": "RocketArena.exe",
+
+  "comment": "What goes into dist/RocketArena (tools/package_game.ps1, docs/game/packaging.md). 'assets' are roots: a file, a folder (with everything inside) or a wildcard, relative to the repository. With followReferences the script also takes everything a taken scene / material / shader / data file names (models, materials, textures, shaders), so the list follows the map: when the game scene moves to other assets, the old ones leave the package by themselves. 'exclude' wins over everything.",
+
+  "followReferences": true,
+
+  "assets": [
+    "assets/scenes/rocket_league.json",
+    "assets/scenes/rl_showcase.json",
+    "assets/models/rl2",
+    "assets/materials/rl2",
+    "assets/textures/rl2",
+    "assets/models/fx",
+    "assets/materials/fx",
+    "assets/textures/fx",
+    "assets/shaders",
+    "assets/data",
+    "assets/audio",
+    "assets/fonts",
+
+    "assets/models/crate.obj",
+    "assets/models/sphere.obj",
+    "assets/models/pyramid.obj",
+    "assets/materials/default.material.json",
+    "assets/materials/warm.material.json",
+    "assets/materials/cool.material.json",
+    "assets/textures/debug.bmp"
+  ],
+
+  "exclude": [
+    "**/*.myemesh",
+    "**/*.myetex",
+    "**/*.pdb",
+    "assets/data/fx/stress_5000.json",
+    "assets/audio/manifest.json"
+  ],
+
+  "runtime": [
+    "external/runtime/python314.dll",
+    "external/runtime/python314.zip"
+  ],
+
+  "config": {
+    "windows": [
+      { "title": "Rocket Arena", "width": 1600, "height": 900, "clearColor": [0.08, 0.12, 0.20, 1.0] }
+    ],
+    "input": { "moveSpeed": 0.8, "scaleSpeed": 0.7, "rotateSpeedDeg": 120.0 },
+    "startScene": "assets/scenes/rocket_league.json",
+    "startInPlay": true,
+    "todo": "G1: when RocketArena.exe takes --game, start the game mode from the config instead of the editor in Play"
+  },
+
+  "project": {
+    "name": "RocketArena",
+    "engineVersion": 1,
+    "contentDir": "assets",
+    "mapsDir": "assets/scenes",
+    "scriptsDir": "assets/scripts",
+    "prefabsDir": "assets/prefabs",
+    "defaultMap": "assets/scenes/rocket_league.json"
+  },
+
+  "licenses": {
+    "notices": "tools/package_licenses",
+    "copy": [
+      { "from": "external/python/LICENSE.txt", "to": "Python-PSF-LICENSE.txt" },
+      { "from": "external/JoltPhysics/LICENSE", "to": "JoltPhysics-MIT-LICENSE.txt" },
+      { "from": "external/freetype/docs/FTL.TXT", "to": "FreeType-FTL.txt" },
+      { "from": "external/pybind11/LICENSE", "to": "pybind11-BSD-LICENSE.txt" },
+      { "from": "assets/fonts/LICENSE-lucide.txt", "to": "Lucide-ISC-LICENSE.txt" }
+    ]
+  },
+
+  "steam": {
+    "comment": "Steamworks: with -WithSteam -SteamSdk <folder> steam_api64.dll goes next to the exe and steam_appid.txt (480, the Spacewar test id) is written. Without the SDK nothing of Steam is in the package.",
+    "dll": "redistributable_bin/win64/steam_api64.dll",
+    "appId": "480"
+  }
+}

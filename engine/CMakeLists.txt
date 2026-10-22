@@ -16,6 +16,7 @@
   include/myengine/core/Application.h
   include/myengine/core/FileWatcher.h
   include/myengine/core/Logger.h
+  include/myengine/core/AppPaths.h
   include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -116,6 +117,7 @@ set(ENGINE_SOURCES
   src/assistant/CodexStreamParser.cpp
   src/assistant/Markdown.cpp
   src/config/AppConfig.cpp
+  src/core/AppPaths.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/Logger.cpp
@@ -265,9 +267,12 @@ target_include_directories(myengine_engine
     ${IMGUIZMO_ROOT}
     ${CMAKE_SOURCE_DIR}/external/renderdoc)
 
-target_compile_definitions(myengine_engine
-  PUBLIC
-    MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# A shipping build knows no repository (core::apppaths::SourceRoot() is empty) and keeps its files in %LOCALAPPDATA%
+if(MYENGINE_SHIPPING)
+  target_compile_definitions(myengine_engine PUBLIC MYENGINE_SHIPPING)
+else()
+  target_compile_definitions(myengine_engine PUBLIC MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+endif()
 
 target_link_libraries(myengine_engine
   PUBLIC

@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/ProjectContext.h>
 
 namespace myengine::core
@@ -553,10 +554,8 @@ namespace myengine::core
 
         fs::path DefaultRecentProjectsFile()
         {
-            wchar_t buffer[MAX_PATH]{};
-            const DWORD length = GetEnvironmentVariableW(L"APPDATA", buffer, static_cast<DWORD>(std::size(buffer)));
-            const fs::path base = length > 0 && length < std::size(buffer) ? fs::path(buffer) : ProjectContext::ExecutableDirectory();
-            return base / "myengine" / "recent_projects.json";
+            // %APPDATA%\myengine, in a shipping build %LOCALAPPDATA%\RocketArena
+            return apppaths::UserDataDirectory() / "recent_projects.json";
         }
 
         std::vector<fs::path> LoadRecentProjects(const fs::path& file)

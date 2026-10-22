@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <string>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
@@ -161,11 +162,17 @@ namespace myengine::core
         Shutdown();
     }
 
-    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath, const bool startInPlay)
+    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& requestedScene, const bool requestedPlay)
     {
         config_ = config;
 
-        const auto logPath = GetExecutableDirectory() / "logs/myengine.log";
+        // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json (the shipped
+        // game starts the Rocket League map this way; TODO(G1): the --game flag replaces it)
+        const bool sceneFromConfig = requestedScene.empty() && !config.startScene.empty();
+        const std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
+        const bool startInPlay = requestedPlay || (sceneFromConfig && config.startInPlay);
+
+        const auto logPath = apppaths::LogDirectory() / "myengine.log";
         if (!logger_.Initialize(logPath))
         {
             return false;
@@ -299,11 +306,11 @@ namespace myengine::core
         resourceManager_ = std::make_unique<resource::ResourceManager>(*renderAdapter_, logger_);
 
         {
-            // Asset previews: images are cached under <project>/Saved/Thumbnails
+            // Asset previews: images are cached under <project>/Saved/Thumbnails (%LOCALAPPDATA%\RocketArena\Saved in shipping)
             editor::ThumbnailServiceConfig thumbnailConfig;
             if (const auto& projectContext = ServiceLocator::GetProjectContext(); projectContext.IsInitialized())
             {
-                thumbnailConfig.cacheDirectory = projectContext.Root() / "Saved" / "Thumbnails";
+                thumbnailConfig.cacheDirectory = apppaths::SavedDirectory(projectContext.Root()) / "Thumbnails";
             }
             thumbnailService_ = std::make_unique<editor::ThumbnailService>(*renderAdapter_, *resourceManager_, logger_, std::move(thumbnailConfig));
         }
@@ -573,7 +580,7 @@ namespace myengine::core
             sceneSavePath_ = project.ResolveContentPath(scenePath);
         }
 
-        gpuCapture_.SetOutput(project.Root() / "Saved" / "Captures", sceneSavePath_.stem().u8string());
+        gpuCapture_.SetOutput(apppaths::SavedDirectory(project.Root()) / "Captures", sceneSavePath_.stem().u8string());
 
         BindRuntimeEventListeners();
 
@@ -871,7 +878,8 @@ namespace myengine::core
             core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         }
 
-        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_)
+        // The maps of a shipping build are never written: they lie next to the exe, where nothing may be changed
+        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_ && !apppaths::IsShipping())
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
@@ -944,7 +952,7 @@ namespace myengine::core
         if (triggered)
         {
             message = "GPU capture of the next frame requested; the file goes to " +
-                      (core::ServiceLocator::GetProjectContext().Root() / "Saved" / "Captures").u8string();
+                      (apppaths::SavedDirectory(core::ServiceLocator::GetProjectContext().Root()) / "Captures").u8string();
             logger_.Info(message);
         }
         return triggered;
@@ -1039,7 +1047,7 @@ namespace myengine::core
         std::filesystem::path target = diagnostics_.frameStatsOut;
         if (target.empty())
         {
-            target = core::ServiceLocator::GetProjectContext().Root() / "Saved" / "FrameStats" /
+            target = apppaths::SavedDirectory(core::ServiceLocator::GetProjectContext().Root()) / "FrameStats" /
                      std::filesystem::u8path("frame_stats_" + map + "_" + std::to_string(diagnostics_.frameStatsFrame) + ".json");
         }
 
@@ -1500,7 +1508,7 @@ namespace myengine::core
 
     bool Application::SaveSceneToDisk()
     {
-        if (!sceneLoaded_ || sceneSavePath_.empty())
+        if (!sceneLoaded_ || sceneSavePath_.empty() || apppaths::IsShipping())
         {
             return false;
         }
@@ -1704,7 +1712,7 @@ namespace myengine::core
 
     bool Application::SaveSceneAs(const std::string& scenePath)
     {
-        if (!sceneLoaded_ || scenePath.empty())
+        if (!sceneLoaded_ || scenePath.empty() || apppaths::IsShipping())
         {
             return false;
         }
