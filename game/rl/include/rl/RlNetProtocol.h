@@ -24,7 +24,7 @@
 
 namespace rl
 {
-    constexpr uint16_t kNetProtocolVersion = 3;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: a car per slot (G4i)
+    constexpr uint16_t kNetProtocolVersion = 4;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: a car per slot (G4i); 4: names up to 32 bytes (G1n, kNameBytes 33)
     constexpr int kNetInputBytes = 5;
     constexpr int kNetInputWindow = 8;   // ticks of input carried by one Input and one Snapshot message
     constexpr int kSnapshotInterval = 2; // ticks between snapshots: 60 Hz
@@ -70,7 +70,7 @@ namespace rl
         uint64_t tuningHash = 0;
         uint64_t carsHash = 0;  // RlCarCatalog::Hash(): the numbers of the cars must be the same on both sides
         uint8_t car = 0;        // the car the player wants (an index of the catalog)
-        std::string name;  // up to 15 characters
+        std::string name;       // up to kPlayerNameBytes bytes (RlName.h)
     };
 
     struct RlWelcomeMsg

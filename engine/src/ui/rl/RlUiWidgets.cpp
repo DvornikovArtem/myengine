@@ -492,13 +492,20 @@ namespace myengine::rlui
         if (row.state.focused)
         {
             f.SetTextEditing();
-            for (const char c : f.input().Typed())
+            // a character at a time (UTF-8): one that does not fit is not added by pieces
+            const std::string& typed = f.input().Typed();
+            for (std::size_t i = 0; i < typed.size();)
             {
-                const bool printable = static_cast<unsigned char>(c) >= 0x20 && c != 0x7F;
-                const bool permitted = allowed.empty() || allowed.find(c) != std::string_view::npos;
-                if (printable && permitted && text.size() < maxLength)
+                const unsigned char lead = static_cast<unsigned char>(typed[i]);
+                std::size_t length = lead >= 0xF0 ? 4 : (lead >= 0xE0 ? 3 : (lead >= 0xC0 ? 2 : 1));
+                length = std::min(length, typed.size() - i);
+                const std::string_view character(typed.data() + i, length);
+                i += length;
+                const bool printable = lead >= 0x20 && lead != 0x7F;
+                const bool permitted = allowed.empty() || (length == 1 && allowed.find(character[0]) != std::string_view::npos);
+                if (printable && permitted && text.size() + length <= maxLength)
                 {
-                    text.push_back(c);
+                    text.append(character);
                     changed = true;
                 }
             }

@@ -2,6 +2,8 @@
 
 #include <rl/RlNetProtocol.h>
 
+#include <rl/RlName.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -332,9 +334,9 @@ namespace rl
         w.U64(msg.tuningHash);
         w.U64(msg.carsHash);
         w.U8(msg.car);
-        const size_t length = std::min<size_t>(msg.name.size(), 15);
-        w.U8(static_cast<uint8_t>(length));
-        w.Bytes(reinterpret_cast<const uint8_t*>(msg.name.data()), length);
+        const std::string name = SanitizePlayerName(msg.name);  // up to kPlayerNameBytes, a character is never cut in the middle
+        w.U8(static_cast<uint8_t>(name.size()));
+        w.Bytes(reinterpret_cast<const uint8_t*>(name.data()), name.size());
     }
 
     void RlEncode(const RlWelcomeMsg& msg, std::vector<uint8_t>& out)
@@ -490,8 +492,8 @@ namespace rl
         msg.carsHash = r.U64();
         msg.car = r.U8();
         const size_t length = r.U8();
-        char name[16] = {};
-        if (length > 15)
+        char name[kNameBytes] = {};
+        if (length > kPlayerNameBytes)
         {
             return false;
         }

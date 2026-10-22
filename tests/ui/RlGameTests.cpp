@@ -18,6 +18,8 @@
 #include <myengine/input/InputManager.h>
 
 #include <rl/RlControls.h>
+#include <rl/RlName.h>
+#include <rl/net/LobbySteam.h>
 #include <rl/net/NetReliable.h>
 #include <rl/RlTuning.h>
 
@@ -143,8 +145,50 @@ namespace
         game::RlGameSettings longName;
         longName.play.playerName = "\xD0\x90\xD1\x80\xD1\x82\xD1\x91\xD0\xBC\xD0\x90\xD1\x80\xD1\x82\xD1\x91\xD0\xBC";  // 16 bytes of 8 two-byte letters
         longName.Clamp();
-        Check(longName.play.playerName.size() <= 15 && longName.play.playerName.size() % 2 == 0, "a long name is cut at a character");
-        Check(!defaults.PlayerName().empty() && defaults.PlayerName().size() <= 15, "the name of the player is never empty and fits the protocol");
+        Check(longName.play.playerName.size() == 20, "a name of 10 letters (20 bytes) fits the slot");
+        for (int i = 0; i < 8; ++i)
+        {
+            longName.play.playerName += "\xD0\xB6";  // a Cyrillic letter, two bytes
+        }
+        longName.Clamp();
+        Check(longName.play.playerName.size() <= rl::kPlayerNameBytes && longName.play.playerName.size() % 2 == 0, "a long name is cut at a character");
+        game::RlGameSettings shortName;
+        shortName.play.playerName = "  x ";
+        shortName.Clamp();
+        Check(shortName.play.playerName.empty(), "a nickname of one letter is not kept: the Windows user stays");
+        game::RlGameSettings spaced;
+        spaced.play.playerName = "  Ann  ";
+        spaced.Clamp();
+        Check(spaced.play.playerName == "Ann", "the spaces at the ends are cut");
+        game::RlGameSettings odd;
+        odd.play.playerName = "Ann\tB\xF0\x9F\x98\x80";
+        odd.Clamp();
+        Check(odd.play.playerName == "AnnB", "control characters and characters without a glyph are dropped");
+        Check(!defaults.PlayerName().empty() && defaults.PlayerName().size() <= rl::kPlayerNameBytes, "the name of the player is never empty and fits the slot");
+
+        // the nickname (G1n): the Steam profile when there is one, else the name of the file, else the Windows user; MYENGINE_PLAYER_NAME above all
+        {
+            _wputenv_s(L"MYENGINE_PLAYER_NAME", L"");
+            std::string steamName;
+            const bool steam = rl::net::SteamPersonaName(steamName);
+            game::RlGameSettings named;
+            named.play.playerName = "FromFile";
+            if (steam)
+            {
+                Check(named.PlayerName() == steamName, "with Steam the nickname is the name of the profile");
+            }
+            else
+            {
+                Check(named.PlayerName() == "FromFile", "without Steam the name of the file");
+                if (defaults.play.playerName.empty())
+                {
+                    Check(!defaults.PlayerName().empty() && defaults.PlayerName() == rl::SanitizePlayerName(defaults.PlayerName()), "the Windows user is cleaned like any name");
+                }
+            }
+            _wputenv_s(L"MYENGINE_PLAYER_NAME", L"\u043f\u043a");
+            Check(named.PlayerName() == "\xD0\xBF\xD0\xBA", "MYENGINE_PLAYER_NAME is the nickname of a test or of a second copy");
+            _wputenv_s(L"MYENGINE_PLAYER_NAME", L"");
+        }
 
         // the camera of the menu and the numbers of the camera of the game
         rl::RlCameraTuning tuning;

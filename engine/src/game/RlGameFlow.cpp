@@ -17,6 +17,7 @@
 #include <string>
 
 #include <rl/RlControls.h>
+#include <rl/RlName.h>
 #include <rl/RlTraining.h>
 #include <rl/RlTuning.h>
 
@@ -191,6 +192,8 @@ namespace myengine::game
 
         // settings
         int tab = 0;
+        std::string nickEdit;          // the field "Player name" (without Steam)
+        bool nickLoaded = false;
         bool askResetControls = false;
         bool askResetTab = false;
         // the rebind window
@@ -504,6 +507,15 @@ namespace myengine::game
             }
             Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::Enter, Glyph::None, "Confirm"}, {Glyph::Esc, Glyph::PadB, "Back"}});
             (void)status;
+            // the nickname of the player (the Steam profile, G1n), top right
+            {
+                const std::string nick = settings.PlayerName();
+                const float width = 96.0f + TextWidth(f, FontStyle::Bold, 24.0f, nick);
+                const Rect chip{1840.0f - width, 112.0f, width, 54.0f};
+                Parallelogram(f, chip, style::kNavySolid.Faded(0.9f));
+                IconGlyph(f, Icon::Person, 24.0f, {chip.x + 44.0f, chip.y + 27.0f}, style::kText);
+                TextIn(f, FontStyle::Bold, 24.0f, {chip.x + 72.0f, chip.y, chip.w - 72.0f, chip.h}, style::kText, nick);
+            }
             // the car of the player, lower right under the podium
             if (const game::RlCarDef* car = game::Cars().FindOrDefault(settings.car))
             {
@@ -2148,6 +2160,44 @@ namespace myengine::game
             Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::LeftRight, Glyph::None, "Change"}, {Glyph::Esc, Glyph::PadB, "Back"}});
         }
 
+        // The nickname (G1n): with Steam it is the name of the profile and cannot be changed; without it the player types his own, 2..16 characters, kept at once
+        void DrawPlayer(Frame& f)
+        {
+            std::string steam;
+            const bool fromSteam = settings.PlayerNameFromSteam(&steam);
+            f.SetDefaultFocus(HashId("player/name"));
+            Column rows({80.0f, 290.0f, 1000.0f, style::kRowHeight}, 62.0f);
+            const Rect row = rows.Next();
+            if (fromSteam)
+            {
+                ValueRow(f, HashId("player/name"), row, "Player name", steam, true, true);
+                TextIn(f, FontStyle::Bold, 18.0f, {row.x + row.w - 220.0f, row.y, 200.0f, row.h}, style::kAccent, "FROM STEAM", Align::Right, 12.0f, 0.1f);
+                Text(f, FontStyle::SemiBold, 22.0f, {row.x, row.y + row.h + 24.0f}, style::kTextDim, "Your nickname is the name of your Steam profile. Change it in Steam.");
+            }
+            else
+            {
+                if (!nickLoaded)
+                {
+                    nickEdit = rl::FilterNicknameInput(settings.OwnPlayerName());
+                    nickLoaded = true;
+                }
+                if (TextRow(f, HashId("player/name"), row, "Player name", nickEdit, 64))
+                {
+                    nickEdit = rl::FilterNicknameInput(nickEdit);
+                    const std::string kept = rl::TrimNickname(nickEdit);
+                    if (rl::NicknameValid(kept))
+                    {
+                        settings.play.playerName = kept;
+                        System().SetPlayerName(settings.PlayerName());
+                    }
+                }
+                const bool valid = rl::NicknameValid(rl::TrimNickname(nickEdit));
+                Text(f, FontStyle::SemiBold, 22.0f, {row.x, row.y + row.h + 24.0f}, valid ? style::kTextDim : style::kBad,
+                     valid ? std::string("2 to 16 characters: letters (Latin, Cyrillic), digits, space . _ -  Shown in the lobby and in the match.") : std::string("The nickname needs at least 2 characters."));
+            }
+            Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+        }
+
         void DrawSettings(Frame& f)
         {
             const bool cameraTab = tab == 1;
@@ -2163,29 +2213,31 @@ namespace myengine::game
             {
                 Backdrop(f, 0.94f);
             }
-            static const char* const kTitles[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO"};
-            ScreenTitle(f, "SETTINGS", kTitles[std::clamp(tab, 0, 3)]);
-            const std::string_view labels[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO"};
+            static const char* const kTitles[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO", "PLAYER"};
+            ScreenTitle(f, "SETTINGS", kTitles[std::clamp(tab, 0, 4)]);
+            const std::string_view labels[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO", "PLAYER"};
             const bool dialogOpen = rebind.active || askResetControls || askResetTab || videoPending;
             if (!dialogOpen)
             {
-                const int next = Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 700.0f, 54.0f}, Span<std::string_view>(labels), tab);
+                const int next = Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 880.0f, 54.0f}, Span<std::string_view>(labels), tab);
                 if (next != tab)
                 {
                     tab = next;
+                    nickLoaded = false;
                     f.SetFocus(kNoId);
                 }
             }
             else
             {
-                Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 700.0f, 54.0f}, Span<std::string_view>(labels), tab);
+                Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 880.0f, 54.0f}, Span<std::string_view>(labels), tab);
             }
             switch (tab)
             {
             case 0: DrawControls(f); break;
             case 1: DrawCamera(f); break;
             case 2: DrawVideo(f); break;
-            default: DrawAudio(f); break;
+            case 3: DrawAudio(f); break;
+            default: DrawPlayer(f); break;
             }
             if (!dialogOpen && f.input().Pressed(Nav::Back) && !rebind.active)
             {
@@ -2195,6 +2247,7 @@ namespace myengine::game
 
         void LeaveSettings(Frame& f)
         {
+            nickLoaded = false;
             System().SetCameraPreview(false);
             Save();
             System().SaveControls();

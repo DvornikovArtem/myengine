@@ -632,7 +632,7 @@ namespace
         {
             RlMatchConfig config = HumanConfig(2, 0x1u);
             config.names[0] = "Artem";
-            config.names[3] = "Very long name of a player that does not fit in the field of the table, \xD0\x98\xD0\xB2\xD0\xB0\xD0\xBD";
+            config.names[3] = "VeryLongNameOfAPlayerThatDoesNotFitInTheFieldOfTheTable, \xD0\x98\xD0\xB2\xD0\xB0\xD0\xBD";
             RlMatch match(g_tuning, config);
             const RlMatchState& m = match.World().match;
             CHECK(std::strcmp(m.names[0], "Artem") == 0);
