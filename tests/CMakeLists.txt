@@ -373,6 +373,17 @@ set_property(TARGET myengine_rl_match_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_match COMMAND myengine_rl_match_tests)
 set_tests_properties(rl_match PROPERTIES TIMEOUT 600)
 
+# G5: the netcode of the match: transport, protocol, host, client with rollback (no window; virtual clock; one test over real UDP)
+add_executable(myengine_rl_net_tests
+  rl/RlNetTests.cpp)
+
+target_link_libraries(myengine_rl_net_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_net_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
+myengine_apply_compiler_options(myengine_rl_net_tests)
+set_property(TARGET myengine_rl_net_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_net COMMAND myengine_rl_net_tests)
+set_tests_properties(rl_net PROPERTIES TIMEOUT 600)
+
 # An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
 if(MYENGINE_ASAN)
   get_property(myengine_all_tests DIRECTORY PROPERTY TESTS)

@@ -33,6 +33,7 @@ namespace
         myengine::core::DiagnosticsOptions diagnostics;
         std::uint32_t exitAfterFrames = 0; // 0: run until the window is closed
         std::filesystem::path dumpShaderLayouts; // not empty: write the shader layouts to this file and exit
+        myengine::ecs::systems::RlOnlineOptions rlOnline; // --rl-host / --rl-join
     };
 
     bool ParseCount(const std::wstring_view text, std::uint64_t& value)
@@ -44,6 +45,20 @@ namespace
         value = std::wcstoull(std::wstring(text).c_str(), nullptr, 10);
         return value > 0;
     }
+
+    // addresses and net-sim texts are ASCII
+    std::string Narrow(const std::wstring_view text)
+    {
+        std::string result;
+        result.reserve(text.size());
+        for (const wchar_t c : text)
+        {
+            result.push_back(static_cast<char>(c));
+        }
+        return result;
+    }
+
+    bool IsDigits(const std::wstring_view text) { return !text.empty() && text.find_first_not_of(L"0123456789") == std::wstring_view::npos; }
 
     bool ParseArguments(LaunchOptions& options)
     {
@@ -101,6 +116,24 @@ namespace
                 continue;
             }
 
+            // Rocket League online (docs/game/rl-online.md, 7): --rl-host [port] | --rl-join ip[:port], with --rl-clients N, --rl-mode N, --net-sim ...
+            if (argument == L"--rl-host")
+            {
+                if (options.rlOnline.role != myengine::ecs::systems::RlOnlineOptions::Role::None)
+                {
+                    valid = false;
+                    break;
+                }
+                options.rlOnline.role = myengine::ecs::systems::RlOnlineOptions::Role::Host;
+                if (index + 1 < argumentCount && IsDigits(arguments[index + 1]))
+                {
+                    const unsigned long port = std::wcstoul(arguments[++index], nullptr, 10);
+                    valid = port > 0 && port <= 65535;
+                    options.rlOnline.port = static_cast<std::uint16_t>(port);
+                }
+                continue;
+            }
+
             const bool isScene = argument == L"--scene";
             const bool isProject = argument == L"--project";
             const bool isWait = argument == L"--wait-for-pid";
@@ -109,7 +142,12 @@ namespace
             const bool isFrameStatsOut = argument == L"--frame-stats-out";
             const bool isFrames = argument == L"--exit-after-frames";
             const bool isDumpLayouts = argument == L"--dump-shader-layouts";
-            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts)
+            const bool isRlJoin = argument == L"--rl-join";
+            const bool isRlClients = argument == L"--rl-clients";
+            const bool isRlMode = argument == L"--rl-mode";
+            const bool isNetSim = argument == L"--net-sim";
+            if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
+                !isRlClients && !isRlMode && !isNetSim)
             {
                 valid = false;
                 break;
@@ -161,6 +199,21 @@ namespace
             else if (isDumpLayouts && options.dumpShaderLayouts.empty())
             {
                 options.dumpShaderLayouts = std::wstring(value);
+            }
+            else if (isRlJoin && options.rlOnline.role == myengine::ecs::systems::RlOnlineOptions::Role::None)
+            {
+                options.rlOnline.role = myengine::ecs::systems::RlOnlineOptions::Role::Client;
+                options.rlOnline.address = Narrow(value);
+            }
+            else if (isRlClients || isRlMode)
+            {
+                const unsigned long number = IsDigits(value) ? std::wcstoul(std::wstring(value).c_str(), nullptr, 10) : 0;
+                valid = number >= 1 && number <= (isRlMode ? 4ul : 7ul);
+                (isRlMode ? options.rlOnline.playersPerTeam : options.rlOnline.expectedClients) = static_cast<int>(number);
+            }
+            else if (isNetSim && options.rlOnline.netSim.empty())
+            {
+                options.rlOnline.netSim = Narrow(value);
             }
             else
             {
@@ -269,7 +322,8 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser]\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
-            L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]",
+            L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
+            L"  Rocket League online: --rl-host [port] [--rl-clients N] [--rl-mode 1..4] | --rl-join ip[:port]   [--net-sim latency=100,jitter=20,loss=5]",
             L"myengine",
             MB_OK | MB_ICONERROR);
         return -1;
@@ -282,6 +336,16 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 
     WaitForProcess(options.waitForPid);
 
+    if (options.rlOnline.role != myengine::ecs::systems::RlOnlineOptions::Role::None)
+    {
+        // an online match is the Rocket League map in Play
+        if (options.scenePath.empty())
+        {
+            options.scenePath = L"assets/scenes/rocket_league.json";
+        }
+        options.startInPlay = true;
+    }
+
     myengine::core::Application app(hInstance);
     app.SetProjectFile(options.projectFile);
     app.SetShowProjectBrowser(options.showProjectBrowser);
@@ -291,6 +355,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
     app.SetDeferredSceneLoad(!gpuDiagnostics);
     app.SetDiagnosticsOptions(options.diagnostics);
     app.SetExitAfterFrames(options.exitAfterFrames);
+    app.SetRlOnlineOptions(options.rlOnline);
 
     const auto configPath = ResolveConfigPath();
     const auto config = myengine::config::AppConfig::LoadFromFile(configPath);

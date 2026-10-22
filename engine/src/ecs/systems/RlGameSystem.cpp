@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,8 @@
 #include <rl/RlCamera.h>
 #include <rl/RlControls.h>
 #include <rl/RlMatch.h>
+#include <rl/RlNet.h>
+#include <rl/net/NetReliable.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -144,6 +147,16 @@ namespace myengine::ecs::systems
         std::vector<std::string> hud;
         rl::RlCarInput lastPlayer;  // what the player holds, shown in the overlay
 
+        // The online game (G5). The match then lives in netHost or netClient; `match` stays empty.
+        RlOnlineOptions online;
+        std::unique_ptr<rl::net::INetTransport> transport;
+        std::unique_ptr<rl::RlNetHost> netHost;
+        std::unique_ptr<rl::RlNetClient> netClient;
+        bool onlineVisuals = false;
+        int localSlot = 0;
+        std::string onlineStatus;
+        std::chrono::steady_clock::time_point onlineEpoch = std::chrono::steady_clock::now();
+
         // rl_tuning.json is read again when it changes on disk (and the RL Tuning window edits the same numbers and writes them back)
         std::filesystem::path tuningPath;
         std::filesystem::file_time_type tuningStamp{};
@@ -154,6 +167,22 @@ namespace myengine::ecs::systems
             : input(inputManager)
         {
         }
+
+        // The match that is shown: the offline one, the host's or the client's own simulation
+        const rl::RlMatch* View() const
+        {
+            if (match != nullptr)
+            {
+                return match.get();
+            }
+            if (netHost != nullptr)
+            {
+                return netHost->Match();
+            }
+            return netClient != nullptr ? netClient->Match() : nullptr;
+        }
+
+        double OnlineNow() const { return std::chrono::duration<double>(std::chrono::steady_clock::now() - onlineEpoch).count(); }
 
         EntityId FindTag(World& world, const std::string& name)
         {
@@ -215,6 +244,7 @@ namespace myengine::ecs::systems
                 }
             }
             match.reset();
+            StopOnline();
             mode = Mode::Menu;
             scanned = false;
             active = false;
@@ -348,6 +378,12 @@ namespace myengine::ecs::systems
             mode = Mode::Match;
             accumulator = 0.0f;
             cameraState = rl::RlCameraState{};
+            BeginMatchVisuals(world);
+        }
+
+        // Shows the cars of the mode in menuMode, the ball, the marker and the pads
+        void BeginMatchVisuals(World& world)
+        {
             HideEverything(world);
             const int teamSize = std::max(menuMode, 1);
             for (int t = 0; t < (menuMode == 0 ? 1 : 2); ++t)
@@ -521,6 +557,12 @@ namespace myengine::ecs::systems
             edge(rl::RlButtonAction::Scoreboard);
             scoreboard = state.Down(rl::RlButtonAction::Scoreboard);
 
+            if (online.role != RlOnlineOptions::Role::None)
+            {
+                UpdateOnline(world, deltaTime, state, justPressed, windowActive, ballCamPressed, menuPressed);
+                return;
+            }
+
             if (mode == Mode::Menu)
             {
                 if (windowActive)
@@ -589,16 +631,31 @@ namespace myengine::ecs::systems
 
         void ApplyToScene(World& world, const float deltaTime)
         {
-            const float alpha = std::clamp(accumulator / rl::kTickDt, 0.0f, 1.0f);
-            const rl::RlWorldState& now = match->World();
-            const rl::RlWorldState& before = match->PreviousWorld();
-            const rl::RlTuning& t = match->Tuning();
-            const int teamSize = std::max(menuMode, 1);
+            const rl::RlMatch* view = View();
+            float alpha = std::clamp(accumulator / rl::kTickDt, 0.0f, 1.0f);
+            const rl::RlWorldState* nowWorld = &view->World();
+            const rl::RlWorldState* beforeWorld = &view->PreviousWorld();
+            rl::RlWorldState clientWorld;
+            if (netClient != nullptr)
+            {
+                // already interpolated between its last two ticks, with the fading correction of a rollback
+                clientWorld = netClient->RenderWorld();
+                nowWorld = beforeWorld = &clientWorld;
+                alpha = 0.0f;
+            }
+            else if (netHost != nullptr)
+            {
+                alpha = netHost->TickFraction();
+            }
+            const rl::RlWorldState& now = *nowWorld;
+            const rl::RlWorldState& before = *beforeWorld;
+            const rl::RlTuning& t = view->Tuning();
+            const int teamSize = std::max(view->SlotCount() / 2, 1);
 
             dx::XMVECTOR playerPosition = dx::XMVectorZero();
             dx::XMVECTOR playerRotation = dx::XMQuaternionIdentity();
 
-            for (int slot = 0; slot < match->SlotCount(); ++slot)
+            for (int slot = 0; slot < view->SlotCount(); ++slot)
             {
                 const rl::RlCarState& a = before.cars[slot];
                 const rl::RlCarState& b = now.cars[slot];
@@ -606,12 +663,12 @@ namespace myengine::ecs::systems
                 const float s = jumped ? 1.0f : alpha;
                 const dx::XMVECTOR position = dx::XMVectorLerp(P(a.position), P(b.position), s);
                 const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), s);
-                if (slot == 0)
+                if (slot == localSlot)
                 {
                     playerPosition = position;
                     playerRotation = rotation;
                 }
-                const int team = match->Team(slot);
+                const int team = view->Team(slot);
                 const int index = slot % teamSize;
                 const bool shown = !b.demolished;
                 if (auto* transform = world.TryGet<components::TransformComponent>(cars[team][index]))
@@ -670,16 +727,16 @@ namespace myengine::ecs::systems
                 transform->position = {dx::XMVectorGetX(playerPosition), dx::XMVectorGetY(playerPosition) + 0.95f, dx::XMVectorGetZ(playerPosition)};
                 transform->rotationDeg = {0.0f, 45.0f, 0.0f};
                 transform->scale = {0.22f, 0.22f, 0.22f};
-                SetVisible(world, marker, !now.cars[0].demolished);
+                SetVisible(world, marker, !now.cars[localSlot].demolished);
             }
 
-            UpdateCamera(world, deltaTime, now.cars[0], playerPosition, playerRotation, ballPosition);
+            UpdateCamera(world, deltaTime, now.cars[localSlot], playerPosition, playerRotation, ballPosition, *view);
         }
 
         // The camera of Rocket League (game/rl RlCamera): behind the car, over it at the ball (ball cam), the up follows the surface, and it
         // is pulled in so that it stays inside the arena.
         void UpdateCamera(World& world, const float deltaTime, const rl::RlCarState& car, dx::FXMVECTOR carPosition, dx::FXMVECTOR carRotation,
-                          dx::FXMVECTOR ballPosition)
+                          dx::FXMVECTOR ballPosition, const rl::RlMatch& view)
         {
             if (camera == kInvalidEntity)
             {
@@ -701,15 +758,15 @@ namespace myengine::ecs::systems
             const Vec3 b = ToVec3(ballPosition);
             in.ballPosition = {b.x, b.y, b.z};
             in.ballCam = ballCam;
-            const rl::RlCameraTuning& cameraTuning = match->Tuning().camera;
-            const rl::RlCameraView view = rl::RlCameraUpdate(cameraTuning, cameraState, match->Sim(), in, std::min(deltaTime, 0.1f));
+            const rl::RlCameraTuning& cameraTuning = view.Tuning().camera;
+            const rl::RlCameraView cameraView = rl::RlCameraUpdate(cameraTuning, cameraState, view.Sim(), in, std::min(deltaTime, 0.1f));
 
             dx::XMMATRIX basis;
-            basis.r[0] = dx::XMVectorSet(view.right.x, view.right.y, view.right.z, 0.0f);
-            basis.r[1] = dx::XMVectorSet(view.up.x, view.up.y, view.up.z, 0.0f);
-            basis.r[2] = dx::XMVectorSet(view.forward.x, view.forward.y, view.forward.z, 0.0f);
+            basis.r[0] = dx::XMVectorSet(cameraView.right.x, cameraView.right.y, cameraView.right.z, 0.0f);
+            basis.r[1] = dx::XMVectorSet(cameraView.up.x, cameraView.up.y, cameraView.up.z, 0.0f);
+            basis.r[2] = dx::XMVectorSet(cameraView.forward.x, cameraView.forward.y, cameraView.forward.z, 0.0f);
             basis.r[3] = dx::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
-            cam->position = {view.position.x, view.position.y, view.position.z};
+            cam->position = {cameraView.position.x, cameraView.position.y, cameraView.position.z};
             cam->rotationDeg = EulerDegrees(dx::XMQuaternionRotationMatrix(basis));
             // RL's field of view is the horizontal one; the camera component takes the vertical one (16:9 assumed)
             constexpr float kAspect = 16.0f / 9.0f;
@@ -735,6 +792,183 @@ namespace myengine::ecs::systems
                    "   menu " + join(controls.ButtonTokens(rl::RlButtonAction::Menu));
         }
 
+        // ---- online (G5) --------------------------------------------------------------------------------------------------------------
+
+        void StopOnline()
+        {
+            netHost.reset();
+            netClient.reset();
+            if (transport != nullptr)
+            {
+                transport->Close();
+                transport.reset();
+            }
+            onlineVisuals = false;
+            localSlot = 0;
+            onlineStatus.clear();
+        }
+
+        // The network of this window: UDP with the simulated lag of --net-sim
+        bool StartOnline()
+        {
+            rl::net::NetSimParams sim;
+            std::string error;
+            if (!online.netSim.empty() && !rl::net::NetSimParams::Parse(online.netSim, sim, &error))
+            {
+                onlineStatus = error;
+                return false;
+            }
+            transport = rl::net::MakeUdpTransport(sim, static_cast<uint64_t>(GetCurrentProcessId()) * 2654435761u);
+            if (online.role == RlOnlineOptions::Role::Host)
+            {
+                rl::RlNetHostOptions options;
+                options.match.mode = std::clamp(online.playersPerTeam, 1, 4);
+                options.match.botLevel = botLevel;
+                options.match.seed = 0x5EED0000ull + static_cast<uint64_t>(GetCurrentProcessId());
+                netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
+                if (!netHost->Listen(online.port, error))
+                {
+                    onlineStatus = "cannot listen on port " + std::to_string(online.port) + ": " + error;
+                    netHost.reset();
+                    return false;
+                }
+                localSlot = 0;
+                menuMode = options.match.mode;
+                onlineStatus = Format("hosting on UDP port %u", static_cast<unsigned>(online.port));
+            }
+            else
+            {
+                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning);
+                if (!netClient->Connect(online.address, "player", error))
+                {
+                    onlineStatus = error;
+                    netClient.reset();
+                    return false;
+                }
+                onlineStatus = "connecting to " + online.address;
+            }
+            return true;
+        }
+
+        void BuildOnlineWaitHud(const std::string& line)
+        {
+            hud.clear();
+            hud.push_back("=== ROCKET LEAGUE ONLINE ===");
+            hud.push_back(line);
+            hud.push_back("M - back to the menu      Esc - stop Play");
+            if (!onlineStatus.empty())
+            {
+                hud.push_back(onlineStatus);
+            }
+        }
+
+        void UpdateOnline(World& world, const float deltaTime, const rl::RlControlState& state, const rl::RlControlState& justPressed, const bool windowActive,
+                          const bool ballCamPressed, const bool menuPressed)
+        {
+            if (netHost == nullptr && netClient == nullptr && !StartOnline())
+            {
+                BuildOnlineWaitHud("cannot start the network");
+                if (menuPressed)
+                {
+                    online = RlOnlineOptions{};
+                    StopOnline();
+                    BuildMenuHud();
+                }
+                return;
+            }
+            if (menuPressed)
+            {
+                // back to the menu: the offline game
+                online = RlOnlineOptions{};
+                StopOnline();
+                ToMenu(world);
+                BuildMenuHud();
+                return;
+            }
+            if (ballCamPressed)
+            {
+                ballCam = !ballCam;
+            }
+
+            rl::RlCarInput player = state.car;
+            lastPlayer = player;
+            if (justPressed.car.jump)
+            {
+                jumpLatched = true;
+            }
+            if (jumpLatched)
+            {
+                player.jump = true;
+                jumpLatched = false;
+            }
+            const double now = OnlineNow();
+
+            if (netHost != nullptr)
+            {
+                netHost->SetLocalInput(player);
+                netHost->Update(now);
+                if (!netHost->Started())
+                {
+                    const bool enter = windowActive && input.WasKeyPressed(VK_RETURN);
+                    if (netHost->ClientCount() >= online.expectedClients || enter)
+                    {
+                        netHost->StartMatch(now);
+                    }
+                    else
+                    {
+                        BuildOnlineWaitHud(Format("waiting for %d player(s): %d joined   (Enter - start now with bots)", online.expectedClients, netHost->ClientCount()));
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                netClient->SetLocalInput(player);
+                netClient->Update(now);
+                const rl::RlNetClientState clientState = netClient->State();
+                if (clientState == rl::RlNetClientState::Failed || clientState == rl::RlNetClientState::Disconnected)
+                {
+                    HideEverything(world);
+                    onlineVisuals = false;
+                    BuildOnlineWaitHud("cannot play: " + netClient->Error());
+                    return;
+                }
+                if (clientState != rl::RlNetClientState::Playing)
+                {
+                    BuildOnlineWaitHud(clientState == rl::RlNetClientState::Lobby ? "joined; waiting for the host to start the match"
+                                                                                   : "connecting to " + online.address + " ...");
+                    return;
+                }
+                localSlot = netClient->Slot();
+            }
+
+            if (!onlineVisuals && View() != nullptr)
+            {
+                menuMode = View()->SlotCount() == 1 ? 0 : View()->SlotCount() / 2;
+                BeginMatchVisuals(world);
+                mode = Mode::Match;
+                cameraState = rl::RlCameraState{};
+                onlineVisuals = true;
+            }
+            if (!onlineVisuals)
+            {
+                return;
+            }
+            ApplyToScene(world, deltaTime);
+            BuildMatchHud();
+            const rl::RlNetStats& stats = netHost != nullptr ? netHost->Stats() : netClient->Stats();
+            if (netClient != nullptr)
+            {
+                hud.push_back(Format("NET client slot %d   ping %.0f ms   tick %u   lead %d   corrections/s %d   (rollbacks %llu, hard %llu)", localSlot, stats.rttMs, stats.tick,
+                                     stats.lead, stats.rollbacksLastSecond, static_cast<unsigned long long>(stats.rollbacks), static_cast<unsigned long long>(stats.hardCorrections)));
+            }
+            else
+            {
+                hud.push_back(Format("NET host   guests %d   ping %.0f ms   tick %u   late inputs %llu", netHost->ClientCount(), stats.rttMs, stats.tick,
+                                     static_cast<unsigned long long>(stats.lateInputs)));
+            }
+        }
+
         void BuildMenuHud()
         {
             hud.clear();
@@ -755,12 +989,14 @@ namespace myengine::ecs::systems
         void BuildMatchHud()
         {
             hud.clear();
-            const rl::RlWorldState& w = match->World();
+            const rl::RlMatch* view = View();
+            const rl::RlWorldState& w = view->World();
             const rl::RlMatchState& m = w.match;
-            const rl::RlCarState& car = w.cars[0];
+            const rl::RlCarState& car = w.cars[localSlot];
+            const int teamSize = std::max(view->SlotCount() / 2, 1);
             const char* teamName[2] = {"BLUE", "ORANGE"};
 
-            if (menuMode == 0)
+            if (view->SlotCount() == 1)
             {
                 hud.push_back(Format("PRACTICE   goals %d", m.score[0]));
             }
@@ -775,8 +1011,8 @@ namespace myengine::ecs::systems
                 break;
             case rl::RlMatchPhase::GoalScored:
             {
-                std::string author = m.lastGoalScorer < 0 ? "" : Format("  (%s%s %d)", teamName[match->Team(m.lastGoalScorer)], m.lastGoalOwn != 0 ? " own goal" : "",
-                                                                       m.lastGoalScorer % std::max(menuMode, 1) + 1);
+                std::string author = m.lastGoalScorer < 0 ? "" : Format("  (%s%s %d)", teamName[view->Team(m.lastGoalScorer)], m.lastGoalOwn != 0 ? " own goal" : "",
+                                                                       m.lastGoalScorer % teamSize + 1);
                 hud.push_back(Format("*** GOAL!  %s scores%s ***", teamName[m.lastGoalTeam], author.c_str()));
                 break;
             }
@@ -811,10 +1047,10 @@ namespace myengine::ecs::systems
             if (scoreboard)
             {
                 hud.push_back("--- SCOREBOARD ---");
-                for (int slot = 0; slot < match->SlotCount(); ++slot)
+                for (int slot = 0; slot < view->SlotCount(); ++slot)
                 {
-                    hud.push_back(Format("%-6s %s %d   goals %d   hits %d", teamName[match->Team(slot)], slot == 0 ? "you   " : "bot   ", slot % std::max(menuMode, 1) + 1,
-                                         m.goals[slot], m.touches[slot]));
+                    hud.push_back(Format("%-6s %s %d   goals %d   hits %d", teamName[view->Team(slot)], slot == localSlot ? "you   " : (view->IsBot(slot) ? "bot   " : "human "),
+                                         slot % teamSize + 1, m.goals[slot], m.touches[slot]));
                 }
             }
             if (!status.empty())
@@ -830,6 +1066,11 @@ namespace myengine::ecs::systems
     }
 
     RlGameSystem::~RlGameSystem() = default;
+
+    void RlGameSystem::SetOnlineOptions(const RlOnlineOptions& options)
+    {
+        impl_->online = options;
+    }
 
     void RlGameSystem::Update(World& world, const float deltaTime)
     {

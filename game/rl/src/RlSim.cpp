@@ -774,14 +774,15 @@ namespace rl
         }
     }
 
-    void RlSim::SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity)
+    void RlSim::SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity, RlVec3 angularVelocity)
     {
         if (index >= 0 && index < impl_->carCount)
         {
             JPH::BodyInterface& bodies = impl_->physics.GetBodyInterfaceNoLock();
             bodies.SetPositionAndRotation(impl_->carIds[index], JPH::RVec3(position.x, position.y, position.z),
                                           JPH::Quat(rotation.x, rotation.y, rotation.z, rotation.w).Normalized(), JPH::EActivation::Activate);
-            bodies.SetLinearAndAngularVelocity(impl_->carIds[index], JPH::Vec3(velocity.x, velocity.y, velocity.z), JPH::Vec3::sZero());
+            bodies.SetLinearAndAngularVelocity(impl_->carIds[index], JPH::Vec3(velocity.x, velocity.y, velocity.z),
+                                              JPH::Vec3(angularVelocity.x, angularVelocity.y, angularVelocity.z));
             impl_->FillState();
         }
     }

@@ -421,6 +421,8 @@ namespace rl
     int RlMatch::SlotCount() const { return impl_->slots; }
     int RlMatch::Team(int slot) const { return impl_->TeamOf(slot); }
     bool RlMatch::IsBot(int slot) const { return impl_->IsBot(slot); }
+    uint32_t RlMatch::HumanMask() const { return impl_->config.humanMask; }
+    void RlMatch::SetHumanMask(uint32_t mask) { impl_->config.humanMask = mask; }
     const RlTuning& RlMatch::Tuning() const { return impl_->tuning; }
 
     void RlMatch::SetTuning(const RlTuning& tuning)
