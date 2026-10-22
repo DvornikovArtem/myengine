@@ -143,6 +143,7 @@ set(ENGINE_SOURCES
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp
+  src/render/dx12/Dx12ScenePass.cpp
   src/render/dx12/InputLayoutBuilder.cpp
   src/render/dx12/RootSignatureBuilder.cpp
   src/render/dx12/ShaderCompiler.cpp

@@ -248,6 +248,17 @@ target_include_directories(myengine_input_layout_tests PRIVATE "${CMAKE_SOURCE_D
 myengine_apply_compiler_options(myengine_input_layout_tests)
 set_property(TARGET myengine_input_layout_tests PROPERTY FOLDER "Tests")
 add_test(NAME input_layout COMMAND myengine_input_layout_tests)
+
+# G7b: the scene passes without a GPU: mesh bounds, the lit and post shaders, the instance stream, the sampler presets
+add_executable(myengine_scene_pass_tests
+  render/ScenePassTests.cpp)
+
+target_link_libraries(myengine_scene_pass_tests PRIVATE myengine_engine)
+target_include_directories(myengine_scene_pass_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_scene_pass_tests)
+set_property(TARGET myengine_scene_pass_tests PROPERTY FOLDER "Tests")
+add_test(NAME scene_pass COMMAND myengine_scene_pass_tests)
+set_tests_properties(scene_pass PROPERTIES TIMEOUT 120)
 set_tests_properties(input_layout PROPERTIES TIMEOUT 120)
 
 # A-check (LR3): shader hot reload in the resource manager on a recording adapter: same handle, errors, fallback, includes
@@ -385,6 +396,17 @@ myengine_apply_compiler_options(myengine_rl_rocketsim_diff)
 set_property(TARGET myengine_rl_rocketsim_diff PROPERTY FOLDER "Tests")
 add_test(NAME rl_rocketsim_diff COMMAND myengine_rl_rocketsim_diff)
 set_tests_properties(rl_rocketsim_diff PROPERTIES TIMEOUT 300)
+
+# G5: the netcode of the match: transport, protocol, host, client with rollback (no window; virtual clock; one test over real UDP)
+add_executable(myengine_rl_net_tests
+  rl/RlNetTests.cpp)
+
+target_link_libraries(myengine_rl_net_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_net_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
+myengine_apply_compiler_options(myengine_rl_net_tests)
+set_property(TARGET myengine_rl_net_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_net COMMAND myengine_rl_net_tests)
+set_tests_properties(rl_net PROPERTIES TIMEOUT 600)
 
 # An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
 if(MYENGINE_ASAN)

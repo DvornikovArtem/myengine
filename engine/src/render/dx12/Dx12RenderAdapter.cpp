@@ -112,6 +112,45 @@ namespace myengine::render::dx12
             return std::filesystem::u8path(MYENGINE_SOURCE_DIR) / relative;
         }
 
+        // The number of levels of a full mip chain
+        UINT MipCount(const std::uint32_t width, const std::uint32_t height)
+        {
+            UINT levels = 1;
+            std::uint32_t size = (std::max)(width, height);
+            while (size > 1)
+            {
+                size >>= 1;
+                ++levels;
+            }
+            return levels;
+        }
+
+        // The next level of an RGBA8 image: the average of 2x2 texels (the edge texel is repeated for an odd size)
+        std::vector<std::uint8_t> DownsampleRgba8(const std::vector<std::uint8_t>& source, const std::uint32_t width, const std::uint32_t height,
+            std::uint32_t& outWidth, std::uint32_t& outHeight)
+        {
+            outWidth = (std::max)(width / 2, 1u);
+            outHeight = (std::max)(height / 2, 1u);
+            std::vector<std::uint8_t> result(static_cast<std::size_t>(outWidth) * outHeight * 4);
+            for (std::uint32_t y = 0; y < outHeight; ++y)
+            {
+                const std::uint32_t y0 = (std::min)(y * 2, height - 1);
+                const std::uint32_t y1 = (std::min)(y * 2 + 1, height - 1);
+                for (std::uint32_t x = 0; x < outWidth; ++x)
+                {
+                    const std::uint32_t x0 = (std::min)(x * 2, width - 1);
+                    const std::uint32_t x1 = (std::min)(x * 2 + 1, width - 1);
+                    for (std::uint32_t c = 0; c < 4; ++c)
+                    {
+                        const unsigned sum = source[(static_cast<std::size_t>(y0) * width + x0) * 4 + c] + source[(static_cast<std::size_t>(y0) * width + x1) * 4 + c] +
+                            source[(static_cast<std::size_t>(y1) * width + x0) * 4 + c] + source[(static_cast<std::size_t>(y1) * width + x1) * 4 + c];
+                        result[(static_cast<std::size_t>(y) * outWidth + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                    }
+                }
+            }
+            return result;
+        }
+
         UINT64 AlignUp(const UINT64 value, const UINT64 alignment)
         {
             if (alignment <= 1)
@@ -160,6 +199,7 @@ namespace myengine::render::dx12
         {
             logger_.Warning("GPU timestamps are not available: frame statistics have no GPU times");
         }
+        ApplyEnvironmentSettings();
         forceRootCbv_ = IsEnvironmentEnabled("MYENGINE_DX12_ROOT_CBV");
         if (forceRootCbv_)
         {
@@ -180,6 +220,11 @@ namespace myengine::render::dx12
         if (!BuildUiPipeline())
         {
             return false;
+        }
+        if (!BuildBuiltinProgram("assets/shaders/post.shader.json", ProgramKind::Post, postProgram_))
+        {
+            logger_.Warning("The post program (assets/shaders/post.shader.json) could not be built: no MSAA resolve and no bloom");
+            postProgram_ = {};
         }
         TextureData defaultWhiteTexture;
         defaultWhiteTexture.width = 1;
@@ -309,7 +354,7 @@ namespace myengine::render::dx12
         srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MostDetailedMip = 0;
-        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Texture2D.MipLevels = MipCount(textureData.width, textureData.height);
 
         D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = textureSrvHeap_->GetCPUDescriptorHandleForHeapStart();
         cpuHandle.ptr += static_cast<UINT64>(textureRecord.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
@@ -483,6 +528,14 @@ namespace myengine::render::dx12
                 slot.lightDirection = findVariable(*buffer, "gLightDirection", ShaderValueType::Float4);
                 slot.screenSize = findVariable(*buffer, "screenSize", ShaderValueType::Float2);
                 slot.translation = findVariable(*buffer, "translation", ShaderValueType::Float2);
+                slot.lightViewProjection = findVariable(*buffer, "gLightViewProjection", ShaderValueType::Float4x4);
+                slot.cameraPosition = findVariable(*buffer, "gCameraPosition", ShaderValueType::Float4);
+                slot.lightColor = findVariable(*buffer, "gLightColor", ShaderValueType::Float4);
+                slot.ambientSky = findVariable(*buffer, "gAmbientSky", ShaderValueType::Float4);
+                slot.ambientGround = findVariable(*buffer, "gAmbientGround", ShaderValueType::Float4);
+                slot.shadowParams = findVariable(*buffer, "gShadowParams", ShaderValueType::Float4);
+                slot.postParams = findVariable(*buffer, "gPostParams", ShaderValueType::Float4);
+                slot.texelSize = findVariable(*buffer, "gTexelSize", ShaderValueType::Float4);
                 record.slots.constantBuffers.push_back(slot);
             }
             else if (binding.kind == BindingKind::Texture)
@@ -506,6 +559,10 @@ namespace myengine::render::dx12
                 if (found)
                 {
                     record.slots.textures.push_back({binding.rootParameter, materialIndex});
+                    if (binding.name == "gShadowMap")
+                    {
+                        record.slots.shadowMapParameter = binding.rootParameter; // the renderer binds the shadow map here
+                    }
                 }
             }
         }
@@ -545,6 +602,12 @@ namespace myengine::render::dx12
 
         const Microsoft::WRL::ComPtr<ID3DBlob>& vertexShader = compiled.vertexBlob;
         const Microsoft::WRL::ComPtr<ID3DBlob>& pixelShader = compiled.pixelBlob;
+        // What the pipeline state variants (blend modes, the shadow pass, the HDR / MSAA target) are built from later
+        record.kind = kind;
+        record.vertexBlob = vertexShader;
+        record.pixelBlob = pixelShader;
+        record.inputLayout = inputLayout;
+        record.instanced = inputLayout.instanceStride > 0;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc{};
         pipelineDesc.pRootSignature = record.rootSignature.Get();
@@ -568,6 +631,11 @@ namespace myengine::render::dx12
                 break;
             case ProgramKind::DebugLines:
                 pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+                break;
+            case ProgramKind::Post:
+                pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+                pipelineDesc.DepthStencilState.DepthEnable = FALSE;
+                pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
                 break;
             case ProgramKind::Ui:
             {
@@ -694,6 +762,14 @@ namespace myengine::render::dx12
         {
             retired.objects.push_back(std::move(record.wireframePipelineState));
         }
+        for (auto& variant : record.variants)
+        {
+            if (variant.second != nullptr)
+            {
+                retired.objects.push_back(std::move(variant.second));
+            }
+        }
+        record.variants.clear();
         if (record.rootSignature != nullptr)
         {
             ReleaseRootSignature(record.rootSignatureShape, retired);
@@ -1041,7 +1117,13 @@ namespace myengine::render::dx12
         surface->uiIndexUploadBuffers[backBufferIndex].used = 0;
         surface->debugVertexUploadBuffers[backBufferIndex].used = 0;
         surface->constantUploadBuffers[backBufferIndex].used = 0;
+        surface->instanceUploadBuffers[backBufferIndex].used = 0;
         boundRootSignature_ = nullptr; // a new command list has no root signature
+        pendingDraws_.clear();
+        sceneOutputActive_ = false;
+        shadowMapReady_ = false;
+        sceneClearColor_ = clearColor;
+        useSceneTargets_ = postProgram_.pipelineState != nullptr && (settings_.msaaSamples > 1 || settings_.bloom);
 
         ID3D12Resource* backBuffer = surface->backBuffers[backBufferIndex].Get();
 
@@ -1076,6 +1158,13 @@ namespace myengine::render::dx12
         if (surface == nullptr)
         {
             return;
+        }
+
+        if (surface == activeSurface_ && activeTarget_ == nullptr)
+        {
+            // What was drawn into the previous region is finished (and composited) before the region changes
+            FlushScene();
+            EndSceneOutput(*surface);
         }
 
         if (region == nullptr)
@@ -1134,9 +1223,21 @@ namespace myengine::render::dx12
         if (activeTarget_ != nullptr && surface == activeSurface_)
         {
             activeTarget_->viewProjection = viewProjection;
+            DirectX::XMVECTOR determinant = DirectX::XMVectorZero();
+            const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(&determinant, MatrixToXm(view));
+            activeTarget_->cameraPosition = {DirectX::XMVectorGetX(inverseView.r[3]), DirectX::XMVectorGetY(inverseView.r[3]), DirectX::XMVectorGetZ(inverseView.r[3])};
             return;
         }
+        if (surface == activeSurface_ && !pendingDraws_.empty() && viewProjection.data != surface->viewProjection.data)
+        {
+            FlushScene(); // the collected draws belong to the previous view
+        }
         surface->viewProjection = viewProjection;
+        {
+            DirectX::XMVECTOR determinant = DirectX::XMVectorZero();
+            const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(&determinant, MatrixToXm(view));
+            surface->cameraPosition = {DirectX::XMVectorGetX(inverseView.r[3]), DirectX::XMVectorGetY(inverseView.r[3]), DirectX::XMVectorGetZ(inverseView.r[3])};
+        }
     }
 
     void Dx12RenderAdapter::Draw(const RenderSurfaceHandle handle, const DrawItem& drawItem)
@@ -1151,6 +1252,25 @@ namespace myengine::render::dx12
         auto* surface = FindSurface(handle);
         if (surface == nullptr || surface != activeSurface_)
         {
+            return;
+        }
+
+        if (activeTarget_ == nullptr && !wireframe_)
+        {
+            // The scene of a surface is collected and drawn by FlushScene (shadow pass, instancing, transparency, post passes)
+            PendingDraw draw;
+            draw.mesh = drawItem.mesh;
+            draw.shader = drawItem.shader;
+            draw.material = drawItem.material;
+            draw.texture = drawItem.texture;
+            draw.model = drawItem.model;
+            draw.color = drawItem.color;
+            draw.blend = drawItem.blend;
+            draw.doubleSided = drawItem.doubleSided;
+            draw.castShadow = drawItem.castShadow;
+            draw.boundsCenter = drawItem.boundsCenter;
+            draw.boundsRadius = drawItem.boundsRadius;
+            pendingDraws_.push_back(draw);
             return;
         }
 
@@ -1194,6 +1314,20 @@ namespace myengine::render::dx12
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &mesh.vertexBufferView);
         context_.commandList->IASetIndexBuffer(&mesh.indexBufferView);
+        if (shader.instanced)
+        {
+            // A program that reads its model matrix from the instance stream, drawn directly (a render target, the wireframe view): one instance
+            D3D12_GPU_VIRTUAL_ADDRESS instanceAddress = 0;
+            if (!AllocateFrameUploadData(surface->instanceUploadBuffers[surface->currentBackBuffer], drawItem.model.data.data(), sizeof(float) * 16, 16, instanceAddress))
+            {
+                return;
+            }
+            D3D12_VERTEX_BUFFER_VIEW instanceView{};
+            instanceView.BufferLocation = instanceAddress;
+            instanceView.StrideInBytes = kInstanceStride;
+            instanceView.SizeInBytes = kInstanceStride;
+            context_.commandList->IASetVertexBuffers(1, 1, &instanceView);
+        }
 
         ID3D12DescriptorHeap* descriptorHeaps[] = {textureSrvHeap_.Get()};
         context_.commandList->SetDescriptorHeaps(1, descriptorHeaps);
@@ -1277,6 +1411,28 @@ namespace myengine::render::dx12
                     put(slot.color, white, sizeof(white));
                 }
                 put(slot.lightDirection, light, sizeof(light));
+                {
+                    // The lit program asks for more: the sun colour, the hemisphere ambient, the eye. A render target keeps the old
+                    // look (ambient + Lambert: the light is 1 - ambient, both hemispheres are `ambient`); no shadow map here.
+                    float lightColor[4] = {lighting_.color.x, lighting_.color.y, lighting_.color.z, 1.0f};
+                    float sky[4] = {lighting_.skyAmbient.x, lighting_.skyAmbient.y, lighting_.skyAmbient.z, 1.0f};
+                    float ground[4] = {lighting_.groundAmbient.x, lighting_.groundAmbient.y, lighting_.groundAmbient.z, 1.0f};
+                    Float3 eye = surface->cameraPosition;
+                    if (activeTarget_ != nullptr)
+                    {
+                        const float share = 1.0f - targetAmbient_;
+                        lightColor[0] = lightColor[1] = lightColor[2] = share;
+                        sky[0] = sky[1] = sky[2] = targetAmbient_;
+                        ground[0] = ground[1] = ground[2] = targetAmbient_;
+                        eye = activeTarget_->cameraPosition;
+                    }
+                    const float camera[4] = {eye.x, eye.y, eye.z, 1.0f};
+                    put(slot.lightColor, lightColor, sizeof(lightColor));
+                    put(slot.ambientSky, sky, sizeof(sky));
+                    put(slot.ambientGround, ground, sizeof(ground));
+                    put(slot.cameraPosition, camera, sizeof(camera));
+                    // gShadowParams and gLightViewProjection stay zero: no shadows on this path
+                }
                 SetConstants(slot, *surface);
             }
         }
@@ -1312,6 +1468,7 @@ namespace myengine::render::dx12
         {
             return;
         }
+        FlushScene(); // the lines go over the scene, into the same target (with its depth)
 
         std::vector<DxDebugVertex> vertices;
         vertices.reserve(lines.size() * 2);
@@ -1353,9 +1510,20 @@ namespace myengine::render::dx12
         vertexBufferView.SizeInBytes = static_cast<UINT>(vertexBufferSize);
 
         EnterAutoGroup(AutoGroup::DebugLines);
-        profiler_->NotePipeline(debugProgram_.pipelineState.Get());
+        ID3D12PipelineState* linePipeline = debugProgram_.pipelineState.Get();
+        if (sceneOutputActive_ && activeTarget_ == nullptr)
+        {
+            PipelineKey key;
+            key.colorFormat = kSceneColorFormat;
+            key.samples = sceneTargets_.samples;
+            if (ID3D12PipelineState* variant = GetPipelineVariant(debugProgram_, key))
+            {
+                linePipeline = variant;
+            }
+        }
+        profiler_->NotePipeline(linePipeline);
         SetRootSignature(debugProgram_.rootSignature.Get());
-        context_.commandList->SetPipelineState(debugProgram_.pipelineState.Get());
+        context_.commandList->SetPipelineState(linePipeline);
         context_.commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
         context_.commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
         context_.commandList->DrawInstanced(static_cast<UINT>(vertices.size()), 1, 0, 0);
@@ -1381,6 +1549,8 @@ namespace myengine::render::dx12
         {
             return;
         }
+        FlushScene();
+        EndSceneOutput(*surface); // the UI goes over the composited scene, into the back buffer
 
         const TextureHandle textureHandle = drawData.texture.IsValid() ? drawData.texture : defaultWhiteTexture_;
         const auto textureIt = textures_.find(textureHandle.value);
@@ -1479,9 +1649,36 @@ namespace myengine::render::dx12
             return;
         }
 
+        FlushScene();
+        EndSceneOutput(*surface);
         CloseAutoGroup();
         profiler_->BeginPass(context_.commandList.Get(), "Present Transition");
         ID3D12Resource* backBuffer = surface->backBuffers[surface->currentBackBuffer].Get();
+        // --screenshot: the frame is copied to a readback buffer before it is presented, and saved once the GPU is done with it
+        Microsoft::WRL::ComPtr<ID3D12Resource> screenshotReadback;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT screenshotFootprint{};
+        const bool takeScreenshot = !screenshotPath_.empty() && frameCounter_ >= screenshotFrame_;
+        if (takeScreenshot)
+        {
+            const D3D12_RESOURCE_DESC backBufferDesc = backBuffer->GetDesc();
+            UINT rows = 0;
+            UINT64 rowSize = 0;
+            UINT64 totalSize = 0;
+            context_.device->GetCopyableFootprints(&backBufferDesc, 0, 1, 0, &screenshotFootprint, &rows, &rowSize, &totalSize);
+            const CD3DX12_HEAP_PROPERTIES readbackHeap(D3D12_HEAP_TYPE_READBACK);
+            const auto readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(totalSize);
+            if (SUCCEEDED(context_.device->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE, &readbackDesc, D3D12_RESOURCE_STATE_COPY_DEST,
+                    nullptr, IID_PPV_ARGS(screenshotReadback.GetAddressOf()))))
+            {
+                const auto toCopy = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                context_.commandList->ResourceBarrier(1, &toCopy);
+                const CD3DX12_TEXTURE_COPY_LOCATION destination(screenshotReadback.Get(), screenshotFootprint);
+                const CD3DX12_TEXTURE_COPY_LOCATION source(backBuffer, 0);
+                context_.commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+                const auto toRender = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                context_.commandList->ResourceBarrier(1, &toRender);
+            }
+        }
         const auto toPresent = CD3DX12_RESOURCE_BARRIER::Transition(backBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
         context_.commandList->ResourceBarrier(1, &toPresent);
         profiler_->NoteBarriers(1);
@@ -1540,8 +1737,108 @@ namespace myengine::render::dx12
             surface->frameFenceValues[surface->currentBackBuffer] = context_.fenceValue;
         }
 
+        if (takeScreenshot && screenshotReadback != nullptr)
+        {
+            WaitForGpu();
+            WriteScreenshot(screenshotReadback.Get(), screenshotFootprint, surface->width, surface->height);
+            screenshotPath_.clear();
+        }
+
         activeFrameTransientResources_ = nullptr;
         activeSurface_ = nullptr;
+    }
+
+    // MYENGINE_RENDER_SETTINGS="shadows=0,msaa=1,bloom=0,instancing=0", MYENGINE_SCREENSHOT=<file.tga>, MYENGINE_SCREENSHOT_FRAME=<n>
+    void Dx12RenderAdapter::ApplyEnvironmentSettings()
+    {
+        const auto read = [](const char* name) -> std::string
+        {
+            char* value = nullptr;
+            std::size_t length = 0;
+            std::string text;
+            if (_dupenv_s(&value, &length, name) == 0 && value != nullptr)
+            {
+                text = value;
+                std::free(value);
+            }
+            return text;
+        };
+        const std::string settings = read("MYENGINE_RENDER_SETTINGS");
+        if (!settings.empty())
+        {
+            RenderSettings next = settings_;
+            std::size_t start = 0;
+            while (start <= settings.size())
+            {
+                std::size_t end = settings.find(',', start);
+                if (end == std::string::npos)
+                {
+                    end = settings.size();
+                }
+                const std::string item = settings.substr(start, end - start);
+                const std::size_t equals = item.find('=');
+                if (equals != std::string::npos)
+                {
+                    const std::string key = item.substr(0, equals);
+                    const double number = std::atof(item.c_str() + equals + 1);
+                    if (key == "shadows") next.shadowQuality = static_cast<std::uint8_t>(number);
+                    else if (key == "msaa") next.msaaSamples = static_cast<std::uint8_t>(number);
+                    else if (key == "bloom") next.bloom = number != 0.0;
+                    else if (key == "instancing") next.instancing = number != 0.0;
+                    else if (key == "bloom_threshold") next.bloomThreshold = static_cast<float>(number);
+                    else if (key == "bloom_intensity") next.bloomIntensity = static_cast<float>(number);
+                    else logger_.Warning("MYENGINE_RENDER_SETTINGS: unknown key '" + key + "' (shadows, msaa, bloom, instancing, bloom_threshold, bloom_intensity)");
+                }
+                start = end + 1;
+            }
+            SetRenderSettings(next);
+            logger_.Info("Render settings from the environment: shadows " + std::to_string(settings_.shadowQuality) + ", msaa " + std::to_string(settings_.msaaSamples) +
+                ", bloom " + std::to_string(settings_.bloom ? 1 : 0) + ", instancing " + std::to_string(settings_.instancing ? 1 : 0));
+        }
+        screenshotPath_ = read("MYENGINE_SCREENSHOT");
+        const std::string frame = read("MYENGINE_SCREENSHOT_FRAME");
+        screenshotFrame_ = frame.empty() ? 1 : static_cast<std::uint64_t>(std::atoll(frame.c_str()));
+    }
+
+    // The back buffer as an uncompressed 32 bit TGA (top left origin): no encoder in the engine, and the tools convert it
+    void Dx12RenderAdapter::WriteScreenshot(ID3D12Resource* readback, const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint, const std::uint32_t width, const std::uint32_t height)
+    {
+        std::uint8_t* mapped = nullptr;
+        const D3D12_RANGE readRange{0, static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height};
+        if (FAILED(readback->Map(0, &readRange, reinterpret_cast<void**>(&mapped))) || mapped == nullptr)
+        {
+            logger_.Error("Screenshot: the readback buffer cannot be mapped");
+            return;
+        }
+        std::vector<std::uint8_t> file(18 + static_cast<std::size_t>(width) * height * 4);
+        file[2] = 2; // uncompressed true colour
+        file[12] = static_cast<std::uint8_t>(width & 0xFF);
+        file[13] = static_cast<std::uint8_t>(width >> 8);
+        file[14] = static_cast<std::uint8_t>(height & 0xFF);
+        file[15] = static_cast<std::uint8_t>(height >> 8);
+        file[16] = 32;
+        file[17] = 0x28; // top left origin, 8 bits of alpha
+        for (std::uint32_t y = 0; y < height; ++y)
+        {
+            const std::uint8_t* row = mapped + footprint.Offset + static_cast<std::size_t>(y) * footprint.Footprint.RowPitch;
+            std::uint8_t* out = file.data() + 18 + static_cast<std::size_t>(y) * width * 4;
+            for (std::uint32_t x = 0; x < width; ++x)
+            {
+                out[x * 4 + 0] = row[x * 4 + 2];
+                out[x * 4 + 1] = row[x * 4 + 1];
+                out[x * 4 + 2] = row[x * 4 + 0];
+                out[x * 4 + 3] = 255;
+            }
+        }
+        readback->Unmap(0, nullptr);
+        std::ofstream stream(std::filesystem::path(screenshotPath_), std::ios::binary); // the path came through the environment: the ANSI code page
+        if (!stream.is_open())
+        {
+            logger_.Error("Screenshot: cannot write " + screenshotPath_);
+            return;
+        }
+        stream.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
+        logger_.Info("Screenshot saved: " + screenshotPath_ + " (frame " + std::to_string(frameCounter_) + ")");
     }
 
     RenderTargetHandle Dx12RenderAdapter::CreateRenderTarget(const std::uint32_t width, const std::uint32_t height)
@@ -1714,6 +2011,7 @@ namespace myengine::render::dx12
         }
 
         RenderTargetRecord& record = it->second;
+        FlushScene(); // what the surface collected so far is drawn before the target takes over
         CloseAutoGroup();
         {
             std::string label = pendingTargetLabel_.empty() ? "Render Target #" + std::to_string(target.value) : pendingTargetLabel_;
@@ -1763,16 +2061,9 @@ namespace myengine::render::dx12
         profiler_->NoteBarriers(1);
         profiler_->EndPass(context_.commandList.Get());
 
-        // Back to the surface that the frame draws into
-        SurfaceData& surface = *activeSurface_;
-        const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(
-            surface.rtvHeap->GetCPUDescriptorHandleForHeapStart(), static_cast<INT>(surface.currentBackBuffer), static_cast<INT>(surface.rtvDescriptorSize));
-        const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = surface.dsvHeap->GetCPUDescriptorHandleForHeapStart();
-        context_.commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
-        context_.commandList->RSSetViewports(1, &surface.viewport);
-        context_.commandList->RSSetScissorRects(1, &surface.scissorRect);
-
+        // Back to the surface that the frame draws into (its scene target when the scene passes use one)
         activeTarget_ = nullptr;
+        SetSurfaceOutput(*activeSurface_);
         wireframe_ = wireframeBeforeTarget_;
     }
 
@@ -1979,8 +2270,17 @@ namespace myengine::render::dx12
             {
                 ReleaseFrameUploadBuffer(uploadBuffer);
             }
+            for (auto& uploadBuffer : surface.instanceUploadBuffers)
+            {
+                ReleaseFrameUploadBuffer(uploadBuffer);
+            }
         }
 
+        sceneTargets_ = {};
+        shadowMap_.Reset();
+        shadowDsvHeap_.Reset();
+        postProgram_ = {};
+        pendingDraws_.clear();
         surfaces_.clear();
         meshes_.clear();
         renderTargets_.clear();
@@ -2687,7 +2987,9 @@ namespace myengine::render::dx12
             return false;
         }
 
-        const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, textureData.width, textureData.height);
+        // The mip chain is made here (a box filter on the CPU): textures far away and at a slant are filtered, not shimmering
+        const UINT mipLevels = MipCount(textureData.width, textureData.height);
+        const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, textureData.width, textureData.height, 1, static_cast<UINT16>(mipLevels));
 
         CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
         HRESULT hr = context_.device->CreateCommittedResource(
@@ -2703,7 +3005,7 @@ namespace myengine::render::dx12
             return false;
         }
 
-        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(outTexture.Get(), 0, 1);
+        const UINT64 uploadBufferSize = GetRequiredIntermediateSize(outTexture.Get(), 0, mipLevels);
         const auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
         Microsoft::WRL::ComPtr<ID3D12Resource> uploadBuffer;
         CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
@@ -2720,19 +3022,37 @@ namespace myengine::render::dx12
             return false;
         }
 
-        D3D12_SUBRESOURCE_DATA textureSubresource{};
-        textureSubresource.pData = textureData.pixelsRgba8.data();
-        textureSubresource.RowPitch = static_cast<LONG_PTR>(textureData.width) * 4;
-        textureSubresource.SlicePitch = textureSubresource.RowPitch * static_cast<LONG_PTR>(textureData.height);
+        std::vector<std::vector<std::uint8_t>> levelPixels(mipLevels > 1 ? mipLevels - 1 : 0);
+        std::vector<D3D12_SUBRESOURCE_DATA> subresources(mipLevels);
+        {
+            std::uint32_t levelWidth = textureData.width;
+            std::uint32_t levelHeight = textureData.height;
+            const std::vector<std::uint8_t>* previous = &textureData.pixelsRgba8;
+            for (UINT level = 0; level < mipLevels; ++level)
+            {
+                if (level > 0)
+                {
+                    std::uint32_t nextWidth = 0;
+                    std::uint32_t nextHeight = 0;
+                    levelPixels[level - 1] = DownsampleRgba8(*previous, levelWidth, levelHeight, nextWidth, nextHeight);
+                    levelWidth = nextWidth;
+                    levelHeight = nextHeight;
+                    previous = &levelPixels[level - 1];
+                }
+                subresources[level].pData = previous->data();
+                subresources[level].RowPitch = static_cast<LONG_PTR>(levelWidth) * 4;
+                subresources[level].SlicePitch = subresources[level].RowPitch * static_cast<LONG_PTR>(levelHeight);
+            }
+        }
 
-        UpdateSubresources<1>(
+        UpdateSubresources(
             context_.commandList.Get(),
             outTexture.Get(),
             uploadBuffer.Get(),
             0,
             0,
-            1,
-            &textureSubresource);
+            mipLevels,
+            subresources.data());
 
         const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(outTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         context_.commandList->ResourceBarrier(1, &barrier);
@@ -2828,6 +3148,10 @@ namespace myengine::render::dx12
         switch (group)
         {
             case AutoGroup::Scene: name = "Scene"; break;
+            case AutoGroup::SceneTransparent: name = "Scene Transparent"; break;
+            case AutoGroup::Shadow: name = "Shadow Map"; break;
+            case AutoGroup::Bloom: name = "Bloom"; break;
+            case AutoGroup::Composite: name = "Composite"; break;
             case AutoGroup::DebugLines: name = "Debug Lines"; break;
             case AutoGroup::Ui: name = "UI"; break;
             case AutoGroup::None: return;

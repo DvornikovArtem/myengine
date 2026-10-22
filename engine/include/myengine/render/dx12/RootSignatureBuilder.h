@@ -59,7 +59,9 @@ namespace myengine::render::dx12
         LinearClamp,
         PointWrap,
         PointClamp,
-        AnisotropicWrap,
+        AnisotropicWrap,    // 8x anisotropic filtering, wrap
+        AnisotropicClamp,   // 8x anisotropic filtering, clamp (decals, the sky)
+        ShadowCompare,      // comparison sampler for a shadow map (bilinear PCF per tap), outside the map = lit
     };
 
     struct StaticSamplerDesc

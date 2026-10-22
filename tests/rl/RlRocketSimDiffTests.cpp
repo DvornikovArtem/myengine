@@ -231,7 +231,7 @@ namespace
                 if (g_dump && sc.ball)
                 {
                     const RlBallState& b = sim.State().ball;
-                    std::printf("        ball ours w(%.2f %.2f %.2f) p(%.2f %.2f %.2f) v(%.2f %.2f %.2f) | rs p(%.2f %.2f %.2f) v(%.2f %.2f %.2f)\n", static_cast<double>(b.position.x),
+                    std::printf("        ball ours p(%.2f %.2f %.2f) v(%.2f %.2f %.2f) | rs p(%.2f %.2f %.2f) v(%.2f %.2f %.2f)\n", static_cast<double>(b.position.x),
                                 static_cast<double>(b.position.y), static_cast<double>(b.position.z), static_cast<double>(b.linearVelocity.x), static_cast<double>(b.linearVelocity.y),
                                 static_cast<double>(b.linearVelocity.z), static_cast<double>(r.ball.x), static_cast<double>(r.ball.y), static_cast<double>(r.ball.z),
                                 static_cast<double>(r.ballVel.x), static_cast<double>(r.ballVel.y), static_cast<double>(r.ballVel.z));

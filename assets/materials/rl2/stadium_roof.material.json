@@ -1,0 +1,18 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/stadium_roof.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 0.0,
+    "gGloss": 8,
+    "gFresnel": 0.0,
+    "gEmissiveStrength": 1.1,
+    "gUnlit": 0.5
+  },
+  "castShadow": false
+}

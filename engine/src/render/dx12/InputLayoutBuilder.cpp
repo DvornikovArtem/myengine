@@ -99,7 +99,17 @@ namespace myengine::render::dx12
                 {"NORMAL", 0, StreamFormat::Float3, 12},
                 {"TEXCOORD", 0, StreamFormat::Float2, 24},
             };
+            VertexStreamDesc instanced = mesh;
+            instanced.name = "mesh_instanced";
+            instanced.instanceStride = kInstanceStride;
+            for (std::uint32_t row = 0; row < 4; ++row)
+            {
+                StreamAttribute attribute{"INSTANCE", row, StreamFormat::Float4, row * 16};
+                attribute.slot = 1;
+                instanced.attributes.push_back(attribute);
+            }
             streams.push_back(std::move(mesh));
+            streams.push_back(std::move(instanced));
 
             VertexStreamDesc debugLines;
             debugLines.name = "debug_lines";
@@ -142,6 +152,7 @@ namespace myengine::render::dx12
         build.ok = true;
         build.stream = stream.name;
         build.stride = stream.stride;
+        build.instanceStride = 0;
 
         for (const VertexInput& input : layout.vertexInputs)
         {
@@ -187,6 +198,11 @@ namespace myengine::render::dx12
             element.semanticIndex = input.semanticIndex;
             element.format = attribute->format;
             element.offset = attribute->offset;
+            element.slot = attribute->slot;
+            if (attribute->slot == 1)
+            {
+                build.instanceStride = stream.instanceStride;
+            }
             build.elements.push_back(std::move(element));
         }
 
@@ -249,10 +265,10 @@ namespace myengine::render::dx12
             desc.SemanticName = element.semantic.c_str();
             desc.SemanticIndex = element.semanticIndex;
             desc.Format = ToDxgiFormat(element.format);
-            desc.InputSlot = 0;
+            desc.InputSlot = element.slot;
             desc.AlignedByteOffset = element.offset;
-            desc.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-            desc.InstanceDataStepRate = 0;
+            desc.InputSlotClass = element.slot == 1 ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+            desc.InstanceDataStepRate = element.slot == 1 ? 1 : 0;
             elements.push_back(desc);
         }
         return elements;
@@ -269,7 +285,8 @@ namespace myengine::render::dx12
             std::string format = ToString(element.format);
             name.resize(std::max<std::size_t>(name.size(), 16), ' ');
             format.resize(std::max<std::size_t>(format.size(), 20), ' ');
-            text += "  " + std::to_string(i) + "  " + name + format + "offset " + std::to_string(element.offset) + "\n";
+            text += "  " + std::to_string(i) + "  " + name + format + "offset " + std::to_string(element.offset) +
+                (element.slot == 1 ? "  per instance (slot 1)" : "") + "\n";
         }
         return text;
     }

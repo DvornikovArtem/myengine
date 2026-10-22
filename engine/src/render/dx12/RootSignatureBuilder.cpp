@@ -94,7 +94,9 @@ namespace myengine::render::dx12
             {
                 case SamplerPreset::PointWrap:
                 case SamplerPreset::PointClamp: return D3D12_FILTER_MIN_MAG_MIP_POINT;
-                case SamplerPreset::AnisotropicWrap: return D3D12_FILTER_ANISOTROPIC;
+                case SamplerPreset::AnisotropicWrap:
+                case SamplerPreset::AnisotropicClamp: return D3D12_FILTER_ANISOTROPIC;
+                case SamplerPreset::ShadowCompare: return D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
                 case SamplerPreset::LinearWrap:
                 case SamplerPreset::LinearClamp: return D3D12_FILTER_MIN_MAG_MIP_LINEAR;
             }
@@ -106,7 +108,9 @@ namespace myengine::render::dx12
             switch (preset)
             {
                 case SamplerPreset::LinearClamp:
-                case SamplerPreset::PointClamp: return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+                case SamplerPreset::PointClamp:
+                case SamplerPreset::AnisotropicClamp: return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+                case SamplerPreset::ShadowCompare: return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
                 case SamplerPreset::LinearWrap:
                 case SamplerPreset::PointWrap:
                 case SamplerPreset::AnisotropicWrap: return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -135,6 +139,8 @@ namespace myengine::render::dx12
             {"point_wrap", SamplerPreset::PointWrap},
             {"point_clamp", SamplerPreset::PointClamp},
             {"anisotropic_wrap", SamplerPreset::AnisotropicWrap},
+            {"anisotropic_clamp", SamplerPreset::AnisotropicClamp},
+            {"shadow_compare", SamplerPreset::ShadowCompare},
         };
         for (const auto& preset : kPresets)
         {
@@ -156,6 +162,8 @@ namespace myengine::render::dx12
             case SamplerPreset::PointWrap: return "point_wrap";
             case SamplerPreset::PointClamp: return "point_clamp";
             case SamplerPreset::AnisotropicWrap: return "anisotropic_wrap";
+            case SamplerPreset::AnisotropicClamp: return "anisotropic_clamp";
+            case SamplerPreset::ShadowCompare: return "shadow_compare";
         }
         return "?";
     }
@@ -291,7 +299,7 @@ namespace myengine::render::dx12
                 if (!ParseSamplerPreset(entry.second, sampler.preset))
                 {
                     AddDiagnostic(build, programName, "sampler '" + resource.name + "': unknown state '" + entry.second +
-                        "' (linear_wrap, linear_clamp, point_wrap, point_clamp, anisotropic_wrap)");
+                        "' (linear_wrap, linear_clamp, point_wrap, point_clamp, anisotropic_wrap, anisotropic_clamp, shadow_compare)");
                 }
             }
 
@@ -366,7 +374,7 @@ namespace myengine::render::dx12
                 address,
                 address,
                 0.0f,
-                16u,
+                8u,
                 D3D12_COMPARISON_FUNC_LESS_EQUAL,
                 D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
                 0.0f,
