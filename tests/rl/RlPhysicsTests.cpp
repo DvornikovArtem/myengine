@@ -1736,6 +1736,12 @@ namespace
         float maxRoll = 0;       // degrees the camera was tilted from the horizon (its right axis out of the horizontal plane)
         float maxTurnRate = 0;   // degrees per second the camera turned (the angle between its looking directions of two frames)
         float minCarInFrame = 99;  // the smallest cosine between the looking direction and the direction to the car: the car stays in the picture
+        float maxYawRate = 0;      // degrees per second the heading of the camera (its looking direction on the ground plane) turned
+        float yawTravelled = 0;    // degrees the heading turned in all (the sum of the frames)
+        float lastYaw = 0;
+        float carYawTravelled = 0;  // degrees the nose of the car turned on the ground plane in all (while it was not pointing up or down)
+        float lastCarYaw = 0;
+        bool haveCarYaw = false;
     };
 
     CameraRun RunCamera(RlSim& sim, int ticks, bool ballCam, const Script& script, const RlCameraTuning* tuningOverride = nullptr)
@@ -1764,6 +1770,33 @@ namespace
             if (run.frames > 1)
             {
                 run.maxTurnRate = std::max(run.maxTurnRate, std::acos(std::clamp(Dot(V(view.forward), V(prevForward)), -1.0f, 1.0f)) * 57.29578f * 60.0f);
+            }
+            {
+                const float yaw = std::atan2(view.forward.x, view.forward.z) * 57.29578f;
+                if (run.frames > 1)
+                {
+                    float step = yaw - run.lastYaw;
+                    while (step > 180.0f) step -= 360.0f;
+                    while (step < -180.0f) step += 360.0f;
+                    run.maxYawRate = std::max(run.maxYawRate, std::fabs(step) * 60.0f);
+                    run.yawTravelled += std::fabs(step);
+                }
+                run.lastYaw = yaw;
+                const float nx = 2.0f * (c.rotation.x * c.rotation.z + c.rotation.w * c.rotation.y);
+                const float nz = 1.0f - 2.0f * (c.rotation.x * c.rotation.x + c.rotation.y * c.rotation.y);
+                if (std::sqrt(nx * nx + nz * nz) > 0.3f)
+                {
+                    const float carYaw = std::atan2(nx, nz) * 57.29578f;
+                    if (run.haveCarYaw)
+                    {
+                        float carStep = carYaw - run.lastCarYaw;
+                        while (carStep > 180.0f) carStep -= 360.0f;
+                        while (carStep < -180.0f) carStep += 360.0f;
+                        run.carYawTravelled += std::fabs(carStep);
+                    }
+                    run.lastCarYaw = carYaw;
+                    run.haveCarYaw = true;
+                }
             }
             prevForward = view.forward;
             {
@@ -2140,6 +2173,111 @@ namespace
             std::printf("  dt %.2f ms: the camera swings after a 180 degree turn of the car in %.3f s\n", static_cast<double>(dt * 1000.0f), static_cast<double>(swung));
             CHECK(swung > 0.0f && swung <= 0.5f);
         }
+    }
+
+    // The camera in the air (G4h3): in a jump, a double jump, a flip in any direction, an air roll and a boosted flight the heading of the camera does not jump: it
+    // follows where the car faces (the nose, or the side of the car when the nose points up or down), smoothly, and it does not follow the dodge or the flip.
+    void TestCameraAir()
+    {
+        std::printf("camera: the heading in the air, in jumps, flips and an air roll\n");
+        const auto start = [](RlSim& sim) {
+            sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+            sim.SetCarBoost(0, 100.0f);
+        };
+        // a jump at t = 2 ticks, held for `hold` seconds
+        const auto jumpAt = [](int t, float from, float hold) { return t >= Ticks(from) && t < Ticks(from + hold); };
+        const auto dodge = [&](Inputs& in, int t, float from, float pitch, float steer) {
+            // the first jump, then (0.4 s later) a second press with a direction: a dodge
+            in[0].jump = jumpAt(t, from, 0.2f) || (t >= Ticks(from + 0.4f) && t < Ticks(from + 0.4f) + 3);
+            if (t >= Ticks(from + 0.4f) && t < Ticks(from + 0.4f) + 3)
+            {
+                in[0].pitch = pitch;
+                in[0].steer = steer;
+            }
+        };
+        struct AirScenario
+        {
+            const char* name;
+            float seconds;
+            Script script;
+        };
+        const AirScenario scenarios[] = {
+            {"a jump on the spot", 2.5f, [&](int t, const RlWorldState&, Inputs& in) { in[0].jump = jumpAt(t, 1.0f, 0.25f); }},
+            {"a double jump", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].jump = jumpAt(t, 1.0f, 0.2f) || jumpAt(t, 1.6f, 0.05f); }},
+            {"a front flip on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, -1.0f, 0.0f); }},
+            {"a back flip on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, 1.0f, 0.0f); }},
+            {"a side flip to the left on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, 0.0f, -1.0f); }},
+            {"a side flip to the right on the spot", 3.0f, [&](int t, const RlWorldState&, Inputs& in) { dodge(in, t, 1.0f, 0.0f, 1.0f); }},
+            {"a front flip at speed", 4.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; in[0].boost = t < Ticks(1.6f); dodge(in, t, 1.8f, -1.0f, 0.0f); }},
+            {"a back flip at speed", 4.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; in[0].boost = t < Ticks(1.6f); dodge(in, t, 1.8f, 1.0f, 0.0f); }},
+            {"a side flip at speed", 4.0f, [&](int t, const RlWorldState&, Inputs& in) { in[0].throttle = 1.0f; in[0].boost = t < Ticks(1.6f); dodge(in, t, 1.8f, 0.0f, 1.0f); }},
+            {"an air roll for three seconds", 4.5f, [&](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = t >= 2 && t < Ticks(0.3f);
+                 in[0].boost = t >= Ticks(0.3f) && t < Ticks(3.5f);
+                 in[0].pitch = (t >= Ticks(0.3f) && t < Ticks(0.8f)) ? 0.6f : 0.0f;
+                 in[0].airRoll = t >= Ticks(0.8f);
+                 in[0].steer = t >= Ticks(0.8f) ? 1.0f : 0.0f;
+             }},
+            {"a boosted flight on an arc", 4.5f, [&](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = t >= 2 && t < Ticks(0.3f);
+                 in[0].boost = t >= Ticks(0.3f) && t < Ticks(3.0f);
+                 in[0].pitch = (t >= Ticks(0.3f) && t < Ticks(1.2f)) ? 0.5f : 0.0f;
+                 in[0].steer = (t >= Ticks(1.5f) && t < Ticks(2.2f)) ? 0.5f : 0.0f;
+             }},
+        };
+        for (int ball = 0; ball < 2; ++ball)
+        {
+            for (const AirScenario& scenario : scenarios)
+            {
+                RlSim sim(g_tuning, 1);
+                start(sim);
+                QuietBall(sim);
+                Settle(sim);
+                const CameraRun r = RunCamera(sim, Ticks(scenario.seconds), ball == 1, scenario.script);
+                std::printf("  %s, %s: the heading turned at most %.0f deg/s (%.0f deg in all, the car turned %.0f), the car at most %.0f deg off the middle of the picture, at least %.2f m from it, outside %d, blocked %d\n",
+                            ball == 1 ? "ball cam" : "car cam", scenario.name, static_cast<double>(r.maxYawRate), static_cast<double>(r.yawTravelled), static_cast<double>(r.carYawTravelled),
+                            static_cast<double>(std::acos(std::clamp(r.minCarInFrame, -1.0f, 1.0f)) * 57.29578f), static_cast<double>(r.minDistance), r.outside, r.blocked);
+                CHECK(r.outside == 0 && r.blocked == 0);
+                CHECK(r.minDistance >= 0.85f * g_tuning.camera.distance);
+                CHECK(r.minCarInFrame > std::cos(65.0f * 0.01745329f));
+                if (ball == 0)
+                {
+                    const bool turning = std::strstr(scenario.name, "air roll") != nullptr || std::strstr(scenario.name, "arc") != nullptr;
+                    if (!turning)
+                    {
+                        CHECK(r.maxYawRate < 90.0f);                    // no jerk of the heading: nothing here turns the car round
+                        CHECK(r.yawTravelled < 60.0f);                  // the heading does not wander: a jump or a flip straight ahead keeps the camera straight ahead
+                    }
+                    else
+                    {
+                        CHECK(r.maxYawRate < 360.0f);                   // the car itself yaws in these (the boost, the roll about a steep nose): the camera follows it, no faster
+                        CHECK(r.yawTravelled < r.carYawTravelled * 1.25f + 15.0f);   // and no farther than the car turned: no swings of its own
+                    }
+                }
+            }
+        }
+    }
+
+    // "airVelocityFollow" brings the old behaviour back: the camera in the air follows the direction of the motion, and a dodge turns it
+    void TestCameraAirVelocityFollow()
+    {
+        RlCameraTuning tuning = g_tuning.camera;
+        tuning.airVelocityFollow = 1.0f;
+        RlSim sim(g_tuning, 1);
+        sim.ResetCar(0, 0.0f, -45.0f, 0.0f);
+        QuietBall(sim);
+        Settle(sim);
+        const CameraRun r = RunCamera(sim, Ticks(3.0f), false, [](int t, const RlWorldState&, Inputs& in) {
+            in[0].jump = (t >= Ticks(1.0f) && t < Ticks(1.2f)) || (t >= Ticks(1.4f) && t < Ticks(1.4f) + 3);
+            if (t >= Ticks(1.4f) && t < Ticks(1.4f) + 3)
+            {
+                in[0].steer = 1.0f;
+            }
+        }, &tuning);
+        std::printf("  with airVelocityFollow 1, a side flip on the spot: the heading turned %.0f deg in all%c", static_cast<double>(r.yawTravelled), 10);
+        CHECK(r.yawTravelled > 20.0f);
     }
 
     // ---------------------------------------------------------------- ball
@@ -2573,6 +2711,8 @@ int main(int argc, char** argv)
     TestCameraLevel();
     TestCameraDistance();
     TestCameraTransition();
+    TestCameraAir();
+    TestCameraAirVelocityFollow();
     TestBallBounce();
     TestBallStaysInside();
     TestBallHit();
