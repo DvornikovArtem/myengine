@@ -514,6 +514,7 @@ namespace myengine::core
         {
             // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena
             auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
+            rlGame->SetOnlineOptions(rlOnline_);
             rlGameSystem_ = rlGame.get();
             world_.AddUpdateSystem(std::move(rlGame));
         }
@@ -879,6 +880,11 @@ namespace myengine::core
     void Application::SetDiagnosticsOptions(const DiagnosticsOptions& options)
     {
         diagnostics_ = options;
+    }
+
+    void Application::SetRlOnlineOptions(const ecs::systems::RlOnlineOptions& options)
+    {
+        rlOnline_ = options;
     }
 
     int Application::GetExitCode() const

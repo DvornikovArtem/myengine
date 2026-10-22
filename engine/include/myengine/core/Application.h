@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/config/AppConfig.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/Timer.h>
@@ -74,6 +75,8 @@ namespace myengine::core
         void SetShowProjectBrowser(bool show);
         /// Before Initialize: GPU capture and statistics requested on the command line.
         void SetDiagnosticsOptions(const DiagnosticsOptions& options);
+        /// Before Initialize: the role of this window in an online Rocket League match (--rl-host, --rl-join).
+        void SetRlOnlineOptions(const ecs::systems::RlOnlineOptions& options);
         /// The code the process should return when the loop ended on purpose (a capture or statistics request).
         int GetExitCode() const;
         /// A capture of the next frame with RenderDoc (F12, Help > Developer). false: `message` says what to install.
@@ -210,6 +213,7 @@ namespace myengine::core
         bool showProjectBrowser_ = false;
         bool deferredSceneLoad_ = false;
         DiagnosticsOptions diagnostics_;
+        ecs::systems::RlOnlineOptions rlOnline_;
         render::GpuCapture gpuCapture_;
         std::uint64_t renderedFrames_ = 0;
         std::uint64_t captureTriggeredAtFrame_ = 0;

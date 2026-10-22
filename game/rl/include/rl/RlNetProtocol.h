@@ -1,0 +1,133 @@
+// RlNetProtocol.h
+// The messages of the Rocket League netcode (docs/game/rl-online.md, 7.2) and their byte layout. Everything is little endian and fits one
+// packet (kMaxMessageBytes = 1100). The first byte of a message is its type.
+//
+//   Join      client -> host   reliable    protocol version, hash of the tuning, name
+//   Welcome   host -> client   reliable    slot, mode, bot level, seed, mask of human slots, hash of the tuning (or Reject)
+//   Input     client -> host   unreliable  the inputs of the last <= 8 ticks, one per tick, quantized
+//   Snapshot  host -> clients  unreliable  60 Hz: tick, match, ball, cars, pads, the inputs the host really used, a hash of the full state
+//   Event     host -> clients  reliable    match start, a slot that took a player / went to a bot, goal, demolition, match end
+//
+// Inputs are quantized to bytes before the simulation takes them, on both sides, so that the numbers the host and the client simulate are
+// the same ones.
+
+#pragma once
+
+#include <rl/RlTuning.h>
+#include <rl/RlTypes.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace rl
+{
+    constexpr uint16_t kNetProtocolVersion = 1;
+    constexpr int kNetInputBytes = 5;
+    constexpr int kNetInputWindow = 8;   // ticks of input carried by one Input and one Snapshot message
+    constexpr int kSnapshotInterval = 2; // ticks between snapshots: 60 Hz
+
+    enum class RlMsg : uint8_t
+    {
+        Join = 1,
+        Welcome = 2,
+        Reject = 3,
+        Input = 4,
+        Snapshot = 5,
+        Event = 6,
+    };
+
+    enum class RlRejectReason : uint8_t
+    {
+        Version = 1,   // other protocol version
+        Tuning = 2,    // other rl_tuning.json
+        Full = 3,      // no free slot
+        Started = 4,   // the match is on already
+    };
+
+    const char* RlRejectText(RlRejectReason reason);
+
+    // Hash of the numbers that decide the simulation (FNV-1a over RlTuning::ToJson()); hosts and clients must agree on it.
+    uint64_t RlTuningHash(const RlTuning& tuning);
+
+    // The input as the simulation takes it: every axis rounded to 1/127, the buttons as bits.
+    RlCarInput RlQuantizeInput(const RlCarInput& input);
+    void RlPackInput(const RlCarInput& input, uint8_t out[kNetInputBytes]);
+    RlCarInput RlUnpackInput(const uint8_t in[kNetInputBytes]);
+    bool RlSameInput(const RlCarInput& a, const RlCarInput& b);
+
+    struct RlJoinMsg
+    {
+        uint16_t version = kNetProtocolVersion;
+        uint64_t tuningHash = 0;
+        std::string name;  // up to 15 characters
+    };
+
+    struct RlWelcomeMsg
+    {
+        uint16_t version = kNetProtocolVersion;
+        uint8_t slot = 0;
+        uint8_t mode = 1;
+        uint8_t botLevel = 1;
+        uint8_t started = 0;      // the match runs already (not used for now: a started match refuses new players)
+        uint64_t seed = 1;
+        uint32_t humanMask = 0;
+        uint64_t tuningHash = 0;
+    };
+
+    struct RlInputMsg
+    {
+        uint32_t firstTick = 0;
+        int count = 0;
+        RlCarInput inputs[kNetInputWindow];  // ticks firstTick .. firstTick + count - 1
+    };
+
+    enum class RlEventKind : uint8_t
+    {
+        MatchStart = 1,  // tick 0: the match begins; `mask` is the human slots
+        SlotMask = 2,    // from `tick` on the human slots are `mask`; `slot` joined (a = 1) or went to a bot (a = 0)
+        Goal = 3,        // `slot` scored for team a (slot -1 = nobody touched the ball)
+        Demolition = 4,  // slot `slot` was demolished
+        MatchEnd = 5,    // winner a (0 blue, 1 orange)
+    };
+
+    struct RlEventMsg
+    {
+        RlEventKind kind = RlEventKind::MatchStart;
+        uint32_t tick = 0;
+        int8_t slot = -1;
+        uint8_t a = 0;
+        uint32_t mask = 0;
+    };
+
+    // What the host knows at tick `tick` (the state before the step of that tick). The world is the dequantized one: positions,
+    // rotations and velocities of the cars and the ball, the boost and a few flags, the score and the clock; the rest is zero.
+    struct RlSnapshotMsg
+    {
+        uint32_t tick = 0;
+        uint32_t ackInputTick = 0;    // the newest tick of input the host has from this client
+        int8_t margin = 0;            // ticks that the newest input of this client arrived ahead of the host (negative: late)
+        uint32_t humanMask = 0;
+        uint64_t stateHash = 0;       // hash of RlMatch::SaveState at `tick`
+        uint64_t padMask = 0;         // bit i: pad i is ready
+        RlWorldState world;
+        int inputCount = 0;           // ticks of used input: tick - inputCount .. tick - 1
+        uint8_t inputs[kMaxCars][kNetInputWindow][kNetInputBytes] = {};
+    };
+
+    void RlEncode(const RlJoinMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlWelcomeMsg& msg, std::vector<uint8_t>& out);
+    void RlEncodeReject(RlRejectReason reason, std::vector<uint8_t>& out);
+    void RlEncode(const RlInputMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlEventMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlSnapshotMsg& msg, std::vector<uint8_t>& out);
+
+    bool RlDecode(const uint8_t* data, size_t size, RlJoinMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlWelcomeMsg& msg);
+    bool RlDecodeReject(const uint8_t* data, size_t size, RlRejectReason& reason);
+    bool RlDecode(const uint8_t* data, size_t size, RlInputMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlEventMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlSnapshotMsg& msg);
+
+    inline RlMsg RlMessageType(const uint8_t* data, size_t size) { return size == 0 ? static_cast<RlMsg>(0) : static_cast<RlMsg>(data[0]); }
+}

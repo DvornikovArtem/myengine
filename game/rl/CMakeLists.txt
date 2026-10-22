@@ -3,6 +3,11 @@ set(RL_HEADERS
   include/rl/RlCamera.h
   include/rl/RlControls.h
   include/rl/RlMatch.h
+  include/rl/RlNet.h
+  include/rl/RlNetProtocol.h
+  include/rl/net/NetLink.h
+  include/rl/net/NetReliable.h
+  include/rl/net/NetTransport.h
   include/rl/RlRng.h
   include/rl/RlSim.h
   include/rl/RlTuning.h
@@ -20,6 +25,11 @@ set(RL_SOURCES
   src/RlJolt.cpp
   src/RlJolt.h
   src/RlMatch.cpp
+  src/RlNetClient.cpp
+  src/RlNetHost.cpp
+  src/RlNetProtocol.cpp
+  src/net/NetLink.cpp
+  src/net/NetReliable.cpp
   src/RlSim.cpp
   src/RlTuning.cpp
 )
@@ -37,7 +47,8 @@ target_link_libraries(myengine_rl
   PRIVATE
     Jolt
     TracyClient
-    myengine_nlohmann_json)
+    myengine_nlohmann_json
+    ws2_32)
 
 myengine_apply_compiler_options(myengine_rl)
 set_property(TARGET myengine_rl PROPERTY FOLDER "Game")

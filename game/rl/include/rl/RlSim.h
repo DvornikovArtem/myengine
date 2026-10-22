@@ -39,7 +39,7 @@ namespace rl
         // Where a demolished car comes back (ResetCar sets it to the spot the car was reset to).
         void SetRespawnPoint(int index, float x, float z, float yaw);
         // Puts a car at any pose (tests, kick-off spots, flip resets); the car keeps its boost and its jump state.
-        void SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity = {});
+        void SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
 
         // One 120 Hz tick; `inputs` has CarCount() entries.
         void Step(const RlCarInput* inputs);

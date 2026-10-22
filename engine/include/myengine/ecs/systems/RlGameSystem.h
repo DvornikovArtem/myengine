@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,11 +24,33 @@ namespace rl
 
 namespace myengine::ecs::systems
 {
+    // The online game (G5): --rl-host [port] and --rl-join ip[:port]. With a role the game skips the menu: the host waits for its guests and starts
+    // the match, a client joins the host and plays its slot with prediction and rollback (game/rl RlNet).
+    struct RlOnlineOptions
+    {
+        enum class Role
+        {
+            None,
+            Host,
+            Client,
+        };
+
+        Role role = Role::None;
+        std::string address;       // client: "ip" or "ip:port" of the host
+        std::uint16_t port = 47777;  // host: the port to listen on
+        int expectedClients = 1;   // host: the match starts when this many guests have joined (Enter starts it earlier)
+        int playersPerTeam = 2;    // host: 1..4
+        std::string netSim;        // "latency=100,jitter=20,loss=5": delay and losses added to everything this window sends
+    };
+
     class RlGameSystem final : public IUpdateSystem
     {
     public:
         explicit RlGameSystem(input::InputManager& input);
         ~RlGameSystem() override;
+
+        // Before the first Play: the role of this window in an online match
+        void SetOnlineOptions(const RlOnlineOptions& options);
 
         void Update(World& world, float deltaTime) override;
 
