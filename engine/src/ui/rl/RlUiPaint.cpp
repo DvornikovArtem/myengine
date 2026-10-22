@@ -278,13 +278,35 @@ namespace myengine::rlui::paint
         }
     }
 
+    namespace
+    {
+        // The italic Exo 2 draws the Cyrillic in its italic forms: "п" is an "n", "т" is an "m", the names of the players are unreadable.
+        // A text with Cyrillic in an italic style is drawn upright (Bold) instead: the Latin headlines keep the slant.
+        FontStyle StyleFor(const FontStyle style, const std::string_view text)
+        {
+            if (style != FontStyle::BlackItalic && style != FontStyle::ExtraBoldItalic)
+            {
+                return style;
+            }
+            for (const char c : text)
+            {
+                const unsigned char u = static_cast<unsigned char>(c);
+                if (u >= 0xD0 && u <= 0xD3)
+                {
+                    return FontStyle::Bold;
+                }
+            }
+            return style;
+        }
+    }
+
     float TextWidth(Frame& f, const FontStyle style, const float designSize, const std::string_view text, const float letterSpacing)
     {
         if (text.empty())
         {
             return 0.0f;
         }
-        const FontHandle handle = f.fonts().Ready() ? f.fonts().Get(style, designSize) : FontHandle{};
+        const FontHandle handle = f.fonts().Ready() ? f.fonts().Get(StyleFor(style, text), designSize) : FontHandle{};
         const float scale = f.metrics().scale;
         ImFont* font = handle.Valid() ? handle.font : ImGui::GetFont();
         const float size = handle.Valid() ? designSize * scale * handle.lineScale : designSize * scale;
@@ -310,7 +332,7 @@ namespace myengine::rlui::paint
         {
             return;
         }
-        const FontHandle handle = f.fonts().Ready() ? f.fonts().Get(style, designSize) : FontHandle{};
+        const FontHandle handle = f.fonts().Ready() ? f.fonts().Get(StyleFor(style, text), designSize) : FontHandle{};
         const float scale = f.metrics().scale;
         ImFont* font = handle.Valid() ? handle.font : ImGui::GetFont();
         const float size = handle.Valid() ? designSize * scale * handle.lineScale : designSize * scale;

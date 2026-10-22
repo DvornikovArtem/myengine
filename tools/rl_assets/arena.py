@@ -22,6 +22,7 @@ WALL_TOP = 5.0  # the opaque lower wall ends here, above it the open frame
 MOUTH_TOP = 7.0  # the header over a goal mouth (the mouth is 6.43 m high)
 RAMP_FRAC = None  # set below: the share of the wall tile taken by the floor ramp
 BAR = 0.24
+ROOF_LIFT = 0.45   # the ceiling beams hang this far ABOVE the physical ceiling: the camera that slips through it never meets a beam
 
 # --- boost pads: RLBot order, uu -> m (RlMatch.cpp kPadsUu); big = 3, 4, 15, 18, 29, 30
 PADS_UU = [(0, -4240), (-1792, -4184), (1792, -4184), (-3072, -4096), (3072, -4096), (-940, -3308), (940, -3308), (0, -2816),
@@ -415,7 +416,7 @@ def build_walls(t, foot, team):
 
 
 def build_frame(t, foot, team, atlas):
-    """The open frame: rails and posts of the upper wall, the ribs of the ceiling ramp, the ceiling beams."""
+    """The open frame: rails and posts of the upper wall, the ribs of the ceiling ramp, the ceiling beams (above the physical ceiling)."""
     metal, accent = atlas.uv("metal"), atlas.uv("accent")
     H = t["height"]
     rc = t["ceilingRampRadius"]
@@ -423,10 +424,12 @@ def build_frame(t, foot, team, atlas):
     m = Mesh("arena_frame_" + ("blue" if team == 0 else "orange"))
     up = (0, 1, 0)
     inset = BAR * 0.5
+    y_beam = H + ROOF_LIFT + BAR * 0.5   # the axis of the ceiling beams
     rib = [(inset, WALL_TOP), (inset, H - rc)]  # the first point is replaced per span (the sill)
     for k in range(1, segs + 1):
         ang = 0.5 * math.pi * k / segs
         rib.append((inset + rc - rc * math.cos(ang), min(H - rc + rc * math.sin(ang), H - BAR * 0.5)))
+    rib.append((inset + rc, y_beam))   # a short stub carries the rib above the ceiling to the beams
     cuts = mouth_cuts(t)
     mid_rails = (9.2, 13.3, H - rc)
     for edge in range(8):
@@ -442,7 +445,7 @@ def build_frame(t, foot, team, atlas):
             for y in (y_sill + BAR * 0.5,) + tuple(v for v in mid_rails if v > y_sill + 1.0):
                 m.extend(beam(foot.point(edge, u0, inset, y), foot.point(edge, u1, inset, y), BAR, BAR, up, metal, n_in, accent))
             # the rail at the end of the ceiling ramp
-            m.extend(beam(foot.point(edge, u0, rc + inset, H - BAR * 0.5), foot.point(edge, u1, rc + inset, H - BAR * 0.5), BAR, BAR, up,
+            m.extend(beam(foot.point(edge, u0, rc + inset, y_beam), foot.point(edge, u1, rc + inset, y_beam), BAR, BAR, up,
                           metal, (0, -1, 0), accent))
             # posts every ~4 m, each continuing in the ribs of the ceiling ramp
             n_posts = max(2, int(round(foot.lengths[edge] * (u1 - u0) / 4.0)) + 1)
@@ -468,7 +471,7 @@ def build_frame(t, foot, team, atlas):
                 continue
             lo, hi = poly_span(poly, "z", z)
             if hi - lo > 0.5:
-                m.extend(beam((lo, H - BAR * 0.5, z), (hi, H - BAR * 0.5, z), BAR, BAR, up, metal, (0, -1, 0), accent))
+                m.extend(beam((lo, y_beam, z), (hi, y_beam, z), BAR, BAR, up, metal, (0, -1, 0), accent))
         k += 1
     x_max = t["halfWidth"] - rc
     k = 0
@@ -479,7 +482,7 @@ def build_frame(t, foot, team, atlas):
                 continue
             a, b = (lo, min(hi, 0.0)) if team == 0 else (max(lo, 0.0), hi)
             if b - a > 0.5:
-                m.extend(beam((x, H - BAR * 0.5, a), (x, H - BAR * 0.5, b), BAR, BAR, up, metal, (0, -1, 0), accent))
+                m.extend(beam((x, y_beam, a), (x, y_beam, b), BAR, BAR, up, metal, (0, -1, 0), accent))
         k += 1
     return m
 
