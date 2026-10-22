@@ -31,7 +31,7 @@ python tools/gen_rl_assets.py pack --preview build/rl_preview   # плюс PNG-�
 
 ### Машина
 
-Бюджет ≤ 4000 треугольников на машину: тело + фары + 4 колеса = **2512**.
+Бюджет ≤ 4000 треугольников на машину: тело + фары + 4 колеса = **2512**. Это Pulse; ещё пять кузовов гаража (Vector, Slate, Dart, Fusion, Bulwark, 2880–3024 треугольника) строит `tools/rl_assets/cars.py` по хитбоксам RocketSim, к ним данные `assets/data/cars/*.json` и профильные превью `assets/ui/cars/*.png`: [rl-cars.md](rl-cars.md). Генератор печатает бюджет каждой машины.
 
 | Меш | Тр. | Материал | Назначение |
 | --- | --- | --- | --- |

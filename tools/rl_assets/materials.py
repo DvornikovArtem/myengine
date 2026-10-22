@@ -45,6 +45,12 @@ OPTIONS = {
 }
 
 
+# the paint of the other cars of the garage (cars.py): the same clear coat as Pulse
+for _key in ("vector", "slate", "dart", "fusion", "bulwark"):
+    for _team in ("blue", "orange"):
+        OPTIONS["car_%s_%s" % (_key, _team)] = dict(OPTIONS["car_blue"])
+
+
 def options(name):
     merged = {"shader": DEFAULT["shader"], "params": dict(DEFAULT["params"]), "castShadow": DEFAULT["castShadow"]}
     entry = OPTIONS.get(name, {})

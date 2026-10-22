@@ -783,6 +783,286 @@
    "orientation": 1.0,
    "part_of": null,
    "note": "plinth of the menu: radius 2 m, 0.26 m high, glowing rings; the origin is the centre of the bottom"
+  },
+  "car_vector_body": {
+   "name": "car_vector_body",
+   "triangles": 1552,
+   "vertices": 1470,
+   "bytes": 111782,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.07,
+   "radius": 0.8498,
+   "bounds": [
+    [
+     -0.485,
+     -0.215,
+     -0.78
+    ],
+    [
+     0.485,
+     0.208,
+     0.785
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Vector: hull + cabin + details, one atlas"
+  },
+  "car_vector_lights": {
+   "name": "car_vector_lights",
+   "triangles": 60,
+   "vertices": 120,
+   "bytes": 2745,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.996,
+   "radius": 0.8498,
+   "bounds": [
+    [
+     -0.42,
+     -0.052,
+     -0.732
+    ],
+    [
+     0.42,
+     0.065,
+     0.735
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Vector: head and tail lights"
+  },
+  "car_slate_body": {
+   "name": "car_slate_body",
+   "triangles": 1612,
+   "vertices": 1641,
+   "bytes": 116457,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.168,
+   "radius": 0.8493,
+   "bounds": [
+    [
+     -0.485,
+     -0.2,
+     -0.8
+    ],
+    [
+     0.485,
+     0.213,
+     0.87
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Slate: hull + cabin + details, one atlas"
+  },
+  "car_slate_lights": {
+   "name": "car_slate_lights",
+   "triangles": 60,
+   "vertices": 120,
+   "bytes": 2734,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.031,
+   "radius": 0.8498,
+   "bounds": [
+    [
+     -0.45,
+     -0.045,
+     -0.747
+    ],
+    [
+     0.45,
+     0.06,
+     0.773
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Slate: head and tail lights"
+  },
+  "car_dart_body": {
+   "name": "car_dart_body",
+   "triangles": 1552,
+   "vertices": 1519,
+   "bytes": 113808,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.025,
+   "radius": 0.8497,
+   "bounds": [
+    [
+     -0.43,
+     -0.225,
+     -0.805
+    ],
+    [
+     0.43,
+     0.268,
+     0.79
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Dart: hull + cabin + details, one atlas"
+  },
+  "car_dart_lights": {
+   "name": "car_dart_lights",
+   "triangles": 48,
+   "vertices": 96,
+   "bytes": 2243,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.996,
+   "radius": 0.8493,
+   "bounds": [
+    [
+     -0.37,
+     -0.055,
+     -0.757
+    ],
+    [
+     0.37,
+     0.075,
+     0.777
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Dart: head and tail lights"
+  },
+  "car_fusion_body": {
+   "name": "car_fusion_body",
+   "triangles": 1564,
+   "vertices": 1454,
+   "bytes": 111870,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.033,
+   "radius": 0.8496,
+   "bounds": [
+    [
+     -0.486,
+     -0.26,
+     -0.785
+    ],
+    [
+     0.486,
+     0.248,
+     0.76
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Fusion: hull + cabin + details, one atlas"
+  },
+  "car_fusion_lights": {
+   "name": "car_fusion_lights",
+   "triangles": 60,
+   "vertices": 120,
+   "bytes": 2705,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.997,
+   "radius": 0.8496,
+   "bounds": [
+    [
+     -0.415,
+     -0.07,
+     -0.732
+    ],
+    [
+     0.415,
+     0.097,
+     0.735
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Fusion: head and tail lights"
+  },
+  "car_bulwark_body": {
+   "name": "car_bulwark_body",
+   "triangles": 1696,
+   "vertices": 1656,
+   "bytes": 119115,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.029,
+   "radius": 0.8495,
+   "bounds": [
+    [
+     -0.473,
+     -0.3,
+     -0.79
+    ],
+    [
+     0.473,
+     0.343,
+     0.765
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Bulwark: hull + cabin + details, one atlas"
+  },
+  "car_bulwark_lights": {
+   "name": "car_bulwark_lights",
+   "triangles": 48,
+   "vertices": 96,
+   "bytes": 2268,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.954,
+   "radius": 0.8496,
+   "bounds": [
+    [
+     -0.38,
+     -0.09,
+     -0.7
+    ],
+    [
+     0.38,
+     0.15,
+     0.725
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "Bulwark: head and tail lights"
   }
  },
  "textures": {
@@ -960,6 +1240,76 @@
     128
    ],
    "bytes": 16285
+  },
+  "car_vector_blue": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 1149806
+  },
+  "car_vector_orange": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 1075254
+  },
+  "car_slate_blue": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 909129
+  },
+  "car_slate_orange": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 817316
+  },
+  "car_dart_blue": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 1317394
+  },
+  "car_dart_orange": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 1313329
+  },
+  "car_fusion_blue": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 871651
+  },
+  "car_fusion_orange": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 847621
+  },
+  "car_bulwark_blue": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 722192
+  },
+  "car_bulwark_orange": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 622771
   }
  },
  "pack": "rl2",
@@ -977,8 +1327,18 @@
   "ball",
   "car_blue",
   "car_boost",
+  "car_bulwark_blue",
+  "car_bulwark_orange",
+  "car_dart_blue",
+  "car_dart_orange",
+  "car_fusion_blue",
+  "car_fusion_orange",
   "car_lights",
   "car_orange",
+  "car_slate_blue",
+  "car_slate_orange",
+  "car_vector_blue",
+  "car_vector_orange",
   "car_wheel",
   "floodlight",
   "pad_orb",

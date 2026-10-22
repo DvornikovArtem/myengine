@@ -51,6 +51,8 @@ namespace myengine::game
         std::function<float()> fps;                                                              // frames per second (the overlay of the FPS)
         std::function<void(const std::string&)> log;                                              // one line of the log (the screens, the settings that were saved)
         std::function<void(bool menu)> setLighting;                                              // the dim light behind the menus / the light of the match
+        std::function<std::uint64_t(const std::string& path)> loadImage;                         // a PNG of the project as the texture id of the UI; 0 while it loads or when it cannot be read
+        std::function<void(const std::string& path)> preload;                                    // starts loading a mesh (.obj), a material (.material.json) or a texture of the project
         std::filesystem::path settingsFile;                                                      // empty: RlGameSettings::DefaultPath()
     };
 
@@ -71,7 +73,7 @@ namespace myengine::game
         // The scripted input of the tests: a hook on the devices that the screens see (see Application, MYENGINE_UI_SCRIPT)
         void SetRawInputHook(std::function<void(rlui::RawInput&)> hook);
 
-        // The screen that is shown, for the logs and the tests ("boot", "main", "play", "loading", "match", "pause", "results", "settings", "lobby")
+        // The screen that is shown, for the logs and the tests ("boot", "main", "play", "loading", "match", "pause", "results", "settings", "lobby", "training", "garage")
         const char* ScreenName() const;
 
     private:

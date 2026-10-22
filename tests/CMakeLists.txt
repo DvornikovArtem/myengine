@@ -500,6 +500,17 @@ add_test(NAME rl_training COMMAND myengine_rl_training_tests)
 set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
 
 
+# G4i: the cars of the garage: the data (the hitboxes of RocketSim), the meshes and previews they name, the bars, broken data, the key in the settings (no window)
+add_executable(myengine_rl_cars_tests
+  rl/RlCarsTests.cpp)
+
+target_link_libraries(myengine_rl_cars_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_cars_tests)
+set_property(TARGET myengine_rl_cars_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_cars COMMAND myengine_rl_cars_tests)
+set_tests_properties(rl_cars PROPERTIES TIMEOUT 120)
+
+
 # G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
 # RlFeedback in the replay mode (no window)
 add_executable(myengine_rl_replay_tests

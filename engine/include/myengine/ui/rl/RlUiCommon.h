@@ -134,6 +134,9 @@ namespace myengine::rlui
         ChevronRight,
         ArrowsVertical,    // the key hint "up / down"
         ArrowsHorizontal,  // "left / right"
+        Car,               // Garage, Change car
+        Check,             // Equipped
+        Ruler,             // the size of the hitbox
         Count
     };
 }

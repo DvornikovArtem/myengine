@@ -135,6 +135,16 @@ namespace myengine::game
         }
         play.playerName = TruncateUtf8(play.playerName, 15);
         play.joinAddress = TruncateUtf8(play.joinAddress, 40);
+        // a key of a car is lower case letters, digits and "_" / "-": anything else is not a car of ours
+        std::string key;
+        for (const char c : car)
+        {
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
+            {
+                key += c;
+            }
+        }
+        car = key.empty() ? std::string("pulse") : key.substr(0, 32);
     }
 
     std::string RlGameSettings::ToJson() const
@@ -180,6 +190,7 @@ namespace myengine::game
         p["playerName"] = play.playerName;
         root["play"] = p;
         root["invertPitch"] = invertPitch;
+        root["car"] = car;
         return root.dump(2) + "\n";
     }
 
@@ -238,6 +249,7 @@ namespace myengine::game
             Read(*it, "playerName", loaded.play.playerName);
         }
         Read(root, "invertPitch", loaded.invertPitch);
+        Read(root, "car", loaded.car);
         loaded.Clamp();
         *this = loaded;
         return true;
