@@ -26,10 +26,17 @@ namespace rl::net
         virtual ~IDatagramLink() = default;
 
         virtual bool Bind(uint16_t port, std::string& error) = 0;  // port 0 = any
+        // Several links (of one PC) may listen on one port: for the broadcasts of the LAN lobby (docs/game/rl-online.md 7.4)
+        virtual bool BindShared(uint16_t port, std::string& error) = 0;
         virtual uint16_t LocalPort() const = 0;
         // Resolves "ip:port" (or a name known to the link) into an address.
         virtual bool Resolve(const std::string& text, NetAddress& out, std::string& error) = 0;
         virtual void Send(NetAddress to, const uint8_t* data, size_t size, double now) = 0;
+        // To everybody on the network that listens (BindShared) on `port`
+        virtual void SendBroadcast(uint16_t port, const uint8_t* data, size_t size, double now) = 0;
+        // "a.b.c.d:port" (the loopback: "port") and the same address with another port
+        virtual std::string FormatAddress(NetAddress address) const = 0;
+        virtual NetAddress WithPort(NetAddress address, uint16_t port) const = 0;
         // false when nothing is waiting; `now` lets a link hold packets back
         virtual bool Receive(NetAddress& from, std::vector<uint8_t>& data, double now) = 0;
         virtual void Close() = 0;
@@ -50,10 +57,14 @@ namespace rl::net
         bool Register(uint16_t port, uint16_t& assigned);
         void Unregister(uint16_t port);
         void Deliver(uint16_t to, NetAddress from, const uint8_t* data, size_t size);
+        // an endpoint that also hears the broadcasts to `port`
+        bool RegisterShared(uint16_t port, uint16_t& assigned);
+        void Broadcast(uint16_t port, NetAddress from, const uint8_t* data, size_t size);
         bool Take(uint16_t port, Packet& out);
 
     private:
         std::map<uint16_t, std::deque<Packet>> inboxes_;
+        std::map<uint16_t, std::vector<uint16_t>> shared_;  // port -> the endpoints that listen to its broadcasts
         uint16_t nextFree_ = 40000;
     };
 
