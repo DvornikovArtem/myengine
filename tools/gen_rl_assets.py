@@ -11,6 +11,10 @@ Writes
 Run from anywhere:  python tools/gen_rl_assets.py
 Needs Pillow (pip install pillow); nothing else.
 
+The visual pack of the online game (car, ball, arena, stands, crowd, sky; assets/{models,textures,materials}/rl2, the showcase scene
+assets/scenes/rl_showcase.json) lives in tools/rl_assets:  python tools/gen_rl_assets.py pack [--only car,ball,arena,stadium]
+[--preview DIR]  (the previews need numpy). See docs/game/rl-assets.md.
+
 Texture conventions (rl_box.obj): on every face u runs left to right and the image top is up when the face is
 looked at from outside. On the top face (+y) the image top is +z (the orange end), the left edge is -x.
 Sizes are authored for the stretched crate of the game, e.g. a 42 x 74 m floor is 756 x 1332 px (18 px/m).
@@ -702,4 +706,9 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "pack":
+        # the visual pack of the online game (tools/rl_assets, assets/*/rl2): python tools/gen_rl_assets.py pack --help
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from rl_assets.cli import main as pack_main
+        sys.exit(pack_main(sys.argv[2:]))
     main()

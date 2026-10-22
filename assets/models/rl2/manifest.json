@@ -1,0 +1,850 @@
+{
+ "meshes": {
+  "car_body": {
+   "name": "car_body",
+   "triangles": 1172,
+   "vertices": 1195,
+   "bytes": 83891,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.996,
+   "radius": 0.8495,
+   "bounds": [
+    [
+     -0.488,
+     -0.27,
+     -0.74
+    ],
+    [
+     0.488,
+     0.253,
+     0.7
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "hull + cabin + spoiler + nozzle, one atlas"
+  },
+  "car_lights": {
+   "name": "car_lights",
+   "triangles": 60,
+   "vertices": 120,
+   "bytes": 2711,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.942,
+   "radius": 0.8497,
+   "bounds": [
+    [
+     -0.4,
+     -0.072,
+     -0.687
+    ],
+    [
+     0.4,
+     0.093,
+     0.687
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "head and tail lights"
+  },
+  "car_wheel": {
+   "name": "car_wheel",
+   "triangles": 320,
+   "vertices": 210,
+   "bytes": 20919,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 0.189,
+   "radius": 0.8456,
+   "bounds": [
+    [
+     -0.085,
+     -0.15,
+     -0.15
+    ],
+    [
+     0.085,
+     0.15,
+     0.15
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "the rear wheel (r 0.15 m); the front wheels (r 0.125 m) use the entity scale x 0.8333"
+  },
+  "car_boost": {
+   "name": "car_boost",
+   "triangles": 40,
+   "vertices": 88,
+   "bytes": 2761,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.059,
+   "radius": 0.8499,
+   "bounds": [
+    [
+     -0.07,
+     -0.07,
+     -0.9
+    ],
+    [
+     0.07,
+     0.07,
+     0.0
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "car",
+   "note": "flame cone behind the nozzle (additive in G7b)"
+  },
+  "ball": {
+   "name": "ball",
+   "triangles": 1216,
+   "vertices": 691,
+   "bytes": 84678,
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "scale": 1.092,
+   "radius": 0.8494,
+   "bounds": [
+    [
+     -0.927,
+     -0.927,
+     -0.927
+    ],
+    [
+     0.927,
+     0.927,
+     0.927
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": null,
+   "note": "smooth UV sphere r 0.9275 m; equirectangular ball.tga with panels and seam glow"
+  },
+  "arena_floor": {
+   "name": "arena_floor",
+   "triangles": 16,
+   "vertices": 17,
+   "bytes": 1353,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 66.8,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -37.96,
+     0.0,
+     -51.2
+    ],
+    [
+     37.96,
+     0.0,
+     51.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": null,
+   "note": "turf + markings, planar UV over 2 x halfWidth by 2 x halfLength"
+  },
+  "arena_wall_blue": {
+   "name": "arena_wall_blue",
+   "triangles": 154,
+   "vertices": 158,
+   "bytes": 12100,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 70.035,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -40.96,
+     0.0,
+     -51.2
+    ],
+    [
+     40.96,
+     7.0,
+     0.0
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "floor ramps + opaque lower wall; u = perimeter / 8 m, v = profile arc length"
+  },
+  "arena_frame_blue": {
+   "name": "arena_frame_blue",
+   "triangles": 3564,
+   "vertices": 6912,
+   "bytes": 169930,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 70.015,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -40.976,
+     5.0,
+     -51.216
+    ],
+    [
+     40.976,
+     20.44,
+     0.12
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "open frame instead of transparent glass: posts, rails, ceiling ribs and beams"
+  },
+  "arena_goal_blue": {
+   "name": "arena_goal_blue",
+   "triangles": 640,
+   "vertices": 1028,
+   "bytes": 30027,
+   "origin": [
+    0.0,
+    3.215,
+    -55.6
+   ],
+   "scale": 12.485,
+   "radius": 0.8499,
+   "bounds": [
+    [
+     -9.09,
+     0,
+     -60.0
+    ],
+    [
+     9.09,
+     6.582,
+     -51.04
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "goal box behind the end wall: net surfaces, posts, crossbar"
+  },
+  "arena_wall_orange": {
+   "name": "arena_wall_orange",
+   "triangles": 154,
+   "vertices": 148,
+   "bytes": 11917,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 70.035,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -40.96,
+     0.0,
+     0.0
+    ],
+    [
+     40.96,
+     7.0,
+     51.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "floor ramps + opaque lower wall; u = perimeter / 8 m, v = profile arc length"
+  },
+  "arena_frame_orange": {
+   "name": "arena_frame_orange",
+   "triangles": 3552,
+   "vertices": 6888,
+   "bytes": 170746,
+   "origin": [
+    0.0,
+    10.22,
+    0.0
+   ],
+   "scale": 70.015,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -40.976,
+     5.0,
+     -0.096
+    ],
+    [
+     40.976,
+     20.44,
+     51.216
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "open frame instead of transparent glass: posts, rails, ceiling ribs and beams"
+  },
+  "arena_goal_orange": {
+   "name": "arena_goal_orange",
+   "triangles": 640,
+   "vertices": 1028,
+   "bytes": 30069,
+   "origin": [
+    0.0,
+    3.215,
+    55.6
+   ],
+   "scale": 12.485,
+   "radius": 0.8499,
+   "bounds": [
+    [
+     -9.09,
+     0,
+     51.04
+    ],
+    [
+     9.09,
+     6.582,
+     60.0
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "arena",
+   "note": "goal box behind the end wall: net surfaces, posts, crossbar"
+  },
+  "pad_small": {
+   "name": "pad_small",
+   "triangles": 30,
+   "vertices": 28,
+   "bytes": 2224,
+   "origin": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": 1.119,
+   "radius": 0.8493,
+   "bounds": [
+    [
+     -0.823,
+     0.0,
+     -0.95
+    ],
+    [
+     0.823,
+     0.05,
+     0.95
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "pads",
+   "note": "hexagon plate, origin on the floor"
+  },
+  "pad_big": {
+   "name": "pad_big",
+   "triangles": 90,
+   "vertices": 79,
+   "bytes": 6282,
+   "origin": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": 1.825,
+   "radius": 0.8496,
+   "bounds": [
+    [
+     -1.342,
+     0.0,
+     -1.55
+    ],
+    [
+     1.342,
+     0.37,
+     1.55
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "pads",
+   "note": "big plate with a ring, origin on the floor"
+  },
+  "pad_orb": {
+   "name": "pad_orb",
+   "triangles": 168,
+   "vertices": 115,
+   "bytes": 11357,
+   "origin": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": 0.73,
+   "radius": 0.8493,
+   "bounds": [
+    [
+     -0.62,
+     -0.62,
+     -0.62
+    ],
+    [
+     0.62,
+     0.62,
+     0.62
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "pads",
+   "note": "orb of a big pad, origin = its centre (float it ~1.6 m up)"
+  },
+  "stand_blue": {
+   "name": "stand_blue",
+   "triangles": 9404,
+   "vertices": 18808,
+   "bytes": 665161,
+   "origin": [
+    0.0,
+    5.085,
+    -7.2
+   ],
+   "scale": 13.145,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -6.65,
+     0.0,
+     -14.6
+    ],
+    [
+     6.65,
+     10.17,
+     0.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "stand block 13.3 m wide, 16 rows, baked crowd; front (ad board) at z=0 looks to +z"
+  },
+  "stand_orange": {
+   "name": "stand_orange",
+   "triangles": 9108,
+   "vertices": 18216,
+   "bytes": 653334,
+   "origin": [
+    0.0,
+    5.0104,
+    -7.2
+   ],
+   "scale": 13.106,
+   "radius": 0.8499,
+   "bounds": [
+    [
+     -6.65,
+     0.0,
+     -14.6
+    ],
+    [
+     6.65,
+     10.021,
+     0.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "stand block 13.3 m wide, 16 rows, baked crowd; front (ad board) at z=0 looks to +z"
+  },
+  "stand_mixed": {
+   "name": "stand_mixed",
+   "triangles": 9250,
+   "vertices": 18500,
+   "bytes": 658854,
+   "origin": [
+    0.0,
+    5.01,
+    -7.2
+   ],
+   "scale": 13.105,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -6.65,
+     0.0,
+     -14.6
+    ],
+    [
+     6.65,
+     10.02,
+     0.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "stand block 13.3 m wide, 16 rows, baked crowd; front (ad board) at z=0 looks to +z"
+  },
+  "stadium_shell": {
+   "name": "stadium_shell",
+   "triangles": 16,
+   "vertices": 32,
+   "bytes": 1546,
+   "origin": [
+    0.0,
+    22.0,
+    0.0
+   ],
+   "scale": 117.981,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -76.96,
+     0.0,
+     -87.2
+    ],
+    [
+     76.96,
+     44.0,
+     87.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "inward facing facade ring, 44 m"
+  },
+  "stadium_roof": {
+   "name": "stadium_roof",
+   "triangles": 32,
+   "vertices": 64,
+   "bytes": 2041,
+   "origin": [
+    0.0,
+    37.0,
+    0.0
+   ],
+   "scale": 115.401,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -76.96,
+     29.5,
+     -87.2
+    ],
+    [
+     76.96,
+     44.0,
+     87.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "roof ring over the stands"
+  },
+  "stadium_ground": {
+   "name": "stadium_ground",
+   "triangles": 8,
+   "vertices": 9,
+   "bytes": 732,
+   "origin": [
+    0.0,
+    -0.05,
+    0.0
+   ],
+   "scale": 115.107,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -76.96,
+     -0.05,
+     -87.2
+    ],
+    [
+     76.96,
+     -0.05,
+     87.2
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "concrete under everything, y = -0.05"
+  },
+  "sky_dome": {
+   "name": "sky_dome",
+   "triangles": 2208,
+   "vertices": 1223,
+   "bytes": 158046,
+   "origin": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": 294.118,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -250.0,
+     -250.0,
+     -250.0
+    ],
+    [
+     250.0,
+     250.0,
+     250.0
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "inward facing sphere r 250 (far plane 300)"
+  },
+  "floodlight": {
+   "name": "floodlight",
+   "triangles": 154,
+   "vertices": 287,
+   "bytes": 9194,
+   "origin": [
+    0.0,
+    18.0,
+    0.0
+   ],
+   "scale": 23.284,
+   "radius": 0.85,
+   "bounds": [
+    [
+     -3.7,
+     0.0,
+     -0.55
+    ],
+    [
+     3.7,
+     37.45,
+     0.65
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "a 34 m tower, the lamps look to +z"
+  },
+  "scoreboard": {
+   "name": "scoreboard",
+   "triangles": 20,
+   "vertices": 40,
+   "bytes": 1367,
+   "origin": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": 12.164,
+   "radius": 0.8499,
+   "bounds": [
+    [
+     -9.5,
+     -4.0,
+     -0.8
+    ],
+    [
+     9.5,
+     4.0,
+     0.85
+    ]
+   ],
+   "orientation": 1.0,
+   "part_of": "stadium",
+   "note": "a hanging board, the screen looks to +z"
+  }
+ },
+ "textures": {
+  "car_blue": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 1164438
+  },
+  "car_orange": {
+   "size": [
+    1024,
+    1024
+   ],
+   "bytes": 1045120
+  },
+  "car_lights": {
+   "size": [
+    128,
+    64
+   ],
+   "bytes": 2208
+  },
+  "car_wheel": {
+   "size": [
+    512,
+    256
+   ],
+   "bytes": 275420
+  },
+  "car_boost": {
+   "size": [
+    32,
+    128
+   ],
+   "bytes": 684
+  },
+  "ball": {
+   "size": [
+    1024,
+    512
+   ],
+   "bytes": 785651
+  },
+  "arena_floor": {
+   "size": [
+    1638,
+    2048
+   ],
+   "bytes": 578892
+  },
+  "arena_wall_blue": {
+   "size": [
+    512,
+    512
+   ],
+   "bytes": 289744
+  },
+  "arena_frame_blue": {
+   "size": [
+    128,
+    64
+   ],
+   "bytes": 2244
+  },
+  "arena_goal_blue": {
+   "size": [
+    512,
+    256
+   ],
+   "bytes": 80570
+  },
+  "arena_wall_orange": {
+   "size": [
+    512,
+    512
+   ],
+   "bytes": 291612
+  },
+  "arena_frame_orange": {
+   "size": [
+    128,
+    64
+   ],
+   "bytes": 2248
+  },
+  "arena_goal_orange": {
+   "size": [
+    512,
+    256
+   ],
+   "bytes": 81576
+  },
+  "pads": {
+   "size": [
+    768,
+    256
+   ],
+   "bytes": 151517
+  },
+  "stands": {
+   "size": [
+    1024,
+    512
+   ],
+   "bytes": 143222
+  },
+  "stadium_facade": {
+   "size": [
+    512,
+    512
+   ],
+   "bytes": 272933
+  },
+  "stadium_roof": {
+   "size": [
+    256,
+    256
+   ],
+   "bytes": 2604
+  },
+  "stadium_ground": {
+   "size": [
+    256,
+    256
+   ],
+   "bytes": 17391
+  },
+  "sky": {
+   "size": [
+    2048,
+    1024
+   ],
+   "bytes": 148352
+  },
+  "floodlight": {
+   "size": [
+    128,
+    64
+   ],
+   "bytes": 2284
+  },
+  "scoreboard": {
+   "size": [
+    768,
+    256
+   ],
+   "bytes": 41737
+  }
+ },
+ "pack": "rl2",
+ "materials": [
+  "arena_floor",
+  "arena_frame_blue",
+  "arena_frame_orange",
+  "arena_goal_blue",
+  "arena_goal_orange",
+  "arena_wall_blue",
+  "arena_wall_orange",
+  "ball",
+  "car_blue",
+  "car_boost",
+  "car_lights",
+  "car_orange",
+  "car_wheel",
+  "floodlight",
+  "pads",
+  "scoreboard",
+  "sky",
+  "stadium_facade",
+  "stadium_ground",
+  "stadium_roof",
+  "stands"
+ ],
+ "showcase_draw_calls": 107
+}
