@@ -44,6 +44,7 @@ namespace rl
         uint64_t hashMismatches = 0;      // client: snapshots whose state hash differed from ours (a hard correction makes the states close, not bit-equal)
         uint64_t lateInputs = 0;          // host: inputs of a tick that was simulated already
         uint64_t repeatedInputs = 0;      // host: ticks where a client's input was missing and the last one was repeated
+        uint64_t lateJoins = 0;           // host: players that joined a running match
         int rollbacksLastSecond = 0;      // client: the "corrections per second" of the overlay
         int lastResimTicks = 0;
         double lastRollbackMs = 0.0;
@@ -100,6 +101,7 @@ namespace rl
         Joining,     // Join sent, Welcome awaited
         Lobby,       // in; the host has not started the match
         Playing,
+        Syncing,     // the match is on: the state of the host is coming in pieces, then the client catches up with it
         Failed,      // see Error()
         Disconnected,
     };

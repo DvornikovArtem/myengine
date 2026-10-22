@@ -155,14 +155,14 @@ namespace rl
             kicks.push_back({peer, now + kKickDelay});
         }
 
-        void BroadcastEvent(const RlEventMsg& event)
+        void BroadcastEvent(const RlEventMsg& event, net::PeerId except = net::kInvalidPeer)
         {
             events.push_back(event);
             std::vector<uint8_t> bytes;
             RlEncode(event, bytes);
             for (auto& entry : clients)
             {
-                if (entry.second.slot >= 0)
+                if (entry.second.slot >= 0 && entry.first != except)
                 {
                     Send(entry.first, bytes, true);
                 }
@@ -186,11 +186,6 @@ namespace rl
                 Reject(peer, RlRejectReason::Tuning, now);
                 return;
             }
-            if (started)
-            {
-                Reject(peer, RlRejectReason::Started, now);
-                return;
-            }
             Client& client = clients[peer];
             if (client.slot >= 0)
             {
@@ -212,13 +207,73 @@ namespace rl
             welcome.slot = static_cast<uint8_t>(slot);
             welcome.mode = static_cast<uint8_t>(options.match.mode);
             welcome.botLevel = static_cast<uint8_t>(options.match.botLevel);
-            welcome.started = 0;
+            welcome.started = started ? 1 : 0;
             welcome.seed = options.match.seed;
             welcome.humanMask = humanMask;
             welcome.tuningHash = tuningHash;
             std::vector<uint8_t> bytes;
             RlEncode(welcome, bytes);
             Send(peer, bytes, true);
+            if (started)
+            {
+                LateJoin(peer, client, slot);
+            }
+        }
+
+        // A player joins a running match: the slot of a bot becomes his from this tick on (the others are told), and he gets the state of
+        // the match as it is now, in pieces, to restore it and catch up
+        void LateJoin(net::PeerId peer, Client& client, int slot)
+        {
+            RlEventMsg event;
+            event.kind = RlEventKind::SlotMask;
+            event.tick = tick;
+            event.slot = static_cast<int8_t>(slot);
+            event.a = 1;
+            event.mask = humanMask;
+            BroadcastEvent(event, peer);  // the new player learns the mask from the Welcome
+
+            match->SaveState(scratch);
+            RlStateChunkMsg chunk;
+            chunk.tick = tick;
+            chunk.total = static_cast<uint32_t>(scratch.size());
+            for (size_t offset = 0; offset < scratch.size(); offset += kStateChunkBytes)
+            {
+                const size_t length = std::min(kStateChunkBytes, scratch.size() - offset);
+                chunk.offset = static_cast<uint32_t>(offset);
+                chunk.bytes.assign(scratch.begin() + static_cast<std::ptrdiff_t>(offset), scratch.begin() + static_cast<std::ptrdiff_t>(offset + length));
+                RlEncode(chunk, packet);
+                Send(peer, packet, true);
+            }
+            client.last = RlCarInput{};
+            ++stats.lateJoins;
+        }
+
+        // the inputs the host used for the ticks that the joined player asks for (he restored an older state and replays them)
+        void OnInputRequest(net::PeerId peer, const std::vector<uint8_t>& data)
+        {
+            const auto it = clients.find(peer);
+            RlInputRequestMsg request;
+            if (it == clients.end() || it->second.slot < 0 || !started || !RlDecode(data.data(), data.size(), request))
+            {
+                return;
+            }
+            const uint32_t end = std::min(request.first + std::min<uint32_t>(request.count, kHistory - 8), tick);
+            const uint32_t from = std::max(request.first, tick > kHistory - 8 ? tick - (kHistory - 8) : 0u);
+            for (uint32_t first = from; first < end; first += kHistoryTicksPerMessage)
+            {
+                RlInputHistoryMsg msg;
+                msg.first = first;
+                msg.count = static_cast<int>(std::min<uint32_t>(kHistoryTicksPerMessage, end - first));
+                for (int t = 0; t < msg.count; ++t)
+                {
+                    for (int slot = 0; slot < kMaxCars; ++slot)
+                    {
+                        RlPackInput(used[slot][(first + static_cast<uint32_t>(t)) % kHistory], msg.inputs[t][slot]);
+                    }
+                }
+                RlEncode(msg, packet);
+                Send(peer, packet, true);
+            }
         }
 
         void OnInput(net::PeerId peer, const std::vector<uint8_t>& data)
@@ -307,6 +362,7 @@ namespace rl
                     {
                     case RlMsg::Join: OnJoin(event.peer, event.data, now); break;
                     case RlMsg::Input: OnInput(event.peer, event.data); break;
+                    case RlMsg::InputRequest: OnInputRequest(event.peer, event.data); break;
                     default: break;
                     }
                     break;

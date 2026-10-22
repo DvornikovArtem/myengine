@@ -923,8 +923,9 @@ namespace myengine::ecs::systems
                 }
                 if (clientState != rl::RlNetClientState::Playing)
                 {
-                    BuildOnlineWaitHud(clientState == rl::RlNetClientState::Lobby ? "joined; waiting for the host to start the match"
-                                                                                   : "connecting to " + online.address + " ...");
+                    BuildOnlineWaitHud(clientState == rl::RlNetClientState::Lobby     ? "joined; waiting for the host to start the match"
+                                       : clientState == rl::RlNetClientState::Syncing ? "the match is on: getting its state from the host ..."
+                                                                                      : "connecting to " + online.address + " ...");
                     return;
                 }
                 localSlot = netClient->Slot();
