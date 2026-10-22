@@ -25,6 +25,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -145,9 +146,16 @@ namespace
         int firstOff = -1;               // the first tick the position is 0.1 m or the orientation 3 degrees off
         float finalSpeedRs = 0, finalSpeedOurs = 0;
         float secondFinalRs = 0, secondFinalOurs = 0;
+        // G4j: where the car ends. up.y of the car (1 on its wheels, -1 on its roof, near 0 on its side), the wheels on the ground, and the last tick
+        // the car was not standing on its wheels (up.y < 0.8 or fewer than 3 wheels)
+        float upRs = 0, upOurs = 0;
+        int wheelsRs = 0, wheelsOurs = 0;
+        int unsettledRs = -1, unsettledOurs = -1;
     };
 
     bool g_dump = false;
+    bool g_carsFuzz = false;
+    int g_fuzzOutcomes = 0, g_fuzzSame = 0, g_fuzzRsWheels = 0, g_fuzzOurWheels = 0;
     float g_ballFriction = -1.0f;
     float g_carRestitution = -1.0f;
 
@@ -269,6 +277,18 @@ namespace
                 }
                 res.finalSpeedRs = speedRs;
                 res.finalSpeedOurs = Len(vel);
+                res.upRs = r.up.y;
+                res.upOurs = u.y;
+                res.wheelsRs = r.wheels;
+                res.wheelsOurs = c.wheelContacts;
+                if (r.up.y < 0.8f || r.wheels < 3)
+                {
+                    res.unsettledRs = done;
+                }
+                if (u.y < 0.8f || c.wheelContacts < 3)
+                {
+                    res.unsettledOurs = done;
+                }
                 if (sc.ball)
                 {
                     const RlBallState& b = sim.State().ball;
@@ -292,6 +312,43 @@ namespace
             }
         }
         return res;
+    }
+
+    // G4j: the flights that end with the car rolling or spinning into the floor: a side flip, a diagonal flip, an air roll that is let go of. Bullet and Jolt
+    // part ways at the first touchdown of a car that turns fast (Bullet starts with the one point of the hitbox that touches first and the car turns about
+    // it, Jolt takes the whole edge or face at once and stops the turn), so the two are compared in two ways: tick for tick until that touchdown, and by how the
+    // flight ends (the car on its wheels, how long it took) after it.
+    bool IsImpactScenario(const char* name)
+    {
+        return std::strcmp(name, "flip_right_recover") == 0 || std::strcmp(name, "flip_diag_recover") == 0 || std::strcmp(name, "air_roll_land_throttle") == 0;
+    }
+
+    // The first touchdown of RocketSim's car after the flip (from the second 0.8 on): a wheel on the ground, or the velocity changing by more than gravity does
+    int ImpactTick(const std::vector<Row>& rows)
+    {
+        for (size_t i = 1; i < rows.size(); ++i)
+        {
+            if (rows[i].tick < 96)
+            {
+                continue;
+            }
+            if (rows[i].wheels > 0 || Len(Sub(rows[i].vel, rows[i - 1].vel)) > 1.2f)
+            {
+                return rows[i].tick;
+            }
+        }
+        return -1;
+    }
+
+    void CheckImpactScenario(const Result& r, const std::vector<Row>& rows)
+    {
+        const int impact = ImpactTick(rows);
+        CHECK(impact > 0);
+        CHECK(r.firstOff < 0 || r.firstOff >= impact - 8);   // the same flight until the touchdown
+        const bool rsOn = r.upRs > 0.8f && r.wheelsRs >= 3;
+        const bool ourOn = r.upOurs > 0.8f && r.wheelsOurs >= 3;
+        CHECK(rsOn && ourOn);                                // both end on their wheels
+        CHECK(std::abs(r.unsettledOurs - r.unsettledRs) <= 90);   // ours is on its wheels for good within 0.75 s of RocketSim
     }
 
     struct Limit
@@ -360,6 +417,10 @@ int main(int argc, char** argv)
         {
             g_carRestitution = static_cast<float>(std::atof(argv[++i]));
         }
+        else if (std::strcmp(argv[i], "--cars-fuzz") == 0)
+        {
+            g_carsFuzz = true;
+        }
         else if (std::strcmp(argv[i], "--dump") == 0)
         {
             g_dump = true;
@@ -384,7 +445,7 @@ int main(int argc, char** argv)
     for (int index = 0; index < rldiff::kScenarioCount; ++index)
     {
         const rldiff::Scenario sc = rldiff::Get(index);
-        if (sc.ticks <= 0 || (only != nullptr && std::strcmp(only, sc.name) != 0))
+        if (sc.ticks <= 0 || (only != nullptr && std::strcmp(only, sc.name) != 0) || std::strncmp(sc.name, "fuzz_", 5) == 0 || std::strncmp(sc.name, "spin_", 5) == 0 || std::strncmp(sc.name, "ext_", 4) == 0)
         {
             continue;
         }
@@ -408,9 +469,16 @@ int main(int argc, char** argv)
                           static_cast<double>(r.secondSpeedMax * 100.0f), r.demoTickOurs, r.demoTickRs);
         }
         const Limit limit = LimitOf(sc.name);
-        CHECK(r.pos2s <= limit.pos);
-        CHECK(r.speedMax <= limit.speed);
-        CHECK(r.orientMax <= limit.orient);
+        if (IsImpactScenario(sc.name))
+        {
+            CheckImpactScenario(r, rows);
+        }
+        else
+        {
+            CHECK(r.pos2s <= limit.pos);
+            CHECK(r.speedMax <= limit.speed);
+            CHECK(r.orientMax <= limit.orient);
+        }
         if (sc.ball)
         {
             CHECK(r.ballPosMax <= 0.4f);
@@ -425,6 +493,84 @@ int main(int argc, char** argv)
         }
         std::printf("  %-22s %7.2f %7.2f %7.1f %7.2f %7.2f %7.1f %6d  %s\n", sc.name, static_cast<double>(r.posMax), static_cast<double>(r.pos2s),
                     static_cast<double>(r.speedMax * 100.0f), static_cast<double>(r.velMax), static_cast<double>(r.angMax), static_cast<double>(r.orientMax), r.firstOff, extra);
+    }
+
+    // ---- G4j: the flights at random (rldiff::kFuzzFirst ..., rldiff::kSpinFirst ...): where the car ends and how fast it gets onto its wheels, against RocketSim
+    for (const auto& family : {std::make_pair(rldiff::kFuzzFirst, 60), std::make_pair(rldiff::kSpinFirst, 60), std::make_pair(rldiff::kSpinFirst + 60, 60), std::make_pair(rldiff::kExtFirst, 100), std::make_pair(rldiff::kExtFirst + 100, 100)})
+    {
+        int outcomes = 0, sameOutcome = 0, both = 0, slower = 0, faster = 0;
+        int rsWheels = 0, ourWheels = 0, rsRoof = 0, ourRoof = 0, rsSide = 0, ourSide = 0;
+        std::vector<float> lastOffRs, lastOffOurs;   // ticks from the first touchdown to the last tick off the wheels
+        std::printf("random flights from %d (%s): the end of the flight, up.y and the last tick off its wheels\n", family.first,
+                    family.first == rldiff::kFuzzFirst ? "flip, roll, recover; the throttle at a random time"
+                    : family.first == rldiff::kSpinFirst ? "a long roll, pitch or yaw let go of; the throttle late"
+                                                         : family.first == rldiff::kSpinFirst + 60 ? "the same without the throttle: how the car rests when nobody drives it"
+                    : family.first == rldiff::kExtFirst ? "100 flights of the same kind, no throttle"
+                                                        : "the same 100 flights with the throttle held from the first tick");
+        for (int index = family.first; index < family.first + family.second; ++index)
+        {
+            const rldiff::Scenario sc = rldiff::Get(index);
+            std::vector<Row> rows;
+            if (sc.ticks <= 0 || !ReadTrace(std::string(RL_DIFF_TRACES) + "/" + sc.name + ".csv", rows))
+            {
+                continue;
+            }
+            const Result r = Run(index, rows, tuning);
+            const int touch = ImpactTick(rows) > 0 ? ImpactTick(rows) : 0;
+            lastOffRs.push_back(static_cast<float>(r.unsettledRs - touch));
+            lastOffOurs.push_back(static_cast<float>(r.unsettledOurs - touch));
+            const bool rsOn = r.upRs > 0.8f && r.wheelsRs >= 3;
+            const bool ourOn = r.upOurs > 0.8f && r.wheelsOurs >= 3;
+            ++outcomes;
+            rsWheels += rsOn ? 1 : 0;
+            ourWheels += ourOn ? 1 : 0;
+            rsRoof += r.upRs < -0.5f ? 1 : 0;
+            ourRoof += r.upOurs < -0.5f ? 1 : 0;
+            rsSide += (!rsOn && r.upRs >= -0.5f) ? 1 : 0;
+            ourSide += (!ourOn && r.upOurs >= -0.5f) ? 1 : 0;
+            sameOutcome += rsOn == ourOn ? 1 : 0;
+            if (rsOn && ourOn)
+            {
+                ++both;
+                slower += r.unsettledOurs > r.unsettledRs + 12 ? 1 : 0;
+                faster += r.unsettledOurs + 12 < r.unsettledRs ? 1 : 0;
+            }
+            if (g_verbose || rsOn != ourOn)
+            {
+                std::printf("  %-10s RocketSim up %5.2f wheels %d off wheels until %3d | ours up %5.2f wheels %d until %3d | first off at %d%s\n", sc.name,
+                            static_cast<double>(r.upRs), r.wheelsRs, r.unsettledRs, static_cast<double>(r.upOurs), r.wheelsOurs, r.unsettledOurs, r.firstOff,
+                            rsOn != ourOn ? "   <-- the end differs" : "");
+            }
+        }
+        std::printf("  %d flights: at the end on the wheels RocketSim %d, ours %d; on the roof %d / %d; on the side or in the air %d / %d; the same end in %d;\n"
+                    "  of the %d that both end on the wheels ours is more than 0.1 s later in %d, earlier in %d\n",
+                    outcomes, rsWheels, ourWheels, rsRoof, ourRoof, rsSide, ourSide, sameOutcome, both, slower, faster);
+        {
+            const auto quantile = [](std::vector<float> v, float q) {
+                std::sort(v.begin(), v.end());
+                return v.empty() ? 0.0f : v[std::min(v.size() - 1, static_cast<size_t>(q * static_cast<float>(v.size())))];
+            };
+            std::printf("  ticks from the first touchdown to the last tick off the wheels (median / 90 %% / worst): RocketSim %.0f / %.0f / %.0f, ours %.0f / %.0f / %.0f%c",
+                        static_cast<double>(quantile(lastOffRs, 0.5f)), static_cast<double>(quantile(lastOffRs, 0.9f)), static_cast<double>(quantile(lastOffRs, 1.0f)),
+                        static_cast<double>(quantile(lastOffOurs, 0.5f)), static_cast<double>(quantile(lastOffOurs, 0.9f)), static_cast<double>(quantile(lastOffOurs, 1.0f)), 10);
+        }
+        // the flights end the same way in nine of ten, ours is on its wheels as often as RocketSim's (a few per cent less), and it is on them for good as soon
+        CHECK(outcomes > 0 && sameOutcome * 100 >= outcomes * 88);
+        CHECK(ourWheels * 100 >= rsWheels * 92);
+        CHECK(!lastOffRs.empty() && !lastOffOurs.empty());
+        if (!lastOffRs.empty() && !lastOffOurs.empty())
+        {
+            const auto at = [](std::vector<float> v, float q) {
+                std::sort(v.begin(), v.end());
+                return v[std::min(v.size() - 1, static_cast<size_t>(q * static_cast<float>(v.size())))];
+            };
+            CHECK(at(lastOffOurs, 0.5f) <= at(lastOffRs, 0.5f) + 12.0f);   // 0.1 s
+            CHECK(at(lastOffOurs, 0.9f) <= at(lastOffRs, 0.9f) + 36.0f);   // 0.3 s
+        }
+        g_fuzzOutcomes += outcomes;
+        g_fuzzSame += sameOutcome;
+        g_fuzzRsWheels += rsWheels;
+        g_fuzzOurWheels += ourWheels;
     }
 
     // ---- the cars of the catalog, with the layer of RocketSim only
@@ -468,9 +614,16 @@ int main(int argc, char** argv)
                 }
                 const Result r = Run(index, rows, tuning, variant);
                 const Limit limit = LimitOf(sc.name);
-                CHECK(r.pos2s <= limit.pos);
-                CHECK(r.speedMax <= limit.speed);
-                CHECK(r.orientMax <= limit.orient);
+                if (IsImpactScenario(sc.name))
+                {
+                    CheckImpactScenario(r, rows);
+                }
+                else
+                {
+                    CHECK(r.pos2s <= limit.pos);
+                    CHECK(r.speedMax <= limit.speed);
+                    CHECK(r.orientMax <= limit.orient);
+                }
                 if (sc.ball)
                 {
                     CHECK(r.ballPosMax <= 0.4f);
@@ -487,7 +640,7 @@ int main(int argc, char** argv)
                 worstPos = std::max(worstPos, r.pos2s);
                 worstSpeed = std::max(worstSpeed, r.speedMax);
                 const bool contactOff = (sc.ball && (r.ballPosMax > 0.4f || r.ballSpeedMax > 0.02f)) || (sc.second && (r.secondPosMax > 0.3f || r.secondSpeedMax > 0.05f));
-                if (g_verbose || contactOff || r.pos2s > limit.pos || r.speedMax > limit.speed || r.orientMax > limit.orient)
+                if (g_verbose || contactOff || (!IsImpactScenario(sc.name) && (r.pos2s > limit.pos || r.speedMax > limit.speed || r.orientMax > limit.orient)))
                 {
                     char name[64];
                     std::snprintf(name, sizeof(name), "%s / %s", cls.c_str(), sc.name);
@@ -507,6 +660,45 @@ int main(int argc, char** argv)
                 }
             }
             std::printf("  %-10s worst of the scenarios: position in the first 2 s %.3f m, speed %.2f%%\n", cls.c_str(), static_cast<double>(worstPos), static_cast<double>(worstSpeed * 100.0f));
+        }
+    }
+    // ---- G4j: how every car of the catalog lands the same random flights: with the layer of RocketSim only and with our factors on top (docs/game/rl-cars.md)
+    if (g_carsFuzz)
+    {
+        RlCarCatalog cars;
+        std::string error;
+        if (cars.LoadDirectory(RL_CARS_DIR, &error))
+        {
+            std::printf("\nthe flights of the family without the throttle, car by car: the end on the wheels / on the roof / on the side, the mean last tick off the wheels\n");
+            for (int c = 0; c < cars.Count(); ++c)
+            {
+                for (int layer = 0; layer < 2; ++layer)
+                {
+                    const RlCarVariant variant = layer == 0 ? RlBodyOnly(cars.Spec(c).variant) : cars.Spec(c).variant;
+                    int wheels = 0, roof = 0, side = 0, count = 0;
+                    double settled = 0.0;
+                    for (int index = rldiff::kSpinFirst + 60; index < rldiff::kSpinFirst + 120; ++index)
+                    {
+                        const rldiff::Scenario sc = rldiff::Get(index);
+                        std::vector<Row> dummy;
+                        for (int t = 0; t <= sc.ticks; t += 4)
+                        {
+                            Row row;
+                            row.tick = t;
+                            dummy.push_back(row);
+                        }
+                        const Result r = Run(index, dummy, tuning, variant);
+                        const bool on = r.upOurs > 0.8f && r.wheelsOurs >= 3;
+                        wheels += on ? 1 : 0;
+                        roof += r.upOurs < -0.5f ? 1 : 0;
+                        side += (!on && r.upOurs >= -0.5f) ? 1 : 0;
+                        settled += r.unsettledOurs;
+                        ++count;
+                    }
+                    std::printf("  %-8s %-26s wheels %2d roof %2d side %2d of %d, off the wheels until tick %.0f\n", cars.Spec(c).id.c_str(),
+                                layer == 0 ? "(the layer of RocketSim)" : "(with our factors)", wheels, roof, side, count, settled / std::max(count, 1));
+                }
+            }
         }
     }
     std::printf("%d checks, %d failed\n", g_checks, g_failures);

@@ -9,6 +9,8 @@ build-*/
 out/
 # the packaged game (tools/package_game.ps1)
 dist/
+# the local path of the Steamworks SDK for the package script (first line of the file)
+tools/steam_sdk.txt
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake

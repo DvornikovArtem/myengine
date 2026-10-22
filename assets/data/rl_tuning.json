@@ -11,6 +11,8 @@
     "goalHalfWidth": 8.93,
     "goalHeight": 6.43,
     "goalDepth": 8.8,
+    "goalCornerRadius": 3.0,
+    "goalMouthBlend": 5.0,
     "friction": 0.4,
     "restitution": 0.0
   },
@@ -230,6 +232,7 @@
     "wallMargin": 0.3,
     "ballCamMaxPitch": 35.0,
     "rollFollow": 0.0,
+    "airVelocityFollow": 0.0,
     "maxTurnRate": 540.0
   },
   "match": {

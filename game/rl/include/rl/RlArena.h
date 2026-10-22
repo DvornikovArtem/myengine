@@ -14,10 +14,28 @@
 
 namespace rl
 {
+    // One cross-section of the inside of a goal, `along` metres from the mouth: a rounded rectangle of the centre (0, goalHeight / 2) whose straight
+    // parts end at +-innerX and +-innerY from the centre and whose corners are quarter circles of the radius `radius`; its outside is innerX + radius
+    // wide (half) and innerY + radius high (half). The cross-sections run from the mouth (a sharp rectangle: radius 0) through the blend (the radius
+    // grows by a smoothstep over goalMouthBlend metres) and the straight part (radius goalCornerRadius) to the back, where the radius shrinks along a
+    // quarter circle (the corners of the back wall are spheres) down to a flat rectangle.
+    struct RlGoalSection
+    {
+        float along = 0.0f;
+        float innerX = 0.0f;
+        float innerY = 0.0f;
+        float radius = 0.0f;
+    };
+
     class RlArena
     {
     public:
         explicit RlArena(const RlArenaTuning& tuning);
+
+        // The sections of the profile of a goal, from the mouth to the back wall (the back wall itself is the last section: radius 0, a flat rectangle)
+        static std::vector<RlGoalSection> GoalProfile(const RlArenaTuning& tuning);
+        // The point of a section: corner 0..3 (+x +y, -x +y, -x -y, +x -y) and the angle step 0..segments in that corner, in the plane of the goal (x, y)
+        static RlVec3 GoalSectionPoint(const RlArenaTuning& tuning, const RlGoalSection& section, int corner, int step);
 
         // Welded vertices and triangles (three indices each), counter-clockwise seen from inside.
         const std::vector<RlVec3>& Vertices() const { return vertices_; }

@@ -20,6 +20,12 @@ namespace rl
         float goalHalfWidth = 8.93f;
         float goalHeight = 6.43f;
         float goalDepth = 8.8f;
+        // The inside of a goal is smooth like the ramps (G9): the floor, the side walls, the ceiling and the back wall meet in quarter pipes of this radius
+        // (0: the old box). The quarter pipes of the sides grow from nothing at the mouth over goalMouthBlend metres, so that the goal takes the sharp
+        // posts of the end wall without a step; the back corners are spheres of the same radius. RlArena::GoalProfile is the one profile that the
+        // collision and the generator of the visual (tools/rl_assets/arena.py) both follow.
+        float goalCornerRadius = 3.0f;
+        float goalMouthBlend = 5.0f;
         float friction = 0.4f;
         float restitution = 0.0f;       // Jolt takes the larger of the two restitutions, so the ball's counts
     };
@@ -206,6 +212,8 @@ namespace rl
         // G4h: the horizon. 0 (the default, "Wall tilt" of the settings): the camera is always level, on walls, on the ceiling and in the air; 1: its up follows the
         // surface under the car (the behaviour before G4h). In the air the camera never follows the pitch or the roll of the car either way.
         float rollFollow = 0.0f;
+        // G4h3: how much the direction of the motion counts for the heading in the air (0, the default: only where the car faces, as in RL; 1: the motion decides)
+        float airVelocityFollow = 0.0f;
         float maxTurnRate = 540.0f;       // degrees per second: the heading of the camera never turns faster than this (a flip, the car upside down, a wall)
     };
 

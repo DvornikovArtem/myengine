@@ -267,11 +267,11 @@ namespace rl
     {
         switch (reason)
         {
-        case RlRejectReason::Version: return "the host runs another version of the netcode";
-        case RlRejectReason::Tuning: return "the host uses another rl_tuning.json (the numbers of the cars differ)";
-        case RlRejectReason::Full: return "the match has no free slot";
-        case RlRejectReason::Started: return "the match has started already";
-        case RlRejectReason::Cars: return "the host has other cars (the files assets/data/cars differ)";
+        case RlRejectReason::Version: return "The host has another version of the game: both players need the same one.";
+        case RlRejectReason::Tuning: return "The host plays with other game settings: both players need the same game files.";
+        case RlRejectReason::Full: return "The match has no free slot.";
+        case RlRejectReason::Started: return "The match has already started.";
+        case RlRejectReason::Cars: return "The host has other cars: both players need the same game files.";
         }
         return "the host refused the connection";
     }

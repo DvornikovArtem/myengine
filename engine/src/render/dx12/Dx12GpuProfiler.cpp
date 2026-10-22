@@ -7,6 +7,8 @@
 
 #include <algorithm>
 
+#include <tracy/Tracy.hpp>
+
 namespace myengine::render::dx12
 {
     namespace
@@ -142,6 +144,26 @@ namespace myengine::render::dx12
                 stats.gpuMs = pass.gpuMs;
             }
             stats.passes.push_back(std::move(pass));
+        }
+
+        // the GPU time of the frame and of its passes as plots of the Tracy trace (tracy-csvexport -u -p): the frame time of the CPU alone does not say whether the GPU was the one to wait for
+        if (stats.gpuMs >= 0.0)
+        {
+            TracyPlot("GPU frame ms", stats.gpuMs);
+            for (const GpuPassStats& pass : stats.passes)
+            {
+                if (pass.depth != 1 || pass.gpuMs < 0.0 || pass.renderTarget)
+                {
+                    continue;
+                }
+                // braces: without Tracy TracyPlot is empty and "if (...) ;" is C4390
+                if (pass.name == "Shadow Map") { TracyPlot("GPU Shadow Map ms", pass.gpuMs); }
+                else if (pass.name == "Scene") { TracyPlot("GPU Scene ms", pass.gpuMs); }
+                else if (pass.name == "Scene Transparent") { TracyPlot("GPU Scene Transparent ms", pass.gpuMs); }
+                else if (pass.name == "Bloom") { TracyPlot("GPU Bloom ms", pass.gpuMs); }
+                else if (pass.name == "Composite") { TracyPlot("GPU Composite ms", pass.gpuMs); }
+                else if (pass.name == "UI") { TracyPlot("GPU UI ms", pass.gpuMs); }
+            }
         }
 
         if (!hasCompleted_ || stats.frame >= lastCompleted_.frame)

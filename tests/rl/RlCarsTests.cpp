@@ -193,6 +193,10 @@ namespace
         Check(tuning.LoadFromFile((Source() / "assets" / "data" / "rl_tuning.json").generic_u8string(), &error), "rl_tuning.json reads: " + error);
         const RlCarDef* pulse = catalog.Find("pulse");
         Check(pulse != nullptr, "Pulse");
+        if (pulse == nullptr)
+        {
+            return;
+        }
         const rl::RlCarTuning& c = tuning.car;
         Check(Near(pulse->halfExtent[0], c.halfExtentX, 1e-3f) && Near(pulse->halfExtent[1], c.halfExtentY, 1e-3f) && Near(pulse->halfExtent[2], c.halfExtentZ, 1e-3f), "the hitbox of Pulse is the one of the tuning");
         Check(Near(pulse->wheelZ[0], c.wheelFrontZ, 1e-3f) && Near(pulse->wheelZ[1], c.wheelRearZ, 1e-3f) && Near(pulse->wheelMountX[0], c.wheelMountXFront, 1e-3f) &&
@@ -213,6 +217,10 @@ namespace
         const RlCarDef* bulwark = catalog.Find("bulwark");
         const RlCarDef* pulse = catalog.Find("pulse");
         Check(slate != nullptr && bulwark != nullptr && pulse != nullptr, "the cars");
+        if (slate == nullptr || bulwark == nullptr || pulse == nullptr)
+        {
+            return;
+        }
         // the height differs from car to car: the lowest is 3 segments, the tallest 10, the rest in between by their height
         Check(catalog.Segments(*slate, RlCarStat::Height) == kSegmentsMin, "the flat Slate is the lowest car: 3 segments");
         Check(catalog.Segments(*bulwark, RlCarStat::Height) == kSegmentsMax, "the tall Bulwark is the highest: 10 segments");

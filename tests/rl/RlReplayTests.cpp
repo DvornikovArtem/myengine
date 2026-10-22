@@ -334,7 +334,8 @@ namespace
     void TestSkip()
     {
         const Run skipped = PlayMatch(true, 1.0f, false);
-        Check(skipped.replayStarted == 1 && skipped.replayEnded == 1, "the replay that is skipped ends");
+        // the bots play on for 40 s of the match: a second goal is theirs to score, and its replay is skipped as well
+        Check(skipped.replayStarted >= 1 && skipped.replayEnded == skipped.replayStarted, "the replay that is skipped ends (started " + std::to_string(skipped.replayStarted) + ", ended " + std::to_string(skipped.replayEnded) + ")");
         Check(skipped.replaySeconds > 0.9f && skipped.replaySeconds < 1.2f, "right after the press (" + std::to_string(skipped.replaySeconds) + " s)");
     }
 
@@ -343,7 +344,7 @@ namespace
         // the match cannot wait: the goal phase is cut short by the kick-off, and the replay with it
         const Run online = PlayMatch(false, 0.0f, false);
         Check(online.frozenFrames == 0, "an online match is never frozen");
-        Check(online.replayStarted == 1 && online.replayEnded == 1, "the replay starts and ends");
+        Check(online.replayStarted >= 1 && online.replayEnded == online.replayStarted, "the replay starts and ends (started " + std::to_string(online.replayStarted) + ", ended " + std::to_string(online.replayEnded) + ")");
         Check(online.replaySeconds < online.expectedSeconds - 0.5f, "and is cut by the kick-off (" + std::to_string(online.replaySeconds) + " s of " + std::to_string(online.expectedSeconds) + " s)");
         std::cout << "online: the replay is cut at " << online.replaySeconds << " s of " << online.expectedSeconds << " s (a goal phase of 3 s: raise match.goalSeconds)\n";
     }
@@ -496,7 +497,17 @@ namespace
         const int liveGoals = liveCount(RlFeedbackKind::Goal);
         const int liveBeeps = liveCount(RlFeedbackKind::CountdownBeep);
         const std::size_t liveEvents = feedback.Journal().size();
-        Check(liveGoals == 1 && liveHits > 0, "the live match had a goal and hits");
+        {
+            std::string goals;
+            for (const auto& e : feedback.Journal())
+            {
+                if (e.kind == RlFeedbackKind::Goal)
+                {
+                    goals += " tick " + std::to_string(e.tick) + " team " + std::to_string(e.team) + " at (" + std::to_string(e.position.x) + "," + std::to_string(e.position.y) + "," + std::to_string(e.position.z) + ")";
+                }
+            }
+            Check(liveGoals >= 1 && liveHits > 0, "the live match had a goal (the forced one, and maybe one of the bots) and hits (goals " + std::to_string(liveGoals) + ", hits " + std::to_string(liveHits) + "; goal events at" + goals + "; score " + std::to_string(match.World().match.score[0]) + ":" + std::to_string(match.World().match.score[1]) + ")");
+        }
 
         uint32_t goalTick = 0;
         Check(buffer.FindLastGoal(goalTick), "the goal is in the ring");

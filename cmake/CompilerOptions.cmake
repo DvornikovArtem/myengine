@@ -59,6 +59,7 @@ function(myengine_apply_compiler_options target_name)
         PRIVATE
           _DISABLE_VECTOR_ANNOTATION
           _DISABLE_STRING_ANNOTATION
+          _DISABLE_OPTIONAL_ANNOTATION   # the newer MSVC STL annotates std::optional too (LNK2038 "annotate_optional" against the plain DirectXTK / DirectXTex)
           MYENGINE_ASAN_BUILD)
 
       get_target_property(target_type ${target_name} TYPE)
@@ -66,6 +67,12 @@ function(myengine_apply_compiler_options target_name)
         target_link_options(${target_name} PRIVATE /INCREMENTAL:NO)
         myengine_copy_asan_runtime(${target_name})
       endif()
+    endif()
+
+    get_target_property(own_target_type ${target_name} TYPE)
+    if(own_target_type STREQUAL "EXECUTABLE")
+      # LNK4099: the prebuilt DirectXTK12 / DirectXTex (external/) were built with /Zi and their .pdb files are not shipped with the .lib files
+      target_link_options(${target_name} PRIVATE /ignore:4099)
     endif()
 
     if(MYENGINE_ANALYZE)

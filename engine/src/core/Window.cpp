@@ -409,6 +409,9 @@ namespace myengine::core
             wc.lpfnWndProc = &Window::StaticWndProc;
             wc.hInstance = instance;
             wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+            // The icon of the exe (app/resources, resource id 1) for the title bar and the taskbar; a binary without the resource (tests) has the default one
+            wc.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+            wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
             // The editor background (kTitle): before the first frame the window is dark, not white
             wc.hbrBackground = CreateSolidBrush(RGB(0x15, 0x15, 0x15));
             wc.lpszClassName = Window::ClassName();

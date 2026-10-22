@@ -17,6 +17,7 @@
   include/myengine/core/FileWatcher.h
   include/myengine/core/Logger.h
   include/myengine/core/AppPaths.h
+  include/myengine/core/CrashHandler.h
   include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -133,8 +134,10 @@ set(ENGINE_SOURCES
   src/assistant/Markdown.cpp
   src/config/AppConfig.cpp
   src/core/AppPaths.cpp
+  src/core/CrashHandler.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
+  src/core/FramePacer.cpp
   src/core/Logger.cpp
   src/core/ProjectContext.cpp
   src/core/Timer.cpp
@@ -284,6 +287,9 @@ set(IMGUIZMO_SOURCES
   ${IMGUIZMO_ROOT}/ImGuizmo.cpp
 )
 
+# ImGuizmo is third-party code that is built with our /W4: its float -> ImDrawFlags and int -> ImGuiID conversions are not ours to fix
+set_source_files_properties(${IMGUIZMO_SOURCES} PROPERTIES COMPILE_OPTIONS "/wd4244;/wd4245")
+
 list(APPEND ENGINE_HEADERS ${IMGUI_HEADERS})
 list(APPEND ENGINE_SOURCES ${IMGUI_SOURCES})
 list(APPEND ENGINE_HEADERS ${IMGUIZMO_HEADERS})
@@ -294,6 +300,7 @@ add_library(myengine_engine STATIC ${ENGINE_HEADERS} ${ENGINE_SOURCES})
 target_include_directories(myengine_engine
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_BINARY_DIR}/generated
   PRIVATE
     ${IMGUI_ROOT}/Include
     ${IMGUI_ROOT}/Include/imgui

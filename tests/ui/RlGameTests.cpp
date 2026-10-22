@@ -3,6 +3,7 @@
 // the way the screens drive it: a match from the start to the results (the HUD data, the pause that stands still, the events of the feed, the winner and
 // the MVP), the lobby of a private match, the controls that the settings screen edits and saves.
 
+#include <stb_image.h>
 #include <myengine/audio/AudioSystem.h>
 #include <myengine/core/ProjectContext.h>
 #include <myengine/core/ServiceLocator.h>
@@ -629,6 +630,236 @@ namespace
         rig.system.SetCameraSettings(camera, true);
         Check(rig.system.CameraSettings().fov == 80.0f, "the camera settings are the player's");
     }
+
+    // The ball and the cars of an online match are on the screen for the host and for the guest (the guest plays orange). The match used to begin inside
+    // the frame in which the menu (the podium) was still being updated: the podium hid everything the match had just shown, and the ball stayed
+    // invisible for good. The test runs a host and a guest through a loopback hub, frame by frame, the way the lobby screens drive them.
+    void TestOnlineVisuals()
+    {
+        std::cout << "RlGameSystem: the ball and the cars of an online match are visible for the host and for the guest" << std::endl;
+        const fs::path appdata = TempFolder("myengine_game_online_visuals_test");
+        _putenv_s("APPDATA", appdata.string().c_str());
+        _putenv_s("LOCALAPPDATA", appdata.string().c_str());
+
+        for (int mode = 1; mode <= 2; ++mode)
+        {
+            rl::net::LoopbackHub hub;
+            Rig hostRig;
+            Rig guestRig;
+            hostRig.system.SetGameMode(true);
+            guestRig.system.SetGameMode(true);
+            hostRig.Frames(2);
+            guestRig.Frames(2);
+
+            sys::RlGameMatchSetup host;
+            host.kind = sys::RlGameMatchSetup::Kind::Host;
+            host.mode = mode;
+            host.port = 47873;
+            host.playerName = "Host";
+            host.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 1); };
+            hostRig.system.StartMatch(host);
+            hostRig.Frames(3);
+            Check(hostRig.system.Status().stage == sys::RlGameStage::Lobby, "the host waits in the lobby");
+
+            sys::RlGameMatchSetup join;
+            join.kind = sys::RlGameMatchSetup::Kind::Join;
+            join.mode = mode;
+            join.address = "47873";
+            join.playerName = "Guest";
+            join.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 2); };
+            guestRig.system.StartMatch(join);
+
+            const auto step = [&](const int frames)
+            {
+                for (int i = 0; i < frames; ++i)
+                {
+                    hostRig.system.Update(hostRig.world, 1.0f / 60.0f);
+                    guestRig.system.Update(guestRig.world, 1.0f / 60.0f);
+                }
+            };
+            // the guest is in the lobby of the host, the host starts the match
+            bool inLobby = false;
+            for (int i = 0; i < 600 && !inLobby; ++i)
+            {
+                step(1);
+                inLobby = guestRig.system.Status().stage == sys::RlGameStage::Lobby && hostRig.system.Status().lobby.size() >= 2;
+            }
+            Check(inLobby, "the guest is in the lobby of the host");
+            hostRig.system.StartHostedMatch();
+            bool playing = false;
+            for (int i = 0; i < 1200 && !playing; ++i)
+            {
+                step(1);
+                playing = hostRig.system.Status().stage == sys::RlGameStage::Playing && guestRig.system.Status().stage == sys::RlGameStage::Playing;
+            }
+            Check(playing, "the match is on for both");
+            step(30);
+
+            const auto visible = [](Rig& rig, const char* tag)
+            {
+                ecs::EntityId found = ecs::kInvalidEntity;
+                rig.world.ForEach<components::TagComponent>([&](const ecs::EntityId entity, const components::TagComponent& t) { found = t.name == tag ? entity : found; });
+                const auto* renderer = rig.world.TryGet<components::MeshRendererComponent>(found);
+                return renderer != nullptr && renderer->visible;
+            };
+            for (Rig* rig : {&hostRig, &guestRig})
+            {
+                const char* who = rig == &hostRig ? "host" : "guest (orange)";
+                Check(visible(*rig, "RlBall"), (std::string("the ball is visible for the ") + who).c_str());
+                Check(visible(*rig, "RlBlue0"), (std::string("the blue car is visible for the ") + who).c_str());
+                Check(visible(*rig, "RlOrange0"), (std::string("the orange car is visible for the ") + who).c_str());
+                Check(!visible(*rig, "RlPodium"), (std::string("the podium of the menu is gone for the ") + who).c_str());
+            }
+            Check(guestRig.system.Status().stage == sys::RlGameStage::Playing && !guestRig.system.Status().isHost, "the guest plays as a client");
+            guestRig.system.LeaveMatch();
+            hostRig.system.LeaveMatch();
+            guestRig.Frames(2);
+            hostRig.Frames(2);
+        }
+    }
+
+    // A demolished car is parked under the map until it comes back. The camera of the player must stay where the car was blown up, not follow it
+    // down (the player looked at the arena from below, "under the textures", for the three seconds of the respawn).
+    void TestDemolishCamera()
+    {
+        std::cout << "RlGameSystem: the camera stays over the field while the car of the player is demolished" << std::endl;
+        const fs::path appdata = TempFolder("myengine_game_demolish_camera_test");
+        _putenv_s("APPDATA", appdata.string().c_str());
+        _putenv_s("LOCALAPPDATA", appdata.string().c_str());
+        Rig rig;
+        rig.system.SetGameMode(true);
+        rig.Frames(2);
+        sys::RlGameMatchSetup offline;
+        offline.kind = sys::RlGameMatchSetup::Kind::Offline;
+        offline.mode = 1;
+        offline.playerName = "Player";
+        rig.system.StartMatch(offline);
+        rig.Frames(2);
+        rig.system.MatchViewBegins();
+        Check(rig.Until([&] { return rig.system.Status().stage == sys::RlGameStage::Playing; }, 600), "the offline match is on");
+        Check(rig.Until([&] { return rig.system.Status().hud.phase == rlui::HudPhase::Playing; }, 60 * 20, 1.0f / 60.0f), "the countdown is over");   // the flight, the countdown
+        const auto cameraY = [&]
+        {
+            float y = 1000.0f;
+            rig.world.ForEach<components::CameraComponent>([&](const ecs::EntityId, const components::CameraComponent& camera) { y = camera.position.y; });
+            return y;
+        };
+        Check(cameraY() > 0.2f, "the camera is over the field before");
+        rig.system.DebugCommand("demolish");
+        float lowest = 1000.0f;
+        bool sawDown = false;
+        for (int i = 0; i < 60 * 5; ++i)
+        {
+            rig.Frames(1, 1.0f / 60.0f);
+            lowest = std::min(lowest, cameraY());
+            sawDown = sawDown || rig.system.Status().hud.demolished;
+        }
+        Check(sawDown, "the car of the player was demolished");
+        Check(lowest > 0.2f, "the camera never went under the floor while the car was parked");
+        rig.system.LeaveMatch();
+        rig.Frames(2);
+    }
+
+    // The ball stays visible in every way to play: the practice, a match against bots, the free play and a pack of exercises of the training, and
+    // through a goal with its celebration and its replay (the director of the replay moves the live ball out of the way and has to bring it back).
+    void TestBallVisibleEverywhere()
+    {
+        std::cout << "RlGameSystem: the ball is visible in the practice, the match, the training, the goal and the replay" << std::endl;
+        const fs::path appdata = TempFolder("myengine_game_ball_everywhere_test");
+        _putenv_s("APPDATA", appdata.string().c_str());
+        _putenv_s("LOCALAPPDATA", appdata.string().c_str());
+        struct Case
+        {
+            const char* name;
+            sys::RlGameMatchSetup::Kind kind;
+            int mode;
+            const char* pack;
+        };
+        const Case cases[] = {
+            {"the practice", sys::RlGameMatchSetup::Kind::Offline, 0, ""},
+            {"a match 1v1", sys::RlGameMatchSetup::Kind::Offline, 1, ""},
+            {"a match 2v2", sys::RlGameMatchSetup::Kind::Offline, 2, ""},
+            {"the free play", sys::RlGameMatchSetup::Kind::Training, 1, ""},
+            {"a pack of exercises", sys::RlGameMatchSetup::Kind::Training, 1, "striker"},
+        };
+        for (const Case& c : cases)
+        {
+            Rig rig;
+            rig.system.SetGameMode(true);
+            rig.Frames(2);
+            sys::RlGameMatchSetup setup;
+            setup.kind = c.kind;
+            setup.mode = c.mode;
+            setup.trainingPack = c.pack;
+            setup.playerName = "Player";
+            rig.system.StartMatch(setup);
+            rig.Frames(2);
+            rig.system.MatchViewBegins();
+            const bool on = rig.Until([&] { return rig.system.Status().stage == sys::RlGameStage::Playing; }, 600, 1.0f / 60.0f);
+            Check(on, (std::string(c.name) + " starts").c_str());
+            const auto ballVisible = [&]
+            {
+                ecs::EntityId found = ecs::kInvalidEntity;
+                rig.world.ForEach<components::TagComponent>([&](const ecs::EntityId entity, const components::TagComponent& t) { found = t.name == "RlBall" ? entity : found; });
+                const auto* renderer = rig.world.TryGet<components::MeshRendererComponent>(found);
+                return renderer != nullptr && renderer->visible;
+            };
+            rig.Frames(60 * 8, 1.0f / 60.0f);
+            Check(ballVisible(), (std::string("the ball is visible in ") + c.name).c_str());
+            if (c.kind == sys::RlGameMatchSetup::Kind::Offline && c.mode > 0)
+            {
+                rig.Until([&] { return rig.system.Status().hud.phase == rlui::HudPhase::Playing; }, 60 * 20, 1.0f / 60.0f);
+                rig.system.DebugCommand("goal-blue");
+                int hidden = 0;
+                for (int i = 0; i < 60 * 25; ++i)
+                {
+                    rig.Frames(1, 1.0f / 60.0f);
+                    // (the results of a finished match show the podium instead of the field)
+                    hidden += (rig.system.Status().stage != sys::RlGameStage::Playing || ballVisible()) ? 0 : 1;
+                }
+                Check(hidden == 0, (std::string("the ball is visible through the goal and its replay in ") + c.name).c_str());
+            }
+            rig.system.LeaveMatch();
+            rig.Frames(2);
+        }
+    }
+
+    // The floor of the arena has no white spot where the kick-off camera of the back spots stands: a dot painted in the turf two and a half metres
+    // from that camera blew up into a white blur at the corner of the screen. The texture covers the field (2 x halfWidth by 2 x halfLength, +z at the
+    // top, 20 pixels per metre); the pixels around (0, +-38.7), where the dots were, are turf.
+    void TestFloorHasNoSpotsAtTheKickoffCamera(const fs::path& source)
+    {
+        std::cout << "arena floor: no white spot in front of the goals" << std::endl;
+        const std::string path = (source / "assets" / "textures" / "rl2" / "arena_floor.tga").string();
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        unsigned char* pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
+        Check(pixels != nullptr && width > 1000 && height > 1000, "the floor texture loads");
+        if (pixels == nullptr)
+        {
+            return;
+        }
+        const float ppm = static_cast<float>(height) / 102.4f;   // halfLength 51.2 m
+        const float halfWidthMetres = static_cast<float>(width) / ppm * 0.5f;
+        int brightest = 0;
+        for (const float z : {-38.7f, 38.7f})
+        {
+            const int cx = static_cast<int>(halfWidthMetres * ppm);
+            const int cy = static_cast<int>((51.2f - z) * ppm);
+            for (int dy = -12; dy <= 12; ++dy)
+            {
+                for (int dx = -12; dx <= 12; ++dx)
+                {
+                    const unsigned char* p = pixels + 4 * ((cy + dy) * width + cx + dx);
+                    brightest = std::max(brightest, static_cast<int>(p[0]));
+                }
+            }
+        }
+        std::cout << "  the brightest red in the 0.6 m squares in front of the goals: " << brightest << std::endl;
+        Check(brightest < 150, "the turf in front of the goals is turf, not a white dot");
+        stbi_image_free(pixels);
+    }
 }
 
 int main()
@@ -639,6 +870,10 @@ int main()
         TestSettings();
         TestScript();
         TestSystem(source);
+        TestOnlineVisuals();
+        TestDemolishCamera();
+        TestBallVisibleEverywhere();
+        TestFloorHasNoSpotsAtTheKickoffCamera(source);
     }
     catch (const std::exception& error)
     {

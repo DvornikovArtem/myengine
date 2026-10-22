@@ -242,6 +242,11 @@ namespace myengine::ecs::systems
         std::unique_ptr<rl::RlNetHost> netHost;
         std::unique_ptr<rl::RlNetClient> netClient;
         bool onlineVisuals = false;
+        // Where the camera of the player stays while the car is demolished: the pose of the last tick it was alive (a demolished car is parked
+        // under the map until it comes back, and the camera must not follow it there)
+        dx::XMFLOAT3 aliveCarPosition{};
+        dx::XMFLOAT4 aliveCarRotation{0.0f, 0.0f, 0.0f, 1.0f};
+        bool aliveCarKnown = false;
         int localSlot = 0;
         std::string onlineStatus;
         std::chrono::steady_clock::time_point onlineEpoch = std::chrono::steady_clock::now();
@@ -662,6 +667,7 @@ namespace myengine::ecs::systems
         void BeginMatchVisuals(World& world)
         {
             HideEverything(world);
+            aliveCarKnown = false;
             const int teamSize = std::max(menuMode, 1);
             for (int t = 0; t < (menuMode == 0 ? 1 : 2); ++t)
             {
@@ -933,6 +939,7 @@ namespace myengine::ecs::systems
 
         void ApplyToScene(World& world, const float deltaTime)
         {
+            ZoneScopedN("RlGame::ApplyToScene");
             // the match (or the network), or the training when there is no match
             const rl::RlMatch* view = View();
             float alpha = std::clamp(accumulator / rl::kTickDt, 0.0f, 1.0f);
@@ -995,8 +1002,23 @@ namespace myengine::ecs::systems
                 const dx::XMVECTOR rotation = dx::XMQuaternionSlerp(Q(a.rotation), Q(b.rotation), s);
                 if (slot == localSlot)
                 {
-                    playerPosition = position;
-                    playerRotation = rotation;
+                    if (b.demolished && aliveCarKnown)
+                    {
+                        // the camera stays where the car was blown up (the ball cam keeps looking at the ball) until the car comes back
+                        playerPosition = dx::XMLoadFloat3(&aliveCarPosition);
+                        playerRotation = dx::XMLoadFloat4(&aliveCarRotation);
+                    }
+                    else
+                    {
+                        playerPosition = position;
+                        playerRotation = rotation;
+                        if (!b.demolished)
+                        {
+                            dx::XMStoreFloat3(&aliveCarPosition, position);
+                            dx::XMStoreFloat4(&aliveCarRotation, rotation);
+                            aliveCarKnown = true;
+                        }
+                    }
                 }
                 const int team = view != nullptr ? view->Team(slot) : slot;   // a training: the player is blue, the bot of a kick-off orange
                 const int index = slot % teamSize;
@@ -1149,6 +1171,7 @@ namespace myengine::ecs::systems
         void UpdateCamera(World& world, const float deltaTime, const rl::RlCarState& car, dx::FXMVECTOR carPosition, dx::FXMVECTOR carRotation,
                           dx::FXMVECTOR ballPosition, const rl::RlTuning& arenaTuning, const rl::RlSim& sim, const rl::RlCinematicView* cinematic = nullptr)
         {
+            ZoneScopedN("RlGame::Camera");
             if (camera == kInvalidEntity)
             {
                 return;
@@ -1587,7 +1610,7 @@ namespace myengine::ecs::systems
                 status_.setup.transportFactory = nullptr;  // used once; it holds the lobby service
                 if (!transport)
                 {
-                    error = "The lobby could not make the transport of the match";
+                    error = "The match could not start: the network connection is not available.";
                     return false;
                 }
             }
@@ -1609,7 +1632,7 @@ namespace myengine::ecs::systems
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(setup.port, error))
                 {
-                    error = "Cannot listen on port " + std::to_string(setup.port) + ": " + error;
+                    error = "Cannot start the match. " + error;
                     netHost.reset();
                     transport->Close();
                     transport.reset();
@@ -2356,7 +2379,14 @@ namespace myengine::ecs::systems
                 // the menus: the podium (the network, if any, keeps going)
                 if ((netHost != nullptr || netClient != nullptr) && status_.stage != RlGameStage::Finished)
                 {
+                    const bool visualsWere = onlineVisuals;
                     NetStep(world, rl::RlCarInput{});  // the match may start while a menu is shown: the next frame is the match
+                    if (!visualsWere && onlineVisuals)
+                    {
+                        // The match began inside this call and its visuals are up (the ball, the cars, the pads). The podium below would hide them
+                        // all again (EnterPodium is a HideEverything) and nothing shows them a second time: the ball and the other cars stay invisible.
+                        return;
+                    }
                 }
                 if (status_.stage == RlGameStage::Finished && View() != nullptr)
                 {
@@ -2480,13 +2510,8 @@ namespace myengine::ecs::systems
                 }
                 else if (command == "demolish")
                 {
-                    // the car of the player is run into by an enemy at full speed
-                    const int enemy = match->SlotCount() > 1 ? match->SlotCount() - 1 : -1;
-                    if (enemy >= 0)
-                    {
-                        const rl::RlCarState& car = match->World().cars[0];
-                        sim.SetCarPose(enemy, {car.position.x + 6.0f, car.position.y, car.position.z}, {0.0f, -0.70710678f, 0.0f, 0.70710678f}, {-30.0f, 0.0f, 0.0f});
-                    }
+                    // the car of the player is demolished (as if an enemy had run into it at full speed)
+                    sim.DemolishCar(0);
                 }
                 else if (command == "boost")
                 {

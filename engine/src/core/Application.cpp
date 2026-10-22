@@ -13,6 +13,8 @@
 
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/FramePacer.h>
+#include <imm.h>
 #include "UiScript.h"
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
@@ -175,6 +177,17 @@ namespace myengine::core
         // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json
         // The game mode (--game or "startInGame" of app.json) plays the Rocket League map with the screens of the game instead of the editor
         gameMode_ = gameMode_ || config.startInGame;
+        char* keepIme = nullptr;
+        std::size_t keepImeLength = 0;
+        const bool keepTextServices = _dupenv_s(&keepIme, &keepImeLength, "MYENGINE_KEEP_IME") == 0 && keepIme != nullptr && *keepIme != '\0';  // for the comparison of the frame times
+        std::free(keepIme);
+        if (gameMode_ && !keepTextServices)
+        {
+            // The text services of Windows (the IME and the Text Services Framework) look at every key and mouse message, and on some machines they take 6 - 20 ms for
+            // each one (G8: every press of a key was a frame of that length). The game has no composition to take in: the keyboard layout is enough.
+            ImmDisableIME(static_cast<DWORD>(-1));
+            ImmDisableTextFrameService(0);
+        }
         const bool sceneFromConfig = requestedScene.empty() && !config.startScene.empty();
         std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
         if (gameMode_ && scenePath.empty())
@@ -315,6 +328,7 @@ namespace myengine::core
         }
 
         resourceManager_ = std::make_unique<resource::ResourceManager>(*renderAdapter_, logger_);
+        resourceManager_->SetHotReloadAsync(true);  // the scan for changed files does not hold the frame
 
         {
             // Asset previews: images are cached under <project>/Saved/Thumbnails (%LOCALAPPDATA%\RocketArena\Saved in shipping)
@@ -854,6 +868,7 @@ namespace myengine::core
 
         logger_.Info("Main loop started");
         tracy::SetThreadName("Main");
+        FramePacer framePacer;
 
         while (!quitRequested_)
         {
@@ -861,14 +876,40 @@ namespace myengine::core
 
             input_.BeginFrame();
 
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
             {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-
-                if (msg.message == WM_QUIT)
+                ZoneScopedN("Frame::Messages");
+                for (;;)
                 {
-                    quitRequested_ = true;
+                    const auto peekStart = std::chrono::steady_clock::now();
+                    const bool have = PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE) != FALSE;
+                    const auto peekEnd = std::chrono::steady_clock::now();
+                    if (!have)
+                    {
+                        // the call that finds nothing can take long as well (the messages that are sent, not posted, are handled inside it)
+                        const double peekMs = std::chrono::duration<double, std::milli>(peekEnd - peekStart).count();
+                        if (peekMs > 6.0 && slowMessageLogs_ < 40)
+                        {
+                            ++slowMessageLogs_;
+                            logger_.Warning("PeekMessage took " + std::to_string(peekMs) + " ms without a message for the loop");
+                        }
+                        break;
+                    }
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                    const auto dispatchEnd = std::chrono::steady_clock::now();
+                    const double dispatchMs = std::chrono::duration<double, std::milli>(dispatchEnd - peekEnd).count();
+                    const double peekMs = std::chrono::duration<double, std::milli>(peekEnd - peekStart).count();
+                    if ((dispatchMs > 6.0 || peekMs > 6.0) && slowMessageLogs_ < 40)
+                    {
+                        ++slowMessageLogs_;
+                        logger_.Warning("Slow window message 0x" + [&] { char text[16]; std::snprintf(text, sizeof(text), "%04x", static_cast<unsigned>(msg.message)); return std::string(text); }() +
+                                        ": PeekMessage " + std::to_string(peekMs) + " ms, DispatchMessage " + std::to_string(dispatchMs) + " ms");
+                    }
+
+                    if (msg.message == WM_QUIT)
+                    {
+                        quitRequested_ = true;
+                    }
                 }
             }
 
@@ -885,9 +926,12 @@ namespace myengine::core
             }
 
             // A map that was read on a worker is applied here, between frames
-            PumpPendingSceneLoad();
-            SyncBackgroundOperations();
-            loadingService_.Update();
+            {
+                ZoneScopedN("Frame::Background");
+                PumpPendingSceneLoad();
+                SyncBackgroundOperations();
+                loadingService_.Update();
+            }
 
             timer_.Tick();
             const float deltaTime = timer_.DeltaTime();
@@ -1028,22 +1072,8 @@ namespace myengine::core
                 frameTimingStats = {};
             }
 
-            // the limit of the frames per second of the video settings: sleep most of the time that is left, spin for the last bit
-            if (fpsLimit_ > 0)
-            {
-                const auto target = frameStartTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / static_cast<double>(fpsLimit_)));
-                for (auto now = std::chrono::steady_clock::now(); now < target; now = std::chrono::steady_clock::now())
-                {
-                    if (target - now > std::chrono::milliseconds(2))
-                    {
-                        Sleep(1);
-                    }
-                    else
-                    {
-                        YieldProcessor();
-                    }
-                }
-            }
+            // the limit of the frames per second of the video settings
+            framePacer.Wait(fpsLimit_);
 
             // a running match hides the cursor (only while this application is the one in front)
             if (gameMode_ && !cameraControlActive_)

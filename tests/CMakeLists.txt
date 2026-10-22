@@ -204,6 +204,17 @@ myengine_apply_compiler_options(myengine_loading_tests)
 set_property(TARGET myengine_loading_tests PROPERTY FOLDER "Tests")
 add_test(NAME loading_service COMMAND myengine_loading_tests)
 
+# G8: the limit of the frames per second of the main loop (the rate and the length of a frame)
+add_executable(myengine_frame_pacer_tests
+  core/FramePacerTests.cpp)
+
+target_link_libraries(myengine_frame_pacer_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_frame_pacer_tests)
+set_property(TARGET myengine_frame_pacer_tests PROPERTY FOLDER "Tests")
+add_test(NAME frame_pacer COMMAND myengine_frame_pacer_tests)
+# RUN_SERIAL: it measures the length of frames in real time (3 % and half a millisecond); with `ctest -j 8` next to the heavy tests it fails
+set_tests_properties(frame_pacer PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
@@ -392,7 +403,9 @@ target_link_libraries(myengine_rl_bots_tests PRIVATE myengine_rl)
 target_compile_definitions(myengine_rl_bots_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
 myengine_apply_compiler_options(myengine_rl_bots_tests)
 set_property(TARGET myengine_rl_bots_tests PROPERTY FOLDER "Tests")
-add_test(NAME rl_bots COMMAND myengine_rl_bots_tests)
+# Debug runs the quick look (4 matches, no verdicts): the whole series is 40 minutes without optimisation, and its verdicts (win rates, 0.5 ms per tick)
+# are for an optimised build; RelWithDebInfo and Release run all of it
+add_test(NAME rl_bots COMMAND myengine_rl_bots_tests $<$<CONFIG:Debug>:--quick>)
 set_tests_properties(rl_bots PROPERTIES TIMEOUT 900)
 
 # G4i: the cars of the match (the physics of the six, the choice, six cars in one world); the garage and its data are tested by rl_cars

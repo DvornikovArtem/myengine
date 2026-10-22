@@ -727,8 +727,11 @@ namespace myengine::ui
             // The real frame time: a floor of 1/600 s made ImGui's clock run up to several times faster than the
             // wall clock above 600 FPS, which shrank the double click window to a fraction of the system one
             io.DeltaTime = std::max(deltaTime, 1.0f / 100000.0f);
-            ImGui::NewFrame();
-            ImGuizmo::BeginFrame();
+            {
+                ZoneScopedN("Ui::NewFrame");
+                ImGui::NewFrame();
+                ImGuizmo::BeginFrame();
+            }
 
             // A press that Windows reported as a double click is one, however slow the frames were
             for (int button = 0; button < 3; ++button)
@@ -753,6 +756,7 @@ namespace myengine::ui
 
             if (gameUi_.build)
             {
+                ZoneScopedN("Ui::GameBuild");
                 gameUi_.build(windowId, windowContext.width, windowContext.height, deltaTime);
             }
             else
@@ -772,7 +776,10 @@ namespace myengine::ui
                 windowContext.wantKeyboardCapture = gameUiCaptures_;
                 windowContext.wantTextInput = false;
             }
-            ImGui::Render();
+            {
+                ZoneScopedN("Ui::Render");
+                ImGui::Render();
+            }
         }
     }
 

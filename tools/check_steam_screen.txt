@@ -1,0 +1,8 @@
+# The script of tools/check_package.ps1 (MYENGINE_UI_SCRIPT): main menu > Play > Private match > Network: Steam, then waits there.
+# The Steam library starts when the screen asks for it (and, with a Steam client, takes the crash handlers over: the check of the crash after it).
+6.0 key Enter
+7.0 key E
+8.0 key Up
+8.5 key Right
+9.0 note check: the Private match screen is on the Steam network
+20.0 quit

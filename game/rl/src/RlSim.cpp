@@ -972,6 +972,15 @@ namespace rl
         }
     }
 
+    void RlSim::DemolishCar(int index)
+    {
+        if (index >= 0 && index < impl_->carCount && impl_->runtimes[index].demolished == 0)
+        {
+            impl_->Demolish(index, -1);
+            impl_->FillState();
+        }
+    }
+
     void RlSim::SetRespawnPoint(int index, float x, float z, float yaw)
     {
         if (index >= 0 && index < impl_->carCount)

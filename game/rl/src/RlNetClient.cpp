@@ -471,7 +471,7 @@ namespace rl
             }
             if (!match->RestoreState(stateBytes))
             {
-                Fail("cannot restore the state of the match that the host sent (another build?)");
+                Fail("Cannot join this match: the host has another version of the game.");
                 return;
             }
             tick = stateTick;
@@ -885,9 +885,9 @@ namespace rl
                     if (state != RlNetClientState::Failed && state != RlNetClientState::Disconnected)
                     {
                         state = RlNetClientState::Disconnected;
-                        error = event.reason == net::DisconnectReason::Rejected   ? "the host refused the connection"
-                                : event.reason == net::DisconnectReason::Timeout ? "no answer from the host (timeout)"
-                                                                                  : "the host closed the connection";
+                        error = event.reason == net::DisconnectReason::Rejected   ? "The host refused the connection."
+                                : event.reason == net::DisconnectReason::Timeout ? "No answer from the host."
+                                                                                  : "The host closed the connection.";
                     }
                     break;
                 case net::NetEventType::Data:
