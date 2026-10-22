@@ -215,8 +215,69 @@ namespace myengine::game
         return true;
     }
 
-    void RlFeedback::Emit(const RlFeedbackEvent& event)
+    void RlFeedback::BeginReplay(const float gain)
     {
+        if (replaying_)
+        {
+            return;
+        }
+        // the memory of the live match is put aside: the replay finds the same events again and plays them
+        liveLastByKey_ = std::move(lastByKey_);
+        liveAnnounced_ = std::move(announced_);
+        liveLastTick_ = lastTick_;
+        liveHaveTick_ = haveTick_;
+        lastByKey_.clear();
+        announced_.clear();
+        haveTick_ = false;
+        lastTick_ = 0;
+        replaying_ = true;
+        replayGain_ = std::clamp(gain, 0.0f, 1.0f);
+        replaySpeed_ = 1.0f;
+        if (audio_ != nullptr)
+        {
+            audio_->SetVoiceVolume(crowd_, 0.35f);   // the stands are muted
+        }
+    }
+
+    void RlFeedback::EndReplay()
+    {
+        if (!replaying_)
+        {
+            return;
+        }
+        replaying_ = false;
+        replaySpeed_ = 1.0f;
+        lastByKey_ = std::move(liveLastByKey_);
+        announced_ = std::move(liveAnnounced_);
+        lastTick_ = liveLastTick_;
+        haveTick_ = liveHaveTick_;
+        liveLastByKey_.clear();
+        liveAnnounced_.clear();
+        if (audio_ != nullptr)
+        {
+            audio_->SetVoiceVolume(crowd_, 1.0f);
+        }
+    }
+
+    void RlFeedback::Emit(const RlFeedbackEvent& found)
+    {
+        RlFeedbackEvent event = found;
+        event.replay = replaying_;
+        if (replaying_)
+        {
+            // the announcer of the match does not repeat itself in a replay
+            switch (event.kind)
+            {
+            case RlFeedbackKind::CountdownBeep:
+            case RlFeedbackKind::KickoffGo:
+            case RlFeedbackKind::OvertimeStart:
+            case RlFeedbackKind::MatchEnd:
+            case RlFeedbackKind::CrowdGasp:
+                return;
+            default:
+                break;
+            }
+        }
         ++stats_.events[static_cast<int>(event.kind)];
         if (journalOn_)
         {
@@ -524,7 +585,13 @@ namespace myengine::game
         {
             if (audio_ != nullptr)
             {
-                audio_->PlayEvent(name, params);
+                audio::EventParams adjusted = params;
+                if (replaying_)
+                {
+                    adjusted.volumeScale *= replayGain_;
+                    adjusted.pitchScale *= 0.5f + 0.5f * replaySpeed_;
+                }
+                audio_->PlayEvent(name, adjusted);
             }
         };
         const auto spawn = [&](const char* name, const fx::SpawnParams& params)
@@ -545,8 +612,11 @@ namespace myengine::game
             break;
         case RlFeedbackKind::Goal:
         {
-            playSound("goal_horn", audio::EventParams{});
-            playSound("crowd_roar", audio::EventParams{});
+            if (!replaying_)
+            {
+                playSound("goal_horn", audio::EventParams{});
+                playSound("crowd_roar", audio::EventParams{});
+            }
             if (tint != nullptr)
             {
                 std::copy(tint, tint + 4, effect.tint);
@@ -691,7 +761,9 @@ namespace myengine::game
             if (audio_ != nullptr)
             {
                 // the engine: pitch from the speed (a little more with the boost), the car of the player a bit softer and in the middle
-                const float pitch = 0.7f + 1.1f * speed01 + (boosting ? 0.12f : 0.0f) - (b.onGround ? 0.0f : 0.12f);
+                const float replayPitch = replaying_ ? 0.5f + 0.5f * replaySpeed_ : 1.0f;
+                const float replayVolume = replaying_ ? replayGain_ : 1.0f;
+                const float pitch = (0.7f + 1.1f * speed01 + (boosting ? 0.12f : 0.0f) - (b.onGround ? 0.0f : 0.12f)) * replayPitch;
                 if (!audio_->IsPlaying(loops.engine))
                 {
                     audio::EventParams params;
@@ -702,7 +774,7 @@ namespace myengine::game
                     loops.engine = audio_->PlayEvent("engine", params);
                 }
                 audio_->SetVoicePitch(loops.engine, pitch);
-                audio_->SetVoiceVolume(loops.engine, own ? 0.7f : 1.0f);
+                audio_->SetVoiceVolume(loops.engine, (own ? 0.7f : 1.0f) * replayVolume);
                 if (!own)
                 {
                     audio_->SetVoicePosition(loops.engine, ToAudio(position), ToAudio(velocity));
@@ -727,7 +799,7 @@ namespace myengine::game
                 }
                 if (boosting)
                 {
-                    audio_->SetVoiceVolume(loops.boost, own ? 0.8f : 1.0f);
+                    audio_->SetVoiceVolume(loops.boost, (own ? 0.8f : 1.0f) * replayVolume);
                 }
 
                 // the tyres: sliding sideways on the ground
@@ -742,7 +814,7 @@ namespace myengine::game
                         params.position = ToAudio(position);
                         loops.skid = audio_->PlayEvent("skid", params);
                     }
-                    audio_->SetVoiceVolume(loops.skid, Clamp01((sideways - 3.0f) / 9.0f) * (own ? 0.8f : 1.0f));
+                    audio_->SetVoiceVolume(loops.skid, Clamp01((sideways - 3.0f) / 9.0f) * (own ? 0.8f : 1.0f) * replayVolume);
                     audio_->SetVoicePitch(loops.skid, 0.85f + 0.35f * speed01);
                     if (!own)
                     {
