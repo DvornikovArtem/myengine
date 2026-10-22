@@ -4,6 +4,8 @@
 
 #include <myengine/game/RlGameFlow.h>
 
+#include "RlLobbyScreens.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -57,11 +59,12 @@ namespace myengine::game
             Pause,
             Results,
             Settings,
+            Room,
             Training,
             Garage,
         };
 
-        const char* const kScreenNames[] = {"boot", "main", "play", "loading", "lobby", "match", "pause", "results", "settings", "training", "garage"};
+        const char* const kScreenNames[] = {"boot", "main", "play", "loading", "lobby", "match", "pause", "results", "settings", "room", "training", "garage"};
 
         const char* const kTips[] = {
             "Tip: hold {Space} to look at the ball, release for the car cam.",
@@ -208,7 +211,15 @@ namespace myengine::game
         bool resolutionsRead = false;
         bool settingsDirty = false;
 
-        explicit Impl(const RlGameFlowServices& services) : svc(services) {}
+        // the lobby of a private match: LAN / Steam, the list, the room (RlLobbyScreens)
+        RlLobbyScreens lobby;
+        int autoStartHumans = 0;  // a host starts the match when so many players are in it (the lobby that was started had them)
+
+        explicit Impl(const RlGameFlowServices& services)
+            : svc(services)
+            , lobby([this](const std::string& text) { Log(text); })
+        {
+        }
 
         sys::RlGameSystem& System() { return *svc.system; }
 
@@ -263,6 +274,18 @@ namespace myengine::game
             askQuit = askLeave = askRestart = lobbyAskLeave = false;
             askResetControls = askResetTab = false;
             resolutionsRead = false;
+            if (next != Screen::Lobby && next != Screen::Loading)
+            {
+                autoStartHumans = 0;
+            }
+            if (next == Screen::Main || next == Screen::Play)
+            {
+                lobby.ReleaseMatch();  // the match of the lobby is over or was left
+            }
+            if (next == Screen::Main)
+            {
+                lobby.CloseIdle();
+            }
             f.ResetFocus();
             // the stage behind the menus is dimmer than the field of the match
             const bool menuLight = next != Screen::Match && next != Screen::Pause;
@@ -337,6 +360,19 @@ namespace myengine::game
                 core::ServiceLocator::GetEditorRuntimeState().gameHidesCursor = true;
             }
             ++frames;
+            lobby.Update(f.DeltaTime());
+            if (screen == Screen::Main || screen == Screen::Play)
+            {
+                if (lobby.TakeOpenRoom())  // an invitation of a friend, or +connect_lobby
+                {
+                    playTab = 1;
+                    GoTo(f, Screen::Room);
+                }
+                else if (screen == Screen::Main && errorText.empty() && lobby.TakeError(errorTitle, errorText))
+                {
+                    Log("lobby error: " + errorText);
+                }
+            }
             sys::RlGameSystem& system = System();
             const Vec2 window = f.metrics().window;
             system.SetViewAspect(window.y > 0.0f ? window.x / window.y : 16.0f / 9.0f);
@@ -390,6 +426,7 @@ namespace myengine::game
             case Screen::Play: DrawPlay(f); break;
             case Screen::Loading: DrawLoading(f); break;
             case Screen::Lobby: DrawLobby(f); break;
+            case Screen::Room: DrawRoom(f); break;
             case Screen::Match: DrawMatch(f); break;
             case Screen::Pause: DrawPause(f); break;
             case Screen::Results: DrawResults(f); break;
@@ -579,92 +616,64 @@ namespace myengine::game
             }
             else
             {
-                DrawPrivate(f);
+                if (lobby.DrawPrivate(f, settings, settings.PlayerName()) == RlLobbyScreens::Action::OpenRoom)
+                {
+                    Save();
+                    GoTo(f, Screen::Room);
+                    return;
+                }
                 Hints(f, {{Glyph::AllArrows, Glyph::PadA, "Select"}, {Glyph::QE, Glyph::PadLBRB, "Tabs"}, {Glyph::Esc, Glyph::PadB, "Back"}});
             }
-            if (f.input().Pressed(Nav::Back))
+            if (f.input().Pressed(Nav::Back) && !(privateTab && lobby.ErrorShown()))
             {
                 Save();
                 GoTo(f, Screen::Main);
             }
         }
 
-        void DrawPrivate(Frame& f)
+        // The room of the lobby service (RlLobbyScreens): the members, the readiness, the invitation, the start. When the host starts, the match of G5 begins
+        // on the transport of the service: hosts wait in the lobby of the match until the players of this lobby are in, then start it by themselves.
+        void DrawRoom(Frame& f)
         {
-            Panel(f, {45.0f, 300.0f, 810.0f, 520.0f}, true);
-            IconGlyph(f, Icon::Server, 40.0f, {160.0f, 366.0f}, style::kText);
-            Text(f, FontStyle::BlackItalic, 52.0f, {196.0f, 332.0f}, style::kText, "HOST");
-            Text(f, FontStyle::SemiBold, 24.0f, {142.0f, 398.0f}, style::kTextDim, "Friends join you. You play on your machine.");
-            const std::string_view sizes[] = {"1v1", "2v2", "3v3", "4v4"};
-            f.SetDefaultFocus(HashId("host/size"));
-            settings.play.hostTeamSize =
-                OptionRow(f, HashId("host/size"), {142.0f, 452.0f, 618.0f, 58.0f}, "Team size", Span<std::string_view>(sizes), settings.play.hostTeamSize - 1) + 1;
-            settings.play.hostFillBots = ToggleRow(f, HashId("host/fill"), {142.0f, 516.0f, 618.0f, 58.0f}, "Fill with bots", settings.play.hostFillBots, true, "Off", "On");
-            if (TextRow(f, HashId("host/port"), {142.0f, 580.0f, 618.0f, 58.0f}, "Port", portText, 5, "0123456789"))
+            const RlLobbyScreens::Action action = lobby.DrawRoom(f, settings.PlayerName());
+            if (action == RlLobbyScreens::Action::None)
             {
-                const int port = portText.empty() ? 0 : std::atoi(portText.c_str());
-                if (port >= 1 && port <= 65535)
+                // the car of the player under the invitation: the garage opens over the room, Back returns (G / Y do the same)
+                const game::RlCarDef* car = game::Cars().FindOrDefault(settings.car);
+                const bool free = !lobby.ErrorShown();
+                Panel(f, {1210.0f, 650.0f, 630.0f, 210.0f}, false, true);
+                Text(f, FontStyle::SemiBold, 16.0f, {1290.0f, 670.0f}, style::kTextFaint, "YOUR CAR", Align::Left, 0.1f);
+                if (car != nullptr)
                 {
-                    settings.play.hostPort = port;
+                    Image(f, CarImage(*car, 0), {1290.0f, 700.0f, 200.0f, 96.0f});
+                    Text(f, FontStyle::BlackItalic, 34.0f, {1510.0f, 704.0f}, style::kText, Upper(car->name));
+                    Text(f, FontStyle::SemiBold, 18.0f, {1510.0f, 750.0f}, style::kTextDim, Upper(car->className), Align::Left, 0.1f);
+                }
+                if (ActionButton(f, HashId("room/car"), {1290.0f, 800.0f, 400.0f, 48.0f}, "CHANGE CAR", Icon::Car, free) || (free && (f.input().KeyPressed('G') || f.input().Pressed(Nav::ResetRow))))
+                {
+                    OpenGarage(f, Screen::Room);
+                    return;
                 }
             }
-            if (ActionButton(f, HashId("host/go"), {142.0f, 668.0f, 440.0f, 76.0f}, "HOST MATCH", Icon::Play, true, true))
+            if (action == RlLobbyScreens::Action::LeaveRoom)
+            {
+                GoTo(f, Screen::Play);
+            }
+            else if (action == RlLobbyScreens::Action::StartMatch)
             {
                 sys::RlGameMatchSetup setup;
-                setup.kind = sys::RlGameMatchSetup::Kind::Host;
-                setup.mode = settings.play.hostTeamSize;
-                setup.botLevel = settings.play.botLevel;
-                setup.fillWithBots = settings.play.hostFillBots;
-                setup.port = static_cast<std::uint16_t>(settings.play.hostPort);
-                setup.playerName = settings.PlayerName();
-                Save();
-                System().StartMatch(setup);
-                lobbyEnteredAt = frames;
-                GoTo(f, Screen::Lobby);
-            }
-
-            Panel(f, {782.0f, 300.0f, 810.0f, 520.0f}, false);
-            IconGlyph(f, Icon::Join, 40.0f, {904.0f, 366.0f}, style::kText);
-            Text(f, FontStyle::BlackItalic, 52.0f, {940.0f, 332.0f}, style::kText, "JOIN BY IP");
-            Text(f, FontStyle::SemiBold, 24.0f, {886.0f, 398.0f}, style::kTextDim, "Ask the host for the address.");
-            TextRow(f, HashId("join/address"), {886.0f, 452.0f, 618.0f, 58.0f}, "Address", settings.play.joinAddress, 21, "0123456789.:");
-            // the addresses that worked before: ← / → choose one into the field
-            const std::vector<std::string>& recent = settings.play.recent;
-            if (recent.empty())
-            {
-                ValueRow(f, HashId("join/recent"), {886.0f, 516.0f, 618.0f, 58.0f}, "Recent", "none yet", true, false);
-            }
-            else
-            {
-                int& index = f.IntState(HashId("join/recent/index"));
-                index = std::clamp(index, 0, static_cast<int>(recent.size()) - 1);
-                const int step = StepperRow(f, HashId("join/recent"), {886.0f, 516.0f, 618.0f, 58.0f}, "Recent", recent[static_cast<size_t>(index)]);
-                if (step != 0)
+                int humans = 0;
+                if (lobby.TakeStartedMatch(setup, humans))
                 {
-                    index = std::clamp(index + step, 0, static_cast<int>(recent.size()) - 1);
-                    settings.play.joinAddress = recent[static_cast<size_t>(index)];
+                    setup.playerName = settings.PlayerName();
+                    Save();
+                    hud.Reset();
+                    System().StartMatch(setup);
+                    lobbyEnteredAt = frames;
+                    GoTo(f, Screen::Lobby);
+                    autoStartHumans = setup.kind == sys::RlGameMatchSetup::Kind::Host ? humans : 0;
                 }
             }
-            const bool addressOk = !settings.play.joinAddress.empty();
-            if (ActionButton(f, HashId("join/go"), {886.0f, 600.0f, 360.0f, 66.0f}, "JOIN", Icon::Join, addressOk, true))
-            {
-                std::string address = settings.play.joinAddress;
-                if (address.find(':') == std::string::npos)
-                {
-                    address += ":27015";
-                }
-                sys::RlGameMatchSetup setup;
-                setup.kind = sys::RlGameMatchSetup::Kind::Join;
-                setup.address = address;
-                setup.playerName = settings.PlayerName();
-                joinedAddress = settings.play.joinAddress;
-                Save();
-                System().StartMatch(setup);
-                lobbyEnteredAt = frames;
-                GoTo(f, Screen::Lobby);
-            }
-            IconGlyph(f, Icon::Info, 18.0f, {896.0f, 706.0f}, style::kTextDim);
-            Text(f, FontStyle::SemiBold, 20.0f, {910.0f, 694.0f}, style::kTextDim, "Steam invites come later (G6).");
         }
 
         // ---- loading
@@ -892,7 +901,7 @@ namespace myengine::game
 
         // ---- the garage (docs/game/rl-cars.md): the podium of the menu shows the car in focus, the bars compare it with the one that is driven
 
-        Screen garageReturn = Screen::Main;     // where Back goes: the main menu, Play, the lobby
+        Screen garageReturn = Screen::Main;     // where Back goes: the main menu, Play, the room, the lobby
         std::string garageFocusCar;             // the car in focus (a key); an equip is a separate act
         int garageTeam = 0;                     // the paint of the preview: 0 blue, 1 orange
         bool garageDragging = false;
@@ -1021,7 +1030,7 @@ namespace myengine::game
                 return;
             }
             const int count = static_cast<int>(list.size());
-            const char* from = garageReturn == Screen::Play ? "PLAY" : (garageReturn == Screen::Lobby ? "LOBBY" : "MAIN MENU");
+            const char* from = garageReturn == Screen::Play ? "PLAY" : (garageReturn == Screen::Lobby || garageReturn == Screen::Room ? "LOBBY" : "MAIN MENU");
 
             // ---- the left column
             Text(f, FontStyle::SemiBold, 24.0f, {80.0f, 58.0f}, style::kTextDim, from);
@@ -1259,6 +1268,12 @@ namespace myengine::game
                 humans += (!slot.bot && !slot.name.empty()) ? 1 : 0;
             }
             const int slots = status.setup.mode * 2;
+            if (autoStartHumans > 0 && hosting && status.stage == sys::RlGameStage::Lobby && (humans >= autoStartHumans || screenTime > 12.0f))
+            {
+                Log(Format("the players of the lobby are in (%d of %d): starting the match", humans, autoStartHumans));
+                autoStartHumans = 0;
+                System().StartHostedMatch();
+            }
             if (hosting && status.stage == sys::RlGameStage::Lobby)
             {
                 const bool canStart = status.setup.fillWithBots || humans >= slots;
@@ -2204,6 +2219,7 @@ namespace myengine::game
         d.host.Install(*d.svc.ui, config);
         d.host.SetScreen([impl = impl_.get()](Frame& frame) { impl->Draw(frame); });
         d.ApplyToGame();
+        d.lobby.Install(GetCommandLineA());
         if (d.svc.applyVideo)
         {
             d.svc.applyVideo(d.settings.video);

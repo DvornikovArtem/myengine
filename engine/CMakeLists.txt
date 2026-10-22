@@ -181,6 +181,8 @@ set(ENGINE_SOURCES
   src/game/RlCars.cpp
   src/game/RlFeedback.cpp
   src/game/RlGameFlow.cpp
+  src/game/RlLobbyScreens.cpp
+  src/game/RlLobbyScreens.h
   src/game/RlGameSettings.cpp
   src/game/RlTrainingStore.cpp
   src/ecs/systems/FxSystem.cpp

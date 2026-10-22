@@ -547,6 +547,52 @@ namespace rl::net
     }
 
     std::unique_ptr<IDatagramLink> MakeLoopbackLink(LoopbackHub& hub) { return std::make_unique<LoopbackLink>(hub); }
+    std::string LocalIPv4Address()
+    {
+        if (!StartWinsock())
+        {
+            return "";
+        }
+        // connect() on a datagram socket only picks the route; the address of the interface that would be used is then the local one. The
+        // broadcast of the LAN lobby goes out through the interface that the limited broadcast takes, so that is the one asked first (the address
+        // that the guests see in the beacons); a PC without it falls back to the route to the outside.
+        const char* const targets[] = {"255.255.255.255", "192.0.2.1"};  // the second is TEST-NET-1: nothing answers, nothing is sent
+        for (const char* target : targets)
+        {
+            const SOCKET probe = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            if (probe == INVALID_SOCKET)
+            {
+                return "";
+            }
+            BOOL yes = TRUE;
+            setsockopt(probe, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&yes), sizeof(yes));
+            std::string result;
+            sockaddr_in remote{};
+            remote.sin_family = AF_INET;
+            remote.sin_port = htons(9);
+            inet_pton(AF_INET, target, &remote.sin_addr);
+            if (::connect(probe, reinterpret_cast<sockaddr*>(&remote), sizeof(remote)) == 0)
+            {
+                sockaddr_in local{};
+                int length = sizeof(local);
+                if (::getsockname(probe, reinterpret_cast<sockaddr*>(&local), &length) == 0 && local.sin_addr.s_addr != 0)
+                {
+                    char text[INET_ADDRSTRLEN] = {};
+                    if (inet_ntop(AF_INET, &local.sin_addr, text, sizeof(text)) != nullptr)
+                    {
+                        result = text;
+                    }
+                }
+            }
+            ::closesocket(probe);
+            if (!result.empty())
+            {
+                return result;
+            }
+        }
+        return "";
+    }
+
     std::unique_ptr<IDatagramLink> MakeUdpLink() { return std::make_unique<UdpLink>(); }
     std::unique_ptr<IDatagramLink> MakeSimLink(std::unique_ptr<IDatagramLink> inner, const NetSimParams& params, uint64_t seed)
     {
