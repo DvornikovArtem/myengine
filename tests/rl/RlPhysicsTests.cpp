@@ -1733,13 +1733,18 @@ namespace
         float maxUpTurn = 0;     // degrees the up of the camera turned in one frame
         float minDistance = 99;  // closest the camera came to the car
         float maxHeight = 0;     // highest the car was
+        float maxRoll = 0;       // degrees the camera was tilted from the horizon (its right axis out of the horizontal plane)
+        float maxTurnRate = 0;   // degrees per second the camera turned (the angle between its looking directions of two frames)
+        float minCarInFrame = 99;  // the smallest cosine between the looking direction and the direction to the car: the car stays in the picture
     };
 
-    CameraRun RunCamera(RlSim& sim, int ticks, bool ballCam, const Script& script)
+    CameraRun RunCamera(RlSim& sim, int ticks, bool ballCam, const Script& script, const RlCameraTuning* tuningOverride = nullptr)
     {
         CameraRun run;
         RlCameraState state;
         RlVec3 prevUp{0, 1, 0};
+        RlVec3 prevForward{0, 0, 1};
+        const RlCameraTuning& cameraTuning = tuningOverride != nullptr ? *tuningOverride : g_tuning.camera;
         const RlArenaTuning& arena = g_tuning.arena;
         Run(sim, ticks, [&](int t, const RlWorldState& s, Inputs& in) {
             if (script) script(t, s, in);
@@ -1752,8 +1757,23 @@ namespace
             input.surfaceNormal = c.surfaceNormal;
             input.ballPosition = s.ball.position;
             input.ballCam = ballCam;
-            const RlCameraView view = RlCameraUpdate(g_tuning.camera, state, sim, input, 1.0f / 60.0f);
+            input.carVelocity = c.linearVelocity;
+            const RlCameraView view = RlCameraUpdate(cameraTuning, state, sim, input, 1.0f / 60.0f);
             ++run.frames;
+            run.maxRoll = std::max(run.maxRoll, std::fabs(std::asin(std::clamp(view.right.y, -1.0f, 1.0f))) * 57.29578f);
+            if (run.frames > 1)
+            {
+                run.maxTurnRate = std::max(run.maxTurnRate, std::acos(std::clamp(Dot(V(view.forward), V(prevForward)), -1.0f, 1.0f)) * 57.29578f * 60.0f);
+            }
+            prevForward = view.forward;
+            {
+                const Vec toCar = {c.position.x - view.position.x, c.position.y - view.position.y, c.position.z - view.position.z};
+                const float l = Len(toCar);
+                if (l > 0.01f)
+                {
+                    run.minCarInFrame = std::min(run.minCarInFrame, Dot(V(view.forward), {toCar.x / l, toCar.y / l, toCar.z / l}));
+                }
+            }
             if (!InsideArena(arena, view.position)) ++run.outside;
             if (sim.ArenaSegmentFree(c.position, view.position) < 0.999f) ++run.blocked;
             const float turn = std::acos(std::clamp(Dot(V(view.up), V(prevUp)), -1.0f, 1.0f)) * 57.29578f;
@@ -1781,9 +1801,9 @@ namespace
                 in[0].throttle = 1.0f;
                 in[0].boost = t < Ticks(4.0f);
             });
-            std::printf("  %s: %d frames, car up to %.1f m, outside %d, blocked %d, up turned at most %.1f deg per frame\n",
+            std::printf("  %s: %d frames, car up to %.1f m, outside %d, blocked %d, up turned at most %.1f deg per frame, tilted from the horizon up to %.1f deg, turned at most %.0f deg/s\n",
                         ball ? "ball cam, up the wall and over the ceiling" : "car cam, up the wall and over the ceiling", r.frames, static_cast<double>(r.maxHeight), r.outside,
-                        r.blocked, static_cast<double>(r.maxUpTurn));
+                        r.blocked, static_cast<double>(r.maxUpTurn), static_cast<double>(r.maxRoll), static_cast<double>(r.maxTurnRate));
             CHECK(r.maxHeight > 15.0f);
             CHECK(r.outside == 0 && r.blocked == 0);
             CHECK(r.maxUpTurn < 8.0f);
@@ -1841,6 +1861,111 @@ namespace
             std::printf("  a flip: the up of the camera turned at most %.1f deg per frame\n", static_cast<double>(r.maxUpTurn));
             CHECK(r.maxUpTurn < 3.0f);
         }
+    }
+
+
+    // The camera does not tilt with the car (G4h): on a wall, on the ceiling, in a flip, in an air roll and in a fall the horizon of the camera stays level,
+    // the camera turns without jerks and the car stays in the picture. `rollFollow` is the setting "Wall tilt" (0 by default).
+    struct LevelScenario
+    {
+        const char* name;
+        std::function<void(RlSim&)> setup;
+        float seconds;
+        Script script;
+    };
+
+    void TestCameraLevel()
+    {
+        std::printf("camera: a level horizon on walls, on the ceiling, in flips, in an air roll and in a fall\n");
+        const auto drive = [](Inputs& in, bool boost) {
+            in[0].throttle = 1.0f;
+            in[0].boost = boost;
+        };
+        const LevelScenario scenarios[] = {
+            {"up the side wall and over the ceiling",
+             [](RlSim& sim) { sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f); },
+             5.0f,
+             [&](int t, const RlWorldState&, Inputs& in) { drive(in, t < Ticks(4.0f)); }},
+            {"up the wall at an angle and along it",
+             [](RlSim& sim) { sim.ResetCar(0, 20.0f, -20.0f, 0.9f); },
+             5.0f,
+             [&](int t, const RlWorldState&, Inputs& in) {
+                 drive(in, t < Ticks(4.0f));
+                 in[0].steer = (t > Ticks(2.2f) && t < Ticks(3.0f)) ? 0.7f : 0.0f;
+             }},
+            {"a front flip",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -45.0f, 0.0f); },
+             2.0f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].jump = (t >= 2 && t < Ticks(0.25f)) || (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3);
+                 in[0].pitch = (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3) ? -1.0f : 0.0f;
+             }},
+            {"a backflip",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -45.0f, 0.0f); },
+             2.0f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = (t >= 2 && t < Ticks(0.25f)) || (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3);
+                 in[0].pitch = (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3) ? 1.0f : 0.0f;
+             }},
+            {"an air roll for three seconds under boost",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -40.0f, 0.0f); sim.SetCarBoost(0, 100.0f); },
+             4.5f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = t >= 2 && t < Ticks(0.3f);
+                 in[0].boost = t >= Ticks(0.3f) && t < Ticks(3.5f);
+                 in[0].pitch = (t >= Ticks(0.3f) && t < Ticks(0.8f)) ? 0.6f : 0.0f;
+                 in[0].airRoll = t >= Ticks(0.8f);
+                 in[0].steer = t >= Ticks(0.8f) ? 1.0f : 0.0f;
+             }},
+            {"a fall from the ceiling",
+             [](RlSim& sim) { sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f); },
+             7.0f,
+             [&](int t, const RlWorldState&, Inputs& in) {
+                 if (t < Ticks(4.2f))
+                 {
+                     drive(in, true);
+                 }
+             }},
+        };
+        float tiltedWithFollow = 0.0f;
+        for (int follow = 0; follow < 2; ++follow)
+        {
+         for (int ball = 0; ball < 2; ++ball)
+         {
+            for (const LevelScenario& scenario : scenarios)
+            {
+                if (follow == 1 && scenario.seconds < 5.0f)
+                {
+                    continue;  // with "Wall tilt" at 100 % only the walls matter
+                }
+                RlSim sim(g_tuning, 1);
+                scenario.setup(sim);
+                sim.SetCarBoost(0, 100.0f);
+                QuietBall(sim);
+                Settle(sim);
+                RlCameraTuning tuning = g_tuning.camera;
+                tuning.rollFollow = static_cast<float>(follow);
+                const CameraRun r = RunCamera(sim, Ticks(scenario.seconds), ball == 1, scenario.script, &tuning);
+                std::printf("  %s%s, %s: tilted from the horizon up to %.1f deg, turned at most %.0f deg/s, the car at most %.0f deg off the middle of the picture, outside %d, blocked %d\n",
+                            ball == 1 ? (follow == 1 ? "ball cam, Wall tilt 100%" : "ball cam") : (follow == 1 ? "car cam, Wall tilt 100%" : "car cam"), "", scenario.name, static_cast<double>(r.maxRoll), static_cast<double>(r.maxTurnRate),
+                            static_cast<double>(std::acos(std::clamp(r.minCarInFrame, -1.0f, 1.0f)) * 57.29578f), r.outside, r.blocked);
+                CHECK(r.outside == 0 && r.blocked == 0);
+                if (follow == 0)
+                {
+                    CHECK(r.maxRoll < 1.0f);                                          // the horizon is level
+                    CHECK(r.maxTurnRate < tuning.maxTurnRate * 1.1f);                   // no jerks: the camera turns no faster than the limit
+                    CHECK(r.minCarInFrame > std::cos(65.0f * 0.01745329f));             // the car stays in the picture
+                }
+                else
+                {
+                    tiltedWithFollow = std::max(tiltedWithFollow, r.maxRoll);
+                }
+            }
+         }
+        }
+        CHECK(tiltedWithFollow > 10.0f);  // and "Wall tilt" really brings the old leaning back
     }
 
     // ---------------------------------------------------------------- ball
@@ -2271,6 +2396,7 @@ int main(int argc, char** argv)
     TestMechanicsChecklist();
     TestJumpWhileDriving();
     TestCamera();
+    TestCameraLevel();
     TestBallBounce();
     TestBallStaysInside();
     TestBallHit();

@@ -41,6 +41,7 @@ namespace myengine::game
         float stiffness = 0.45f;
         float swivelSpeed = 4.7f;
         float transitionSpeed = 1.2f;
+        float wallTilt = 0.0f;        // 0 the horizon is always level, 1 the camera leans with the wall (rollFollow of the tuning)
         bool ballCamHold = false;     // the ball cam is on while the button is held (false: it toggles)
 
         static RlCameraSettings FromTuning(const rl::RlCameraTuning& tuning);

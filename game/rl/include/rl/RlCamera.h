@@ -16,6 +16,9 @@ namespace rl
         RlVec3 heading{0.0f, 0.0f, 1.0f};  // the horizontal direction (in the plane of `up`) the camera looks along
         RlVec3 up{0.0f, 1.0f, 0.0f};
         float ballBlend = 0.0f;            // 0 car cam, 1 ball cam
+        float groundBlend = 1.0f;          // 1 the car drives on a surface, 0 it is in the air (changes over a quarter of a second)
+        float ballPitch = 0.0f;            // the sine of the angle the ball cam looks up (smoothed)
+        float pitchOffset = 0.0f;          // radians the camera tilts to keep the car in the picture (a wall, a fall)
         bool ready = false;
     };
 
@@ -27,6 +30,7 @@ namespace rl
         RlVec3 surfaceNormal{0.0f, 1.0f, 0.0f};
         RlVec3 ballPosition;
         bool ballCam = false;
+        RlVec3 carVelocity;                // the direction of the motion decides where the camera looks on a wall and in the air
     };
 
     struct RlCameraView
