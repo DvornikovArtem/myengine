@@ -1,0 +1,131 @@
+{
+  "name": "sparks_hit",
+  "comment": "The sparks of an impact (a ball hit, a car against the wall): direction = the normal of the surface, scale and intensity by the strength.",
+  "emitters": [
+    {
+      "name": "sparks",
+      "blend": "additive",
+      "frame": 2,
+      "bursts": [
+        [
+          0,
+          30
+        ]
+      ],
+      "maxParticles": 80,
+      "shape": "point",
+      "coneAngle": 65,
+      "lifetime": [
+        0.18,
+        0.5
+      ],
+      "speed": [
+        6,
+        16
+      ],
+      "gravity": [
+        0,
+        -9.8,
+        0
+      ],
+      "drag": 1.1,
+      "size": [
+        0.18,
+        0.3
+      ],
+      "stretch": 2.2,
+      "stretchSpeed": 0.12,
+      "intensity": 3.0,
+      "useTint": false,
+      "color": [
+        [
+          0,
+          [
+            1,
+            0.95,
+            0.6,
+            1
+          ]
+        ],
+        [
+          0.5,
+          [
+            1,
+            0.6,
+            0.2,
+            0.8
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            0.3,
+            0.08,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "flash",
+      "blend": "additive",
+      "frame": 5,
+      "bursts": [
+        [
+          0,
+          1
+        ]
+      ],
+      "maxParticles": 2,
+      "shape": "point",
+      "lifetime": [
+        0.12,
+        0.12
+      ],
+      "size": [
+        1.1,
+        1.1
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.5
+        ],
+        [
+          0.3,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "rotation": [
+        0,
+        45
+      ],
+      "intensity": 3.5,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            0.9,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            0.7,
+            0.3,
+            0
+          ]
+        ]
+      ]
+    }
+  ]
+}

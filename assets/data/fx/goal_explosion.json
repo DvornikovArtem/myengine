@@ -1,0 +1,320 @@
+{
+  "name": "goal_explosion",
+  "comment": "A goal: at the goal mouth, direction = up, tint = the colour of the team that scored. A flash, a ring, confetti of the team, gold confetti, streaks.",
+  "emitters": [
+    {
+      "name": "flash",
+      "blend": "additive",
+      "frame": 5,
+      "bursts": [
+        [
+          0,
+          1
+        ]
+      ],
+      "maxParticles": 2,
+      "shape": "point",
+      "lifetime": [
+        0.55,
+        0.55
+      ],
+      "size": [
+        16,
+        16
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.3
+        ],
+        [
+          0.2,
+          1
+        ],
+        [
+          1,
+          0.6
+        ]
+      ],
+      "intensity": 3.5,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            1,
+            1,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "ring",
+      "blend": "additive",
+      "frame": 3,
+      "bursts": [
+        [
+          0,
+          1
+        ],
+        [
+          0.18,
+          1
+        ]
+      ],
+      "maxParticles": 4,
+      "shape": "point",
+      "lifetime": [
+        0.9,
+        0.9
+      ],
+      "size": [
+        3,
+        3
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.1
+        ],
+        [
+          1,
+          9
+        ]
+      ],
+      "intensity": 3.0,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            0.95
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            1,
+            1,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "team_confetti",
+      "blend": "alpha",
+      "frame": 4,
+      "bursts": [
+        [
+          0.03,
+          260
+        ],
+        [
+          0.35,
+          140
+        ]
+      ],
+      "maxParticles": 600,
+      "shape": "disc",
+      "shapeRadius": 6,
+      "coneAngle": 50,
+      "lifetime": [
+        2.8,
+        4.2
+      ],
+      "speed": [
+        10,
+        24
+      ],
+      "gravity": [
+        0,
+        -7.5,
+        0
+      ],
+      "drag": 1.3,
+      "size": [
+        0.34,
+        0.5
+      ],
+      "rotation": [
+        0,
+        360
+      ],
+      "rotationSpeed": [
+        -420,
+        420
+      ],
+      "intensity": 1.5,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          0.8,
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            1,
+            1,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "gold_confetti",
+      "blend": "alpha",
+      "frame": 4,
+      "bursts": [
+        [
+          0.05,
+          120
+        ]
+      ],
+      "maxParticles": 200,
+      "useTint": false,
+      "shape": "disc",
+      "shapeRadius": 6,
+      "coneAngle": 55,
+      "lifetime": [
+        2.6,
+        4.0
+      ],
+      "speed": [
+        9,
+        22
+      ],
+      "gravity": [
+        0,
+        -7.5,
+        0
+      ],
+      "drag": 1.3,
+      "size": [
+        0.3,
+        0.44
+      ],
+      "rotation": [
+        0,
+        360
+      ],
+      "rotationSpeed": [
+        -420,
+        420
+      ],
+      "intensity": 1.4,
+      "color": [
+        [
+          0,
+          [
+            1,
+            0.82,
+            0.25,
+            1
+          ]
+        ],
+        [
+          0.8,
+          [
+            1,
+            0.75,
+            0.2,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            0.7,
+            0.15,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "streaks",
+      "blend": "additive",
+      "frame": 2,
+      "bursts": [
+        [
+          0,
+          90
+        ]
+      ],
+      "maxParticles": 120,
+      "shape": "sphere",
+      "shapeRadius": 1.0,
+      "lifetime": [
+        0.5,
+        1.1
+      ],
+      "speed": [
+        18,
+        38
+      ],
+      "gravity": [
+        0,
+        -9.8,
+        0
+      ],
+      "drag": 1.5,
+      "size": [
+        0.4,
+        0.7
+      ],
+      "stretch": 3,
+      "stretchSpeed": 0.1,
+      "intensity": 3.0,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            1,
+            1,
+            0
+          ]
+        ]
+      ]
+    }
+  ]
+}

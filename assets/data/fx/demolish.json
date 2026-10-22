@@ -1,0 +1,341 @@
+{
+  "name": "demolish",
+  "comment": "A demolition: at the car, scale by its size. A fireball, smoke, debris sparks, a flash and a ring.",
+  "emitters": [
+    {
+      "name": "flash",
+      "blend": "additive",
+      "frame": 5,
+      "bursts": [
+        [
+          0,
+          1
+        ]
+      ],
+      "maxParticles": 2,
+      "useTint": false,
+      "shape": "point",
+      "lifetime": [
+        0.16,
+        0.16
+      ],
+      "size": [
+        9,
+        9
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.4
+        ],
+        [
+          0.3,
+          1
+        ],
+        [
+          1,
+          0.4
+        ]
+      ],
+      "intensity": 4.0,
+      "color": [
+        [
+          0,
+          [
+            1,
+            1,
+            0.9,
+            1
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            0.6,
+            0.2,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "fireball",
+      "blend": "additive",
+      "frame": 0,
+      "bursts": [
+        [
+          0,
+          46
+        ]
+      ],
+      "maxParticles": 60,
+      "useTint": false,
+      "shape": "sphere",
+      "shapeRadius": 0.5,
+      "lifetime": [
+        0.4,
+        0.85
+      ],
+      "speed": [
+        3,
+        9
+      ],
+      "drag": 2.2,
+      "gravity": [
+        0,
+        1.5,
+        0
+      ],
+      "size": [
+        1.2,
+        2.2
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.5
+        ],
+        [
+          0.3,
+          1
+        ],
+        [
+          1,
+          0.6
+        ]
+      ],
+      "intensity": 3.0,
+      "color": [
+        [
+          0,
+          [
+            1,
+            0.95,
+            0.7,
+            0.9
+          ]
+        ],
+        [
+          0.35,
+          [
+            1,
+            0.5,
+            0.12,
+            0.8
+          ]
+        ],
+        [
+          1,
+          [
+            0.35,
+            0.08,
+            0.02,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "smoke",
+      "blend": "alpha",
+      "frame": 1,
+      "bursts": [
+        [
+          0.08,
+          26
+        ]
+      ],
+      "maxParticles": 40,
+      "useTint": false,
+      "shape": "sphere",
+      "shapeRadius": 0.7,
+      "lifetime": [
+        1.2,
+        2.2
+      ],
+      "speed": [
+        1.5,
+        5
+      ],
+      "drag": 1.6,
+      "gravity": [
+        0,
+        1.8,
+        0
+      ],
+      "size": [
+        1.4,
+        2.4
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.5
+        ],
+        [
+          1,
+          2.4
+        ]
+      ],
+      "rotation": [
+        0,
+        360
+      ],
+      "rotationSpeed": [
+        -30,
+        30
+      ],
+      "intensity": 1.0,
+      "color": [
+        [
+          0,
+          [
+            0.25,
+            0.22,
+            0.2,
+            0.0
+          ]
+        ],
+        [
+          0.12,
+          [
+            0.2,
+            0.18,
+            0.17,
+            0.55
+          ]
+        ],
+        [
+          1,
+          [
+            0.12,
+            0.12,
+            0.12,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "debris",
+      "blend": "additive",
+      "frame": 2,
+      "bursts": [
+        [
+          0,
+          100
+        ]
+      ],
+      "maxParticles": 120,
+      "useTint": false,
+      "shape": "sphere",
+      "shapeRadius": 0.4,
+      "lifetime": [
+        0.4,
+        1.0
+      ],
+      "speed": [
+        12,
+        28
+      ],
+      "gravity": [
+        0,
+        -9.8,
+        0
+      ],
+      "drag": 0.9,
+      "size": [
+        0.25,
+        0.45
+      ],
+      "stretch": 2.5,
+      "stretchSpeed": 0.1,
+      "intensity": 3.0,
+      "floorY": 0.05,
+      "bounce": 0.35,
+      "color": [
+        [
+          0,
+          [
+            1,
+            0.9,
+            0.5,
+            1
+          ]
+        ],
+        [
+          0.5,
+          [
+            1,
+            0.5,
+            0.15,
+            0.8
+          ]
+        ],
+        [
+          1,
+          [
+            0.9,
+            0.2,
+            0.05,
+            0
+          ]
+        ]
+      ]
+    },
+    {
+      "name": "ring",
+      "blend": "additive",
+      "frame": 3,
+      "bursts": [
+        [
+          0,
+          1
+        ]
+      ],
+      "maxParticles": 2,
+      "useTint": false,
+      "shape": "point",
+      "lifetime": [
+        0.5,
+        0.5
+      ],
+      "size": [
+        1.5,
+        1.5
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.2
+        ],
+        [
+          1,
+          8
+        ]
+      ],
+      "intensity": 2.4,
+      "color": [
+        [
+          0,
+          [
+            1,
+            0.7,
+            0.3,
+            0.9
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            0.3,
+            0.08,
+            0
+          ]
+        ]
+      ]
+    }
+  ]
+}

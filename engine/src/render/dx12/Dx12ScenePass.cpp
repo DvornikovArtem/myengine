@@ -694,6 +694,10 @@ namespace myengine::render::dx12
         put(slot.ambientGround, ground, sizeof(ground));
         const float camera[4] = {pass.cameraPosition.x, pass.cameraPosition.y, pass.cameraPosition.z, 1.0f};
         put(slot.cameraPosition, camera, sizeof(camera));
+        const float right[4] = {pass.cameraRight.x, pass.cameraRight.y, pass.cameraRight.z, 0.0f};
+        put(slot.cameraRight, right, sizeof(right));
+        const float up[4] = {pass.cameraUp.x, pass.cameraUp.y, pass.cameraUp.z, 0.0f};
+        put(slot.cameraUp, up, sizeof(up));
         put(slot.shadowParams, pass.shadowParams, sizeof(pass.shadowParams));
     }
 
@@ -735,7 +739,18 @@ namespace myengine::render::dx12
                     ++end;
                 }
             }
-            const std::size_t instanceCount = end - position;
+            const std::size_t groupDraws = end - position;
+            if (first.instanceCount > 0 && !shader.instanced)
+            {
+                position = end; // a batch of instances needs a program that reads the instance stream
+                continue;
+            }
+            std::size_t totalInstances = 0;
+            for (std::size_t i = position; i < end; ++i)
+            {
+                const PendingDraw& member = pendingDraws_[order[i]];
+                totalInstances += member.instanceCount > 0 ? member.instanceCount : 1;
+            }
 
             const MaterialParams* material = first.material;
             bool useMaterial = material != nullptr;
@@ -775,11 +790,19 @@ namespace myengine::render::dx12
             if (shader.instanced)
             {
                 instanceMatrices.clear();
-                instanceMatrices.reserve(instanceCount * 16);
+                instanceMatrices.reserve(totalInstances * 16);
                 for (std::size_t i = position; i < end; ++i)
                 {
-                    const Matrix4& model = pendingDraws_[order[i]].model;
-                    instanceMatrices.insert(instanceMatrices.end(), model.data.begin(), model.data.end());
+                    const PendingDraw& member = pendingDraws_[order[i]];
+                    if (member.instanceCount > 0)
+                    {
+                        const float* batch = pendingInstanceData_.data() + member.instanceOffset;
+                        instanceMatrices.insert(instanceMatrices.end(), batch, batch + static_cast<std::size_t>(member.instanceCount) * 16);
+                    }
+                    else
+                    {
+                        instanceMatrices.insert(instanceMatrices.end(), member.model.data.begin(), member.model.data.end());
+                    }
                 }
                 D3D12_GPU_VIRTUAL_ADDRESS address = 0;
                 if (!AllocateFrameUploadData(surface.instanceUploadBuffers[surface.currentBackBuffer], instanceMatrices.data(),
@@ -836,7 +859,7 @@ namespace myengine::render::dx12
             }
 
             // One draw for the whole group when the program takes its model matrix from the instance stream, else one per draw with gModel
-            const std::size_t constantPasses = shader.instanced ? 1 : instanceCount;
+            const std::size_t constantPasses = shader.instanced ? 1 : groupDraws;
             for (std::size_t pass_i = 0; pass_i < constantPasses; ++pass_i)
             {
                 const PendingDraw& draw = pendingDraws_[order[position + pass_i]];
@@ -864,7 +887,7 @@ namespace myengine::render::dx12
                     }
                     SetConstants(slot, surface);
                 }
-                const UINT instances = shader.instanced ? static_cast<UINT>(instanceCount) : 1u;
+                const UINT instances = shader.instanced ? static_cast<UINT>(totalInstances) : 1u;
                 context_.commandList->DrawIndexedInstanced(mesh.indexCount, instances, 0, 0, 0);
                 profiler_->NoteDraw(static_cast<std::uint64_t>(mesh.indexCount / 3) * instances);
             }
@@ -972,6 +995,8 @@ namespace myengine::render::dx12
         shadowPass.viewProjection = mainPass.lightViewProjection;
         shadowPass.lightViewProjection = mainPass.lightViewProjection;
         shadowPass.cameraPosition = mainPass.cameraPosition;
+        shadowPass.cameraRight = mainPass.cameraRight;
+        shadowPass.cameraUp = mainPass.cameraUp;
         shadowPass.depthOnly = true;
         shadowPass.key.depthOnly = true;
         shadowPass.key.colorFormat = DXGI_FORMAT_UNKNOWN;
@@ -1001,6 +1026,8 @@ namespace myengine::render::dx12
         main.viewProjection = surface.viewProjection;
         main.lightViewProjection = Matrix4::Identity();
         main.cameraPosition = surface.cameraPosition;
+        main.cameraRight = surface.cameraRight;
+        main.cameraUp = surface.cameraUp;
         main.key.colorFormat = sceneOutputActive_ ? kSceneColorFormat : DXGI_FORMAT_R8G8B8A8_UNORM;
         main.key.samples = sceneOutputActive_ ? sceneTargets_.samples : 1;
 
@@ -1101,5 +1128,35 @@ namespace myengine::render::dx12
             RecordDraws(surface, additive, main);
         }
         pendingDraws_.clear();
+        pendingInstanceData_.clear();
+    }
+
+    void Dx12RenderAdapter::DrawInstances(const RenderSurfaceHandle handle, const DrawItem& drawItem, const float* instanceData, const std::uint32_t instanceCount)
+    {
+        if (activeSurface_ == nullptr || !handle.IsValid() || instanceData == nullptr || instanceCount == 0 || activeTarget_ != nullptr || wireframe_)
+        {
+            return;
+        }
+        auto* surface = FindSurface(handle);
+        if (surface == nullptr || surface != activeSurface_)
+        {
+            return;
+        }
+        PendingDraw draw;
+        draw.mesh = drawItem.mesh;
+        draw.shader = drawItem.shader;
+        draw.material = drawItem.material;
+        draw.texture = drawItem.texture;
+        draw.model = Matrix4::Identity();
+        draw.color = drawItem.color;
+        draw.blend = drawItem.blend;
+        draw.doubleSided = drawItem.doubleSided;
+        draw.castShadow = false; // a batch of instances is not a model: it does not go into the shadow map
+        draw.boundsCenter = drawItem.boundsCenter;
+        draw.boundsRadius = drawItem.boundsRadius;
+        draw.instanceCount = instanceCount;
+        draw.instanceOffset = pendingInstanceData_.size();
+        pendingInstanceData_.insert(pendingInstanceData_.end(), instanceData, instanceData + static_cast<std::size_t>(instanceCount) * 16);
+        pendingDraws_.push_back(draw);
     }
 }

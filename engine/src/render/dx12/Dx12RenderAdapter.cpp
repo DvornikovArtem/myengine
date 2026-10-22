@@ -536,6 +536,8 @@ namespace myengine::render::dx12
                 slot.shadowParams = findVariable(*buffer, "gShadowParams", ShaderValueType::Float4);
                 slot.postParams = findVariable(*buffer, "gPostParams", ShaderValueType::Float4);
                 slot.texelSize = findVariable(*buffer, "gTexelSize", ShaderValueType::Float4);
+                slot.cameraRight = findVariable(*buffer, "gCameraRight", ShaderValueType::Float4);
+                slot.cameraUp = findVariable(*buffer, "gCameraUp", ShaderValueType::Float4);
                 record.slots.constantBuffers.push_back(slot);
             }
             else if (binding.kind == BindingKind::Texture)
@@ -1120,6 +1122,7 @@ namespace myengine::render::dx12
         surface->instanceUploadBuffers[backBufferIndex].used = 0;
         boundRootSignature_ = nullptr; // a new command list has no root signature
         pendingDraws_.clear();
+        pendingInstanceData_.clear();
         sceneOutputActive_ = false;
         shadowMapReady_ = false;
         sceneClearColor_ = clearColor;
@@ -1237,6 +1240,8 @@ namespace myengine::render::dx12
             DirectX::XMVECTOR determinant = DirectX::XMVectorZero();
             const DirectX::XMMATRIX inverseView = DirectX::XMMatrixInverse(&determinant, MatrixToXm(view));
             surface->cameraPosition = {DirectX::XMVectorGetX(inverseView.r[3]), DirectX::XMVectorGetY(inverseView.r[3]), DirectX::XMVectorGetZ(inverseView.r[3])};
+            surface->cameraRight = {DirectX::XMVectorGetX(inverseView.r[0]), DirectX::XMVectorGetY(inverseView.r[0]), DirectX::XMVectorGetZ(inverseView.r[0])};
+            surface->cameraUp = {DirectX::XMVectorGetX(inverseView.r[1]), DirectX::XMVectorGetY(inverseView.r[1]), DirectX::XMVectorGetZ(inverseView.r[1])};
         }
     }
 

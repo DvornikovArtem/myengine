@@ -69,6 +69,14 @@
   include/myengine/render/GpuCapture.h
   include/myengine/render/GpuStats.h
   include/myengine/render/dx12/Dx12RenderAdapter.h
+  include/myengine/audio/AudioSpatial.h
+  include/myengine/audio/AudioSystem.h
+  include/myengine/audio/AudioTypes.h
+  include/myengine/audio/WavFile.h
+  include/myengine/fx/ParticleEffect.h
+  include/myengine/fx/ParticleSystem.h
+  include/myengine/ecs/components/FxComponents.h
+  include/myengine/ecs/systems/FxSystem.h
   include/myengine/render/dx12/InputLayoutBuilder.h
   include/myengine/render/dx12/RootSignatureBuilder.h
   include/myengine/render/dx12/ShaderLayoutDump.h
@@ -143,6 +151,15 @@ set(ENGINE_SOURCES
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp
+  src/audio/AudioBackend.h
+  src/audio/AudioSpatial.cpp
+  src/audio/AudioSystem.cpp
+  src/audio/NullAudioBackend.cpp
+  src/audio/WavFile.cpp
+  src/audio/XAudio2Backend.cpp
+  src/fx/ParticleEffect.cpp
+  src/fx/ParticleSystem.cpp
+  src/ecs/systems/FxSystem.cpp
   src/render/dx12/Dx12ScenePass.cpp
   src/render/dx12/InputLayoutBuilder.cpp
   src/render/dx12/RootSignatureBuilder.cpp
@@ -274,6 +291,7 @@ target_link_libraries(myengine_engine
     comdlg32
     shell32
     xinput
+    xaudio2
     TracyClient
     myengine_rl
   PRIVATE
