@@ -1,10 +1,17 @@
 {
-  "shader": "../../shaders/textured_lit.shader.json",
+  "shader": "../../shaders/lit_clamp.shader.json",
   "texture": "../../textures/rl2/sky.tga",
   "tint": [
     1.0,
     1.0,
     1.0,
     1.0
-  ]
+  ],
+  "params": {
+    "gSpecular": 0.15,
+    "gGloss": 16,
+    "gFresnel": 0.0,
+    "gUnlit": 1
+  },
+  "castShadow": false
 }

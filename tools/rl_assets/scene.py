@@ -54,13 +54,14 @@ def car(ents, team, base, yaw, boost=False):
 def showcase(meshes, tuning):
     ents = Entities(meshes)
     foot = Footprint(tuning["arena"])
-    for n in ("arena_floor", "arena_wall_blue", "arena_wall_orange", "arena_frame_blue", "arena_frame_orange", "arena_goal_blue", "arena_goal_orange"):
+    for n in ("arena_floor", "arena_wall_blue", "arena_wall_orange", "arena_frame_blue", "arena_frame_orange", "arena_goal_blue", "arena_goal_orange",
+              "arena_glass_blue", "arena_glass_orange", "arena_glass_roof"):
         ents.add(n, n, n)
     # pads and orbs
     for i, (x, z, big) in enumerate(pad_positions()):
         ents.add("Pad%02d" % i, "pad_big" if big else "pad_small", "pads", base=(x, 0.0, z))
         if big:
-            ents.add("Orb%02d" % i, "pad_orb", "pads", base=(x, 1.7, z))
+            ents.add("Orb%02d" % i, "pad_orb", "pad_orb", base=(x, 1.7, z))
     ents.add("Ball", "ball", "ball", base=(0.0, 0.98, 0.0))
     car(ents, "blue", (-6.0, CAR_Y, -9.0), 12.0)
     car(ents, "orange", (7.5, CAR_Y, -2.0), -146.0, boost=True)

@@ -41,7 +41,10 @@ namespace myengine::ecs::systems
             DirectX::BoundingSphere bounds{};
         };
 
-        DirectX::BoundingSphere BuildRenderableBounds(World& world, const EntityId entity, const DirectX::XMMATRIX& worldMatrix)
+        // The mesh bounds (when the mesh is loaded) make the sphere: the centre of the mesh bounds through the world matrix, the radius of
+        // the mesh times the largest scale. Without them (a mesh that is not loaded yet) the entity gets the old fixed radius, or its collider.
+        DirectX::BoundingSphere BuildRenderableBounds(World& world, const EntityId entity, const DirectX::XMMATRIX& worldMatrix,
+            const render::MeshBounds* meshBounds)
         {
             DirectX::BoundingSphere result{};
 
@@ -62,6 +65,16 @@ namespace myengine::ecs::systems
             DirectX::XMFLOAT3 center{};
             DirectX::XMStoreFloat3(&center, translationVector);
             float radius = std::max({worldScale.x, worldScale.y, worldScale.z}) * kDefaultRenderableRadius;
+
+            if (meshBounds != nullptr && meshBounds->valid)
+            {
+                const DirectX::XMVECTOR meshCenter = DirectX::XMVector3TransformCoord(
+                    DirectX::XMVectorSet(meshBounds->center.x, meshBounds->center.y, meshBounds->center.z, 1.0f), worldMatrix);
+                DirectX::XMStoreFloat3(&center, meshCenter);
+                result.Center = center;
+                result.Radius = std::max(meshBounds->radius * std::max({worldScale.x, worldScale.y, worldScale.z}), 0.001f);
+                return result;
+            }
 
             if (const auto* collider = world.TryGet<components::ColliderComponent>(entity); collider != nullptr)
             {
@@ -241,11 +254,19 @@ namespace myengine::ecs::systems
                         visiting,
                         &hierarchyCycleWarningLogged_,
                         context.logger);
+                    render::MeshBounds meshBounds;
+                    if (context.resourceManager != nullptr)
+                    {
+                        if (const auto meshResource = context.resourceManager->Load<resource::MeshAsset>(renderer.meshPath); meshResource != nullptr)
+                        {
+                            meshBounds = meshResource->asset.bounds;
+                        }
+                    }
                     renderables.push_back(RenderableEntry{
                         entity,
                         &renderer,
                         worldMatrix,
-                        BuildRenderableBounds(world, entity, worldMatrix),
+                        BuildRenderableBounds(world, entity, worldMatrix, &meshBounds),
                         });
                 });
         }
@@ -286,7 +307,8 @@ namespace myengine::ecs::systems
         {
             ZoneScopedN("BuildDrawItems");
             const auto appendDrawItem =
-                [&](const std::string& meshPath, const std::string& materialPath, const DirectX::XMMATRIX& modelMatrix)
+                [&](const std::string& meshPath, const std::string& materialPath, const DirectX::XMMATRIX& modelMatrix,
+                    const DirectX::BoundingSphere& bounds)
                 {
                     if (context.resourceManager == nullptr)
                     {
@@ -314,6 +336,11 @@ namespace myengine::ecs::systems
                     drawItem.mesh = meshResource->asset.gpuHandle;
                     drawItem.shader = shaderResource->asset.gpuHandle;
                     drawItem.model = scene::ToRenderMatrix(modelMatrix);
+                    drawItem.blend = materialResource->asset.blend;
+                    drawItem.doubleSided = materialResource->asset.doubleSided;
+                    drawItem.castShadow = materialResource->asset.castShadow;
+                    drawItem.boundsCenter = {bounds.Center.x, bounds.Center.y, bounds.Center.z};
+                    drawItem.boundsRadius = bounds.Radius;
                     // The textures and the values of the material come from its parameters, by the names of the shader
                     drawItem.material = context.resourceManager->GetMaterialParams(materialResource);
                     if (drawItem.material == nullptr)
@@ -349,7 +376,7 @@ namespace myengine::ecs::systems
 
                     const RenderableEntry& entry = renderables[visibleIndex];
                     auto& renderer = *entry.renderer;
-                    appendDrawItem(renderer.meshPath, renderer.materialPath, entry.worldMatrix);
+                    appendDrawItem(renderer.meshPath, renderer.materialPath, entry.worldMatrix, entry.bounds);
                 }
             }
 

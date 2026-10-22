@@ -1655,6 +1655,22 @@ namespace myengine::resource
         {
             descriptor["tint"] = TintToJson(asset.tint);
         }
+        if (asset.blend == render::BlendMode::Alpha)
+        {
+            descriptor["blend"] = "alpha";
+        }
+        else if (asset.blend == render::BlendMode::Additive)
+        {
+            descriptor["blend"] = "additive";
+        }
+        if (asset.doubleSided)
+        {
+            descriptor["doubleSided"] = true;
+        }
+        if (!asset.castShadow)
+        {
+            descriptor["castShadow"] = false;
+        }
         if (!asset.params.empty())
         {
             json params = json::object();
@@ -2435,6 +2451,7 @@ namespace myengine::resource
 
         MeshAsset asset;
         asset.data = std::move(cpuAsset.data);
+        asset.bounds = render::ComputeMeshBounds(asset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
         if (!asset.gpuHandle.IsValid())
         {
@@ -2591,6 +2608,23 @@ namespace myengine::resource
         if (!legacyTexture.empty())
         {
             asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / legacyTexture));
+        }
+        {
+            const std::string blend = descriptor.value("blend", std::string("opaque"));
+            if (blend == "alpha")
+            {
+                asset.blend = render::BlendMode::Alpha;
+            }
+            else if (blend == "additive")
+            {
+                asset.blend = render::BlendMode::Additive;
+            }
+            else if (blend != "opaque")
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": unknown blend '" + blend + "' (opaque, alpha, additive): opaque is used");
+            }
+            asset.doubleSided = descriptor.value("doubleSided", false);
+            asset.castShadow = descriptor.value("castShadow", true);
         }
         const bool hasTint = descriptor.contains("tint");
         asset.tintSet = hasTint;
@@ -2809,6 +2843,7 @@ namespace myengine::resource
 
         MeshAsset asset;
         asset.data = meshData;
+        asset.bounds = render::ComputeMeshBounds(asset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
 
         return CreateResource("__fallback_mesh__", {}, std::move(asset));

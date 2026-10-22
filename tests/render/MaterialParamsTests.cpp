@@ -516,9 +516,27 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         stream << text;
     }
 
+    // The lit shader of the scene passes (G7b): the materials of the RL pack use its parameters by name
+    ShaderLayout LitLayout()
+    {
+        static dx12::ShaderReflector reflector;
+        ShaderProgramData program = Entries();
+        program.sourcePath = SourceDirectory() / "assets/shaders/lit.hlsl";
+        const dx12::ShaderCompileResult result = reflector.CompileProgram(program);
+        Check(result.ok && result.program != nullptr, "lit.hlsl compiles");
+        return result.program->layout;
+    }
+
+    bool UsesLitShader(const std::string& shaderPath)
+    {
+        const auto ends = [&](const char* suffix) { return shaderPath.size() >= std::strlen(suffix) && shaderPath.compare(shaderPath.size() - std::strlen(suffix), std::strlen(suffix), suffix) == 0; };
+        return ends("/lit.shader.json") || ends("/lit_clamp.shader.json");
+    }
+
     void TestEveryMaterialOfTheProjectReads()
     {
         const ShaderLayout layout = TexturedLitLayout();
+        const ShaderLayout litLayout = LitLayout();
         Harness harness;
         std::size_t count = 0;
         for (const auto& entry : fs::recursive_directory_iterator(SourceDirectory() / "assets/materials"))
@@ -531,6 +549,17 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
             const auto material = harness.resources.Load<resource::MaterialAsset>(entry.path());
             Check(material != nullptr && !harness.resources.LoadFailed(entry.path()), "the material reads: " + name);
             const resource::MaterialAsset& asset = material->asset;
+            if (UsesLitShader(asset.shaderPath))
+            {
+                // A material of the scene passes: its parameters are names of the lit shader, all of them apply without a message
+                MaterialParams litParams(litLayout);
+                const auto litMessages = ApplyMaterialValues(litParams, resource::ToMaterialValues(asset), Resolver());
+                Check(litMessages.empty(), "a lit material applies to lit.hlsl without a message: " + name + "\n" + Joined(litMessages));
+                Check(!asset.texturePath.empty() && litParams.FindTexture("gTexture")->texture.IsValid(), "'texture' reached gTexture of lit: " + name);
+                Check(!asset.params.empty(), "a lit material sets its parameters: " + name);
+                ++count;
+                continue;
+            }
             Check(!asset.texturePath.empty() && asset.textures.empty() && asset.params.empty(), "an old material has the old keys only: " + name);
 
             MaterialParams params(layout);

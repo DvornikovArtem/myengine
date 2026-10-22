@@ -27,7 +27,8 @@ def budgets(ctx, items):
         if n in m:
             row("%s triangles" % n, tris(n), 20000)
     if items:
-        row("draw calls of the showcase scene", len(items), 150)
+        row("entities of the showcase scene (draw calls without instancing)", len(items), 150)
+        row("draw calls with instancing (mesh + material groups)", len({(i["mesh"], i["material"]) for i in items}), 60)
     tex_max = max((max(t["size"]) for t in ctx.textures.values()), default=0)
     row("largest texture side", tex_max, 2048, "px")
     total = sum(t["bytes"] for t in ctx.textures.values()) + sum(i["bytes"] for i in m.values())

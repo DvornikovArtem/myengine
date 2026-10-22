@@ -1,10 +1,20 @@
 {
-  "shader": "../../shaders/textured_lit.shader.json",
+  "shader": "../../shaders/lit.shader.json",
   "texture": "../../textures/rl2/car_boost.tga",
   "tint": [
     1.0,
     1.0,
     1.0,
     1.0
-  ]
+  ],
+  "params": {
+    "gSpecular": 0.15,
+    "gGloss": 16,
+    "gFresnel": 0.0,
+    "gUnlit": 1,
+    "gEmissiveStrength": 1.4
+  },
+  "blend": "additive",
+  "doubleSided": true,
+  "castShadow": false
 }

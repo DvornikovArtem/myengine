@@ -1,10 +1,15 @@
 {
-  "shader": "../../shaders/textured_lit.shader.json",
+  "shader": "../../shaders/lit.shader.json",
   "texture": "../../textures/rl2/car_wheel.tga",
   "tint": [
     1.0,
     1.0,
     1.0,
     1.0
-  ]
+  ],
+  "params": {
+    "gSpecular": 0.25,
+    "gGloss": 24,
+    "gFresnel": 0.15
+  }
 }
