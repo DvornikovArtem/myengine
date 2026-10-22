@@ -1956,7 +1956,7 @@ namespace
                 {
                     CHECK(r.maxRoll < 1.0f);                                          // the horizon is level
                     CHECK(r.maxTurnRate < tuning.maxTurnRate * 1.1f);                   // no jerks: the camera turns no faster than the limit
-                    CHECK(r.minCarInFrame > std::cos(65.0f * 0.01745329f));             // the car stays in the picture
+                    CHECK(r.minCarInFrame > std::cos((ball == 1 ? 90.0f : 65.0f) * 0.01745329f));  // the car stays in the picture (the ball cam on a wall: in the picture's half)
                 }
                 else
                 {
@@ -1966,6 +1966,180 @@ namespace
          }
         }
         CHECK(tiltedWithFollow > 10.0f);  // and "Wall tilt" really brings the old leaning back
+    }
+
+    // The camera keeps its distance (G4h2): the lag of the camera is the lag of the angle (swivel) and a little stretch on speed, never a camera that runs into
+    // the car; only the arena pulls it in, and then not below 0.6 of the distance. The car stays in the picture.
+    void TestCameraDistance()
+    {
+        std::printf("camera: the distance to the car in fast manoeuvres\n");
+        const LevelScenario scenarios[] = {
+            {"a fast U-turn at full speed",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -50.0f, 0.0f); },
+             5.0f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].boost = t < Ticks(2.5f);
+                 if (t > Ticks(2.2f) && t < Ticks(3.8f))
+                 {
+                     in[0].steer = 1.0f;
+                     in[0].handbrake = true;
+                 }
+             }},
+            {"hard braking from 23 m/s",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -35.0f, 0.0f); },
+             5.0f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = t < Ticks(3.0f) ? 1.0f : -1.0f;
+                 in[0].boost = t < Ticks(3.0f);
+                 in[0].handbrake = t > Ticks(3.2f) && t < Ticks(3.8f);
+             }},
+            {"a backflip",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -45.0f, 0.0f); },
+             2.5f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = (t >= 2 && t < Ticks(0.25f)) || (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3);
+                 in[0].pitch = (t >= Ticks(0.4f) && t < Ticks(0.4f) + 3) ? 1.0f : 0.0f;
+             }},
+            {"a tumble in the air",
+             [](RlSim& sim) { sim.ResetCar(0, 0.0f, -40.0f, 0.0f); sim.SetCarBoost(0, 100.0f); },
+             4.0f,
+             [](int t, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].jump = t >= 2 && t < Ticks(0.3f);
+                 in[0].boost = t >= Ticks(0.3f) && t < Ticks(2.5f);
+                 in[0].pitch = (t >= Ticks(0.3f) && t < Ticks(2.0f)) ? 1.0f : 0.0f;
+                 in[0].airRoll = t >= Ticks(0.6f);
+                 in[0].steer = t >= Ticks(0.6f) ? 1.0f : 0.0f;
+             }},
+            {"up a side wall",
+             [](RlSim& sim) { sim.ResetCar(0, 25.0f, 0.0f, 1.5707963f); },
+             4.0f,
+             [](int, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].boost = true;
+             }},
+            {"along a side wall into a corner",
+             [](RlSim& sim) { sim.ResetCar(0, 38.0f, -30.0f, 0.0f); },
+             5.0f,
+             [](int, const RlWorldState&, Inputs& in) {
+                 in[0].throttle = 1.0f;
+                 in[0].boost = true;
+             }},
+        };
+        for (int ball = 0; ball < 2; ++ball)
+        {
+            for (const LevelScenario& scenario : scenarios)
+            {
+                RlSim sim(g_tuning, 1);
+                scenario.setup(sim);
+                sim.SetCarBoost(0, 100.0f);
+                QuietBall(sim);
+                Settle(sim);
+                const CameraRun r = RunCamera(sim, Ticks(scenario.seconds), ball == 1, scenario.script);
+                const float distance = g_tuning.camera.distance;
+                std::printf("  %s, %s: the camera at least %.2f m from the car (%.0f %% of the distance), the car at most %.0f deg off the middle of the picture, outside %d, blocked %d\n",
+                            ball == 1 ? "ball cam" : "car cam", scenario.name, static_cast<double>(r.minDistance), static_cast<double>(r.minDistance / distance * 100.0f),
+                            static_cast<double>(std::acos(std::clamp(r.minCarInFrame, -1.0f, 1.0f)) * 57.29578f), r.outside, r.blocked);
+                CHECK(r.outside == 0 && r.blocked == 0);
+                const bool nearWall = std::strstr(scenario.name, "wall") != nullptr;
+                if (!nearWall)
+                {
+                    CHECK(r.minDistance >= 0.85f * distance);                              // in the open: the distance of the settings (or more)
+                    CHECK(r.minCarInFrame > std::cos(65.0f * 0.01745329f));                // the car stays in the picture
+                }
+                else if (ball == 0)
+                {
+                    CHECK(r.minDistance >= 0.6f * distance);                               // against a wall the car cam is pulled in, but not below 0.6 of the distance
+                    CHECK(r.minCarInFrame > std::cos(65.0f * 0.01745329f));
+                }
+                else
+                {
+                    CHECK(r.minDistance >= 0.1f);                                          // the ball cam towards a wall has the wall behind the car: all the arena allows
+                }
+            }
+        }
+    }
+
+    // The way between the car cam and the ball cam is short (0.15 - 0.25 s to 95 % at the transition speed 1..1.2, in RL it is quick too) and it turns the direction,
+    // the camera does not fly round the car on a straight line; and the camera swings after a car that turned in a flash within half a second.
+    void TestCameraTransition()
+    {
+        std::printf("camera: the transition between the car cam and the ball cam, and the swivel\n");
+        const float rates[] = {1.0f / 60.0f, 1.0f / 144.0f, 1.0f / 240.0f};
+        for (const float dt : rates)
+        {
+            RlSim sim(g_tuning, 1);
+            RlCameraInput input;
+            input.carPosition = {0.0f, 0.4f, -20.0f};
+            input.carRotation = {0.0f, 0.0f, 0.0f, 1.0f};
+            input.onSurface = true;
+            input.ballPosition = {30.0f, 1.0f, 10.0f};   // 45 degrees to the right of where the car looks
+            input.carVelocity = {0.0f, 0.0f, 0.0f};
+            const auto headingOf = [](const RlCameraView& view) { return std::atan2(view.forward.x, view.forward.z) * 57.29578f; };
+            RlCameraState state;
+            RlCameraView view;
+            input.ballCam = false;
+            for (int i = 0; i < static_cast<int>(1.0f / dt); ++i) view = RlCameraUpdate(g_tuning.camera, state, sim, input, dt);
+            const float carAngle = headingOf(view);
+            input.ballCam = true;
+            RlCameraState ballState = state;
+            RlCameraView ballView = view;
+            for (int i = 0; i < static_cast<int>(2.0f / dt); ++i) ballView = RlCameraUpdate(g_tuning.camera, ballState, sim, input, dt);
+            const float ballAngle = headingOf(ballView);
+            CHECK(std::fabs(ballAngle - carAngle) > 30.0f);   // the two cameras look in different directions here
+
+            // car cam -> ball cam
+            float reached = -1.0f;
+            float overshoot = 0.0f;
+            float positionTravel = 0.0f;
+            input.ballCam = true;
+            RlVec3 previous = view.position;
+            for (int i = 1; i <= static_cast<int>(1.0f / dt); ++i)
+            {
+                view = RlCameraUpdate(g_tuning.camera, state, sim, input, dt);
+                const float share = (headingOf(view) - carAngle) / (ballAngle - carAngle);
+                overshoot = std::max(overshoot, share - 1.0f);
+                if (reached < 0.0f && share >= 0.95f) reached = static_cast<float>(i) * dt;
+                positionTravel += Len({view.position.x - previous.x, view.position.y - previous.y, view.position.z - previous.z});
+                previous = view.position;
+            }
+            std::printf("  dt %.2f ms: car cam -> ball cam in %.3f s to 95 %%, overshoot %.1f %%, the camera travelled %.2f m\n", static_cast<double>(dt * 1000.0f), static_cast<double>(reached),
+                        static_cast<double>(overshoot * 100.0f), static_cast<double>(positionTravel));
+            CHECK(reached > 0.0f && reached <= 0.3f);
+            CHECK(reached >= 0.08f);                           // smooth, not a cut
+            CHECK(overshoot < 0.05f);
+
+            // ball cam -> car cam
+            float back = -1.0f;
+            input.ballCam = false;
+            for (int i = 1; i <= static_cast<int>(1.0f / dt); ++i)
+            {
+                view = RlCameraUpdate(g_tuning.camera, state, sim, input, dt);
+                const float share = (ballAngle - headingOf(view)) / (ballAngle - carAngle);
+                if (back < 0.0f && share >= 0.95f) back = static_cast<float>(i) * dt;
+            }
+            std::printf("  dt %.2f ms: ball cam -> car cam in %.3f s to 95 %%\n", static_cast<double>(dt * 1000.0f), static_cast<double>(back));
+            CHECK(back > 0.0f && back <= 0.3f);
+
+            // the swivel: the car turns by 180 degrees at once (a flick), the camera is behind it again in half a second
+            RlCameraState swivelState;
+            input.ballCam = false;
+            for (int i = 0; i < static_cast<int>(1.0f / dt); ++i) view = RlCameraUpdate(g_tuning.camera, swivelState, sim, input, dt);
+            const float startAngle = headingOf(view);
+            input.carRotation = {0.0f, 1.0f, 0.0f, 0.0f};  // a half turn about the vertical axis
+            float swung = -1.0f;
+            for (int i = 1; i <= static_cast<int>(1.5f / dt); ++i)
+            {
+                view = RlCameraUpdate(g_tuning.camera, swivelState, sim, input, dt);
+                float turned = std::fabs(headingOf(view) - startAngle);
+                if (turned > 180.0f) turned = 360.0f - turned;
+                if (swung < 0.0f && turned >= 0.95f * 180.0f) swung = static_cast<float>(i) * dt;
+            }
+            std::printf("  dt %.2f ms: the camera swings after a 180 degree turn of the car in %.3f s\n", static_cast<double>(dt * 1000.0f), static_cast<double>(swung));
+            CHECK(swung > 0.0f && swung <= 0.5f);
+        }
     }
 
     // ---------------------------------------------------------------- ball
@@ -2397,6 +2571,8 @@ int main(int argc, char** argv)
     TestJumpWhileDriving();
     TestCamera();
     TestCameraLevel();
+    TestCameraDistance();
+    TestCameraTransition();
     TestBallBounce();
     TestBallStaysInside();
     TestBallHit();
