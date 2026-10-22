@@ -33,6 +33,19 @@ namespace rl
         // the part of v that lies in the plane with this normal
         V3 OnPlane(V3 v, V3 normal) { return v - normal * Dot(v, normal); }
 
+        // the direction between a and b (unit vectors) at a share of the way, along the great circle
+        V3 Slerp(V3 a, V3 b, float share)
+        {
+            const float cosine = std::clamp(Dot(a, b), -1.0f, 1.0f);
+            const float angle = std::acos(cosine);
+            if (angle < 1e-4f)
+            {
+                return b;
+            }
+            const float sine = std::sin(angle);
+            return Norm(a * (std::sin((1.0f - share) * angle) / sine) + b * (std::sin(share * angle) / sine), b);
+        }
+
         V3 Rotate(const RlQuat& q, V3 v)
         {
             const float tx = 2.0f * (q.y * v.z - q.z * v.y);
@@ -49,10 +62,11 @@ namespace rl
         const V3 carPosition = FromRl(in.carPosition);
         const V3 ball = FromRl(in.ballPosition);
         const float rollFollow = std::clamp(t.rollFollow, 0.0f, 1.0f);
+        const bool first = !state.ready;  // the first frame has nothing to follow: everything starts where it should be
 
         // ---- ground or air: a quarter of a second between them, so that a wheel that lets go for a tick does not make the camera jump
         const float groundTarget = in.onSurface ? 1.0f : 0.0f;
-        if (!state.ready)
+        if (first)
         {
             state.groundBlend = groundTarget;
         }
@@ -67,14 +81,16 @@ namespace rl
         const V3 surfaceUp = Norm(FromRl(in.surfaceNormal), worldUp);
         const V3 targetUp = Norm(Lerp(worldUp, surfaceUp, rollFollow * state.groundBlend), worldUp);
         const float upRate = state.groundBlend * t.upFollow + (1.0f - state.groundBlend) * t.airUpFollow;
-        up = !state.ready ? targetUp : Norm(Lerp(up, targetUp, 1.0f - std::exp(-dt * upRate)), targetUp);
+        up = first ? targetUp : Norm(Lerp(up, targetUp, 1.0f - std::exp(-dt * upRate)), targetUp);
 
-        // ---- the heading: where the camera looks along. The nose of the car on the floor; along the motion on a wall, on the ceiling and in the air (the nose of a
-        // car that climbs a wall or flips points anywhere, the motion is what the player follows); the last heading when there is nothing to go by.
+        // ---- car cam <-> ball cam: the weight of the ball cam eases out, and it reaches 95 % in 0.24 s at the transition speed 1 (the directions are what is mixed below,
+        // not the places of the camera, and each of them is smoothed on its own: the transition is not slowed down by the swivel)
         const float blendTarget = in.ballCam ? 1.0f : 0.0f;
-        const float blendStep = t.transitionSpeed * 1.5f * dt;
-        state.ballBlend = state.ready ? state.ballBlend + std::clamp(blendTarget - state.ballBlend, -blendStep, blendStep) : blendTarget;  // the first frame has no blend to make
+        const float transitionSeconds = 0.24f / std::max(t.transitionSpeed, 0.05f);
+        state.ballBlend = first ? blendTarget : state.ballBlend + (blendTarget - state.ballBlend) * (1.0f - std::exp(-dt * 3.0f / transitionSeconds));
 
+        // ---- the heading of the car cam: where the camera looks along. The nose of the car on the floor; along the motion on a wall, on the ceiling and in the air (the
+        // nose of a car that climbs a wall or flips points anywhere, the motion is what the player follows); the last heading when there is nothing to go by.
         const V3 lastHeading = Norm(OnPlane(FromRl(state.heading), up), {0.0f, 0.0f, 1.0f});
         const V3 carForward = Rotate(in.carRotation, {0.0f, 0.0f, 1.0f});
         const V3 noseHeading = OnPlane(carForward, up);
@@ -89,51 +105,104 @@ namespace rl
         const float wallness = std::clamp((0.85f - surfaceUp.y) / 0.5f, 0.0f, 1.0f);
         const V3 groundHeading = Norm(Lerp(nose, motionDirection, wallness * (1.0f - rollFollow) * motionWeight), nose);
         const V3 airHeading = Norm(Lerp(nose, motionDirection, motionWeight), nose);
-        V3 target = Norm(Lerp(airHeading, groundHeading, state.groundBlend), nose);
+        const V3 carTarget = Norm(Lerp(airHeading, groundHeading, state.groundBlend), nose);
 
-        // the ball cam: from the car towards the ball (on a wall with the horizon level this is as stable as on the floor)
-        const float ballWeight = state.ballBlend * std::clamp((up.y - 0.2f) / 0.5f, 0.0f, 1.0f);
+        // a heading turned by a share of the angle to another one, about the up (both lie in its plane): the angle is what is mixed, not the vectors (the
+        // vectors of a half turn pass through nothing and the camera would not move)
+        const auto turned = [&](V3 from, V3 target, float share, float limit)
+        {
+            const float angle = std::atan2(Dot(Cross(from, target), up), Dot(from, target));
+            const float step = std::clamp(angle * share, -limit, limit);
+            return Norm(from * std::cos(step) + Cross(up, from) * std::sin(step), from);
+        };
+        // the swing of a heading towards its target: exponential, and never faster than the limit (a flip, the car upside down, a wall)
+        const float turnLimit = std::max(t.maxTurnRate, 30.0f) * kDegToRad * dt;
+        const auto swing = [&](V3 from, V3 target, float rate) { return turned(from, target, 1.0f - std::exp(-dt * rate), turnLimit); };
+        // the camera lags behind the car by the angle only: 11 per second at the swivel speed 4.7 and the stiffness 0.45 (a time constant of 0.09 s); in the air slower
+        const float carRate = t.swivelSpeed * (1.0f + 3.0f * t.stiffness) * (state.groundBlend + (1.0f - state.groundBlend) * t.airSwivelScale);
+        V3 carHeading = first ? carTarget : swing(lastHeading, carTarget, carRate);
+
+        // the heading of the ball cam: from the car towards the ball, followed closely (the ball changes its direction in a flash)
         const V3 toBall = OnPlane(ball - carPosition, up);
-        if (ballWeight > 0.001f && Len(toBall) > 0.5f)
+        V3 ballHeading = Norm(OnPlane(FromRl(state.ballHeading), up), carHeading);
+        if (Len(toBall) > 0.5f)
         {
-            target = Norm(Lerp(target, Norm(toBall, target), ballWeight), target);
+            ballHeading = first ? Norm(toBall, carHeading) : swing(ballHeading, Norm(toBall, ballHeading), 16.0f);
         }
-        V3 heading = lastHeading;
-        if (!state.ready)
+        else if (first)
         {
-            heading = target;
+            ballHeading = carHeading;
         }
-        else
-        {
-            const float rate = t.swivelSpeed * t.stiffness * 2.0f * (state.groundBlend + (1.0f - state.groundBlend) * t.airSwivelScale);
-            const V3 wanted = Norm(Lerp(heading, target, 1.0f - std::exp(-dt * rate)), target);
-            // and never faster than the limit, whatever the car does
-            const float cosine = std::clamp(Dot(heading, wanted), -1.0f, 1.0f);
-            const float angle = std::acos(cosine);
-            const float limit = std::max(t.maxTurnRate, 10.0f) * kDegToRad * dt;
-            heading = (angle > limit && angle > 1e-5f) ? Norm(Lerp(heading, wanted, limit / angle), wanted) : wanted;
-        }
-        heading = Norm(OnPlane(heading, up), nose);
+        carHeading = Norm(OnPlane(carHeading, up), nose);
+        ballHeading = Norm(OnPlane(ballHeading, up), carHeading);
         state.ready = true;
-        state.heading = ToRl(heading);
+        state.heading = ToRl(carHeading);
+        state.ballHeading = ToRl(ballHeading);
         state.up = ToRl(up);
 
-        // ---- the place: behind the car and above it, then pulled in so that it stays inside the arena
+        // on a wall with the horizon level the ball cam is as stable as on the floor; with the camera leaning it fades (the ball is "up" from there)
+        const float ballWeight = state.ballBlend * std::clamp((up.y - 0.2f) / 0.5f, 0.0f, 1.0f);
+        const V3 heading = ballWeight > 0.001f ? turned(carHeading, ballHeading, ballWeight, 10.0f) : carHeading;
+
+        // ---- the place: behind the car and above it at the distance of the settings. The camera lags by the angle (above) and is stretched a little on speed (never closer).
         // (the pivot sits on the side of the surface that is inside the arena: under a car on the ceiling, so the ray to the camera starts inside)
+        const float speedShare = std::clamp(motionSpeed / 23.0f, 0.0f, 1.0f);
+        state.stretch += (speedShare - state.stretch) * (1.0f - std::exp(-dt * 4.0f));
+        const float distance = t.distance * (1.0f + 0.12f * state.stretch);
         const V3 inside = Norm(Lerp(up, surfaceUp, state.groundBlend), up);
         const V3 pivot = carPosition + inside * 0.35f;
-        V3 eye = carPosition - heading * t.distance + up * t.height;
+        // The place of the camera on the way from the full distance (u = 0) to 0.6 of it (u = 1). The way "up": the nearer, the higher (the car stays in the picture when
+        // the camera comes close to it). The way "down": the nearer, the lower, to the level of the car (when the roof or the ceiling is above).
+        constexpr float kLeastShare = 0.6f;
+        const auto placeAt = [&](float u, bool lowering)
         {
+            const float share = 1.0f - (1.0f - kLeastShare) * u;
+            const float height = lowering ? t.height * (1.0f - u) : t.height + (1.0f - share) * distance * 0.9f;
+            return carPosition - heading * (distance * share) + up * height;
+        };
+        const auto clear = [&](V3 place)
+        {
+            const V3 beyond = place + Norm(place - pivot, up) * t.wallMargin;
+            return sim.ArenaSegmentFree(ToRl(pivot), ToRl(beyond)) >= 0.999f;
+        };
+        // what the arena allows: the whole distance, or the way to 0.6 of it as far as the camera must go for the way to the car to be free
+        float needed = 0.0f;
+        bool lowering = false;
+        bool squeezed = false;
+        if (!clear(placeAt(0.0f, false)))
+        {
+            if (clear(placeAt(1.0f, false)) || (lowering = clear(placeAt(1.0f, true))))
+            {
+                float low = 0.0f;
+                float high = 1.0f;
+                for (int i = 0; i < 7; ++i)
+                {
+                    const float middle = 0.5f * (low + high);
+                    (clear(placeAt(middle, lowering)) ? high : low) = middle;
+                }
+                needed = high;
+            }
+            else
+            {
+                needed = 1.0f;
+                squeezed = true;
+            }
+        }
+        // closer at once, farther again in a moment (a corner that goes by does not make the camera swing)
+        state.pull = (first || lowering != state.lowering || needed > state.pull) ? needed : std::max(needed, state.pull + (needed - state.pull) * (1.0f - std::exp(-dt * 6.0f)));
+        state.lowering = lowering;
+        V3 eye = placeAt(state.pull, lowering);
+        if (squeezed)
+        {
+            // squeezed even at 0.6: the arena in the way pulls the camera along its ray, not below what keeps the car readable
             const V3 ray = eye - pivot;
             const float rayLength = Len(ray);
             const float free = sim.ArenaSegmentFree(ToRl(pivot), ToRl(eye));
-            float keep = rayLength;
             if (free < 1.0f)
             {
-                keep = std::max(rayLength * free - t.wallMargin, t.minDistance);
+                const float keep = std::min(std::max(rayLength * free - t.wallMargin, 0.3f), rayLength);
+                eye = pivot + Norm(ray, up) * keep;
             }
-            keep = std::min(keep, rayLength);
-            eye = pivot + Norm(ray, up) * keep;
         }
 
         // ---- where it looks: ahead along the heading, tilted by the camera pitch. The car stays where the player expects it in the picture: when it climbs or falls
@@ -145,26 +214,26 @@ namespace rl
         const float delta = elevation - nominal;
         const float extra = delta > 0.0f ? std::max(delta - kDeadZone, 0.0f) : std::min(delta + kDeadZone, 0.0f);
         const float wantedOffset = std::clamp(extra, -45.0f * kDegToRad, 60.0f * kDegToRad);
-        state.pitchOffset += (wantedOffset - state.pitchOffset) * (1.0f - std::exp(-dt * 6.0f));
-        const float pitch = t.pitchDegrees * kDegToRad + state.pitchOffset;
-        V3 forward = Norm(heading * std::cos(pitch) + up * std::sin(pitch), heading);
+        state.pitchOffset += (wantedOffset - state.pitchOffset) * (1.0f - std::exp(-dt * 8.0f));
+        float pitch = t.pitchDegrees * kDegToRad + state.pitchOffset;
         if (ballWeight > 0.001f)
         {
-            V3 toBallFromEye = Norm(ball - eye, forward);
+            // the direction along the ground is the heading (it was mixed above); the angle up or down is mixed here, the same way, so that the two halves of the
+            // transition do not add up to a faster one
+            const V3 toBallFromEye = Norm(ball - eye, heading);
             // not steeper than the limit, and not so steep that the car leaves the picture (a ball high above the car lifts the camera only as far as the car
             // allows, a ball far below it - when the car is on the ceiling - lowers the camera only as far as the car allows)
-            const V3 flat = Norm(OnPlane(toBallFromEye, up), heading);
             const float height = Dot(toBallFromEye, up);
             const float halfVertical = std::atan(std::tan(t.fov * 0.5f * kDegToRad) * (9.0f / 16.0f));
             const float highest = std::sin(std::min(t.ballCamMaxPitch * kDegToRad, std::max(elevation + halfVertical * 0.9f, 5.0f * kDegToRad)));
             const float lowest = std::sin(std::max(std::min(elevation - halfVertical * 0.9f, -5.0f * kDegToRad), -80.0f * kDegToRad));
             const float clamped0 = std::clamp(height, lowest, highest);
             // the angle follows smoothly: the ball flies over the car, the car climbs, the limit moves
-            state.ballPitch = ballWeight < 0.01f ? clamped0 : state.ballPitch + (clamped0 - state.ballPitch) * (1.0f - std::exp(-dt * 7.0f));
+            state.ballPitch = ballWeight < 0.01f ? clamped0 : state.ballPitch + (clamped0 - state.ballPitch) * (1.0f - std::exp(-dt * 12.0f));
             const float clamped = std::clamp(state.ballPitch, lowest, highest);
-            toBallFromEye = Norm(flat * std::sqrt(std::max(1.0f - clamped * clamped, 0.0f)) + up * clamped, flat);
-            forward = Norm(Lerp(forward, toBallFromEye, ballWeight), forward);
+            pitch += ballWeight * (std::asin(clamped) - pitch);
         }
+        const V3 forward = Norm(heading * std::cos(pitch) + up * std::sin(pitch), heading);
         const V3 right = Norm(Cross(up, forward), Cross(up, heading));
         const V3 cameraUp = Cross(forward, right);
         return {ToRl(eye), ToRl(forward), ToRl(cameraUp), ToRl(right)};

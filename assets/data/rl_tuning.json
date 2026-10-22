@@ -230,7 +230,7 @@
     "wallMargin": 0.3,
     "ballCamMaxPitch": 35.0,
     "rollFollow": 0.0,
-    "maxTurnRate": 240.0
+    "maxTurnRate": 540.0
   },
   "match": {
     "matchSeconds": 300.0,
