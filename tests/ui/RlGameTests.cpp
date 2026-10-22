@@ -16,6 +16,7 @@
 #include <myengine/editor/EditorState.h>
 #include <myengine/game/RlCars.h>
 #include <myengine/game/RlGameSettings.h>
+#include <myengine/game/RlVideoWindowChange.h>
 #include <myengine/input/InputManager.h>
 
 #include <rl/RlControls.h>
@@ -1189,6 +1190,112 @@ namespace
         Check(brightest < 150, "the turf in front of the goals is turf, not a white dot");
         stbi_image_free(pixels);
     }
+
+    // ---------------------------------------------------------------- the video window: chosen, applied, kept or reverted
+
+    // The window mode and the resolution of Settings > Video wait for APPLY: the steps only choose, APPLY hands the window ONE change and opens the question,
+    // Keep / Revert / the end of the time answer it, leaving with a choice asks, Discard throws the choice away without a touch of the window.
+    void TestVideoWindowChange()
+    {
+        using game::RlVideoWindowChange;
+        using game::RlWindowChoice;
+
+        // the way the screen drives it: every change of the window that reaches the display is counted
+        int windowChanges = 0;
+        RlWindowChoice shown{};
+        RlVideoWindowChange w;
+        const auto apply = [&]() -> bool
+        {
+            if (!w.Apply())
+            {
+                return false;
+            }
+            ++windowChanges;
+            shown = w.Applied();
+            return true;
+        };
+        const auto revert = [&]()
+        {
+            if (w.Revert())
+            {
+                ++windowChanges;
+                shown = w.Applied();
+            }
+        };
+
+        w.Set({0, 1600, 900});
+        shown = w.Applied();
+        Check(!w.Dirty() && !w.Keeping(), "the window that was loaded is applied: nothing is chosen, no question");
+        Check(!apply() && windowChanges == 0, "APPLY with nothing chosen does nothing");
+
+        // steps of the resolution and a window mode only choose
+        w.SetPendingSize(1280, 720);
+        w.SetPendingSize(1366, 768);
+        w.SetPendingSize(1920, 1080);
+        w.SetPendingMode(2);
+        Check(windowChanges == 0 && shown.width == 1600 && shown.mode == 0, "steps and clicks do not touch the window");
+        Check(w.Dirty() && w.Pending().width == 1920 && w.Pending().mode == 2, "the chosen values are shown");
+        Check(w.Applied().width == 1600 && w.Applied().mode == 0, "and the applied ones are the old ones");
+
+        // APPLY: both at once, one change, then the question
+        Check(apply(), "APPLY applies a chosen window");
+        Check(windowChanges == 1 && shown.mode == 2 && shown.width == 1920 && shown.height == 1080, "the window changed once, to the mode and the size together");
+        Check(w.Keeping() && std::abs(w.Remaining() - RlVideoWindowChange::kKeepSeconds) < 1e-4f, "the question of Keep / Revert is open for 15 s");
+        Check(!w.Dirty(), "nothing is chosen any more");
+        Check(!apply() && windowChanges == 1, "APPLY while the question is open does nothing");
+        w.SetPendingMode(0);
+        w.SetPendingSize(1280, 720);
+        Check(!w.Dirty() && w.Pending().mode == 2, "a choice cannot be made while the question is open");
+
+        // Keep
+        w.Keep();
+        Check(!w.Keeping() && w.Applied().mode == 2 && w.Applied().width == 1920, "Keep leaves the new window");
+        Check(!w.Revert() && windowChanges == 1, "a Revert after Keep has nothing to bring back");
+        Check(!w.Tick(100.0f) && windowChanges == 1, "the time of a closed question does not run");
+
+        // Revert
+        w.SetPendingMode(0);
+        w.SetPendingSize(1600, 900);
+        Check(apply() && windowChanges == 2, "the next APPLY");
+        Check(!w.Tick(5.0f) && w.Keeping() && std::abs(w.Remaining() - 10.0f) < 1e-3f, "5 s later 10 s are left");
+        revert();
+        Check(windowChanges == 3 && shown.mode == 2 && shown.width == 1920, "Revert brings the old window back, once");
+        Check(!w.Keeping() && !w.Dirty() && w.Pending().mode == 2 && w.Pending().width == 1920, "and the chosen values are the old ones again");
+
+        // the time is up: the same as Revert
+        w.SetPendingSize(1280, 720);
+        Check(apply() && windowChanges == 4, "APPLY again");
+        Check(!w.Tick(14.0f) && w.Keeping(), "14 s: still waiting");
+        Check(w.Tick(1.5f), "past 15 s the question ends");
+        windowChanges += 1;
+        shown = w.Applied();
+        Check(!w.Keeping() && shown.width == 1920 && !w.Dirty() && w.Pending().width == 1920, "the time out is a Revert: the old window and the chosen values");
+        Check(!w.Revert(), "and it was one answer, not two");
+
+        // Discard: the window is not touched, because nothing was applied
+        const int before = windowChanges;
+        w.SetPendingMode(1);
+        w.SetPendingSize(1366, 768);
+        Check(w.Dirty(), "a choice again");
+        w.Discard();
+        Check(!w.Dirty() && w.Pending().mode == 2 && w.Pending().width == 1920 && windowChanges == before, "Discard returns the chosen values to the applied ones and applies nothing");
+
+        // Borderless takes the desktop: its size is not a choice
+        w.Set({1, 2560, 1440});
+        w.SetPendingSize(1280, 720);
+        Check(!w.Dirty(), "a size is no change of a Borderless window");
+        w.SetPendingMode(0);
+        Check(w.Dirty(), "but the mode is");
+        w.SetPendingMode(1);
+        Check(!w.Dirty(), "back to Borderless: nothing is chosen again");
+
+        // Set() (the settings were loaded, a reset) ends everything
+        w.SetPendingMode(2);
+        Check(apply() && w.Keeping(), "the question is open");
+        w.Set({0, 1600, 900});
+        Check(!w.Keeping() && !w.Dirty() && w.Applied().mode == 0, "Set starts from the applied window with no question");
+        Check(game::SameWindow({1, 1, 1}, {1, 2, 2}) && !game::SameWindow({0, 1, 1}, {0, 2, 2}) && !game::SameWindow({0, 1, 1}, {2, 1, 1}), "the same window: Borderless by the mode, the others by the size too");
+    }
 }
 
 int main()
@@ -1197,6 +1304,7 @@ int main()
     {
         const fs::path source = fs::u8path(MYENGINE_SOURCE_DIR);
         TestSettings();
+        TestVideoWindowChange();
         TestScript();
         TestSystem(source);
         TestOnlineVisuals();

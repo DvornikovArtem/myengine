@@ -82,6 +82,7 @@
   include/myengine/game/RlFeedback.h
   include/myengine/game/RlGameFlow.h
   include/myengine/game/RlGameSettings.h
+  include/myengine/game/RlVideoWindowChange.h
   include/myengine/game/RlTrainingStore.h
   include/myengine/ecs/components/FxComponents.h
   include/myengine/ecs/systems/FxSystem.h
@@ -189,6 +190,7 @@ set(ENGINE_SOURCES
   src/game/RlLobbyScreens.cpp
   src/game/RlLobbyScreens.h
   src/game/RlGameSettings.cpp
+  src/game/RlVideoWindowChange.cpp
   src/game/RlTrainingStore.cpp
   src/ecs/systems/FxSystem.cpp
   src/render/dx12/Dx12ScenePass.cpp

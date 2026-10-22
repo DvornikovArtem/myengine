@@ -28,6 +28,7 @@
 #include <myengine/editor/EditorState.h>
 #include <myengine/game/RlCars.h>
 #include <myengine/game/RlTrainingStore.h>
+#include <myengine/game/RlVideoWindowChange.h>
 #include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/ui/UiManager.h>
 #include <myengine/ui/rl/RlUiHost.h>
@@ -208,10 +209,13 @@ namespace myengine::game
             float timer = 0.0f;  // seconds left
             bool clearedHalf = false;
         } rebind;
-        // the video settings that wait for the answer of the player
+        // the video settings that wait for the answer of the player: the window mode and the resolution are chosen and applied apart (RlVideoWindowChange),
+        // videoBackup is what the settings were before APPLY (or before a reset), what Revert brings back
         RlVideoSettings videoBackup;
-        float videoConfirm = 0.0f;
-        bool videoPending = false;
+        RlVideoWindowChange videoWindow;
+        bool askApplyChanges = false;      // "APPLY THE DISPLAY CHANGES?": the Video tab is being left with a choice that was not applied
+        int leaveToTab = -1;               // ... for this tab
+        bool leaveSettingsAfter = false;   // ... or for the way out of Settings
         std::vector<std::pair<std::uint32_t, std::uint32_t>> resolutions;
         bool resolutionsRead = false;
         bool settingsDirty = false;
@@ -278,6 +282,12 @@ namespace myengine::game
             screenTime = 0.0f;
             askQuit = askLeave = askRestart = lobbyAskLeave = false;
             askResetControls = askResetTab = false;
+            askApplyChanges = leaveSettingsAfter = false;
+            leaveToTab = -1;
+            if (!videoWindow.Keeping())
+            {
+                videoWindow.Set({settings.video.windowMode, settings.video.width, settings.video.height});
+            }
             resolutionsRead = false;
             if (next != Screen::Lobby && next != Screen::Loading)
             {
@@ -1598,22 +1608,6 @@ namespace myengine::game
             system.SetCameraSettings(settings.camera.ToTuning(system.CameraSettings()), settings.camera.ballCamHold);
         }
 
-        void ApplyVideo(const bool windowChange)
-        {
-            if (windowChange && !videoPending)
-            {
-                videoPending = true;
-                videoConfirm = 15.0f;
-                videoBackup = pendingBefore;
-            }
-            if (svc.applyVideo)
-            {
-                svc.applyVideo(settings.video);
-            }
-        }
-
-        RlVideoSettings pendingBefore;
-
         // ---- the bindings of the controls: reading and writing the tokens of RlControls
 
         std::vector<std::string> TokensOf(const Slot& slot)
@@ -2012,6 +2006,54 @@ namespace myengine::game
             }
         }
 
+        // The window mode and the resolution of the Video tab wait for APPLY (videoWindow): a choice only changes the shown value. APPLY hands both to the window
+        // once and asks "KEEP THESE SETTINGS?"; the other rows (VSync, the quality, UI scale ...) apply at once and are not asked about.
+        void ApplyWindowChoice()
+        {
+            RlVideoSettings& v = settings.video;
+            const RlVideoSettings before = v;
+            if (!videoWindow.Apply())
+            {
+                return;
+            }
+            videoBackup = before;
+            v.windowMode = videoWindow.Applied().mode;
+            v.width = videoWindow.Applied().width;
+            v.height = videoWindow.Applied().height;
+            if (svc.applyVideo)
+            {
+                svc.applyVideo(v);
+            }
+        }
+
+        // The question was answered with Revert (or the time ran out): the settings and the window are what they were before APPLY
+        void RevertWindowChoice()
+        {
+            settings.video = videoBackup;
+            host.SetUiScale(static_cast<float>(settings.video.uiScalePercent) / 100.0f);
+            if (svc.applyVideo)
+            {
+                svc.applyVideo(settings.video);
+            }
+        }
+
+        // The tab or the screen that was asked for when the question of the unapplied changes came up
+        void FinishVideoLeave(Frame& f)
+        {
+            if (leaveToTab >= 0)
+            {
+                tab = leaveToTab;
+                leaveToTab = -1;
+                nickLoaded = false;
+                f.SetFocus(kNoId);
+            }
+            else if (leaveSettingsAfter)
+            {
+                leaveSettingsAfter = false;
+                LeaveSettings(f);
+            }
+        }
+
         void DrawVideo(Frame& f)
         {
             // asking the display for its modes takes a while: once for each visit of the tab
@@ -2020,39 +2062,46 @@ namespace myengine::game
                 resolutions = svc.resolutions ? svc.resolutions() : std::vector<std::pair<std::uint32_t, std::uint32_t>>{};
                 resolutionsRead = true;
             }
-            RlVideoSettings& v = settings.video;
+            RlVideoSettings& v = settings.video;   // what is applied (this is what the file gets)
             const RlVideoSettings before = v;
+            const RlWindowChoice pending = videoWindow.Pending();
+            const RlWindowChoice applied = videoWindow.Applied();
             f.SetDefaultFocus(HashId("video/mode"));
             Column rows({80.0f, 290.0f, 1100.0f, 64.0f}, 68.0f);
-            const bool locked = videoPending || askResetTab;
+            const bool locked = videoWindow.Keeping() || askResetTab || askApplyChanges;
             const std::string_view modes[] = {"Windowed", "Borderless", "Fullscreen"};
-            const int mode = OptionRow(f, HashId("video/mode"), rows.Next(), "Window mode", Span<std::string_view>(modes), v.windowMode, !locked);
+            const Rect modeRect = rows.Next();
+            const int mode = OptionRow(f, HashId("video/mode"), modeRect, "Window mode", Span<std::string_view>(modes), pending.mode, !locked);
             // the resolution: the sizes the display offers (a windowed window may be any of them; Borderless uses the desktop)
             int index = -1;
             for (size_t i = 0; i < resolutions.size(); ++i)
             {
-                if (resolutions[i].first == static_cast<std::uint32_t>(v.width) && resolutions[i].second == static_cast<std::uint32_t>(v.height))
+                if (resolutions[i].first == static_cast<std::uint32_t>(pending.width) && resolutions[i].second == static_cast<std::uint32_t>(pending.height))
                 {
                     index = static_cast<int>(i);
                 }
             }
-            // Borderless takes the resolution of the desktop: show the window as it is
-            int shownWidth = v.width;
-            int shownHeight = v.height;
-            if (v.windowMode == 1 && svc.windowSize)
+            // Borderless takes the resolution of the desktop: the window as it is when it is Borderless already, the word for it while the mode is only chosen
+            int shownWidth = pending.width;
+            int shownHeight = pending.height;
+            const bool desktopSize = pending.mode == 1;
+            const bool desktopKnown = desktopSize && applied.mode == 1 && svc.windowSize;
+            if (desktopKnown)
             {
                 const auto size = svc.windowSize();
                 shownWidth = static_cast<int>(size.first);
                 shownHeight = static_cast<int>(size.second);
             }
-            std::string resolutionText = Format("%d \xC3\x97 %d", shownWidth, shownHeight);
+            std::string resolutionText = desktopSize && !desktopKnown ? std::string("Desktop") : Format("%d \xC3\x97 %d", shownWidth, shownHeight);
             std::string ratio;
+            if (!desktopSize || desktopKnown)
             {
                 const int w = shownWidth, h = shownHeight;
                 const double aspect = static_cast<double>(w) / static_cast<double>(std::max(h, 1));
                 ratio = std::fabs(aspect - 16.0 / 9.0) < 0.02 ? "16:9" : (std::fabs(aspect - 16.0 / 10.0) < 0.02 ? "16:10" : (std::fabs(aspect - 21.0 / 9.0) < 0.05 ? "21:9" : (std::fabs(aspect - 4.0 / 3.0) < 0.02 ? "4:3" : "")));
             }
-            const int step = StepperRow(f, HashId("video/resolution"), rows.Next(), "Resolution", resolutionText, ratio, v.windowMode != 1 && !locked && !resolutions.empty());
+            const Rect resolutionRect = rows.Next();
+            const int step = StepperRow(f, HashId("video/resolution"), resolutionRect, "Resolution", resolutionText, ratio, pending.mode != 1 && !locked && !resolutions.empty());
             const std::string_view ratesText[] = {"Unlimited", "60", "120", "144", "240"};
             int rateIndex = 0;
             for (int i = 0; i < 5; ++i)
@@ -2068,33 +2117,53 @@ namespace myengine::game
             const bool bloom = ToggleRow(f, HashId("video/bloom"), rows.Next(), "Bloom", v.bloom, !locked);
             const float scale = SliderRow(f, HashId("video/uiscale"), rows.Next(), "UI scale", static_cast<float>(v.uiScalePercent), 75.0f, 125.0f, 5.0f, Format("%d%%", v.uiScalePercent), !locked);
             const bool showFps = ToggleRow(f, HashId("video/fps-overlay"), rows.Next(), "Show FPS", v.showFps, !locked);
+
+            // what is chosen and not applied yet is marked on its row
+            const bool modeChosen = pending.mode != applied.mode;
+            const bool sizeChosen = pending.mode != 1 && (pending.width != applied.width || pending.height != applied.height);
+            if (modeChosen)
+            {
+                Chip(f, {modeRect.x + modeRect.w - 24.0f, modeRect.y + 15.0f}, "NOT APPLIED");
+            }
+            if (sizeChosen)
+            {
+                Chip(f, {resolutionRect.x + resolutionRect.w - 24.0f, resolutionRect.y + 15.0f}, "NOT APPLIED");
+            }
+            const bool dirty = videoWindow.Dirty();
+
             Panel(f, {1258.0f, 290.0f, 600.0f, 220.0f}, false, true);
             Text(f, FontStyle::BlackItalic, 26.0f, {1320.0f, 322.0f}, style::kText, "APPLY");
-            Text(f, FontStyle::SemiBold, 20.0f, {1320.0f, 366.0f}, style::kTextDim, "Window mode and resolution ask to keep the change: it");
-            Text(f, FontStyle::SemiBold, 20.0f, {1320.0f, 392.0f}, style::kTextDim, "reverts in 15 s if you do not confirm.");
+            Text(f, FontStyle::SemiBold, 20.0f, {1320.0f, 366.0f}, style::kTextDim, "Window mode and resolution change only when you");
+            Text(f, FontStyle::SemiBold, 20.0f, {1320.0f, 392.0f}, style::kTextDim, "press APPLY; keep the change in 15 s or it reverts.");
+            const bool applyPressed = ActionButton(f, HashId("video/apply"), {1320.0f, 436.0f, 300.0f, 56.0f}, "APPLY", Icon::Check, dirty && !locked, true);
             if (ActionButton(f, HashId("video/reset"), {1275.0f, 880.0f, 580.0f, 72.0f}, "RESET TO DEFAULTS", Icon::Refresh, !locked))
             {
                 askResetTab = true;
             }
-            Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::LeftRight, Glyph::None, "Change"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+            if (dirty && !locked)
+            {
+                Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::LeftRight, Glyph::None, "Change"}, {Glyph::R, Glyph::PadY, "Apply"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+            }
+            else
+            {
+                Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::LeftRight, Glyph::None, "Change"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+            }
 
             if (!locked)
             {
-                bool windowChange = false;
-                RlVideoSettings next = v;
-                if (mode != v.windowMode)
+                // the window mode and the resolution are only chosen here
+                if (mode != pending.mode)
                 {
-                    next.windowMode = mode;
-                    windowChange = true;
+                    videoWindow.SetPendingMode(mode);
                 }
                 if (step != 0 && !resolutions.empty())
                 {
                     const int from = index < 0 ? static_cast<int>(resolutions.size()) - 1 : index;
                     const int to = std::clamp(from + step, 0, static_cast<int>(resolutions.size()) - 1);
-                    next.width = static_cast<int>(resolutions[static_cast<size_t>(to)].first);
-                    next.height = static_cast<int>(resolutions[static_cast<size_t>(to)].second);
-                    windowChange = windowChange || to != index;
+                    videoWindow.SetPendingSize(static_cast<int>(resolutions[static_cast<size_t>(to)].first), static_cast<int>(resolutions[static_cast<size_t>(to)].second));
                 }
+                // the rest applies at once
+                RlVideoSettings next = v;
                 next.vsync = vsync;
                 next.fpsLimit = kFpsLimits[std::clamp(rate, 0, 4)];
                 next.shadows = shadow;
@@ -2107,34 +2176,65 @@ namespace myengine::game
                     next.uiScalePercent = newScale;
                     host.SetUiScale(static_cast<float>(newScale) / 100.0f);
                 }
-                const bool changed = next.windowMode != before.windowMode || next.width != before.width || next.height != before.height || next.vsync != before.vsync ||
-                                     next.fpsLimit != before.fpsLimit || next.shadows != before.shadows || next.msaa != before.msaa || next.bloom != before.bloom ||
-                                     next.showFps != before.showFps || next.uiScalePercent != before.uiScalePercent;
+                const bool changed = next.vsync != before.vsync || next.fpsLimit != before.fpsLimit || next.shadows != before.shadows || next.msaa != before.msaa ||
+                                     next.bloom != before.bloom || next.showFps != before.showFps || next.uiScalePercent != before.uiScalePercent;
                 if (changed)
                 {
-                    pendingBefore = before;
                     v = next;
-                    ApplyVideo(windowChange && (next.windowMode != before.windowMode || next.width != before.width || next.height != before.height));
-                }
-            }
-
-            if (videoPending)
-            {
-                videoConfirm -= f.DeltaTime();
-                const DialogResult result = ConfirmDialog(f, HashId("video/keep"), {"KEEP THESE SETTINGS?", Format("Reverting in %d s", std::max(static_cast<int>(std::ceil(videoConfirm)), 0)), "Keep", "Revert"});
-                if (result == DialogResult::Confirm)
-                {
-                    videoPending = false;
-                }
-                else if (result == DialogResult::Cancel || videoConfirm <= 0.0f)
-                {
-                    videoPending = false;
-                    v = videoBackup;
-                    host.SetUiScale(static_cast<float>(v.uiScalePercent) / 100.0f);
                     if (svc.applyVideo)
                     {
                         svc.applyVideo(v);
                     }
+                }
+                if (applyPressed || (dirty && f.input().Pressed(Nav::ResetRow)))
+                {
+                    ApplyWindowChoice();
+                }
+            }
+
+            if (videoWindow.Keeping())
+            {
+                const bool timeUp = videoWindow.Tick(f.DeltaTime());
+                DialogResult result = DialogResult::None;
+                if (!timeUp)
+                {
+                    result = ConfirmDialog(f, HashId("video/keep"), {"KEEP THESE SETTINGS?", Format("Reverting in %d s", std::max(static_cast<int>(std::ceil(videoWindow.Remaining())), 0)), "Keep", "Revert"});
+                }
+                if (result == DialogResult::Confirm)
+                {
+                    videoWindow.Keep();
+                    FinishVideoLeave(f);
+                }
+                else if (result == DialogResult::Cancel)
+                {
+                    videoWindow.Revert();
+                    RevertWindowChoice();
+                    FinishVideoLeave(f);
+                }
+                else if (timeUp)
+                {
+                    // (Tick has reverted the window)
+                    RevertWindowChoice();
+                    FinishVideoLeave(f);
+                }
+            }
+            else if (askApplyChanges)
+            {
+                const DialogResult result = ConfirmDialog(f, HashId("video/apply-dialog"), {"APPLY THE DISPLAY CHANGES?", "The window mode or the resolution was changed and not applied.", "Apply", "Discard"});
+                if (result == DialogResult::Confirm)
+                {
+                    askApplyChanges = false;
+                    ApplyWindowChoice();   // the question of Keep / Revert comes, the tab or the screen that was asked for follows it
+                    if (!videoWindow.Keeping())
+                    {
+                        FinishVideoLeave(f);
+                    }
+                }
+                else if (result == DialogResult::Cancel)
+                {
+                    askApplyChanges = false;
+                    videoWindow.Discard();
+                    FinishVideoLeave(f);
                 }
             }
             else if (askResetTab)
@@ -2142,10 +2242,25 @@ namespace myengine::game
                 const DialogResult result = ConfirmDialog(f, HashId("video/reset-dialog"), {"RESET THE VIDEO SETTINGS?", "The window and the quality return to the defaults.", "Reset", "Cancel"});
                 if (result == DialogResult::Confirm)
                 {
-                    pendingBefore = v;
-                    v = RlVideoSettings{};
+                    const RlVideoSettings defaults{};
+                    const RlVideoSettings old = v;
+                    // the quality at once, the window through the question: the file keeps the applied window until Keep
+                    v = defaults;
+                    v.windowMode = old.windowMode;
+                    v.width = old.width;
+                    v.height = old.height;
                     host.SetUiScale(1.0f);
-                    ApplyVideo(true);
+                    videoWindow.SetPendingMode(defaults.windowMode);
+                    videoWindow.SetPendingSize(defaults.width, defaults.height);
+                    ApplyWindowChoice();   // (sets videoBackup to `v`, the defaults: the revert must bring `old` back)
+                    if (videoWindow.Keeping())
+                    {
+                        videoBackup = old;
+                    }
+                    else if (svc.applyVideo)
+                    {
+                        svc.applyVideo(v);
+                    }
                     askResetTab = false;
                 }
                 else if (result == DialogResult::Cancel)
@@ -2237,11 +2352,17 @@ namespace myengine::game
             static const char* const kTitles[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO", "PLAYER"};
             ScreenTitle(f, "SETTINGS", kTitles[std::clamp(tab, 0, 4)]);
             const std::string_view labels[] = {"CONTROLS", "CAMERA", "VIDEO", "AUDIO", "PLAYER"};
-            const bool dialogOpen = rebind.active || askResetControls || askResetTab || videoPending;
+            const bool dialogOpen = rebind.active || askResetControls || askResetTab || videoWindow.Keeping() || askApplyChanges;
             if (!dialogOpen)
             {
                 const int next = Tabs(f, HashId("settings/tabs"), {75.0f, 200.0f, 880.0f, 54.0f}, Span<std::string_view>(labels), tab);
-                if (next != tab)
+                if (next != tab && tab == 2 && videoWindow.Dirty())
+                {
+                    // leaving the Video tab with a window mode or a resolution that was not applied: ask first
+                    leaveToTab = next;
+                    askApplyChanges = true;
+                }
+                else if (next != tab)
                 {
                     tab = next;
                     nickLoaded = false;
@@ -2262,7 +2383,15 @@ namespace myengine::game
             }
             if (!dialogOpen && f.input().Pressed(Nav::Back) && !rebind.active)
             {
-                LeaveSettings(f);
+                if (tab == 2 && videoWindow.Dirty())
+                {
+                    leaveSettingsAfter = true;
+                    askApplyChanges = true;
+                }
+                else
+                {
+                    LeaveSettings(f);
+                }
             }
         }
 
@@ -2294,6 +2423,7 @@ namespace myengine::game
         Impl& d = *impl_;
         d.LoadSettings();
         d.settings.Clamp();
+        d.videoWindow.Set({d.settings.video.windowMode, d.settings.video.width, d.settings.video.height});
         if (d.svc.setLighting)
         {
             d.menuLighting = true;
