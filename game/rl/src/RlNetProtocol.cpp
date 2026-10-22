@@ -379,6 +379,20 @@ namespace rl
         w.U8(static_cast<uint8_t>(msg.slot));
         w.U8(msg.a);
         w.U32(msg.mask);
+        w.U8(static_cast<uint8_t>(msg.other));
+        w.U16(msg.value);
+    }
+
+    void RlEncode(const RlNamesMsg& msg, std::vector<uint8_t>& out)
+    {
+        Writer w(out);
+        w.U8(static_cast<uint8_t>(RlMsg::Names));
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            const size_t length = std::min(msg.names[slot].size(), static_cast<size_t>(kNameBytes - 1));
+            w.U8(static_cast<uint8_t>(length));
+            w.Bytes(reinterpret_cast<const uint8_t*>(msg.names[slot].data()), length);
+        }
     }
 
     void RlEncode(const RlSnapshotMsg& msg, std::vector<uint8_t>& out)
@@ -401,6 +415,8 @@ namespace rl
         w.U8(static_cast<uint8_t>(world.match.overtime != 0 ? 1 : 0));
         w.F32(world.match.clock);
         w.F32(world.match.phaseTimer);
+        w.F32(world.match.lastGoalSpeed);
+        w.U8(static_cast<uint8_t>(world.match.lastGoalAssist + 1));
         w.U8(static_cast<uint8_t>(world.lastBallToucher + 1));
         PutBody(w, world.ball.position, world.ball.rotation, world.ball.linearVelocity, world.ball.angularVelocity);
 
@@ -419,6 +435,12 @@ namespace rl
             flags |= car.canDodge ? kCanDodge : 0;
             flags |= car.dodging ? kDodging : 0;
             w.U8(flags);
+            w.U16(static_cast<uint16_t>(std::clamp(world.match.points[i], 0, 65535)));
+            w.U8(static_cast<uint8_t>(std::clamp(world.match.goals[i], 0, 255)));
+            w.U8(static_cast<uint8_t>(std::clamp(world.match.assists[i], 0, 255)));
+            w.U8(static_cast<uint8_t>(std::clamp(world.match.saves[i], 0, 255)));
+            w.U8(static_cast<uint8_t>(std::clamp(world.match.shots[i], 0, 255)));
+            w.U8(static_cast<uint8_t>(std::clamp(world.match.demos[i], 0, 255)));
         }
 
         const int window = std::clamp(msg.inputCount, 0, kNetInputWindow);
@@ -521,6 +543,30 @@ namespace rl
         msg.slot = static_cast<int8_t>(r.U8());
         msg.a = r.U8();
         msg.mask = r.U32();
+        msg.other = static_cast<int8_t>(r.U8());
+        msg.value = r.U16();
+        return r.Ok();
+    }
+
+    bool RlDecode(const uint8_t* data, size_t size, RlNamesMsg& msg)
+    {
+        Reader r(data, size);
+        if (r.U8() != static_cast<uint8_t>(RlMsg::Names))
+        {
+            return false;
+        }
+        msg = RlNamesMsg{};
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            const size_t length = r.U8();
+            if (length > static_cast<size_t>(kNameBytes - 1))
+            {
+                return false;
+            }
+            char name[kNameBytes] = {};
+            r.Bytes(reinterpret_cast<uint8_t*>(name), length);
+            msg.names[slot].assign(name, length);
+        }
         return r.Ok();
     }
 
@@ -549,6 +595,8 @@ namespace rl
         world.match.overtime = r.U8();
         world.match.clock = r.F32();
         world.match.phaseTimer = r.F32();
+        world.match.lastGoalSpeed = r.F32();
+        world.match.lastGoalAssist = static_cast<int>(r.U8()) - 1;
         world.lastBallToucher = static_cast<int>(r.U8()) - 1;
         GetBody(r, world.ball.position, world.ball.rotation, world.ball.linearVelocity, world.ball.angularVelocity);
 
@@ -570,6 +618,12 @@ namespace rl
             car.jumped = (flags & kJumped) != 0;
             car.canDodge = (flags & kCanDodge) != 0;
             car.dodging = (flags & kDodging) != 0;
+            world.match.points[i] = r.U16();
+            world.match.goals[i] = r.U8();
+            world.match.assists[i] = r.U8();
+            world.match.saves[i] = r.U8();
+            world.match.shots[i] = r.U8();
+            world.match.demos[i] = r.U8();
         }
         for (int i = 0; i < kPadCount; ++i)
         {

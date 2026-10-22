@@ -53,6 +53,14 @@ namespace rl
 
     // ------------------------------------------------------------------------------------------------------------------------------
 
+    // A guest of the host, for the lobby of a private match
+    struct RlNetPeerInfo
+    {
+        int slot = -1;
+        std::string name;
+        double rttMs = 0.0;
+    };
+
     struct RlNetHostOptions
     {
         RlMatchConfig match;      // mode, seed, botLevel; humanMask is made from the players
@@ -76,6 +84,7 @@ namespace rl
 
         void SetLocalInput(const RlCarInput& input);  // the player of the host (slot 0)
         int ClientCount() const;
+        std::vector<RlNetPeerInfo> Peers() const;  // the guests that have a slot
         uint32_t HumanMask() const;
         // How far (0..1) the clock is into the tick that is being waited for: what the host draws interpolates by it.
         float TickFraction() const;
