@@ -1,0 +1,82 @@
+{
+  "name": "stress_5000",
+  "comment": "A load for the measurements: 5000 live additive particles, steadily.",
+  "emitters": [
+    {
+      "name": "cloud",
+      "blend": "additive",
+      "frame": 0,
+      "loop": true,
+      "rate": 2500,
+      "maxParticles": 5000,
+      "shape": "sphere",
+      "shapeRadius": 10,
+      "lifetime": [
+        1.8,
+        2.2
+      ],
+      "speed": [
+        0.5,
+        3
+      ],
+      "drag": 0.4,
+      "gravity": [
+        0,
+        0.3,
+        0
+      ],
+      "size": [
+        0.3,
+        0.6
+      ],
+      "sizeOverLife": [
+        [
+          0,
+          0.3
+        ],
+        [
+          0.3,
+          1
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "intensity": 1.2,
+      "rotation": [
+        0,
+        360
+      ],
+      "color": [
+        [
+          0,
+          [
+            0.4,
+            0.7,
+            1,
+            0.5
+          ]
+        ],
+        [
+          0.5,
+          [
+            1,
+            0.6,
+            0.3,
+            0.5
+          ]
+        ],
+        [
+          1,
+          [
+            1,
+            0.3,
+            0.6,
+            0
+          ]
+        ]
+      ]
+    }
+  ]
+}

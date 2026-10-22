@@ -527,6 +527,23 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
         return result.program->layout;
     }
 
+    // The particle shader of the fx module (G7c): its materials use its parameters by name
+    ShaderLayout ParticleLayout()
+    {
+        static dx12::ShaderReflector reflector;
+        ShaderProgramData program = Entries();
+        program.sourcePath = SourceDirectory() / "assets/shaders/particle.hlsl";
+        const dx12::ShaderCompileResult result = reflector.CompileProgram(program);
+        Check(result.ok && result.program != nullptr, "particle.hlsl compiles");
+        return result.program->layout;
+    }
+
+    bool UsesParticleShader(const std::string& shaderPath)
+    {
+        const std::size_t length = std::strlen("/particle.shader.json");
+        return shaderPath.size() >= length && shaderPath.compare(shaderPath.size() - length, length, "/particle.shader.json") == 0;
+    }
+
     bool UsesLitShader(const std::string& shaderPath)
     {
         const auto ends = [&](const char* suffix) { return shaderPath.size() >= std::strlen(suffix) && shaderPath.compare(shaderPath.size() - std::strlen(suffix), std::strlen(suffix), suffix) == 0; };
@@ -537,6 +554,7 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
     {
         const ShaderLayout layout = TexturedLitLayout();
         const ShaderLayout litLayout = LitLayout();
+        const ShaderLayout particleLayout = ParticleLayout();
         Harness harness;
         std::size_t count = 0;
         for (const auto& entry : fs::recursive_directory_iterator(SourceDirectory() / "assets/materials"))
@@ -557,6 +575,16 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
                 Check(litMessages.empty(), "a lit material applies to lit.hlsl without a message: " + name + "\n" + Joined(litMessages));
                 Check(!asset.texturePath.empty() && litParams.FindTexture("gTexture")->texture.IsValid(), "'texture' reached gTexture of lit: " + name);
                 Check(!asset.params.empty(), "a lit material sets its parameters: " + name);
+                ++count;
+                continue;
+            }
+            if (UsesParticleShader(asset.shaderPath))
+            {
+                // A particle material (G7c): its parameters are names of particle.hlsl, all of them apply without a message
+                MaterialParams particleParams(particleLayout);
+                const auto particleMessages = ApplyMaterialValues(particleParams, resource::ToMaterialValues(asset), Resolver());
+                Check(particleMessages.empty(), "a particle material applies to particle.hlsl without a message: " + name + "\n" + Joined(particleMessages));
+                Check(!asset.texturePath.empty() && particleParams.FindTexture("gTexture")->texture.IsValid(), "'texture' reached gTexture of particle: " + name);
                 ++count;
                 continue;
             }

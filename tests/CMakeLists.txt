@@ -419,3 +419,49 @@ if(MYENGINE_ASAN)
     endif()
   endforeach()
 endif()
+
+
+# G7c: the audio module without a sound device: WAV, 3D, the pool of voices, buses, fades, the sound bank, the sounds of the project
+add_executable(myengine_audio_tests
+  audio/AudioTests.cpp)
+
+target_link_libraries(myengine_audio_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_audio_tests)
+set_property(TARGET myengine_audio_tests PROPERTY FOLDER "Tests")
+add_test(NAME audio COMMAND myengine_audio_tests)
+set_tests_properties(audio PROPERTIES TIMEOUT 120)
+
+
+# G7c: the particle simulation without a renderer: presets, bursts and rates, the budget, batches, the cost of 5000 particles
+add_executable(myengine_fx_tests
+  fx/FxTests.cpp)
+
+target_link_libraries(myengine_fx_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_fx_tests)
+set_property(TARGET myengine_fx_tests PROPERTY FOLDER "Tests")
+add_test(NAME fx COMMAND myengine_fx_tests)
+set_tests_properties(fx PROPERTIES TIMEOUT 120)
+
+
+# G7d: the sounds and effects of a Rocket League match from the state of the simulation: events of pairs of ticks, no doubles after a
+# rollback, the commands that reach the audio and particle systems (no device, no renderer), a bot match with the journal
+add_executable(myengine_rl_feedback_tests
+  rl/RlFeedbackTests.cpp)
+
+target_link_libraries(myengine_rl_feedback_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_feedback_tests)
+set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
+set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
+
+
+# G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery
+add_executable(myengine_rl_ui_tests
+  ui/RlUiTests.cpp)
+
+target_link_libraries(myengine_rl_ui_tests PRIVATE myengine_engine)
+target_include_directories(myengine_rl_ui_tests PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_rl_ui_tests)
+set_property(TARGET myengine_rl_ui_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_ui COMMAND myengine_rl_ui_tests)
+set_tests_properties(rl_ui PROPERTIES TIMEOUT 120)

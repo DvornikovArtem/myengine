@@ -16,6 +16,7 @@
   include/myengine/core/Application.h
   include/myengine/core/FileWatcher.h
   include/myengine/core/Logger.h
+  include/myengine/core/AppPaths.h
   include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -69,6 +70,15 @@
   include/myengine/render/GpuCapture.h
   include/myengine/render/GpuStats.h
   include/myengine/render/dx12/Dx12RenderAdapter.h
+  include/myengine/audio/AudioSpatial.h
+  include/myengine/audio/AudioSystem.h
+  include/myengine/audio/AudioTypes.h
+  include/myengine/audio/WavFile.h
+  include/myengine/fx/ParticleEffect.h
+  include/myengine/fx/ParticleSystem.h
+  include/myengine/game/RlFeedback.h
+  include/myengine/ecs/components/FxComponents.h
+  include/myengine/ecs/systems/FxSystem.h
   include/myengine/render/dx12/InputLayoutBuilder.h
   include/myengine/render/dx12/RootSignatureBuilder.h
   include/myengine/render/dx12/ShaderLayoutDump.h
@@ -91,6 +101,16 @@
   include/myengine/ui/ScriptConsole.h
   include/myengine/ui/ScriptInspector.h
   include/myengine/ui/UiManager.h
+  include/myengine/ui/rl/RlUiCommon.h
+  include/myengine/ui/rl/RlUiFonts.h
+  include/myengine/ui/rl/RlUiFrame.h
+  include/myengine/ui/rl/RlUiGallery.h
+  include/myengine/ui/rl/RlUiHost.h
+  include/myengine/ui/rl/RlUiHud.h
+  include/myengine/ui/rl/RlUiInput.h
+  include/myengine/ui/rl/RlUiPaint.h
+  include/myengine/ui/rl/RlUiTheme.h
+  include/myengine/ui/rl/RlUiWidgets.h
 )
 
 set(ENGINE_SOURCES
@@ -108,6 +128,7 @@ set(ENGINE_SOURCES
   src/assistant/CodexStreamParser.cpp
   src/assistant/Markdown.cpp
   src/config/AppConfig.cpp
+  src/core/AppPaths.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/Logger.cpp
@@ -143,6 +164,16 @@ set(ENGINE_SOURCES
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp
+  src/audio/AudioBackend.h
+  src/audio/AudioSpatial.cpp
+  src/audio/AudioSystem.cpp
+  src/audio/NullAudioBackend.cpp
+  src/audio/WavFile.cpp
+  src/audio/XAudio2Backend.cpp
+  src/fx/ParticleEffect.cpp
+  src/fx/ParticleSystem.cpp
+  src/game/RlFeedback.cpp
+  src/ecs/systems/FxSystem.cpp
   src/render/dx12/Dx12ScenePass.cpp
   src/render/dx12/InputLayoutBuilder.cpp
   src/render/dx12/RootSignatureBuilder.cpp
@@ -197,6 +228,15 @@ set(ENGINE_SOURCES
   src/ui/ScriptConsole.cpp
   src/ui/ScriptInspector.cpp
   src/ui/UiManager.cpp
+  src/ui/rl/RlUiFonts.cpp
+  src/ui/rl/RlUiFrame.cpp
+  src/ui/rl/RlUiGallery.cpp
+  src/ui/rl/RlUiHost.cpp
+  src/ui/rl/RlUiHud.cpp
+  src/ui/rl/RlUiInput.cpp
+  src/ui/rl/RlUiInternal.h
+  src/ui/rl/RlUiPaint.cpp
+  src/ui/rl/RlUiWidgets.cpp
 )
 
 set(ENGINE_OWN_HEADERS ${ENGINE_HEADERS})
@@ -248,9 +288,12 @@ target_include_directories(myengine_engine
     ${IMGUIZMO_ROOT}
     ${CMAKE_SOURCE_DIR}/external/renderdoc)
 
-target_compile_definitions(myengine_engine
-  PUBLIC
-    MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# A shipping build knows no repository (core::apppaths::SourceRoot() is empty) and keeps its files in %LOCALAPPDATA%
+if(MYENGINE_SHIPPING)
+  target_compile_definitions(myengine_engine PUBLIC MYENGINE_SHIPPING)
+else()
+  target_compile_definitions(myengine_engine PUBLIC MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+endif()
 
 target_link_libraries(myengine_engine
   PUBLIC
@@ -274,6 +317,7 @@ target_link_libraries(myengine_engine
     comdlg32
     shell32
     xinput
+    xaudio2
     TracyClient
     myengine_rl
   PRIVATE
