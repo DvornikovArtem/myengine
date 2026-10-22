@@ -23,6 +23,7 @@
 #include <myengine/editor/EditorState.h>
 #include <myengine/fx/ParticleSystem.h>
 #include <myengine/game/RlFeedback.h>
+#include <myengine/game/RlTrainingStore.h>
 #include <myengine/input/InputManager.h>
 #include <myengine/ui/rl/RlUiInput.h>
 
@@ -30,6 +31,8 @@
 #include <rl/RlControls.h>
 #include <rl/RlMatch.h>
 #include <rl/RlNet.h>
+#include <rl/RlTraining.h>
+#include <rl/RlTrainingAutopilot.h>
 #include <rl/net/NetReliable.h>
 
 #include <tracy/Tracy.hpp>
@@ -197,6 +200,11 @@ namespace myengine::ecs::systems
         std::string playerName = "Player";
         bool autoNetDone = false;        // --rl-host / --rl-join in the game mode start the network at once
         bool previewActive = false;      // Settings > Camera: the scene shows the practice field seen through the settings
+        // The training (G4g): in the game mode it takes the place of the match; the keys of the exercise are read from the keys that went down this frame
+        std::unique_ptr<rl::RlTraining> training;
+        std::unique_ptr<rl::RlTrainingAutopilot> autopilot;   // the debug command "autopilot": a bot drives the car
+        bool autopilotOn = false;
+        rl::RlRawInput trainingPressed;
         bool previewWanted = false;
         float previewTime = 0.0f;
         float connectingFor = 0.0f;
@@ -692,6 +700,7 @@ namespace myengine::ecs::systems
 
             if (gameMode)
             {
+                trainingPressed = pressed;
                 UpdateGame(world, deltaTime, state, justPressed, ballCamPressed, menuPressed);
                 return;
             }
@@ -767,10 +776,14 @@ namespace myengine::ecs::systems
 
         void ApplyToScene(World& world, const float deltaTime)
         {
+            // the match (or the network), or the training when there is no match
             const rl::RlMatch* view = View();
             float alpha = std::clamp(accumulator / rl::kTickDt, 0.0f, 1.0f);
-            const rl::RlWorldState* nowWorld = &view->World();
-            const rl::RlWorldState* beforeWorld = &view->PreviousWorld();
+            const rl::RlWorldState* nowWorld = view != nullptr ? &view->World() : &training->World();
+            const rl::RlWorldState* beforeWorld = view != nullptr ? &view->PreviousWorld() : &training->PreviousWorld();
+            const rl::RlTuning& t = view != nullptr ? view->Tuning() : training->Tuning();
+            const rl::RlSim& sim = view != nullptr ? view->Sim() : training->Sim();
+            const int slotCount = view != nullptr ? view->SlotCount() : nowWorld->carCount;
             rl::RlWorldState clientWorld;
             if (netClient != nullptr)
             {
@@ -785,14 +798,13 @@ namespace myengine::ecs::systems
             }
             const rl::RlWorldState& now = *nowWorld;
             const rl::RlWorldState& before = *beforeWorld;
-            const rl::RlTuning& t = view->Tuning();
-            const int teamSize = std::max(view->SlotCount() / 2, 1);
+            const int teamSize = std::max(slotCount / 2, 1);
 
             dx::XMVECTOR playerPosition = dx::XMVectorZero();
             dx::XMVECTOR playerRotation = dx::XMQuaternionIdentity();
 
             effectTime += deltaTime;
-            for (int slot = 0; slot < view->SlotCount(); ++slot)
+            for (int slot = 0; slot < slotCount; ++slot)
             {
                 const rl::RlCarState& a = before.cars[slot];
                 const rl::RlCarState& b = now.cars[slot];
@@ -805,7 +817,7 @@ namespace myengine::ecs::systems
                     playerPosition = position;
                     playerRotation = rotation;
                 }
-                const int team = view->Team(slot);
+                const int team = view != nullptr ? view->Team(slot) : slot;   // a training: the player is blue, the bot of a kick-off orange
                 const int index = slot % teamSize;
                 const bool shown = !b.demolished;
                 const Vec3 eulerRotation = EulerDegrees(rotation);
@@ -862,6 +874,19 @@ namespace myengine::ecs::systems
                 }
             }
 
+            // a training with one car: the orange car of the kick-off exercises is not there
+            for (int slot = view != nullptr ? 2 : slotCount; slot < 2; ++slot)
+            {
+                for (const EntityId part : {cars[slot][0], lights[slot][0], boosts[slot][0]})
+                {
+                    SetVisible(world, part, false);
+                }
+                for (int w = 0; w < rl::kWheelCount; ++w)
+                {
+                    SetVisible(world, wheels[slot][0][w], false);
+                }
+            }
+
             dx::XMVECTOR ballPosition;
             {
                 const rl::RlBallState& a = before.ball;
@@ -885,7 +910,8 @@ namespace myengine::ecs::systems
             // the pads: lit while they wait for a car (a big pad keeps its plate and loses the orb)
             for (int i = 0; i < rl::kPadCount; ++i)
             {
-                const bool ready = now.match.pads[i].respawnLeft <= 0.0f;
+                // a training has pads only in a kick-off (the match behind it); the free play and the drills have none to take
+                const bool ready = now.match.pads[i].respawnLeft <= 0.0f && (view != nullptr || now.match.mode != 0);
                 if (orbs[i] != kInvalidEntity)
                 {
                     SetVisible(world, orbs[i], ready);
@@ -904,7 +930,7 @@ namespace myengine::ecs::systems
                 SetVisible(world, marker, !now.cars[localSlot].demolished);
             }
 
-            UpdateCamera(world, deltaTime, now.cars[localSlot], playerPosition, playerRotation, ballPosition, *view);
+            UpdateCamera(world, deltaTime, now.cars[localSlot], playerPosition, playerRotation, ballPosition, t, sim);
             if (feedback != nullptr && !previewActive)
             {
                 feedback->Frame(deltaTime, before, now, alpha);
@@ -914,7 +940,7 @@ namespace myengine::ecs::systems
         // The camera of Rocket League (game/rl RlCamera): behind the car, over it at the ball (ball cam), the up follows the surface, and it
         // is pulled in so that it stays inside the arena.
         void UpdateCamera(World& world, const float deltaTime, const rl::RlCarState& car, dx::FXMVECTOR carPosition, dx::FXMVECTOR carRotation,
-                          dx::FXMVECTOR ballPosition, const rl::RlMatch& view)
+                          dx::FXMVECTOR ballPosition, const rl::RlTuning& arenaTuning, const rl::RlSim& sim)
         {
             if (camera == kInvalidEntity)
             {
@@ -937,8 +963,8 @@ namespace myengine::ecs::systems
             in.ballPosition = {b.x, b.y, b.z};
             in.ballCam = ballCam;
             // the player's own camera (Settings > Camera) when the game mode has set it, else the numbers of rl_tuning.json
-            const rl::RlCameraTuning& cameraTuning = haveCameraSettings ? cameraSettings : view.Tuning().camera;
-            const rl::RlCameraView cameraView = rl::RlCameraUpdate(cameraTuning, cameraState, view.Sim(), in, std::min(deltaTime, 0.1f));
+            const rl::RlCameraTuning& cameraTuning = haveCameraSettings ? cameraSettings : arenaTuning.camera;
+            const rl::RlCameraView cameraView = rl::RlCameraUpdate(cameraTuning, cameraState, sim, in, std::min(deltaTime, 0.1f));
 
             dx::XMMATRIX basis;
             basis.r[0] = dx::XMVectorSet(cameraView.right.x, cameraView.right.y, cameraView.right.z, 0.0f);
@@ -1248,6 +1274,9 @@ namespace myengine::ecs::systems
             (void)world;
             previewActive = false;
             match.reset();
+            training.reset();
+            autopilot.reset();
+            autopilotOn = false;
             StopOnline();
             if (feedback != nullptr)
             {
@@ -1344,9 +1373,14 @@ namespace myengine::ecs::systems
             }
             setup.playerName = playerName;
             status_.setup = setup;
-            status_.online = setup.kind != RlGameMatchSetup::Kind::Offline;
+            status_.online = setup.kind == RlGameMatchSetup::Kind::Host || setup.kind == RlGameMatchSetup::Kind::Join;
             status_.isHost = setup.kind != RlGameMatchSetup::Kind::Join;
             status_.error.clear();
+            if (setup.kind == RlGameMatchSetup::Kind::Training)
+            {
+                StartTraining(world, setup);
+                return;
+            }
             if (setup.kind == RlGameMatchSetup::Kind::Offline)
             {
                 menuMode = std::clamp(setup.mode, 0, 4);
@@ -1709,6 +1743,229 @@ namespace myengine::ecs::systems
             }
         }
 
+        // ---- the training (G4g, docs/game/rl-training.md): in the game mode free play and the packs of exercises take the place of the match
+
+        // Begins free play (no pack) or a pack of exercises; a pack that is not there fails like a network that is not there
+        void StartTraining(World& world, const RlGameMatchSetup& setup)
+        {
+            training = std::make_unique<rl::RlTraining>(tuning);
+            game::AttachTrainingResults(*training);
+            autopilot.reset();
+            autopilotOn = false;
+            if (!setup.trainingPack.empty())
+            {
+                const std::vector<rl::RlTrainingPack> packs = game::LoadTrainingPacks();
+                const auto it = std::find_if(packs.begin(), packs.end(), [&](const rl::RlTrainingPack& pack) { return pack.id == setup.trainingPack; });
+                if (it == packs.end() || !training->StartPack(*it, setup.trainingExercise))
+                {
+                    training.reset();
+                    status_.error = "The training pack \"" + setup.trainingPack + "\" is not in assets/data/training.";
+                    status_.stage = RlGameStage::Failed;
+                    EnterPodium(world, 0);
+                    return;
+                }
+            }
+            mode = Mode::Match;
+            accumulator = 0.0f;
+            cameraState = rl::RlCameraState{};
+            menuMode = 1;  // the blue car and the orange one (hidden while the exercise has no bot): BeginMatchVisuals shows both
+            BeginMatchVisuals(world);
+            if (feedback != nullptr)
+            {
+                feedback->StartMatch(0);
+                feedback->SetOwnSlot(0);
+            }
+            localSlot = 0;
+            status_.localSlot = 0;
+            paused = false;
+            status_.stage = RlGameStage::Playing;
+        }
+
+        // The keys of the training: R / N / P / T / C / B and the D-pad (the car takes the keys of the controls, the pad buttons of the
+        // controls are the face buttons, the bumpers and the sticks' roll)
+        void TrainingKeys()
+        {
+            const auto key = [&](const char c) { return trainingPressed.keys[static_cast<unsigned char>(c)]; };
+            const auto pad = [&](const rl::RlPadButton button) { return (trainingPressed.padButtons & (1u << static_cast<unsigned>(button))) != 0; };
+            if (training->Mode() == rl::RlTrainingMode::FreePlay)
+            {
+                if (key('R') || pad(rl::PadDpadUp))
+                {
+                    training->ResetBallToCar();
+                }
+                if (key('T') || pad(rl::PadDpadDown))
+                {
+                    training->BallInAir();
+                }
+                if (key('C') || pad(rl::PadDpadLeft))
+                {
+                    training->ResetCar();
+                }
+                if (key('B') || pad(rl::PadLeftStick))
+                {
+                    training->SetInfiniteBoost(!training->InfiniteBoost());
+                }
+                return;
+            }
+            if (key('R') || pad(rl::PadDpadUp))
+            {
+                training->Retry();
+            }
+            if (key('N') || pad(rl::PadDpadRight))
+            {
+                training->Next();
+            }
+            if (key('P') || pad(rl::PadDpadLeft))
+            {
+                training->Previous();
+            }
+        }
+
+        // The commands of the tests in a training: the bot drives, the keys of the exercise
+        void RunTrainingCommands()
+        {
+            std::vector<std::string> commands;
+            commands.swap(debugCommands);
+            for (const std::string& command : commands)
+            {
+                if (command == "autopilot")
+                {
+                    autopilot = std::make_unique<rl::RlTrainingAutopilot>(tuning, 2, 1);
+                    autopilotOn = true;
+                }
+                else if (command == "autopilot-off")
+                {
+                    autopilotOn = false;
+                }
+                else if (command == "next")
+                {
+                    training->Next();
+                }
+                else if (command == "previous")
+                {
+                    training->Previous();
+                }
+                else if (command == "retry")
+                {
+                    training->Retry();
+                }
+                else if (command == "boost")
+                {
+                    training->MutableSim().SetCarBoost(0, 100.0f);
+                }
+            }
+        }
+
+        // One frame of the training: the keys, the ticks, the scene, the HUD
+        void UpdateTraining(World& world, const float deltaTime, const rl::RlCarInput& player)
+        {
+            RunTrainingCommands();
+            if (!paused)
+            {
+                TrainingKeys();
+                accumulator += std::min(deltaTime, 0.1f);
+                while (accumulator >= rl::kTickDt)
+                {
+                    accumulator -= rl::kTickDt;
+                    rl::RlCarInput drive = latch.Take(player);
+                    if (autopilotOn && autopilot != nullptr)
+                    {
+                        if (training->Phase() == rl::RlTrainingPhase::Ready)
+                        {
+                            autopilot->Reset();
+                            drive = rl::RlCarInput{};
+                        }
+                        else
+                        {
+                            if (const rl::RlTrainingExercise* exercise = training->CurrentExercise())
+                            {
+                                autopilot->SetStyleFor(*exercise);
+                            }
+                            drive = autopilot->Think(training->World());
+                        }
+                    }
+                    training->Step(drive);
+                    if (feedback != nullptr)
+                    {
+                        feedback->OnTick(training->PreviousWorld(), training->World());
+                    }
+                }
+            }
+            ApplyToScene(world, paused ? 0.0001f : deltaTime);
+            BuildTrainingStatus(deltaTime, lastPlayer.boost);
+        }
+
+        void BuildTrainingStatus(const float deltaTime, const bool boostHeld)
+        {
+            const rl::RlWorldState& w = training->World();
+            const rl::RlCarState& car = w.cars[0];
+            const rl::RlTrainingInfo info = training->Info();
+            const rl::RlTrainingExercise* exercise = training->CurrentExercise();
+            rlui::HudState& h = status_.hud;
+            // a kick-off has the countdown of its match (3 2 1 GO); the other exercises wait with GET READY instead
+            const bool countdown = exercise != nullptr && exercise->kickoff;
+            h.phase = countdown ? static_cast<rlui::HudPhase>(static_cast<int>(w.match.phase)) : rlui::HudPhase::Playing;
+            h.phaseTimer = countdown ? w.match.phaseTimer : 0.0f;
+            h.clock = 0.0f;
+            h.overtime = false;
+            h.mode = 0;
+            h.score[0] = h.score[1] = 0;
+            h.boost = car.boost;
+            if (car.boost < previousBoost - 1e-3f || (boostHeld && car.boost > 0.0f))
+            {
+                boostHold = 0.12f;
+            }
+            else
+            {
+                boostHold = std::max(0.0f, boostHold - deltaTime);
+            }
+            previousBoost = car.boost;
+            h.boosting = boostHold > 0.0f && !car.demolished;
+            h.demolished = car.demolished;
+            h.respawnTimer = car.respawnTimer;
+            h.ballCam = ballCam;
+            h.ballCamKey = status_.ballCamKey.empty() ? "Space" : status_.ballCamKey;
+            h.localPlayer = 0;
+            h.players.assign(1, rlui::HudPlayer{});
+            h.players[0].name = playerName;
+            h.pingMs = -1;
+            status_.localSlot = 0;
+            status_.ballCam = ballCam;
+            status_.matchSeconds = static_cast<double>(w.tick) * static_cast<double>(rl::kTickDt);
+
+            rlui::HudTraining& t = h.training;
+            t.active = true;
+            t.phase = info.mode == rl::RlTrainingMode::FreePlay ? rlui::HudTrainingPhase::FreePlay : static_cast<rlui::HudTrainingPhase>(static_cast<int>(info.phase));
+            t.pack = info.packName;
+            t.exercise = info.exerciseName;
+            t.hint = info.hint;
+            t.index = info.exerciseIndex;
+            t.count = info.exerciseCount;
+            t.attempt = info.attempt;
+            t.attempts = info.attempts;
+            t.timeLeft = info.timeLeft;
+            t.timeLimit = info.timeLimit;
+            t.elapsed = info.elapsed;
+            t.bannerTime = info.bannerTime;
+            switch (info.missReason)
+            {
+            case rl::RlTrainingMiss::TimeUp: t.missReason = "TIME UP"; break;
+            case rl::RlTrainingMiss::OwnGoal: t.missReason = "OWN GOAL"; break;
+            case rl::RlTrainingMiss::LostKickoff: t.missReason = "LOST KICK-OFF"; break;
+            case rl::RlTrainingMiss::None: t.missReason.clear(); break;
+            }
+            t.outOfAttempts = info.outOfAttempts;
+            t.newBest = info.newBest;
+            t.hits = info.hits;
+            t.lastHitKmh = info.lastHitSpeed * 3.6f;
+            t.bestHitKmh = info.bestHitSpeed * 3.6f;
+            t.maxTouchHeight = info.maxTouchHeight;
+            t.infiniteBoost = info.infiniteBoost;
+            t.recordTime = info.best.bestTime;
+            t.recordHitKmh = info.best.bestHitSpeed * 3.6f;
+            t.done = info.packDoneSuccesses;
+        }
+
         void UpdateGame(World& world, const float deltaTime, const rl::RlControlState& state, const rl::RlControlState& justPressed, const bool ballCamPressed,
                         const bool menuPressed)
         {
@@ -1811,6 +2068,11 @@ namespace myengine::ecs::systems
                     }
                     return;
                 }
+            }
+            else if (training != nullptr)
+            {
+                UpdateTraining(world, deltaTime, player);
+                return;
             }
             else if (match != nullptr)
             {

@@ -1,6 +1,6 @@
 # Тренировка (G4g)
 
-Отдельный модуль без рендера и без окна (`game/rl`): свободная игра и наборы упражнений поверх `RlSim` (кик-оффы против бота — поверх `RlMatch`). `RlGameSystem` подключает его несколькими вызовами (раздел «Подключение»); `RlMatch`, `RlGameSystem`, `RlNet*` модуль не меняет. Плашка тренировки, таймер, баннер SUCCESS / MISS и подсказки клавиш — компонент UI-кита ([rl-ui.md](rl-ui.md)), результаты игрока — файл `training.json` в пользовательской папке (`core::apppaths`).
+Свободная игра и наборы упражнений на `RlSim` (кик-оффы против бота — на `RlMatch`): модуль без рендера и без окна в `game/rl` (G4g) и его подключение к игровому режиму `--game` (G1-training): экран Training в меню, `Mode` тренировки в `RlGameSystem`, HUD кита, клавиши R / N / P / T / C / B и D-pad, результаты в файле пользователя. Те же упражнения проходит автопилот на ботах игры, поэтому «проходимо» проверено числами, а не на глаз ([ниже](#автопилот-и-проверка-проходимости)).
 
 | Файл | Что |
 | --- | --- |
@@ -8,7 +8,10 @@
 | `assets/data/training/*.json` | наборы упражнений: `striker`, `goalie`, `aerial`, `kickoff` |
 | `engine/include/myengine/game/RlTrainingStore.h` | `TrainingResultsPath()` (`core::apppaths::UserDataDirectory() / "training.json"`), `TrainingPacksDirectory()`, `LoadTrainingPacks()`, `AttachTrainingResults()` |
 | `engine/include/myengine/ui/rl/RlUiHud.h` | `HudState::training` и `Hud::DrawTraining` (плашка, таймер, баннер, подсказки), экран галереи `hud-training` |
-| `tests/rl/RlTrainingTests.cpp` | тест `rl_training` |
+| `game/rl/include/rl/RlTrainingAutopilot.h`, `src/RlTrainingAutopilot.cpp` | `RlTrainingAutopilot`: боты `RlBots` v2, вратарь и контроллер воздуха для упражнений (проверка проходимости, команда `autopilot` игры) |
+| `engine/src/ecs/systems/RlGameSystem.cpp` | `RlGameMatchSetup::Kind::Training`, `Impl::training`, `UpdateTraining`, `BuildTrainingStatus`, клавиши, команды тестов |
+| `engine/src/game/RlGameFlow.cpp` | экран Training (`Screen::Training`): Free play и наборы с результатами; пауза и выход из тренировки |
+| `tests/rl/RlTrainingTests.cpp`, `tests/ui/RlGameTests.cpp` | тесты `rl_training` (модуль, автопилот) и `rl_game` (тренировка в `RlGameSystem`) |
 
 ## Свободная игра
 
@@ -78,11 +81,11 @@
 | Набор | Условие | Упражнения (`id`) |
 | --- | --- | --- |
 | `striker` (8) | гол | `open-net`, `rolling-ball`, `turn-and-shoot`, `bouncing-ball`, `cross`, `far-shot`, `corner`, `falling-ball` |
-| `goalie` (8) | сейв | `straight-on`, `left-post`, `right-post`, `bouncing-shot`, `far-corner`, `hard-drive`, `cross-and-shoot`, `lob` |
+| `goalie` (8) | сейв | `straight-on`, `left-post`, `right-post`, `bouncing-shot`, `across-the-goal`, `hard-drive`, `from-the-corner`, `second-bounce` |
 | `aerial` (7) | касание выше 4–10 м | `easy-lift`, `higher`, `moving-ball`, `from-distance`, `crossing`, `near-the-wall`, `sky-high` |
-| `kickoff` (7) | выигранный кик-офф против бота уровня 2 | `right-corner`, `left-corner`, `back-right`, `back-left`, `far-back`, `push-deep`, `quick-win` |
+| `kickoff` (8) | выигранный кик-офф против бота | `right-corner`, `left-corner`, `far-back` (бот Rookie), `back-right` (Pro), `back-left`, `push-deep`, `quick-win` (Rookie), `all-star-duel` (All-star) |
 
-Удары вратарского набора рассчитаны так, что без касания мяч точно влетает в ворота: тест проверяет это для всех восьми.
+Удары вратарского набора рассчитаны так, что без касания мяч точно влетает в ворота (тест проверяет это для всех восьми). Мяч по полу заметно теряет скорость (14 м/с у начала удара — около 6 м/с у ворот), поэтому «скорость удара» в данных — начальная. Бот кик-оффа растёт по уровню: Rookie → Pro → All-star; `all-star-duel` — «босс» набора: оба бота одинаковые, и при равенстве выигрывает бот матча, победить его можно только быстрее и точнее (автопилот его не берёт, человек должен).
 
 ## Как идёт упражнение
 
@@ -116,71 +119,54 @@
 
 Файл лежит в `core::apppaths::UserDataDirectory()`: `%APPDATA%\myengine\training.json` в разработке и `%LOCALAPPDATA%\RocketArena\training.json` в собранной игре. `game::AttachTrainingResults(training)` читает его (нет файла — результатов нет, сломанный файл — тоже нет, без падения) и заставляет `RlTraining` писать файл **после каждой завершённой попытки** (сначала во временный `.tmp`, затем подмена: обрыв посередине не оставит половину файла). `training.Results()` отдаёт те же данные меню (`Get(pack, exercise)`, `PackSuccesses(pack)`).
 
+## Автопилот и проверка проходимости
+
+`RlTrainingAutopilot` играет синюю машину упражнения так, как играют боты матча: `Think(world)` каждый тик возвращает `RlCarInput`. Три стиля (`SetStyleFor(exercise)` выбирает по условию):
+
+| Стиль | Когда | Как играет |
+| --- | --- | --- |
+| `Bot` | гол, кик-офф | боты `RlBots` v2 (прогноз мяча, перехват, кик-офф со speed flip), как в матче; уровень 0–2 |
+| `Goalie` | `saved` | мяч, идущий низко, встречается на полу там, где машина может быть раньше всех (по прогнозу мяча); высокий — летит к нему контроллером воздуха |
+| `Aerial` | `touchAbove` | боты матча летят только к мячам 3–7.5 м, поэтому свой контроллер: берёт точку встречи на прогнозе мяча (не ниже `height`, не выше на 3.5 м, запас на полёт `0.35 + 0.2·y` с), едет под неё с нужной скоростью (расстояние за время), прыгает за время полёта до касания, в воздухе считает ускорение, которое приведёт машину к мячу, и ведёт нос по нему (PD-регулятор тангажа и рыскания, буст при совпадении) |
+
+Тест `rl_training` прогоняет **каждое упражнение каждого набора** автопилотом на трёх уровнях по три попытки и требует: все упражнения, кроме кик-оффов против бота All-star, выполняет хоть один уровень; упражнения не-кик-оффа — «All-star» минимум две из трёх. Результат: striker 8 из 8, goalie 8 из 8, aerial 7 из 7, kickoff 7 из 8 (остальной — `all-star-duel`). `RL_TRAINING_TABLE=1` печатает таблицу по всем упражнениям и уровням, `RL_TRAINING_TRACE=pack/exercise[/level]` — след одной попытки (машина и мяч раз в 0.1 с) для подбора чисел, `RL_TRAINING_SKIP_TABLE=1` пропускает прогон.
+
+**Вживую в `--game`:** команда игры `autopilot` (`game autopilot` в UI-скрипте, `RlGameSystem::DebugCommand`) отдаёт машину автопилоту, и он проходит набор в настоящей игре: меню → Training → набор → загрузка → упражнения подряд (успех → следующее, промах → повтор). Скрипты и скриншоты — `.team/tasks/g4g-evidence/scripts/pack-*.txt`, `pack-*-NN.png`; по результатам подобраны числа в JSON.
+
 ## HUD и экран галереи
 
 `HudState::training` (`HudTraining`, `active = true`) — компонент кита: пока он активен, `Hud::Draw` вместо табло рисует плашку сверху слева (набор, «3 / 8», название упражнения, подсказка, точки попыток и «BEST 4.2 s · 112 km/h»), таймер сверху посередине (обратный отсчёт с полосой, последние 3 с мигает красным), баннер SUCCESS / MISS / PACK COMPLETE (подзаголовок: время и скорость, NEW BEST, причина, «TRY AGAIN» / «NO ATTEMPTS LEFT»), GET READY и ряд подсказок клавиш внизу (R / Y — Retry, N / RB — Next, P / LB — Previous, Esc / Start — Menu; в свободной игре R — мяч к машине, T — мяч в воздух, B — бесконечный буст, плюс счётчики касаний и метка ENDLESS BOOST). Подсказки можно заменить списком `HudTraining::hints`. Подробности полей — в [rl-ui.md](rl-ui.md). Экран `hud-training` (`MYENGINE_UI_GALLERY=hud-training`) крутит цикл 10 с: упражнение идёт → SUCCESS → MISS → свободная игра → сводка набора. Скриншоты (1600×900) — `.team/tasks/g4g-evidence/rl-hud-training-*.png`.
 
-## Подключение к `RlGameSystem` и меню G1
+## Как это подключено к игре
 
-Это делает владелец `RlGameSystem` (coder-2, G1-flow): модуль ничего в нём не меняет. Названия по `RlGameSystem.cpp` ветки `game-rl-online`.
+**Экран Training** (`RlGameFlow`, `Screen::Training`): кнопка Training главного меню открывает его (раньше она запускала практику). Слева колонка `MenuButton`: FREE PLAY и по кнопке на набор (`game::LoadTrainingPacks()`), справа панель описывает сфокусированный пункт: у Free play — клавиши, у набора — описание, «n / m DONE» и таблица упражнений (кружок «сделано», DONE / TRIES, BEST TIME, BEST HIT из `training.json`, читается при каждом открытии экрана). Enter запускает: экран загрузки («TRAINING · STRIKER»), матч-режим (`Screen::Match`) с HUD тренировки. Esc — главное меню. Выбранный пункт запоминается на время сессии.
 
-**1. Экран Training в меню G1.** Кнопка Training (иконка `Icon::Target`) ведёт на экран выбора: строка «FREE PLAY» и по строке на набор из `game::LoadTrainingPacks(&errors)`; в строке набора — `results.PackSuccesses(pack)` из `pack.exercises.size()`. Выбор запускает тренировку (пункт 2).
+**Игровая система** (`RlGameSystem`): `RlGameMatchSetup::Kind::Training` (+ `trainingPack`, пусто = свободная игра, и `trainingExercise`). `StartGameMatch` создаёт `RlTraining` (с `AttachTrainingResults`), показывает машины и мяч (оранжевая машина — только у кик-оффа, пады — только у кик-оффа), стадия — `Playing`, пауза работает как у офлайн-матча (мир стоит). Каждый кадр `UpdateTraining` берёт клавиши, делает фиксированные тики (`training->Step`, `RlFeedback::OnTick` для звука), рисует сцену тем же `ApplyToScene` (мир из `World()` / `PreviousWorld()` / `Tuning()` / `carCount`, команда машины равна слоту; камера `UpdateCamera` по `Sim()`) и заполняет `status.hud` (`BuildTrainingStatus`: `HudState::training` из `RlTrainingInfo`, у кик-оффа фаза и таймер обратного отсчёта матча — тройка-двойка-единица-GO).
 
-**2. Запуск.** Поле `std::unique_ptr<rl::RlTraining> training;` и новый режим `Mode::Training` рядом с `Mode::Match`. Старт:
+**Клавиши** (читаются из клавиш, нажатых в этом кадре; клавиши управления машиной заняты): в упражнении `R` или D-pad вверх — Retry, `N` / D-pad вправо — Next, `P` / D-pad влево — Previous; в свободной игре `R` / D-pad вверх — мяч к машине, `T` / D-pad вниз — мяч в воздух, `C` / D-pad влево — машина на старт, `B` / L3 — бесконечный буст; `Esc` / Start — пауза. Надписи на подсказках HUD переключаются на кнопки пада, когда пользовался пад.
 
-```cpp
-training = std::make_unique<rl::RlTraining>(tuning);
-game::AttachTrainingResults(*training);        // читает training.json, пишет после каждой попытки
-if (pack) training->StartPack(*pack);          // иначе остаётся свободная игра
-mode = Mode::Training;
-accumulator = 0.0f;
-cameraState = rl::RlCameraState{};
-BeginTrainingVisuals(world);                   // как BeginMatchVisuals: машина 0 (синяя), при кик-оффе машина 1 (оранжевая), мяч, пады
-```
+**Пауза и выход:** пауза показывает «TRAINING · STRIKER», кнопки RESTART TRAINING (набор сначала, с подтверждением) и LEAVE TRAINING («Your results are saved»), выход возвращает на экран Training (с обновлёнными результатами).
 
-**3. Тик.** В `Update` вместо `match->Step(inputs)`: `training->Step(latch.Take(player));` (внутри цикла фиксированных тиков, ввод один — игрок). Мир для рисования: `training->World()` / `PreviousWorld()` / `Tuning()`.
+**Команды тестов** (`DebugCommand`, в UI-скрипте `game <команда>`): `autopilot`, `autopilot-off`, `next`, `previous`, `retry`, `boost`.
 
-**4. Отрисовка.** `ApplyToScene` читает матч через `View()`; для тренировки в неё передаются `before = PreviousWorld()`, `now = World()`, `alpha`, число машин `World().carCount` и `Tuning()`; команда машины `slot` — это `slot` (0 синяя, 1 оранжевая бот). Машины: `cars[team][index]` как в матче. Сдвиг при расстановке упражнения не интерполируется (мир стоит, `PreviousWorld() == World()`). Камера — обычная `UpdateCamera` по `now.cars[0]`.
+## Тесты
 
-**5. Клавиши** (проверять на кадре, до тиков): `R` / pad Y — `training->Retry()` в упражнении, в свободной игре — `ResetBallToCar()`; `N` / RB — `Next()`; `P` / LB — `Previous()` (в свободной игре `P` занят меню практики, там — `T` / X → `BallInAir()` и `B` / LB → `SetInfiniteBoost(!training->InfiniteBoost())`); `Esc` / Start — в меню (`ToMenu`: `training.reset()`). Если клавиши заняты, пишите свои подписи в `HudTraining::hints`.
-
-**6. HUD.** Каждый кадр из `training->Info()` заполняется `hud.training`:
-
-```cpp
-const rl::RlTrainingInfo info = training->Info();
-rlui::HudTraining& t = hudState.training;
-t.active = true;
-t.phase = info.mode == rl::RlTrainingMode::FreePlay ? rlui::HudTrainingPhase::FreePlay : static_cast<rlui::HudTrainingPhase>(info.phase);
-t.pack = info.packName;  t.exercise = info.exerciseName;  t.hint = info.hint;
-t.index = info.exerciseIndex;  t.count = info.exerciseCount;
-t.attempt = info.attempt;  t.attempts = info.attempts;
-t.timeLeft = info.timeLeft;  t.timeLimit = info.timeLimit;  t.elapsed = info.elapsed;
-t.bannerTime = info.bannerTime;
-t.missReason = info.missReason == rl::RlTrainingMiss::TimeUp ? "TIME UP" : info.missReason == rl::RlTrainingMiss::OwnGoal ? "OWN GOAL" : info.missReason == rl::RlTrainingMiss::LostKickoff ? "LOST KICK-OFF" : "";
-t.outOfAttempts = info.outOfAttempts;  t.newBest = info.newBest;
-t.hits = info.hits;  t.lastHitKmh = info.lastHitSpeed * 3.6f;  t.bestHitKmh = info.bestHitSpeed * 3.6f;  t.maxTouchHeight = info.maxTouchHeight;
-t.infiniteBoost = info.infiniteBoost;
-t.recordTime = info.best.bestTime;  t.recordHitKmh = info.best.bestHitSpeed * 3.6f;
-t.done = info.packDoneSuccesses;
-```
-
-Остальное в `HudState` — как у практики: `mode = 0`, `players` из одного игрока, `boost = World().cars[0].boost`, `phase` — из `World().match.phase` (у кик-оффа это обратный отсчёт 3-2-1-GO, HUD показывает его сам).
-
-**7. Звук и эффекты.** `RlFeedback::OnTick(PreviousWorld, World)` вызывается так же, как для матча: тренировка отдаёт обычные `RlWorldState` (касания, прыжки, пады кик-оффа). Свободная игра и упражнения не вызывают гол-баннер матча и повтор: `RlDirector` в тренировке не создаётся.
-
-**8. Выход.** `training.reset()` в `ToMenu`; результаты уже на диске.
-
-## Тест `rl_training` (`ctest -R rl_training`, без окна)
-
-- **Наборы:** четыре набора читаются и идут по `order`; в каждом 5–10 упражнений с названием, подсказкой, временем и попытками, уникальные `id`; машина и мяч внутри арены и не друг в друге; кик-оффы — против бота уровня 2; разбор: плохие тексты (не JSON, пустой список, нет `id`, неизвестное условие, неверный вектор, `timeLimit 0`, позиция вне арены, нет `car` / `ball`, `kickoffWin` без `kickoff`, повторный `id`) отказывают с причиной, значения по умолчанию.
+**`rl_training`** (`ctest -R rl_training`, без окна):
+- **Наборы:** четыре набора читаются и идут по `order`; в каждом 5–10 упражнений с названием, подсказкой, временем и попытками, уникальные `id`; машина и мяч внутри арены и не друг в друге; кик-оффы против бота; разбор: плохие тексты (не JSON, пустой список, нет `id`, неизвестное условие, неверный вектор, `timeLimit 0`, позиция вне арены, нет `car` / `ball`, `kickoffWin` без `kickoff`, повторный `id`) отказывают с причиной, значения по умолчанию.
 - **Свободная игра:** бесконечный буст держит бак полным и без него бак тратится; мяч возвращается к машине на 6 м перед ней; мяч в воздухе поднимается; касание считается (скорость и высота), счётчики сбрасываются.
-- **Упражнения на сценарном вводе:** `open-net` — газ с бустом прямо в мяч: гол, время и скорость удара, рекорд; баннер 1.8 с и автопереход; Previous / Retry; лучшее время не растёт. Ничего не делать: во всех упражнениях `striker`, `aerial` — промах «время вышло» ровно на `timeLimit`, во всех восьми `goalie` — удар долетает в свои ворота раньше конца времени (удары на цель). Сейв: машина на линии удара — успех; мяч в своих воротах — промах. Касание ниже порога не успех, на нужной высоте — успех. Кик-офф: обратный отсчёт матча, часы идут после него, бот едет к мячу, без ввода игрока бот выигрывает во всех пяти точках, один и тот же прогон даёт один и тот же конец.
+- **Упражнения на сценарном вводе:** `open-net` — газ с бустом прямо в мяч: гол, время и скорость удара, рекорд; баннер 1.8 с и автопереход; Previous / Retry; лучшее время не растёт. Ничего не делать: во всех упражнениях striker, aerial — промах «время вышло» ровно на `timeLimit`, во всех goalie — удар долетает в свои ворота раньше конца времени. Сейв: машина на линии удара — успех; мяч в своих воротах — промах. Касание ниже порога не успех, на нужной высоте — успех. Кик-офф: обратный отсчёт матча, часы идут после него, бот едет к мячу, без ввода игрока бот выигрывает во всех пяти точках, один и тот же прогон даёт один и тот же конец.
 - **Таймер и попытки:** таймер идёт, промах приходит на `timeLimit`, три промаха — следующее упражнение, ручной Retry ничего не тратит, промах с оставшимися попытками — то же упражнение сначала с мячом на месте, Next проходит набор до сводки, Previous / Retry в сводке.
 - **Результаты:** файл пишется после попытки, а не в конце сессии; следующая сессия его читает и продолжает; промах считает только попытку; лучшее время сохраняется; текстовый круг; сломанный файл — пустые результаты без падения, затем файл перезаписывается; `TrainingResultsPath()` — `apppaths::UserDataDirectory() / "training.json"`.
+- **Автопилот:** проходимость всех упражнений (раздел выше).
+
+**`rl_game`**: тренировка в `RlGameSystem` через команды экранов — свободная игра (стадия `Playing`, HUD тренировки с одним игроком, время сессии идёт, пауза стоит, выход чистит HUD), набор striker (название, 8 упражнений, попытки, фаза Ready → Running), бот-автопилот проходит первое упражнение (время, скорость удара, рекорд в данных HUD), результаты пишутся в папку пользователя после попытки, успех ведёт к следующему упражнению сам, клавиши next / previous, рестарт начинает набор сначала, кик-офф (обратный отсчёт матча в HUD), набора нет — стадия `Failed` с причиной.
+
+**`rl_ui`**: компонент тренировки на всех фазах (`TestHudTraining`) и экран галереи `hud-training`.
 
 ## Ограничения
 
-- Модуль не подключён к `RlGameSystem` и меню G1 (это делает владелец G1-flow по инструкции выше); живьём в движке тренировку я не смотрел — проверено тестом на настоящей симуляции и экраном галереи.
-- Без касаний выполнимость `striker` и `aerial` тестом не проверяется (нужен автопилот); проверены сами условия, «не сделать ничего = промах» и положение объектов. Значения (скорости, высоты, время) стоит подкрутить после живой игры — это данные в `assets/data/training/*.json`.
+- Автопилот — не человек: он доказывает, что упражнение выполнимо (машина успевает, касание достаточно сильное и высокое), но не его сложность для игрока; числа в `assets/data/training/*.json` (скорости, высоты, время, уровни ботов) можно крутить, тест сразу покажет, если упражнение стало невыполнимым.
+- `all-star-duel` автопилотом не берётся (бот матча с тем же уровнем выигрывает ничью): проходимость человеком не проверена.
+- Живые прогоны (`pack-*.txt`) зависят от кадров реального времени: упражнения на границе (`cross`, `bouncing-ball`) иногда требуют второй попытки и у автопилота; в данных на них даны три попытки.
 - Свободная игра — одна машина и мяч, без бустовых падов и соперников; бесконечный буст в упражнениях набора не действует (там `car.boost` упражнения). Пады в кик-оффе работают как в матче (его ведёт `RlMatch`).
-- Бот кик-оффа — `RlBots` v2 (мозг матча), уровень берётся из `kickoff.botLevel`.
+- Результаты в `training.json` по `id` упражнения: переименование `id` в данных начинает его результаты с нуля.

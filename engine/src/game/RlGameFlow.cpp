@@ -13,11 +13,13 @@
 #include <string>
 
 #include <rl/RlControls.h>
+#include <rl/RlTraining.h>
 #include <rl/RlTuning.h>
 
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
+#include <myengine/game/RlTrainingStore.h>
 #include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/ui/UiManager.h>
 #include <myengine/ui/rl/RlUiHost.h>
@@ -52,9 +54,10 @@ namespace myengine::game
             Pause,
             Results,
             Settings,
+            Training,
         };
 
-        const char* const kScreenNames[] = {"boot", "main", "play", "loading", "lobby", "match", "pause", "results", "settings"};
+        const char* const kScreenNames[] = {"boot", "main", "play", "loading", "lobby", "match", "pause", "results", "settings", "training"};
 
         const char* const kTips[] = {
             "Tip: hold {Space} to look at the ball, release for the car cam.",
@@ -386,6 +389,7 @@ namespace myengine::game
             case Screen::Pause: DrawPause(f); break;
             case Screen::Results: DrawResults(f); break;
             case Screen::Settings: DrawSettings(f); break;
+            case Screen::Training: DrawTraining(f); break;
             }
         }
 
@@ -428,10 +432,7 @@ namespace myengine::game
             }
             if (MenuButton(f, training, column.Next(), "TRAINING", Icon::Target))
             {
-                sys::RlGameMatchSetup setup;
-                setup.mode = 0;
-                setup.botLevel = settings.play.botLevel;
-                BeginLoading(f, setup);
+                OpenTraining(f);
             }
             if (MenuButton(f, settingsId, column.Next(), "SETTINGS", Icon::Settings))
             {
@@ -483,6 +484,7 @@ namespace myengine::game
         {
             loadingSetup = setup;
             loadingSetup.playerName = settings.PlayerName();
+            trainingSession = setup.kind == sys::RlGameMatchSetup::Kind::Training;
             loadingTime = 0.0f;
             loadingFrames = 0;
             loadingStarted = false;
@@ -684,6 +686,18 @@ namespace myengine::game
 
         std::string LoadingConfigText() const
         {
+            if (loadingSetup.kind == sys::RlGameMatchSetup::Kind::Training)
+            {
+                std::string pack = "FREE PLAY";
+                for (const rl::RlTrainingPack& candidate : trainingPacks)
+                {
+                    if (candidate.id == loadingSetup.trainingPack)
+                    {
+                        pack = Upper(candidate.name);
+                    }
+                }
+                return "TRAINING \xC2\xB7 " + pack;
+            }
             std::string text = loadingSetup.kind == sys::RlGameMatchSetup::Kind::Offline ? "OFFLINE" : "ONLINE";
             text += " \xC2\xB7 ";
             text += loadingSetup.mode == 0 ? "TRAINING" : kModeNames[std::clamp(loadingSetup.mode, 0, 4)];
@@ -702,6 +716,126 @@ namespace myengine::game
             f.SetSpace(Space::Screen);
             Dim(f, Color::Hex(0x050b1c, 0.96f));
             f.SetSpace(Space::Menu);
+        }
+
+        // ---- training: free play and the packs of exercises (docs/game/rl-training.md)
+
+        std::vector<rl::RlTrainingPack> trainingPacks;
+        rl::RlTrainingResults trainingResults;
+        int trainingSelected = 0;       // 0 free play, 1.. the packs
+        int trainingShown = 0;          // what the panel on the right describes: the focused item
+        bool trainingSession = false;   // the match that runs (or ran) is a training: Leave goes back to the Training screen
+
+        // The screen reads the packs and the results of the player (the match that has just ended may have changed them)
+        void OpenTraining(Frame& f)
+        {
+            std::vector<std::string> errors;
+            trainingPacks = LoadTrainingPacks(&errors);
+            for (const std::string& error : errors)
+            {
+                Log("training: " + error);
+            }
+            trainingResults.LoadFromFile(TrainingResultsPath().generic_u8string());
+            trainingSelected = std::clamp(trainingSelected, 0, static_cast<int>(trainingPacks.size()));
+            trainingShown = trainingSelected;
+            GoTo(f, Screen::Training);
+        }
+
+        void StartTraining(Frame& f, const int item)
+        {
+            sys::RlGameMatchSetup setup;
+            setup.kind = sys::RlGameMatchSetup::Kind::Training;
+            setup.mode = 0;
+            setup.botLevel = 2;
+            setup.trainingPack = item == 0 ? std::string() : trainingPacks[static_cast<size_t>(item - 1)].id;
+            trainingSelected = item;
+            BeginLoading(f, setup);
+        }
+
+        void DrawTraining(Frame& f)
+        {
+            Backdrop(f, 0.95f);
+            ScreenTitle(f, "TRAINING", "CHOOSE A DRILL");
+            const int count = static_cast<int>(trainingPacks.size()) + 1;
+            f.SetDefaultFocus(HashId("training/item" + std::to_string(trainingSelected)));
+            Column column({76.0f, 300.0f, style::kMenuButtonWidth, style::kMenuButtonHeight}, style::kMenuButtonStep);
+            for (int i = 0; i < count; ++i)
+            {
+                const Id id = HashId("training/item" + std::to_string(i));
+                const std::string label = i == 0 ? std::string("FREE PLAY") : Upper(trainingPacks[static_cast<size_t>(i - 1)].name);
+                if (MenuButton(f, id, column.Next(), label, i == 0 ? Icon::Play : Icon::Target))
+                {
+                    StartTraining(f, i);
+                    return;
+                }
+                if (f.Focus() == id)
+                {
+                    trainingShown = i;
+                }
+            }
+
+            // the panel is tall: a small slant, so that the text does not meet the edge
+            const Rect panel{700.0f, 290.0f, 1140.0f, 640.0f};
+            const float slant = 40.0f;
+            Parallelogram(f, panel, style::kNavySolid.Faded(0.94f), slant);
+            ParallelogramOutline(f, panel, style::kLine, 1.0f, slant);
+            Parallelogram(f, {panel.x, panel.y, 6.0f, panel.h}, style::kAccent, slant);
+            const float left = panel.x + slant + 40.0f;
+            if (trainingShown <= 0 || trainingShown > static_cast<int>(trainingPacks.size()))
+            {
+                Text(f, FontStyle::BlackItalic, 52.0f, {left, panel.y + 30.0f}, style::kText, "FREE PLAY");
+                Text(f, FontStyle::SemiBold, 22.0f, {left, panel.y + 110.0f}, style::kTextDim, "One car and the ball: no clock, no opponents, no score.");
+                Text(f, FontStyle::SemiBold, 22.0f, {left, panel.y + 142.0f}, style::kTextDim, "The counters show the speed of your hits and how high you touch the ball.");
+                const char* const keys[][2] = {{"R", "Ball back in front of the car"},
+                                               {"T", "Ball in the air in front of the car: practise the aerials"},
+                                               {"C", "Car back to the start"},
+                                               {"B", "Endless boost on / off"},
+                                               {"Esc", "Pause"}};
+                float y = panel.y + 230.0f;
+                for (const auto& key : keys)
+                {
+                    const float width = KeyCap(f, {left, y}, key[0]);
+                    Text(f, FontStyle::SemiBold, 22.0f, {left + std::max(width, 70.0f) + 20.0f, y + 4.0f}, style::kText, key[1]);
+                    y += 56.0f;
+                }
+                Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::Enter, Glyph::None, "Confirm"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+            }
+            else
+            {
+                const rl::RlTrainingPack& pack = trainingPacks[static_cast<size_t>(trainingShown - 1)];
+                Text(f, FontStyle::BlackItalic, 52.0f, {left, panel.y + 30.0f}, style::kText, Upper(pack.name));
+                const int done = trainingResults.PackSuccesses(pack);
+                const std::string progress = std::to_string(done) + " / " + std::to_string(pack.exercises.size()) + " DONE";
+                Text(f, FontStyle::ExtraBoldItalic, 34.0f, {panel.x + panel.w - slant - 40.0f, panel.y + 40.0f}, done == static_cast<int>(pack.exercises.size()) ? style::kGood : style::kTextDim, progress, Align::Right);
+                PushClip(f, {left, panel.y + 104.0f, panel.w - slant - 100.0f, 34.0f});
+                Text(f, FontStyle::SemiBold, 20.0f, {left, panel.y + 108.0f}, style::kTextDim, pack.description);
+                PopClip(f);
+                const float captionY = panel.y + 160.0f;
+                ColumnCaption(f, {left + 44.0f, captionY}, "EXERCISE");
+                ColumnCaption(f, {left + 560.0f, captionY}, "DONE / TRIES", Align::Center);
+                ColumnCaption(f, {left + 760.0f, captionY}, "BEST TIME", Align::Center);
+                ColumnCaption(f, {left + 940.0f, captionY}, "BEST HIT", Align::Center);
+                float y = captionY + 34.0f;
+                for (const rl::RlTrainingExercise& exercise : pack.exercises)
+                {
+                    const rl::RlTrainingExerciseResult r = trainingResults.Get(pack.id, exercise.id);
+                    const bool did = r.successes > 0;
+                    const Rect row{left - 14.0f, y, panel.w - 2.0f * slant - 90.0f, 44.0f};
+                    FillRect(f, row, style::kNavySolid.Faded(0.7f));
+                    Circle(f, {left + 12.0f, y + 22.0f}, 9.0f, did ? style::kGood : style::kNavy3);
+                    TextIn(f, FontStyle::SemiBold, 22.0f, {left + 44.0f, y, 500.0f, 44.0f}, did ? style::kText : style::kTextDim, exercise.name);
+                    TextIn(f, FontStyle::SemiBold, 22.0f, {left + 480.0f, y, 160.0f, 44.0f}, style::kTextDim, std::to_string(r.successes) + " / " + std::to_string(r.attempts), Align::Center);
+                    TextIn(f, FontStyle::SemiBold, 22.0f, {left + 680.0f, y, 160.0f, 44.0f}, did ? style::kText : style::kTextDim, did ? Format("%.1f s", static_cast<double>(r.bestTime)) : std::string("-"), Align::Center);
+                    TextIn(f, FontStyle::SemiBold, 22.0f, {left + 860.0f, y, 160.0f, 44.0f}, did ? style::kText : style::kTextDim,
+                           did && r.bestHitSpeed > 0.0f ? Format("%d km/h", static_cast<int>(std::lround(r.bestHitSpeed * 3.6f))) : std::string("-"), Align::Center);
+                    y += 48.0f;
+                }
+                Hints(f, {{Glyph::UpDown, Glyph::PadA, "Select"}, {Glyph::Enter, Glyph::None, "Start"}, {Glyph::Esc, Glyph::PadB, "Back"}});
+            }
+            if (f.input().Pressed(Nav::Back))
+            {
+                GoTo(f, Screen::Main);
+            }
         }
 
         // ---- the lobby of a private match
@@ -840,6 +974,10 @@ namespace myengine::game
 
         std::string MatchLine(const sys::RlGameStatus& status) const
         {
+            if (status.setup.kind == sys::RlGameMatchSetup::Kind::Training)
+            {
+                return "TRAINING \xC2\xB7 " + Upper(status.hud.training.pack);
+            }
             std::string text = status.online ? "ONLINE" : "OFFLINE";
             text += " \xC2\xB7 ";
             text += status.setup.mode == 0 ? "TRAINING" : kModeNames[std::clamp(status.setup.mode, 0, 4)];
@@ -877,11 +1015,12 @@ namespace myengine::game
                 GoTo(f, Screen::Settings);
                 return;
             }
-            if (MenuButton(f, HashId("pause/restart"), column.Next(), "RESTART MATCH", Icon::Refresh, !status.online))
+            const bool training = status.setup.kind == sys::RlGameMatchSetup::Kind::Training;
+            if (MenuButton(f, HashId("pause/restart"), column.Next(), training ? "RESTART TRAINING" : "RESTART MATCH", Icon::Refresh, !status.online))
             {
                 askRestart = true;
             }
-            if (MenuButton(f, HashId("pause/leave"), column.Next(), "LEAVE MATCH", Icon::Exit))
+            if (MenuButton(f, HashId("pause/leave"), column.Next(), training ? "LEAVE TRAINING" : "LEAVE MATCH", Icon::Exit))
             {
                 askLeave = true;
             }
@@ -910,11 +1049,20 @@ namespace myengine::game
 
             if (askLeave)
             {
-                const DialogResult result = ConfirmDialog(f, HashId("pause/leave-dialog"), {"LEAVE THE MATCH?", status.online ? "You will leave the match for good." : "The match is lost.", "Leave", "Stay"});
+                const DialogResult result = ConfirmDialog(f, HashId("pause/leave-dialog"),
+                                                          {training ? "LEAVE THE TRAINING?" : "LEAVE THE MATCH?",
+                                                           training ? "Your results are saved." : (status.online ? "You will leave the match for good." : "The match is lost."), "Leave", "Stay"});
                 if (result == DialogResult::Confirm)
                 {
                     system.LeaveMatch();
-                    GoTo(f, Screen::Main);
+                    if (training)
+                    {
+                        OpenTraining(f);
+                    }
+                    else
+                    {
+                        GoTo(f, Screen::Main);
+                    }
                     return;
                 }
                 if (result == DialogResult::Cancel)
@@ -924,7 +1072,9 @@ namespace myengine::game
             }
             else if (askRestart)
             {
-                const DialogResult result = ConfirmDialog(f, HashId("pause/restart-dialog"), {"RESTART THE MATCH?", "The score and the clock start over.", "Restart", "Cancel"});
+                const DialogResult result = ConfirmDialog(f, HashId("pause/restart-dialog"),
+                                                          {training ? "RESTART THE TRAINING?" : "RESTART THE MATCH?",
+                                                           training ? "The pack starts again from its first exercise." : "The score and the clock start over.", "Restart", "Cancel"});
                 if (result == DialogResult::Confirm)
                 {
                     sys::RlGameMatchSetup setup = status.setup;
