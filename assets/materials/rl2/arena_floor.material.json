@@ -1,0 +1,10 @@
+{
+  "shader": "../../shaders/textured_lit.shader.json",
+  "texture": "../../textures/rl2/arena_floor.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ]
+}
