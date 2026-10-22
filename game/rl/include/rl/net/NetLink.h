@@ -70,6 +70,8 @@ namespace rl::net
 
     std::unique_ptr<IDatagramLink> MakeLoopbackLink(LoopbackHub& hub);
     std::unique_ptr<IDatagramLink> MakeUdpLink();
+    // The IPv4 address of this PC in the network that leads out ("192.168.1.5"), or "" when there is none (no network at all). Nothing is sent.
+    std::string LocalIPv4Address();
     // Wraps `inner`: everything sent goes through the delay, loss and duplication of `params`; `seed` makes a test repeatable.
     std::unique_ptr<IDatagramLink> MakeSimLink(std::unique_ptr<IDatagramLink> inner, const NetSimParams& params, uint64_t seed);
 }

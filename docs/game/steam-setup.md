@@ -28,7 +28,7 @@ cmake --build build --config RelWithDebInfo --target myengine
 Нужны **два компьютера** и **два аккаунта Steam, которые друзья между собой** (на одном компьютере двух разных пользователей Steam не запустить). Steam-клиент запущен и залогинен у обоих, оба с одним и тем же пользователем ОС (не «от администратора» у одного и обычным у другого).
 
 1. У обоих: запустить игру из папки со `steam_appid.txt`. В Steam у каждого должно появиться «Играет в Spacewar» (это AppID 480). Это нормально: 480 — тестовое приложение Valve.
-2. Первый: на экране Private match выбрать Steam (когда G1-flow вызовет `MakeSteamLobbyService`) и создать лобби. Игра создаёт лобби **только для друзей** (публичных лобби с 480 не делаем: им пользуются многие).
+2. Первый: на экране Private match выбрать Network → Steam и нажать Create lobby (G1-lobby: экран Private match работает через `MakeSteamLobbyService`). Игра создаёт лобби **только для друзей** (публичных лобби с 480 не делаем: им пользуются многие).
 3. Первый: пригласить друга (кнопка в меню вызывает оверлей Steam: Shift+Tab → друг → «Пригласить в игру»). Если оверлей не рисуется в окне движка (DX12), приглашение работает и через список друзей Steam: правой кнопкой по другу → «Пригласить в игру».
 4. Второй: принять приглашение. Если игра уже запущена, она получит событие и войдёт в лобби; если нет, Steam запустит `myengine.exe +connect_lobby <id>` — движок разбирает этот ключ (`FindConnectLobbyInCommandLine`).
 5. Оба видят друг друга в составе лобби, второй жмёт «готов», первый стартует матч. Дальше обычный `RlNetHost`/`RlNetClient`, пакеты идут через `ISteamNetworkingMessages` (напрямую или через сеть Valve; IP игроков друг другу не раскрываются).
@@ -54,7 +54,7 @@ cmake --build build --config RelWithDebInfo --target myengine
 - Авторизация по тикетам Steam (`GetAuthSessionTicket`) не используется: хост принимает сессии только от участников своего лобби, друг ли это, проверяет Steam.
 - Именованное лобби «пароль» нет: доступ — приглашение друга.
 - Список лобби строится по присутствию друзей (`ISteamFriends::GetFriendGamePlayed` → `FriendGameInfo_t::m_steamIDLobby`), потому что лобби «только для друзей» в `RequestLobbyList` не попадает (комментарий к `k_ELobbyTypeFriendsOnly` в `isteammatchmaking.h`: «not in public lobby list»). Публичный поиск (`RequestLobbyList` с фильтром `rl_game=1`) оставлен в коде, но лобби с `friendsOnly=false` экран не создаёт.
-- `+connect_lobby` разбирает функция `FindConnectLobbyInCommandLine`, но сам `main`/`RlGameSystem` её пока не вызывают: подключить в G1-flow (экран Private match) вместе с вызовом `Join`.
+- `+connect_lobby` разбирает `FindConnectLobbyInCommandLine`, её вызывает `RlLobbyScreens::Install` при старте игры (G1-lobby): комната открывается в этом лобби.
 
 ## 6. Что проверено с настоящим SDK на одном аккаунте (G6b)
 

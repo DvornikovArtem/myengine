@@ -8,7 +8,7 @@
 
 | Что | Вызовы |
 | --- | --- |
-| Хост | `Create({hostName, mode, maxPlayers, lobbyPort, gamePort, friendsOnly})`, `InviteText()` (LAN: текст для друга), `InviteFriends()` (Steam: оверлей), `StartMatch(error)` — отказывает, пока кто-то не готов |
+| Хост | `Create({hostName, mode, maxPlayers, lobbyPort, gamePort, friendsOnly})`, `InviteText()` (LAN: адрес `ip:порт` лобби, который друг вводит руками; IP — интерфейса, с которого уходит широковещательный маяк, `LocalIPv4Address()`), `InviteFriends()` (Steam: оверлей), `StartMatch(error)` — отказывает, пока кто-то не готов |
 | Гость | `RefreshList()` → `Lobbies()` (id, имя хоста, режим, игроки/мест, ping, `joinable` + `note`: другая версия, лобби полное, матч уже идёт), `Join(id)` или `Join("192.168.1.5:47778")` вручную, `SetReady(bool)` |
 | Состояние | `State()` (Idle, Creating, Hosting, Joining, Joined, Starting, Failed), `Members()`, `Current()`, `StartInfo()`, `LastError()`, `Leave()` |
 | События | Created, Joined, MemberJoined, MemberLeft, MemberChanged, ListUpdated, MatchStarting, HostLeft, InviteReceived, Error |
@@ -27,6 +27,21 @@
 ## Steam
 
 `SteamLobbyService` и `SteamTransport` под `MYENGINE_STEAM` (по умолчанию OFF; `docs/game/steam-setup.md`: как включить, что проверено на одном аккаунте и как проверить вдвоём). В сборке без SDK `MakeSteamLobbyService()` возвращает сервис, у которого `Available(whyNot)` говорит «в этой сборке нет Steam», поэтому экран может предлагать Steam без `#ifdef`. `FindConnectLobbyInCommandLine` разбирает `+connect_lobby <id>` и работает без SDK.
+
+## Экраны (G1-lobby)
+
+Код: `engine/src/game/RlLobbyScreens.{h,cpp}` (экраны и выбор игрока), подключение — `RlGameFlow` (вкладка Private match экрана Play, экран Room, переход в лобби матча G5). Матч стартует на транспорте сервиса: `RlGameMatchSetup::transportFactory` (хост: `RlNetHost` + `Listen`, гость: `RlNetClient` + `Connect(info.hostAddress)`); система вызывает фабрику один раз и забывает её.
+
+- **Переключатель LAN / Steam.** LAN работает всегда. Steam нужен собранный с `MYENGINE_STEAM` и запущенный клиент Steam: в такой сборке сервис Steam поднимается при запуске игры (чтобы приглашения друзей доходили в главном меню), иначе подпись красным объясняет причину (`Available(whyNot)`: «в этой сборке нет Steam» / «клиент Steam не запущен»).
+- **Список.** LAN слушает маяки сам (после первого `RefreshList`), Steam опрашивается раз в 6 с и кнопкой Refresh. Строка: имя хоста, `2v2 · 2/4 · 12 ms`, пометка, если войти нельзя.
+- **Создание.** Create lobby: размер команды, «Fill with bots», порт матча (LAN). Лобби Steam всегда «только для друзей».
+- **Комната.** Состав и готовность; хост — приглашение и Start, гость — готовность. Старт: сервис шлёт `MatchStarting`, комната возвращает флоу `RlGameMatchSetup`, флоу запускает матч G5 и показывает его лобби; хост стартует сам, когда пришли все игроки комнаты (или через 12 с).
+- **Приглашения.** `InviteReceived` (друг принял приглашение в запущенной игре) и `+connect_lobby <id>` (Steam запустил игру по приглашению) открывают комнату с `Join(id)`. При ошибке — панель с причиной. Разбор аргументов `app/src/main.cpp` пропускает `+connect_lobby <id>` (раньше любой неизвестный ключ показывал окно «Usage» и игра не стартовала).
+- **Закрытие.** Пока идёт матч, лобби живёт в состоянии `Starting`; выход в меню (Leave, Results → Main menu) закрывает его (`Leave`). Выход на главное меню останавливает поиск LAN.
+
+## Что проверено в G1-lobby
+
+Живьём (два окна `myengine --game` на этом ПК, скрипты и скриншоты — `.team/tasks/g1l-evidence/`): LAN — хост создаёт лобби, гость видит его в списке (пинг ~30–45 мс), входит, жмёт «I am ready», хост жмёт Start match; оба окна уходят в лобби матча G5 и в матч (хост играет синей командой, гость оранжевой, на экране гостя пинг). Steam на одном аккаунте — Network → Steam, Create lobby, комната с Invite friends; во втором окне тот же аккаунт видит лобби в списке «Lobbies of your friends» (по присутствию). Ошибки панелью: «the host of the lobby does not answer» (вход на адрес, где нет хоста), «cannot enter the lobby» (`+connect_lobby` с несуществующим id). Не проверено: два разных аккаунта Steam, оверлей приглашений в окне, игра двух ПК по LAN.
 
 ## Что проверено
 
