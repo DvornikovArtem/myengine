@@ -9,11 +9,13 @@
 
 #include <rl/RlMatch.h>
 #include <rl/RlTraining.h>
+#include <rl/RlTrainingAutopilot.h>
 #include <rl/RlTuning.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -113,7 +115,7 @@ namespace
                 }
                 if (e.kickoff)
                 {
-                    Check(e.botLevel == 2 && e.condition == RlTrainingCondition::KickoffWin, where + ": a kick-off against the bot of level 2");
+                    Check(e.botLevel >= 0 && e.botLevel <= 2 && e.condition == RlTrainingCondition::KickoffWin, where + ": a kick-off against a bot");
                     continue;
                 }
                 Check(std::fabs(e.carX) < tuning.arena.halfWidth && std::fabs(e.carZ) < tuning.arena.halfLength, where + ": the car starts inside the arena");
@@ -521,6 +523,152 @@ namespace
         Check(a.second.hits >= 1 || a.first == RlTrainingPhase::Miss, "a success needs the touch of the car");
     }
 
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    struct AutopilotResult
+    {
+        bool done = false;
+        bool success = false;
+        float time = 0.0f;
+        RlTrainingMiss reason = RlTrainingMiss::None;
+        int hits = 0;
+    };
+
+    // One attempt of an exercise driven by the autopilot (the training picks the exercise by its index).
+    AutopilotResult RunAutopilot(const RlTuning& tuning, const RlTrainingPack& pack, const int index, const int level, const uint64_t seed)
+    {
+        RlTraining training(tuning);
+        training.StartPack(pack, index);
+        RlTrainingAutopilot pilot(tuning, level, seed);
+        pilot.SetStyleFor(pack.exercises[static_cast<std::size_t>(index)]);
+        AutopilotResult result;
+        const int limit = 120 * 150;
+        for (int tick = 0; tick < limit && !result.done; ++tick)
+        {
+            const RlTrainingPhase phase = training.Phase();
+            if (phase == RlTrainingPhase::Success || phase == RlTrainingPhase::Miss)
+            {
+                result.done = true;
+                result.success = phase == RlTrainingPhase::Success;
+                result.time = training.Info().elapsed;
+                result.reason = training.Info().missReason;
+                result.hits = training.Info().hits;
+                break;
+            }
+            // the autopilot sees the world of the last tick; while the exercise waits it does nothing
+            training.Step(phase == RlTrainingPhase::Running ? pilot.Think(training.World()) : RlCarInput{});
+        }
+        return result;
+    }
+
+    // Every exercise can be done: the autopilot (the bots of the match, the controllers of the saves and of the aerials) plays it at the three levels
+    // of skill, three tries each. A kick-off against the bot of level 2 is the one exception: the two bots are the same and the tie goes to the
+    // bot of the match, a person beats it with a better kick-off (the exercise is the aim of the pack). RL_TRAINING_TABLE=1 prints every line.
+    void TestAutopilot()
+    {
+        const std::vector<RlTrainingPack> packs = Packs();
+        const RlTuning tuning;
+        const char* names[] = {"rookie", "pro", "all-star"};
+        char* verbose = nullptr;
+        size_t verboseLength = 0;
+        _dupenv_s(&verbose, &verboseLength, "RL_TRAINING_TABLE");
+        for (const RlTrainingPack& pack : packs)
+        {
+            int solved = 0;
+            int hard = 0;
+            for (std::size_t i = 0; i < pack.exercises.size(); ++i)
+            {
+                const RlTrainingExercise& e = pack.exercises[i];
+                std::string line = pack.id + "/" + e.id + ":";
+                int bestLevelWins = 0;
+                int allStarWins = 0;
+                for (int level = 2; level >= 0; --level)
+                {
+                    int wins = 0;
+                    float best = 0.0f;
+                    for (uint64_t seed = 1; seed <= 3; ++seed)
+                    {
+                        const AutopilotResult r = RunAutopilot(tuning, pack, static_cast<int>(i), level, seed);
+                        wins += r.success ? 1 : 0;
+                        best = r.success && (best == 0.0f || r.time < best) ? r.time : best;
+                    }
+                    char text[64];
+                    std::snprintf(text, sizeof(text), "  %s %d/3 (%.1f s)", names[level], wins, static_cast<double>(best));
+                    line += text;
+                    bestLevelWins = std::max(bestLevelWins, wins);
+                    allStarWins = level == 2 ? wins : allStarWins;
+                }
+                const bool againstAllStar = e.kickoff && e.botLevel == 2;
+                if (verbose != nullptr || (bestLevelWins == 0 && !againstAllStar))
+                {
+                    std::cout << line << "\n";
+                }
+                if (againstAllStar)
+                {
+                    ++hard;
+                    continue;
+                }
+                Check(bestLevelWins >= 1, pack.id + "/" + e.id + ": the autopilot cannot do this exercise (" + line + ")");
+                if (!e.kickoff)
+                {
+                    Check(allStarWins >= 2, pack.id + "/" + e.id + ": the all-star autopilot does it in fewer than two tries of three (" + line + ")");
+                }
+                ++solved;
+            }
+            std::cout << pack.id << ": " << solved << " of " << pack.exercises.size() << " exercises done by the autopilot" << (hard > 0 ? " (the others are against the all-star bot)" : "") << "\n";
+        }
+        free(verbose);
+    }
+
+    // A trace of one attempt for the tuning of the exercises: RL_TRAINING_TRACE=pack/exercise[/level] prints the car and the ball every 0.25 s
+    void TraceAutopilot()
+    {
+        char* spec = nullptr;
+        size_t length = 0;
+        if (_dupenv_s(&spec, &length, "RL_TRAINING_TRACE") != 0 || spec == nullptr)
+        {
+            return;
+        }
+        const std::string text = spec;
+        free(spec);
+        const std::size_t slash = text.find('/');
+        const std::size_t second = text.find('/', slash + 1);
+        const std::string packId = text.substr(0, slash);
+        const std::string exerciseId = text.substr(slash + 1, second == std::string::npos ? std::string::npos : second - slash - 1);
+        const int level = second == std::string::npos ? 2 : std::atoi(text.c_str() + second + 1);
+        const std::vector<RlTrainingPack> packs = Packs();
+        const RlTrainingPack& pack = PackById(packs, packId);
+        int index = 0;
+        for (std::size_t i = 0; i < pack.exercises.size(); ++i)
+        {
+            index = pack.exercises[i].id == exerciseId ? static_cast<int>(i) : index;
+        }
+        const RlTuning tuning;
+        RlTraining training(tuning);
+        training.StartPack(pack, index);
+        RlTrainingAutopilot pilot(tuning, level, 1);
+        pilot.SetStyleFor(pack.exercises[static_cast<std::size_t>(index)]);
+        for (int tick = 0; tick < 120 * 40; ++tick)
+        {
+            const RlTrainingPhase phase = training.Phase();
+            const RlWorldState& w = training.World();
+            if (tick % 12 == 0 && tick >= 330 && tick < 640)
+            {
+                std::printf("t %5.2f phase %d car (%6.1f %5.1f %6.1f) v %5.1f boost %5.1f %s  ball (%6.1f %5.1f %6.1f) v (%5.1f %5.1f %5.1f) hits %d\n", static_cast<double>(tick) / 120.0, static_cast<int>(phase),
+                            static_cast<double>(w.cars[0].position.x), static_cast<double>(w.cars[0].position.y), static_cast<double>(w.cars[0].position.z),
+                            static_cast<double>(w.cars[0].linearVelocity.z), static_cast<double>(w.cars[0].boost), w.cars[0].onGround ? "gnd" : "air",
+                            static_cast<double>(w.ball.position.x), static_cast<double>(w.ball.position.y), static_cast<double>(w.ball.position.z),
+                            static_cast<double>(w.ball.linearVelocity.x), static_cast<double>(w.ball.linearVelocity.y), static_cast<double>(w.ball.linearVelocity.z), training.Info().hits);
+            }
+            if (phase == RlTrainingPhase::Success || phase == RlTrainingPhase::Miss)
+            {
+                std::printf("-> %s, miss reason %d\n", phase == RlTrainingPhase::Success ? "SUCCESS" : "MISS", static_cast<int>(training.Info().missReason));
+                break;
+            }
+            training.Step(phase == RlTrainingPhase::Running ? pilot.Think(w) : RlCarInput{});
+        }
+    }
+
     void TestResultsFile()
     {
         const std::vector<RlTrainingPack> packs = Packs();
@@ -608,6 +756,14 @@ int main()
         TestSaved();
         TestTouchAbove();
         TestKickoff();
+        TraceAutopilot();
+        char* skipTable = nullptr;
+        size_t skipLength = 0;
+        _dupenv_s(&skipTable, &skipLength, "RL_TRAINING_SKIP_TABLE");
+        if (skipTable == nullptr)
+        {
+            TestAutopilot();
+        }
         TestResultsFile();
         TestStore();
     }

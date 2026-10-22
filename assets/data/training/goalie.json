@@ -89,21 +89,21 @@
       }
     },
     {
-      "id": "far-corner",
-      "name": "High to the far corner",
-      "hint": "Boost up to the top corner.",
+      "id": "across-the-goal",
+      "name": "Across the goal",
+      "hint": "A ground shot from the left wing: slide across.",
       "car": {
-        "x": 4,
+        "x": -5,
         "z": -44,
         "yaw": 0,
         "boost": 66
       },
       "ball": {
-        "position": [20.0, 0.9125, -10.0],
-        "velocity": [-10.9625, 9.4612, -16.7279],
+        "position": [-24.0, 0.9125, -14.0],
+        "velocity": [9.6028, 0.0, -11.5233],
         "spin": [0, 0, 0]
       },
-      "timeLimit": 6.4629,
+      "timeLimit": 7.2282,
       "attempts": 3,
       "success": {
         "type": "saved"
@@ -114,59 +114,59 @@
       "name": "Hard drive",
       "hint": "No time to think: it is fast.",
       "car": {
-        "x": 6,
+        "x": 4,
         "z": -46,
         "yaw": 0,
         "boost": 66
       },
       "ball": {
         "position": [8.0, 0.9125, -25.0],
-        "velocity": [-11.5564, 0.0, -23.2906],
+        "velocity": [-7.5561, 0.0, -15.2284],
         "spin": [0, 0, 0]
       },
-      "timeLimit": 5.1249,
+      "timeLimit": 5.7205,
       "attempts": 3,
       "success": {
         "type": "saved"
       }
     },
     {
-      "id": "cross-and-shoot",
-      "name": "Cross and shoot",
-      "hint": "A shot from the wing.",
+      "id": "from-the-corner",
+      "name": "From the corner",
+      "hint": "A low shot from the corner flag.",
       "car": {
-        "x": -6,
-        "z": -44,
+        "x": -3,
+        "z": -46,
         "yaw": 0,
         "boost": 66
       },
       "ball": {
-        "position": [-30.0, 0.9125, -30.0],
-        "velocity": [18.6683, 6.2417, -11.6402],
+        "position": [-32.0, 0.9125, -38.0],
+        "velocity": [13.375, 0.0, -6.7904],
         "spin": [0, 0, 0]
       },
-      "timeLimit": 5.8213,
+      "timeLimit": 5.9439,
       "attempts": 3,
       "success": {
         "type": "saved"
       }
     },
     {
-      "id": "lob",
-      "name": "Lob",
-      "hint": "A high ball drops over you.",
+      "id": "second-bounce",
+      "name": "Second bounce",
+      "hint": "The ball bounces in front of the goal: time your touch.",
       "car": {
-        "x": 4,
+        "x": 3,
         "z": -44,
         "yaw": 0,
         "boost": 66
       },
       "ball": {
-        "position": [0.0, 0.9125, -30.0],
-        "velocity": [-2.5957, 7.6608, -13.7573],
+        "position": [6.0, 0.9125, -12.0],
+        "velocity": [-2.7994, 9.4232, -13.7173],
         "spin": [0, 0, 0]
       },
-      "timeLimit": 5.541,
+      "timeLimit": 6.8577,
       "attempts": 3,
       "success": {
         "type": "saved"

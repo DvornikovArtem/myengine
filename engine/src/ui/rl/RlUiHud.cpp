@@ -768,15 +768,15 @@ namespace myengine::rlui
         {
             if (t.phase == HudTrainingPhase::FreePlay)
             {
-                hints = {{"R", "Y", "Ball to car"}, {"T", "X", "Ball in the air"}, {"B", "LB", "Endless boost"}, {"Esc", "Start", "Menu"}};
+                hints = {{"R", "D-Up", "Ball to car"}, {"T", "D-Down", "Ball in the air"}, {"C", "D-Left", "Reset car"}, {"B", "L3", "Endless boost"}, {"Esc", "Start", "Menu"}};
             }
             else if (t.phase == HudTrainingPhase::PackDone)
             {
-                hints = {{"R", "Y", "Start over"}, {"P", "LB", "Previous"}, {"Esc", "Start", "Menu"}};
+                hints = {{"R", "D-Up", "Start over"}, {"P", "D-Left", "Previous"}, {"Esc", "Start", "Menu"}};
             }
             else
             {
-                hints = {{"R", "Y", "Retry"}, {"N", "RB", "Next"}, {"P", "LB", "Previous"}, {"Esc", "Start", "Menu"}};
+                hints = {{"R", "D-Up", "Retry"}, {"N", "D-Right", "Next"}, {"P", "D-Left", "Previous"}, {"Esc", "Start", "Menu"}};
             }
         }
         const Space saved = f.space();
@@ -935,8 +935,7 @@ namespace myengine::rlui
             {
                 DrawBoostRing(f);
             }
-            DrawTraining(f);
-            DrawBallCamHint(f);
+            DrawTraining(f);   // no hint of the ball cam: the row of the keys of the training is where it would stand
             return;
         }
         if (scoreboardHeld)
