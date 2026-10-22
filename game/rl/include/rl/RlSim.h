@@ -1,0 +1,118 @@
+// RlSim.h
+// The Rocket League world: a Jolt physics system with the arena, one ball and up to eight cars, stepped at 120 Hz.
+// All bodies live for the whole match; a demolished car is a state (a layer that collides with nothing, parked outside the
+// arena), so SaveState / RestoreState can roll the world back. Single threaded: call it from one thread.
+
+#pragma once
+
+#include <rl/RlArena.h>
+#include <rl/RlCars.h>
+#include <rl/RlTuning.h>
+#include <rl/RlTypes.h>
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+namespace rl
+{
+    class RlSim
+    {
+    public:
+        // `variants` (carCount entries, or null): the car of every slot as RlCarVariant of the catalog; null is the car of the tuning for all
+        RlSim(const RlTuning& tuning, int carCount, const RlCarVariant* variants = nullptr);
+        ~RlSim();
+        RlSim(const RlSim&) = delete;
+        RlSim& operator=(const RlSim&) = delete;
+
+        int CarCount() const;
+        const RlTuning& Tuning() const;
+        // The numbers of the car of a slot: the car of the tuning with the variant of the slot applied
+        const RlCarTuning& CarTuning(int index) const;
+        const RlArena& Arena() const;
+        // Takes new numbers while the world runs (the RL Tuning window, a reloaded rl_tuning.json): everything the car, the ball and the
+        // match read each tick changes at once; what is built into the bodies (the arena, the hitbox, its centre of mass, the mass) keeps
+        // its value until a new sim is made.
+        void SetTuning(const RlTuning& tuning);
+
+        // Puts a car upright on the floor at (x, z) looking `yaw` radians from +Z towards +X, at rest, with the starting boost.
+        // This is also the point it comes back to after a demolition.
+        void ResetCar(int index, float x, float z, float yaw);
+        void ResetBall(RlVec3 position, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
+        void SetCarBoost(int index, float boost);
+        // The team of a car: cars of one team bump each other, only cars of different teams demolish (every car is its own team by default).
+        void SetCarTeam(int index, int team);
+        // Where a demolished car comes back (ResetCar sets it to the spot the car was reset to).
+        void SetRespawnPoint(int index, float x, float z, float yaw);
+        // Demolishes a car as an enemy at full speed would (the car is parked until its respawn delay is over, then it comes back at its respawn point):
+        // the tests and the debug commands of the game use it.
+        void DemolishCar(int index);
+        // Puts a car at any pose (tests, kick-off spots, flip resets); the car keeps its boost and its jump state.
+        void SetCarPose(int index, RlVec3 position, RlQuat rotation, RlVec3 velocity = {}, RlVec3 angularVelocity = {});
+
+        // One 120 Hz tick; `inputs` has CarCount() entries.
+        void Step(const RlCarInput* inputs);
+
+        // Fraction (0..1) of the segment from `from` to `to` that is free of the arena; 1 when it does not touch it (the camera uses it).
+        float ArenaSegmentFree(RlVec3 from, RlVec3 to) const;
+
+        const RlWorldState& State() const;
+        const RlWorldState& PreviousState() const;  // the state before the last Step, for interpolation
+        const RlEvents& LastEvents() const;         // what the last Step did (ball hits, demolitions)
+
+        // Snapshot of the whole simulation (Jolt and the car state around it) into a flat buffer; the vector keeps its capacity.
+        void SaveState(std::vector<uint8_t>& out) const;
+        bool RestoreState(const std::vector<uint8_t>& in);
+        static uint64_t HashState(const std::vector<uint8_t>& snapshot);
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+    };
+
+    // A ring of snapshots by tick for the rollback of G5; works for anything with SaveState(vector&) and RestoreState(vector).
+    template <typename Simulation>
+    class RlStateRingT
+    {
+    public:
+        explicit RlStateRingT(size_t capacity = 128)
+            : slots_(capacity)
+        {
+        }
+        void Push(uint32_t tick, const Simulation& sim)
+        {
+            if (slots_.empty())
+            {
+                return;
+            }
+            Slot& slot = slots_[next_];
+            sim.SaveState(slot.bytes);
+            slot.tick = tick;
+            slot.used = true;
+            next_ = (next_ + 1) % slots_.size();
+        }
+        bool Restore(uint32_t tick, Simulation& sim) const
+        {
+            for (const Slot& slot : slots_)
+            {
+                if (slot.used && slot.tick == tick)
+                {
+                    return sim.RestoreState(slot.bytes);
+                }
+            }
+            return false;
+        }
+
+    private:
+        struct Slot
+        {
+            uint32_t tick = 0;
+            bool used = false;
+            std::vector<uint8_t> bytes;
+        };
+        std::vector<Slot> slots_;
+        size_t next_ = 0;
+    };
+
+    using RlStateRing = RlStateRingT<RlSim>;
+}

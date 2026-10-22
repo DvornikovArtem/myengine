@@ -1,0 +1,17 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/scoreboard.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 0.1,
+    "gGloss": 12,
+    "gFresnel": 0.0,
+    "gEmissiveStrength": 0.9
+  },
+  "castShadow": false
+}

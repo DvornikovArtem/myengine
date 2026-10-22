@@ -104,6 +104,19 @@ namespace myengine::config
                 config.windows = Default().windows;
             }
 
+            if (root.contains("startScene") && root["startScene"].is_string())
+            {
+                config.startScene = root["startScene"].get<std::string>();
+            }
+            if (root.contains("startInPlay") && root["startInPlay"].is_boolean())
+            {
+                config.startInPlay = root["startInPlay"].get<bool>();
+            }
+            if (root.contains("startInGame") && root["startInGame"].is_boolean())
+            {
+                config.startInGame = root["startInGame"].get<bool>();
+            }
+
             if (root.contains("input") && root["input"].is_object())
             {
                 const auto& input = root["input"];

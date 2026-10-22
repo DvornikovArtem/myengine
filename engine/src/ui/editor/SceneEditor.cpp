@@ -189,6 +189,7 @@ namespace myengine::ui
         DrawWidgetsGallery(&showWidgetsGallery_);
         DrawThumbnailsDebugWindow();
         DrawShaderLayoutsWindow();
+        DrawRlTuningWindow();
     }
 
     // Developer tool: the layouts that the reflection reads from every shader of assets/shaders (resources, constant
@@ -431,6 +432,10 @@ namespace myengine::ui
                 if (MenuItemIcon(ICON_PACKAGE, "Prefabs", nullptr, editorState.showPrefabs, true, true, width)) { editorState.showPrefabs = !editorState.showPrefabs; }
                 if (MenuItemIcon(ICON_PALETTE, "Material Editor", nullptr, editorState.showMaterialEditor, true, true, width)) { editorState.showMaterialEditor = !editorState.showMaterialEditor; }
                 MenuSection("TOOLS");
+                if (services_.rlTuning && services_.rlTuning() != nullptr)
+                {
+                    if (MenuItemIcon(ICON_SLIDERS_HORIZONTAL, "RL Tuning", nullptr, showRlTuning_, true, true, width)) { showRlTuning_ = !showRlTuning_; }
+                }
                 if (MenuItemIcon(ICON_SCROLL_TEXT, "Output Log", nullptr, editorState.showScriptConsole, true, true, width)) { editorState.showScriptConsole = !editorState.showScriptConsole; }
                 if (MenuItemIcon(ICON_ACTIVITY, "Statistics", nullptr, editorState.showStatistics, true, true, width)) { editorState.showStatistics = !editorState.showStatistics; }
                 if (MenuItemIcon(ICON_SPARKLES, "Assistant", nullptr, editorState.showAssistant, true, true, width)) { editorState.showAssistant = !editorState.showAssistant; }

@@ -66,17 +66,6 @@ set_property(TARGET myengine_gameplay_tests PROPERTY FOLDER "Tests")
 add_test(NAME scripting_gameplay COMMAND myengine_gameplay_tests)
 set_tests_properties(scripting_gameplay PROPERTIES TIMEOUT 30)
 
-# Headless Rocket League match: the car prefab, its wheels and the real script, without a window.
-add_executable(myengine_rocket_league_tests
-  scripting/RocketLeagueTests.cpp)
-
-target_link_libraries(myengine_rocket_league_tests PRIVATE myengine_engine myengine_python)
-myengine_apply_compiler_options(myengine_rocket_league_tests)
-myengine_copy_runtime_assets(myengine_rocket_league_tests)
-set_property(TARGET myengine_rocket_league_tests PROPERTY FOLDER "Tests")
-add_test(NAME rocket_league COMMAND myengine_rocket_league_tests)
-set_tests_properties(rocket_league PROPERTIES TIMEOUT 240)
-
 # Manual integration test: plays a scripted round in a DX12 window.
 add_executable(myengine_gameplay_smoke
   scene/GameplaySceneSmoke.cpp)
@@ -215,6 +204,17 @@ myengine_apply_compiler_options(myengine_loading_tests)
 set_property(TARGET myengine_loading_tests PROPERTY FOLDER "Tests")
 add_test(NAME loading_service COMMAND myengine_loading_tests)
 
+# G8: the limit of the frames per second of the main loop (the rate and the length of a frame)
+add_executable(myengine_frame_pacer_tests
+  core/FramePacerTests.cpp)
+
+target_link_libraries(myengine_frame_pacer_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_frame_pacer_tests)
+set_property(TARGET myengine_frame_pacer_tests PROPERTY FOLDER "Tests")
+add_test(NAME frame_pacer COMMAND myengine_frame_pacer_tests)
+# RUN_SERIAL: it measures the length of frames in real time (3 % and half a millisecond); with `ctest -j 8` next to the heavy tests it fails
+set_tests_properties(frame_pacer PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
@@ -259,6 +259,17 @@ target_include_directories(myengine_input_layout_tests PRIVATE "${CMAKE_SOURCE_D
 myengine_apply_compiler_options(myengine_input_layout_tests)
 set_property(TARGET myengine_input_layout_tests PROPERTY FOLDER "Tests")
 add_test(NAME input_layout COMMAND myengine_input_layout_tests)
+
+# G7b: the scene passes without a GPU: mesh bounds, the lit and post shaders, the instance stream, the sampler presets
+add_executable(myengine_scene_pass_tests
+  render/ScenePassTests.cpp)
+
+target_link_libraries(myengine_scene_pass_tests PRIVATE myengine_engine)
+target_include_directories(myengine_scene_pass_tests PRIVATE "${CMAKE_SOURCE_DIR}/engine/src/render/dx12")
+myengine_apply_compiler_options(myengine_scene_pass_tests)
+set_property(TARGET myengine_scene_pass_tests PROPERTY FOLDER "Tests")
+add_test(NAME scene_pass COMMAND myengine_scene_pass_tests)
+set_tests_properties(scene_pass PROPERTIES TIMEOUT 120)
 set_tests_properties(input_layout PROPERTIES TIMEOUT 120)
 
 # A-check (LR3): shader hot reload in the resource manager on a recording adapter: same handle, errors, fallback, includes
@@ -360,6 +371,101 @@ target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
 
+# G3: the Rocket League physics (Jolt) without a window
+add_executable(myengine_rl_physics_tests
+  rl/RlPhysicsTests.cpp)
+
+target_link_libraries(myengine_rl_physics_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_physics_tests PRIVATE
+  RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json"
+  RL_ARENA_OBJ="${CMAKE_SOURCE_DIR}/assets/models/rl_arena.obj")
+myengine_apply_compiler_options(myengine_rl_physics_tests)
+set_property(TARGET myengine_rl_physics_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_physics COMMAND myengine_rl_physics_tests)
+set_tests_properties(rl_physics PROPERTIES TIMEOUT 300)
+
+# G4: the match, the bots, the pads (no window)
+add_executable(myengine_rl_match_tests
+  rl/RlMatchTests.cpp)
+
+target_link_libraries(myengine_rl_match_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_match_tests PRIVATE RL_CONTROLS_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_controls.json")
+myengine_apply_compiler_options(myengine_rl_match_tests)
+set_property(TARGET myengine_rl_match_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_match COMMAND myengine_rl_match_tests)
+set_tests_properties(rl_match PROPERTIES TIMEOUT 600)
+
+# G4f: the bots of the second version against the first ones and against each other (many headless matches)
+add_executable(myengine_rl_bots_tests
+  rl/RlBotsTests.cpp)
+
+target_link_libraries(myengine_rl_bots_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_bots_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json")
+myengine_apply_compiler_options(myengine_rl_bots_tests)
+set_property(TARGET myengine_rl_bots_tests PROPERTY FOLDER "Tests")
+# Debug runs the quick look (4 matches, no verdicts): the whole series is 40 minutes without optimisation, and its verdicts (win rates, 0.5 ms per tick)
+# are for an optimised build; RelWithDebInfo and Release run all of it
+add_test(NAME rl_bots COMMAND myengine_rl_bots_tests $<$<CONFIG:Debug>:--quick>)
+set_tests_properties(rl_bots PROPERTIES TIMEOUT 900)
+
+# G4i: the cars of the match (the physics of the six, the choice, six cars in one world); the garage and its data are tested by rl_cars
+add_executable(myengine_rl_carphysics_tests
+  rl/RlCarPhysicsTests.cpp)
+
+target_link_libraries(myengine_rl_carphysics_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_carphysics_tests PRIVATE RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
+myengine_apply_compiler_options(myengine_rl_carphysics_tests)
+set_property(TARGET myengine_rl_carphysics_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_carphysics COMMAND myengine_rl_carphysics_tests)
+set_tests_properties(rl_carphysics PROPERTIES TIMEOUT 300)
+
+# G4e: the car of the game against RocketSim (reference traces written by tests/rl/rocketsim_diff, no RocketSim in this build)
+add_executable(myengine_rl_rocketsim_diff
+  rl/RlRocketSimDiffTests.cpp)
+
+target_link_libraries(myengine_rl_rocketsim_diff PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_rocketsim_diff PRIVATE
+  RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json"
+  RL_DIFF_TRACES="${CMAKE_SOURCE_DIR}/tests/rl/rocketsim_diff/traces"
+  RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
+myengine_apply_compiler_options(myengine_rl_rocketsim_diff)
+set_property(TARGET myengine_rl_rocketsim_diff PROPERTY FOLDER "Tests")
+add_test(NAME rl_rocketsim_diff COMMAND myengine_rl_rocketsim_diff)
+set_tests_properties(rl_rocketsim_diff PROPERTIES TIMEOUT 300)
+
+# G5: the netcode of the match: transport, protocol, host, client with rollback (no window; virtual clock; one test over real UDP)
+add_executable(myengine_rl_net_tests
+  rl/RlNetTests.cpp)
+
+target_link_libraries(myengine_rl_net_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_net_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json" RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
+myengine_apply_compiler_options(myengine_rl_net_tests)
+set_property(TARGET myengine_rl_net_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_net COMMAND myengine_rl_net_tests)
+set_tests_properties(rl_net PROPERTIES TIMEOUT 600)
+
+# G6b: the manual check of the Steam code against the real SDK (needs the Steam client running; not in ctest, exit code 77 = skipped)
+if(MYENGINE_STEAM)
+  add_executable(myengine_rl_steam_smoke
+    rl/RlSteamSmoke.cpp)
+
+  target_link_libraries(myengine_rl_steam_smoke PRIVATE myengine_rl)
+  target_include_directories(myengine_rl_steam_smoke SYSTEM PRIVATE "${STEAMWORKS_SDK_DIR}/public")
+  myengine_apply_compiler_options(myengine_rl_steam_smoke)
+  set_property(TARGET myengine_rl_steam_smoke PROPERTY FOLDER "Tests")
+endif()
+
+# A build with Steam links steam_api64.lib into everything that uses myengine_rl: every test exe needs steam_api64.dll next to it to start
+if(MYENGINE_STEAM)
+  get_property(myengine_test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(test_target IN LISTS myengine_test_targets)
+    get_target_property(test_target_type ${test_target} TYPE)
+    if(test_target_type STREQUAL "EXECUTABLE")
+      myengine_rl_steam_runtime(${test_target})
+    endif()
+  endforeach()
+endif()
+
 # An ASan build is several times slower (physics and rendering loops especially): the time limits grow with it
 if(MYENGINE_ASAN)
   get_property(myengine_all_tests DIRECTORY PROPERTY TESTS)
@@ -371,3 +477,96 @@ if(MYENGINE_ASAN)
     endif()
   endforeach()
 endif()
+
+
+# G7c: the audio module without a sound device: WAV, 3D, the pool of voices, buses, fades, the sound bank, the sounds of the project
+add_executable(myengine_audio_tests
+  audio/AudioTests.cpp)
+
+target_link_libraries(myengine_audio_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_audio_tests)
+set_property(TARGET myengine_audio_tests PROPERTY FOLDER "Tests")
+add_test(NAME audio COMMAND myengine_audio_tests)
+set_tests_properties(audio PROPERTIES TIMEOUT 120)
+
+
+# G7c: the particle simulation without a renderer: presets, bursts and rates, the budget, batches, the cost of 5000 particles
+add_executable(myengine_fx_tests
+  fx/FxTests.cpp)
+
+target_link_libraries(myengine_fx_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_fx_tests)
+set_property(TARGET myengine_fx_tests PROPERTY FOLDER "Tests")
+add_test(NAME fx COMMAND myengine_fx_tests)
+set_tests_properties(fx PROPERTIES TIMEOUT 120)
+
+
+# G7d: the sounds and effects of a Rocket League match from the state of the simulation: events of pairs of ticks, no doubles after a
+# rollback, the commands that reach the audio and particle systems (no device, no renderer), a bot match with the journal
+add_executable(myengine_rl_feedback_tests
+  rl/RlFeedbackTests.cpp)
+
+target_link_libraries(myengine_rl_feedback_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_feedback_tests)
+set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
+set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
+
+
+# G4g: the training: free play, the packs of exercises (assets/data/training), the conditions of success, the attempts, the results file (no window)
+add_executable(myengine_rl_training_tests
+  rl/RlTrainingTests.cpp)
+
+target_link_libraries(myengine_rl_training_tests PRIVATE myengine_engine)
+target_compile_definitions(myengine_rl_training_tests PRIVATE TRAINING_PACKS_DIR="${CMAKE_SOURCE_DIR}/assets/data/training")
+myengine_apply_compiler_options(myengine_rl_training_tests)
+set_property(TARGET myengine_rl_training_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_training COMMAND myengine_rl_training_tests)
+set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
+
+
+# G4i: the cars of the garage: the data (the hitboxes of RocketSim), the meshes and previews they name, the bars, broken data, the key in the settings (no window)
+add_executable(myengine_rl_cars_tests
+  rl/RlCarsTests.cpp)
+
+target_link_libraries(myengine_rl_cars_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_cars_tests)
+set_property(TARGET myengine_rl_cars_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_cars COMMAND myengine_rl_cars_tests)
+set_tests_properties(rl_cars PROPERTIES TIMEOUT 120)
+
+
+# G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
+# RlFeedback in the replay mode (no window)
+add_executable(myengine_rl_replay_tests
+  rl/RlReplayTests.cpp)
+
+target_link_libraries(myengine_rl_replay_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_replay_tests)
+set_property(TARGET myengine_rl_replay_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_replay COMMAND myengine_rl_replay_tests)
+set_tests_properties(rl_replay PROPERTIES TIMEOUT 300)
+
+
+# G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery
+add_executable(myengine_rl_ui_tests
+  ui/RlUiTests.cpp)
+
+target_link_libraries(myengine_rl_ui_tests PRIVATE myengine_engine)
+target_include_directories(myengine_rl_ui_tests PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_rl_ui_tests)
+set_property(TARGET myengine_rl_ui_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_ui COMMAND myengine_rl_ui_tests)
+set_tests_properties(rl_ui PROPERTIES TIMEOUT 120)
+
+
+# G1-flow: the game mode of Rocket League without a window: the settings file, the script of the UI tests, and RlGameSystem driven through the commands of the
+# screens (a match from the start to the results, the pause, the feed, the lobby, the controls)
+add_executable(myengine_rl_game_tests
+  ui/RlGameTests.cpp)
+
+target_link_libraries(myengine_rl_game_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_rl_game_tests)
+set_property(TARGET myengine_rl_game_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_game COMMAND myengine_rl_game_tests)
+set_tests_properties(rl_game PROPERTIES TIMEOUT 180)

@@ -6,6 +6,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <fstream>
@@ -26,6 +27,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/LoadingService.h>
@@ -230,6 +232,29 @@ namespace myengine::resource
             return ToLower(NarrowText(path.extension())) == ".myetex";
         }
 
+        // The binary cache of a source file: next to it, or in the cache folder of the user when the sources may lie
+        // where nothing is written (shipping: <UserData>\Cache\<hash of the path>.<extension>)
+        std::filesystem::path BuildCachePath(const std::filesystem::path& sourcePath, const char* extension)
+        {
+            const std::filesystem::path cacheDirectory = core::apppaths::AssetCacheDirectory();
+            if (cacheDirectory.empty())
+            {
+                std::filesystem::path binaryPath = sourcePath;
+                binaryPath.replace_extension(extension);
+                return binaryPath;
+            }
+
+            // FNV-1a over the normalized path text: the same file always lands on the same name
+            std::uint64_t hash = 14695981039346656037ull;
+            for (const unsigned char c : ToLower(GenericNarrowText(sourcePath)))
+            {
+                hash = (hash ^ c) * 1099511628211ull;
+            }
+            char name[40]{};
+            std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(hash));
+            return cacheDirectory / (std::string(name) + extension);
+        }
+
         std::filesystem::path BuildMeshBinaryPath(const std::filesystem::path& sourcePath)
         {
             if (IsMeshBinaryPath(sourcePath))
@@ -237,9 +262,7 @@ namespace myengine::resource
                 return sourcePath;
             }
 
-            std::filesystem::path binaryPath = sourcePath;
-            binaryPath.replace_extension(".myemesh");
-            return binaryPath;
+            return BuildCachePath(sourcePath, ".myemesh");
         }
 
         std::filesystem::path BuildTextureBinaryPath(const std::filesystem::path& sourcePath)
@@ -249,9 +272,7 @@ namespace myengine::resource
                 return sourcePath;
             }
 
-            std::filesystem::path binaryPath = sourcePath;
-            binaryPath.replace_extension(".myetex");
-            return binaryPath;
+            return BuildCachePath(sourcePath, ".myetex");
         }
 
         bool TryGetFileStamp(const std::filesystem::path& path, FileStamp& outStamp)
@@ -1438,7 +1459,7 @@ namespace myengine::resource
                 {
                     roots.push_back(project.Root());
                 }
-                roots.push_back(std::filesystem::u8path(MYENGINE_SOURCE_DIR));
+                roots.push_back(core::apppaths::SourceRoot()); // empty in a shipping build: skipped below
                 roots.push_back(GetExecutableDirectory());
 
                 for (const auto& root : roots)
@@ -1502,6 +1523,10 @@ namespace myengine::resource
         // The jobs capture this ResourceManager, so all of them must finish before its fields are destroyed
         shuttingDown_ = true;
         jobs::Wait(streamingContext_);
+        if (hotReloadScan_.valid())
+        {
+            hotReloadScan_.wait();
+        }
     }
 
     bool ResourceManager::LoadManifest(const std::filesystem::path& path)
@@ -1585,6 +1610,41 @@ namespace myengine::resource
         return pendingMeshLoads_.size() + pendingTextureLoads_.size();
     }
 
+    namespace
+    {
+        // Is any file of the list not what it was when the resource was read? (no members: it runs on a worker too)
+        bool DependenciesChanged(const std::vector<ResourceDependency>& dependencies)
+        {
+            for (const auto& dependency : dependencies)
+            {
+                std::error_code ec;
+                const bool exists = std::filesystem::exists(dependency.path, ec);
+                if (ec)
+                {
+                    return true;
+                }
+
+                if (exists != dependency.existed)
+                {
+                    return true;
+                }
+
+                if (!exists)
+                {
+                    continue;
+                }
+
+                const auto currentWriteTime = std::filesystem::last_write_time(dependency.path, ec);
+                if (ec || currentWriteTime != dependency.lastWriteTime)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     void ResourceManager::UpdateHotReload()
     {
         // One call per frame: the clock of the material parameters. Parameters that were replaced stay alive for a few
@@ -1597,6 +1657,15 @@ namespace myengine::resource
 
         PumpAsyncLoads();
 
+        if (hotReloadScan_.valid())
+        {
+            if (hotReloadScan_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            {
+                return;
+            }
+            ApplyHotReload(hotReloadScan_.get());
+        }
+
         const auto now = std::chrono::steady_clock::now();
         if (now - lastHotReloadScanTime_ < hotReloadInterval_)
         {
@@ -1604,10 +1673,86 @@ namespace myengine::resource
         }
 
         lastHotReloadScanTime_ = now;
+        if (hotReloadAsync_)
+        {
+            ZoneScopedN("HotReload::Snapshot");
+            std::vector<HotReloadWatch> watches;
+            watches.reserve(meshCache_.size() + textureCache_.size() + shaderCache_.size() + materialCache_.size());
+            const auto collect = [&watches](const auto& cache, const int kind)
+            {
+                for (const auto& [_, resource] : cache)
+                {
+                    if (resource != nullptr && !resource->dependencies.empty())
+                    {
+                        watches.push_back({kind, resource->sourcePath, resource->dependencies});
+                    }
+                }
+            };
+            collect(shaderCache_, 0);
+            collect(materialCache_, 1);
+            collect(meshCache_, 2);
+            collect(textureCache_, 3);
+            hotReloadScan_ = std::async(std::launch::async, [watches = std::move(watches)]()
+            {
+                ZoneScopedN("HotReload::Scan");
+                HotReloadChanges changes;
+                for (const auto& watch : watches)
+                {
+                    if (DependenciesChanged(watch.dependencies))
+                    {
+                        changes.emplace_back(watch.kind, watch.sourcePath);
+                    }
+                }
+                return changes;
+            });
+            return;
+        }
+
         ReloadChangedShaders();
         ReloadChangedMaterials();
         ReloadChangedMeshes();
         ReloadChangedTextures();
+    }
+
+    void ResourceManager::ApplyHotReload(const HotReloadChanges& changes)
+    {
+        // the same order as the scan made in the call: shaders, materials, meshes, textures
+        for (int kind = 0; kind < 4; ++kind)
+        {
+            bool any = false;
+            for (const auto& [changedKind, path] : changes)
+            {
+                if (changedKind != kind)
+                {
+                    continue;
+                }
+                any = true;
+                if (kind == 0)
+                {
+                    logger_.Info("ResourceManager: hot reload shader " + NarrowText(path));
+                    Reload<ShaderAsset>(path);
+                }
+                else if (kind == 1)
+                {
+                    logger_.Info("ResourceManager: hot reload material " + NarrowText(path));
+                    Reload<MaterialAsset>(path);
+                }
+                else if (kind == 2)
+                {
+                    logger_.Info("ResourceManager: hot reload mesh " + NarrowText(path));
+                    Reload<MeshAsset>(path);
+                }
+                else
+                {
+                    logger_.Info("ResourceManager: hot reload texture " + NarrowText(path));
+                    Reload<TextureAsset>(path);
+                }
+            }
+            if (any && kind == 0)
+            {
+                RevalidateMaterials();
+            }
+        }
     }
 
     bool ResourceManager::SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset)
@@ -1654,6 +1799,22 @@ namespace myengine::resource
         if (!colorInParams && asset.tintSet)
         {
             descriptor["tint"] = TintToJson(asset.tint);
+        }
+        if (asset.blend == render::BlendMode::Alpha)
+        {
+            descriptor["blend"] = "alpha";
+        }
+        else if (asset.blend == render::BlendMode::Additive)
+        {
+            descriptor["blend"] = "additive";
+        }
+        if (asset.doubleSided)
+        {
+            descriptor["doubleSided"] = true;
+        }
+        if (!asset.castShadow)
+        {
+            descriptor["castShadow"] = false;
         }
         if (!asset.params.empty())
         {
@@ -1727,8 +1888,10 @@ namespace myengine::resource
             return ec ? candidate.lexically_normal() : canonical;
         };
 
-        const std::filesystem::path projectRelative = std::filesystem::u8path(MYENGINE_SOURCE_DIR) / path;
-        if (std::filesystem::exists(projectRelative, ec))
+        // The sources the executable was built from (none in a shipping build)
+        const std::filesystem::path sourceRoot = core::apppaths::SourceRoot();
+        const std::filesystem::path projectRelative = sourceRoot.empty() ? path : sourceRoot / path;
+        if (!sourceRoot.empty() && std::filesystem::exists(projectRelative, ec))
         {
             return normalizeExisting(projectRelative);
         }
@@ -2435,6 +2598,7 @@ namespace myengine::resource
 
         MeshAsset asset;
         asset.data = std::move(cpuAsset.data);
+        asset.bounds = render::ComputeMeshBounds(asset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
         if (!asset.gpuHandle.IsValid())
         {
@@ -2591,6 +2755,23 @@ namespace myengine::resource
         if (!legacyTexture.empty())
         {
             asset.texturePath = NormalizeKey(ResolvePath(path.parent_path() / legacyTexture));
+        }
+        {
+            const std::string blend = descriptor.value("blend", std::string("opaque"));
+            if (blend == "alpha")
+            {
+                asset.blend = render::BlendMode::Alpha;
+            }
+            else if (blend == "additive")
+            {
+                asset.blend = render::BlendMode::Additive;
+            }
+            else if (blend != "opaque")
+            {
+                logger_.Warning("ResourceManager: material " + NarrowText(path) + ": unknown blend '" + blend + "' (opaque, alpha, additive): opaque is used");
+            }
+            asset.doubleSided = descriptor.value("doubleSided", false);
+            asset.castShadow = descriptor.value("castShadow", true);
         }
         const bool hasTint = descriptor.contains("tint");
         asset.tintSet = hasTint;
@@ -2766,33 +2947,7 @@ namespace myengine::resource
 
     bool ResourceManager::HasChanged(const std::vector<ResourceDependency>& dependencies) const
     {
-        for (const auto& dependency : dependencies)
-        {
-            std::error_code ec;
-            const bool exists = std::filesystem::exists(dependency.path, ec);
-            if (ec)
-            {
-                return true;
-            }
-
-            if (exists != dependency.existed)
-            {
-                return true;
-            }
-
-            if (!exists)
-            {
-                continue;
-            }
-
-            const auto currentWriteTime = std::filesystem::last_write_time(dependency.path, ec);
-            if (ec || currentWriteTime != dependency.lastWriteTime)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return DependenciesChanged(dependencies);
     }
 
     ResourceHandle<MeshAsset> ResourceManager::CreateFallbackMesh()
@@ -2809,6 +2964,7 @@ namespace myengine::resource
 
         MeshAsset asset;
         asset.data = meshData;
+        asset.bounds = render::ComputeMeshBounds(asset.data);
         asset.gpuHandle = renderAdapter_.UploadMesh(asset.data);
 
         return CreateResource("__fallback_mesh__", {}, std::move(asset));

@@ -8,6 +8,10 @@ set(CMAKE_SUPPRESS_REGENERATION ON)
 
 option(MYENGINE_COPY_RUNTIME_ASSETS "Copy assets/config to target output directory" ON)
 option(MYENGINE_BUILD_TESTS "Build myengine tests" ON)
+# The game for players (tools/package_game.ps1, docs/game/packaging.md): RocketArena.exe without the path to the sources,
+# without the assistant and its MCP bridge, without tests; logs and settings go to %LOCALAPPDATA%\RocketArena.
+# Build it in its own folder (build-shipping/) in the Release configuration: Tracy is only on in RelWithDebInfo.
+option(MYENGINE_SHIPPING "Build the shipping game (RocketArena.exe)" OFF)
 # Checks for C++ errors (tools/check.ps1 runs them, docs/dev/cpp-checks.md). Each one needs its own build directory:
 #   MYENGINE_ASAN    AddressSanitizer (MSVC /fsanitize=address) for our targets, build-asan/
 #   MYENGINE_ANALYZE MSVC /analyze for our targets, build-analyze/
@@ -166,10 +170,44 @@ target_link_libraries(myengine_python INTERFACE myengine_python_lib)
 
 add_subdirectory(external/tracy EXCLUDE_FROM_ALL)
 target_compile_definitions(TracyClient PUBLIC $<$<CONFIG:RelWithDebInfo>:TRACY_ENABLE> $<$<CONFIG:RelWithDebInfo>:TRACY_FIBERS> $<$<CONFIG:RelWithDebInfo>:TRACY_ON_DEMAND>)
+# Jolt Physics (v5.6.0, submodule) for the Rocket League game (game/rl). Deterministic float mode so that a rollback replay
+# gives the same state; AVX2 can be turned off for machines without it.
+option(MYENGINE_JOLT_AVX2 "Compile Jolt with AVX2" ON)
+set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(CPP_EXCEPTIONS_ENABLED ON CACHE BOOL "" FORCE)
+set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+set(USE_AVX2 ${MYENGINE_JOLT_AVX2} CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+foreach(opt JPH_USE_DX12 JPH_USE_VK JPH_USE_MTL JPH_USE_CPU_COMPUTE)
+  set(${opt} OFF CACHE BOOL "" FORCE)
+endforeach()
+add_subdirectory(external/JoltPhysics/Build EXCLUDE_FROM_ALL)
+# SYSTEM: /W4 does not apply to Jolt headers
+get_target_property(MYENGINE_JOLT_INCLUDES Jolt INTERFACE_INCLUDE_DIRECTORIES)
+set_target_properties(Jolt PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${MYENGINE_JOLT_INCLUDES}")
+set_property(TARGET Jolt PROPERTY FOLDER "External")
+
+# The version of the game and of the exe resources comes from project(... VERSION) above and nowhere else:
+# generated/myengine/core/Version.h (the menu, the crash report) and app/resources/RocketArena.rc.in (VERSIONINFO of the exe)
+set(MYENGINE_GIT_COMMIT "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
+    OUTPUT_VARIABLE MYENGINE_GIT_COMMIT_OUT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE MYENGINE_GIT_RESULT)
+  if(MYENGINE_GIT_RESULT EQUAL 0 AND MYENGINE_GIT_COMMIT_OUT)
+    set(MYENGINE_GIT_COMMIT "${MYENGINE_GIT_COMMIT_OUT}")
+  endif()
+endif()
+configure_file(cmake/Version.h.in "${CMAKE_BINARY_DIR}/generated/myengine/core/Version.h" @ONLY)
+
 add_subdirectory(engine)
+add_subdirectory(game/rl)
 add_subdirectory(app)
 
-if(MYENGINE_BUILD_TESTS)
+if(MYENGINE_BUILD_TESTS AND NOT MYENGINE_SHIPPING)
   enable_testing()
   add_subdirectory(tests)
 endif()

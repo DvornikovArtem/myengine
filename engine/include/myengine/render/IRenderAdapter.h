@@ -37,6 +37,28 @@ namespace myengine::render
         std::uint64_t reloadFailures = 0;    // reloads that left the old program
     };
 
+    // The quality of the scene passes of a surface (not of render targets: the previews and thumbnails keep drawing directly).
+    // Changeable between frames; the menu of the game sets it. docs/render/scene-passes.md.
+    struct RenderSettings
+    {
+        std::uint8_t shadowQuality = 2;   // 0 off, 1 low (1024 map, one tap), 2 high (2048 map, PCF 3x3)
+        std::uint8_t msaaSamples = 4;     // 1 (off) or 4
+        bool bloom = true;                // HDR scene target with a bloom of the emissive / over-bright parts
+        bool instancing = true;           // draws of one mesh and material become one instanced draw
+        float bloomThreshold = 1.0f;      // brightness above which a pixel glows
+        float bloomIntensity = 0.55f;     // how much of the blurred glow is added
+    };
+
+    // The light of the scene surface (the shaders get it as the engine variables gLightDirection, gLightColor, gAmbientSky,
+    // gAmbientGround). The defaults are the old fixed light: direction (0.35, -1, 0.25), 25 % ambient.
+    struct SceneLighting
+    {
+        Float3 direction{0.35f, -1.0f, 0.25f};  // the way the light travels
+        Float3 color{0.75f, 0.75f, 0.75f};      // directional light, already multiplied by its intensity
+        Float3 skyAmbient{0.30f, 0.30f, 0.32f};   // hemisphere ambient: the colour of a surface that looks up
+        Float3 groundAmbient{0.16f, 0.16f, 0.15f}; // ... and of one that looks down
+    };
+
     class IRenderAdapter
     {
     public:
@@ -98,6 +120,17 @@ namespace myengine::render
         virtual void SetRenderRegion(RenderSurfaceHandle surface, const IntRect* region) = 0;
         virtual void SetViewProjection(RenderSurfaceHandle surface, const Matrix4& view, const Matrix4& projection) = 0;
         virtual void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) = 0;
+        // A batch of instances of one mesh with one material, one draw (particles): instanceData has 16 floats per instance, what
+        // the instance stream of the program reads as INSTANCE0..3 (a model matrix for the lit shader, the particle data for
+        // particle.hlsl). Only for programs that read the instance stream; only on the surface of the frame (not in render targets).
+        // drawItem.model is not used; its bounds (centre, radius) sort a transparent batch among the other transparent draws.
+        virtual void DrawInstances(RenderSurfaceHandle surface, const DrawItem& drawItem, const float* instanceData, std::uint32_t instanceCount)
+        {
+            (void)surface;
+            (void)drawItem;
+            (void)instanceData;
+            (void)instanceCount;
+        }
         virtual void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) = 0;
         virtual void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) = 0;
         virtual void EndFrame(RenderSurfaceHandle surface) = 0;
@@ -115,6 +148,12 @@ namespace myengine::render
             (void)direction;
             (void)ambient;
         }
+        // Settings and light of the scene surface (shadows, MSAA, bloom, instancing; the sun and the ambient)
+        virtual void SetRenderSettings(const RenderSettings& settings) { (void)settings; }
+        virtual RenderSettings GetRenderSettings() const { return {}; }
+        virtual void SetSceneLighting(const SceneLighting& lighting) { (void)lighting; }
+        // Saves the next presented frame of the surface as a PNG (diagnostics: --screenshot). false: not available.
+        virtual bool RequestScreenshot(const std::string& path) { (void)path; return false; }
 
         // ---- render to texture ----
         // An RGBA8 colour target with its own depth. Create and destroy it between frames, never between

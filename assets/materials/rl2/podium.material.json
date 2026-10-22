@@ -1,0 +1,17 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/podium.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 0.5,
+    "gGloss": 40,
+    "gFresnel": 0.2,
+    "gEmissiveStrength": 1.2
+  },
+  "castShadow": false
+}

@@ -1,0 +1,251 @@
+{
+  "gravity": 6.5,
+  "arena": {
+    "halfWidth": 40.96,
+    "halfLength": 51.2,
+    "height": 20.44,
+    "cornerCut": 11.5,
+    "floorRampRadius": 3.0,
+    "ceilingRampRadius": 3.0,
+    "rampSegments": 10,
+    "goalHalfWidth": 8.93,
+    "goalHeight": 6.43,
+    "goalDepth": 8.8,
+    "goalCornerRadius": 3.0,
+    "goalMouthBlend": 5.0,
+    "friction": 0.4,
+    "restitution": 0.0
+  },
+  "ball": {
+    "radius": 0.9125,
+    "mass": 30.0,
+    "restitution": 0.6,
+    "friction": 0.35,
+    "maxSpeed": 60.0,
+    "maxAngularSpeed": 6.0,
+    "linearDamping": 0.03,
+    "angularDamping": 0.0,
+    "hitNormalYScale": 0.35,
+    "hitForwardScale": 0.65,
+    "hitForceScale": 1.0,
+    "hitSpeed": [
+      0.0,
+      5.0,
+      23.0,
+      46.0
+    ],
+    "hitScale": [
+      0.65,
+      0.65,
+      0.55,
+      0.3
+    ],
+    "hitMaxRelativeSpeed": 46.0
+  },
+  "car": {
+    "mass": 180.0,
+    "halfExtentX": 0.4335,
+    "halfExtentY": 0.1933,
+    "halfExtentZ": 0.60254,
+    "comOffsetY": -0.20755,
+    "comOffsetZ": -0.13876,
+    "inertiaMultiplier": 1.0,
+    "friction": 0.3,
+    "restitution": 0.05,
+    "carBallFriction": 2.0,
+    "carBallRestitution": 0.0,
+    "carCarFriction": 0.09,
+    "carCarRestitution": 0.1,
+    "maxSpeed": 23.0,
+    "maxAngularSpeed": 5.5,
+    "supersonicSpeed": 22.0,
+    "supersonicMaintainSpeed": 21.0,
+    "supersonicMaintainTime": 1.0,
+    "wheelMountXFront": 0.259,
+    "wheelMountXRear": 0.295,
+    "wheelMountYOffset": 0.0,
+    "wheelFrontZ": 0.37374,
+    "wheelRearZ": -0.47626,
+    "wheelRadiusFront": 0.125,
+    "wheelRadiusRear": 0.15,
+    "suspensionRestFront": 0.26755,
+    "suspensionRestRear": 0.25055,
+    "suspensionTravel": 0.12,
+    "suspensionSubtraction": 0.025,
+    "suspensionStiffness": 500.0,
+    "suspensionDampCompression": 25.0,
+    "suspensionDampRelaxation": 40.0,
+    "suspensionScaleFront": 35.75,
+    "suspensionScaleRear": 54.265,
+    "pushbackErp": 0.2,
+    "spawnHeight": 0.38,
+    "throttleAccel": 16.0,
+    "driveSpeed": [
+      0.0,
+      14.0,
+      14.1
+    ],
+    "driveFactor": [
+      1.0,
+      0.1,
+      0.0
+    ],
+    "throttleDeadzone": 0.001,
+    "brakeAccel": 35.0,
+    "coastBrakeFactor": 0.15,
+    "stopSpeed": 0.25,
+    "brakeStiffness": 56.87,
+    "steerSpeed": [
+      0.0,
+      5.0,
+      10.0,
+      15.0,
+      17.5,
+      30.0
+    ],
+    "steerAngle": [
+      0.53356,
+      0.3193,
+      0.18203,
+      0.1057,
+      0.08507,
+      0.03454
+    ],
+    "powerslideSteerSpeed": [
+      0.0,
+      25.0
+    ],
+    "powerslideSteerAngle": [
+      0.39235,
+      0.1261
+    ],
+    "slipMinSpeed": 0.05,
+    "latFrictionSlip": [
+      0.0,
+      1.0
+    ],
+    "latFriction": [
+      1.0,
+      0.2
+    ],
+    "handbrakeLatFriction": 0.1,
+    "handbrakeLongSlip": [
+      0.0,
+      1.0
+    ],
+    "handbrakeLongFriction": [
+      0.5,
+      0.9
+    ],
+    "nonStickyNormal": [
+      0.0,
+      0.7075,
+      1.0
+    ],
+    "nonStickyScale": [
+      0.1,
+      0.5,
+      1.0
+    ],
+    "handbrakeRise": 5.0,
+    "handbrakeFall": 2.0,
+    "frictionDamping": 0.2,
+    "stickBase": 0.5,
+    "stickSteep": 1.0,
+    "stickStopSpeed": 0.25,
+    "jumpImpulse": 2.91667,
+    "jumpHoldAccel": 14.5833,
+    "jumpMinTime": 0.025,
+    "jumpMinAccelScale": 0.62,
+    "jumpHoldTime": 0.2,
+    "doubleJumpImpulse": 2.91667,
+    "dodgeWindow": 1.25,
+    "dodgeDeadzone": 0.5,
+    "dodgeImpulse": 5.0,
+    "dodgeForwardSpeedScale": 1.0,
+    "dodgeSideSpeedScale": 1.9,
+    "dodgeBackSpeedScale": 2.5,
+    "dodgeBackImpulseScale": 1.06667,
+    "dodgeZDamp": 0.35,
+    "dodgeZDampStart": 0.15,
+    "dodgeZDampEnd": 0.21,
+    "dodgeTorqueTime": 0.65,
+    "dodgeTorquePitch": 224.0,
+    "dodgeTorqueRoll": 260.0,
+    "dodgePitchLockExtra": 0.3,
+    "airPitchTorque": 12.4636,
+    "airYawTorque": 9.10795,
+    "airRollTorque": 38.3495,
+    "airPitchDamping": 2.87621,
+    "airYawDamping": 1.91747,
+    "airRollDamping": 4.79369,
+    "airThrottleAccel": 0.66667,
+    "autoRollForce": 1.0,
+    "autoRollTorque": 80.0,
+    "autoFlipImpulse": 2.0,
+    "autoFlipTorque": 50.0,
+    "autoFlipTime": 0.4,
+    "autoFlipNormalY": 0.7071,
+    "autoFlipRollThreshold": 2.8,
+    "boostStart": 33.3,
+    "boostMax": 100.0,
+    "boostUsePerSecond": 33.3,
+    "boostMinTime": 0.1,
+    "boostAccelGround": 9.9167,
+    "boostAccelAir": 10.5833,
+    "bumpMinForward": 0.645,
+    "bumpCooldown": 0.25,
+    "bumpSpeed": [
+      0.0,
+      14.0,
+      22.0
+    ],
+    "bumpGroundVelocity": [
+      0.00833,
+      11.0,
+      15.3
+    ],
+    "bumpAirVelocity": [
+      0.00833,
+      13.9,
+      19.45
+    ],
+    "bumpUpVelocity": [
+      0.00333,
+      2.78,
+      4.17
+    ],
+    "respawnDelay": 3.0
+  },
+  "camera": {
+    "fov": 110.0,
+    "distance": 2.7,
+    "height": 1.0,
+    "pitchDegrees": -3.0,
+    "stiffness": 0.45,
+    "swivelSpeed": 4.7,
+    "transitionSpeed": 1.2,
+    "upFollow": 4.0,
+    "airUpFollow": 1.5,
+    "airSwivelScale": 0.5,
+    "minDistance": 0.45,
+    "wallMargin": 0.3,
+    "ballCamMaxPitch": 35.0,
+    "rollFollow": 0.0,
+    "airVelocityFollow": 0.0,
+    "maxTurnRate": 540.0
+  },
+  "match": {
+    "matchSeconds": 300.0,
+    "countdownSeconds": 3.0,
+    "goalSeconds": 3.0,
+    "goalLineMargin": 0.0,
+    "padBigBoost": 100.0,
+    "padBigRespawn": 10.0,
+    "padBigRadius": 2.08,
+    "padSmallBoost": 12.0,
+    "padSmallRespawn": 4.0,
+    "padSmallRadius": 1.65,
+    "padMaxHeight": 1.7
+  }
+}

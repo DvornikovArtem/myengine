@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -61,6 +62,7 @@ namespace myengine::resource
     {
         render::MeshData data;
         render::MeshHandle gpuHandle;
+        render::MeshBounds bounds;  // computed when the mesh is uploaded; the culling of the scene uses it
     };
 
     struct TextureAsset
@@ -93,6 +95,11 @@ namespace myengine::resource
         bool tintSet = false;
         std::map<std::string, std::string> textures;             // "textures": the name of a shader texture -> path (a normalized key)
         std::map<std::string, render::MaterialValue> params;     // "params": the name of a shader variable -> raw value
+        // How the mesh is drawn (the state of the pass, not a shader value): "blend": "opaque" | "alpha" | "additive",
+        // "doubleSided": true, "castShadow": false
+        render::BlendMode blend = render::BlendMode::Opaque;
+        bool doubleSided = false;
+        bool castShadow = true;
     };
 
     // The content of a material for render::ApplyMaterialValues
@@ -174,6 +181,9 @@ namespace myengine::resource
 
         bool LoadManifest(const std::filesystem::path& path);
         void UpdateHotReload();
+        // The scan for changed files on a worker (the application sets it): looking at the time of a thousand files takes tens of milliseconds on the
+        // frame (more with an antivirus), the worker does it and UpdateHotReload applies the answer. Off (the default): the scan is made in the call.
+        void SetHotReloadAsync(bool enabled) { hotReloadAsync_ = enabled; }
         bool SaveMaterial(const std::filesystem::path& path, const MaterialAsset& asset);
 
         // The parameters of a material matched with the layout of its shader, for render::DrawItem::material: the bytes of
@@ -276,6 +286,14 @@ namespace myengine::resource
         void ReloadChangedTextures();
         void ReloadChangedShaders();
         void ReloadChangedMaterials();
+        struct HotReloadWatch
+        {
+            int kind = 0;                                   // the order of the reload: 0 shader, 1 material, 2 mesh, 3 texture
+            std::filesystem::path sourcePath;
+            std::vector<ResourceDependency> dependencies;   // a copy: the worker does not touch the caches
+        };
+        using HotReloadChanges = std::vector<std::pair<int, std::filesystem::path>>;
+        void ApplyHotReload(const HotReloadChanges& changes);
         void ScheduleMeshLoad(const std::string& key, const std::filesystem::path& path);
         void ScheduleTextureLoad(const std::string& key, const std::filesystem::path& path);
         ResourceHandle<MeshAsset> BuildMeshResource(const std::string& key, const std::filesystem::path& path, MeshCpuAsset cpuAsset);
@@ -339,6 +357,8 @@ namespace myengine::resource
         ResourceHandle<TextureAsset> whiteTexture_;
         std::chrono::steady_clock::time_point lastHotReloadScanTime_{};
         std::chrono::milliseconds hotReloadInterval_{500};
+        bool hotReloadAsync_ = false;
+        std::future<HotReloadChanges> hotReloadScan_;   // the scan that is running
     };
 
     template <typename T>

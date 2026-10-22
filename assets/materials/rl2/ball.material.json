@@ -1,0 +1,16 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/ball.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 1.4,
+    "gGloss": 80,
+    "gFresnel": 0.7,
+    "gEmissiveStrength": 0.22
+  }
+}

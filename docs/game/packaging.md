@@ -1,0 +1,144 @@
+# Упаковка игры (G2)
+
+Как собрать `RocketArena.exe` для игрока и положить его с ассетами в папку или zip, который можно «скинуть другу». Архитектурное решение — [rl-online.md](rl-online.md), раздел 8. Скрипты: `tools/package_game.ps1` (сборка и упаковка), `tools/check_package.ps1` (проверка на чистой папке), манифест `tools/package_manifest.json`.
+
+## Быстрый старт
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package_game.ps1      # build-shipping/ -> dist/RocketArena + dist/RocketArena-<версия>-win64-steam.zip (или -nosteam.zip)
+powershell -ExecutionPolicy Bypass -File tools\check_package.ps1     # запуск из %TEMP%\rocket_clean вне репозитория
+```
+
+Без ключей скрипт **собирает пакет со Steam**, если нашёл Steamworks SDK (см. «Steam»), а иначе с предупреждением собирает без Steam. Первый запуск конфигурирует `build-shipping/` и собирает только цель `myengine` (около 20 минут, Release без тестов). Версия берётся из `project(myengine VERSION x.y.z)` в корневом `CMakeLists.txt` и больше нигде не пишется: оттуда её читают меню игры, ресурсы exe, отчёт о падении и имя zip (`tools/package_manifest.json` версии не хранит). Дальше сборка инкрементальная. Параметры `package_game.ps1`:
+
+| Параметр | Что |
+| --- | --- |
+| `-Config Shipping` (по умолчанию) / `Release` | обе записи — конфигурация Release в CMake |
+| `-Out dist` | куда класть `RocketArena/` и zip |
+| `-BuildDir build-shipping` | папка сборки shipping |
+| `-SkipBuild` | упаковать уже собранный exe |
+| `-NoZip` | без zip |
+| `-SteamSdk <папка SDK>` | где искать Steamworks SDK (иначе см. «Steam»); без ключей Steam включается сам, если SDK найден |
+| `-WithSteam` | Steam обязателен: нет SDK — остановиться (без ключа это только предупреждение) |
+| `-NoSteam` | не искать SDK, собрать без Steam (папка сборки `build-shipping-nosteam/`) |
+| `-CopyZipTo <папка>` | скопировать готовый zip ещё и сюда (папка создаётся) |
+
+## Shipping-сборка
+
+CMake-опция `MYENGINE_SHIPPING` (по умолчанию OFF). Её включает скрипт: `-DMYENGINE_SHIPPING=ON -DMYENGINE_BUILD_TESTS=OFF -DMYENGINE_COPY_RUNTIME_ASSETS=OFF`, отдельная папка `build-shipping/`, конфигурация Release (Tracy включён только в RelWithDebInfo, так что в Release его нет).
+
+| Что | В обычной сборке | В shipping |
+| --- | --- | --- |
+| Имя exe | `myengine.exe` | `RocketArena.exe` (`OUTPUT_NAME` той же цели `myengine`) |
+| `MYENGINE_SOURCE_DIR` | зашит в exe: ассеты, шрифты и шейдеры читаются из репозитория | не определён; `core::apppaths::SourceRoot()` пуст, всё ищется рядом с exe |
+| Ассистент и MCP | панель ассистента, `myengine_mcp.exe` | `myengine_mcp` не собирается, `SceneEditor::InitializeAssistant()` ничего не делает (код ассистента остаётся в библиотеке, но не запускается) |
+| Тесты | собираются | не собираются |
+| Автосохранение карты при выходе, «Save Map» | пишут `.json` карты | выключены: карты лежат рядом с exe, туда писать нельзя |
+| Профайлер | Tracy в RelWithDebInfo | нет |
+
+## Куда пишет игра
+
+Все пути ведёт один модуль `engine/include/myengine/core/AppPaths.h` (`core::apppaths`): `SourceRoot`, `UserDataDirectory`, `LogDirectory`, `SavedDirectory`, `AssetCacheDirectory`. В shipping ничего не пишется рядом с exe: он может лежать в `Program Files` или в только читаемой папке.
+
+| Файл | Обычная сборка | Shipping |
+| --- | --- | --- |
+| Лог | `<exe>\logs\myengine.log` | `%LOCALAPPDATA%\RocketArena\logs\myengine.log` |
+| Раскладка окон ImGui | `%APPDATA%\myengine\editor_layout.ini` | `%LOCALAPPDATA%\RocketArena\editor_layout.ini` |
+| Недавние проекты | `%APPDATA%\myengine\recent_projects.json` | `%LOCALAPPDATA%\RocketArena\recent_projects.json` |
+| Миниатюры, захваты GPU, статистика кадра | `<проект>\Saved\…` | `%LOCALAPPDATA%\RocketArena\Saved\…` |
+| Бинарный кэш моделей и текстур | рядом с исходным файлом (`.myemesh`, `.myetex`) | `%LOCALAPPDATA%\RocketArena\Cache\<хэш пути>.myemesh` / `.myetex` |
+| Отчёт и дамп падения | `%APPDATA%\myengine\crashes\` | `%LOCALAPPDATA%\RocketArena\crashes\crash-<дата>-<время>.dmp` и `.txt`, маркер `pending.txt` до следующего запуска |
+| Настройки игры (видео, камера, звук, последний выбор в Play) | `%APPDATA%\myengine\game_settings.json` | `%LOCALAPPDATA%\RocketArena\game_settings.json` |
+| Личные клавиши | `%APPDATA%\myengine\rl_controls.json` | `%LOCALAPPDATA%\RocketArena\rl_controls.json` (пишет Settings > Controls) |
+| Свой `rl_tuning.json` (окно RL Tuning) | `assets/data/rl_tuning.json` проекта | `%LOCALAPPDATA%\RocketArena\rl_tuning.json` (читается вместо файла дистрибутива) |
+
+Кэш в shipping не запекается заранее: он привязан ко времени изменения исходного файла, а распаковка zip меняет время. Первый запуск строит его сам (две-три секунды на арену), следующие читают из `Cache`. Чтобы начать с нуля, достаточно удалить `%LOCALAPPDATA%\RocketArena`.
+
+Стартовая карта задаётся конфигурацией: в `AppConfig` появились поля `startScene`, `startInPlay` и `startInGame` (`config/app.json`). Командная строка сильнее конфигурации; `main.cpp` не менялся.
+
+**Игровой режим (G1).** `RocketArena.exe` — тот же `myengine`, собранный в Release с `MYENGINE_SHIPPING`; вместо отдельной цели режим игры включается полем `"startInGame": true` в `config/app.json` дистрибутива (на разработческом `myengine.exe` — флагом `--game`). Так не нужен второй исполняемый файл и вторая сборка: редактор и игра делят один код, а упаковка остаётся прежней. В игровом режиме открывается `assets/scenes/rocket_league.json`, вместо редактора идут экраны игры (`docs/game/rl-ui.md`), настройки лежат в `%LOCALAPPDATA%\RocketArena\game_settings.json`.
+
+## Что в дистрибутиве
+
+```
+RocketArena/
+  RocketArena.exe              Release, /MD, без PDB
+  python314.dll, python314.zip встроенный Python (python314.dll нужен при загрузке exe)
+  vcruntime140*.dll, msvcp140*.dll, concrt140.dll, vccorlib140.dll   Visual C++ app-local (из VC\Redist\MSVC\<версия>\x64 Visual Studio)
+  config\app.json              окно 1600x900, startScene = rocket_league.json, startInGame = true
+  myengine.myproject           проект RocketArena, карта по умолчанию — rocket_league
+  assets\                      сцены, модели, материалы, текстуры, шейдеры (.hlsl: компилируются при запуске), data, audio, fonts, fx
+  licenses\                    лицензии сторонних компонентов
+  README.txt, version.txt      README на русском и английском (запуск, управление, игра с другом через Steam, LAN, IP и VPN, брандмауэр, где логи и дампы); версия, коммит, есть ли Steam
+  steam_api64.dll, steam_appid.txt   только с -WithSteam
+```
+
+Не нужны и не кладутся: `d3dcompiler_47.dll`, XAudio2, XInput, универсальный CRT (всё это часть Windows 10 и 11), PDB, кэши `.myemesh` / `.myetex`, тестовые и редакторские ассеты (`stress_5000.json`, демо-сцены, скрипты, префабы, ассистент).
+
+**Размер:** папка 42.6 МБ (ассеты 24.5, Python 10.4, exe 5.6, CRT 2), zip 19 МБ при цели ≤ 300 МБ.
+
+### Манифест ассетов
+
+`tools/package_manifest.json`: список корней (`assets`: файл или папка), `exclude` (маски, сильнее всего), `runtime` (Python), `config` и `project` (то, что скрипт пишет в дистрибутив), `licenses`, `steam`. При `followReferences` скрипт идёт дальше по ссылкам: всё, что названо в взятых `.json` (карты, материалы, `.shader.json`, данные) как путь к `.obj`, `.material.json`, `.shader.json`, `.tga`, `.dds`, `.bmp`, `.png`, `.hlsl`, `.wav`, `.ttf`, относительно репозитория или самого файла, попадает в пакет сам. Поэтому, когда G1 переведёт игровую карту на ассеты `rl2`, старые `assets/*/rl/` и `rl_*.obj` уйдут из дистрибутива без правок манифеста. Ссылка на файл, которого нет, выводится предупреждением. Новый ассет игры достаточно положить в одну из перечисленных папок или назвать в карте.
+
+## Иконка, версия и ресурсы exe
+
+`app/resources/RocketArena.ico` (7 размеров, 16..256 пикселей, PNG внутри) рисует `tools/gen_rl_icon.py` (машина Pulse и мяч на тёмно-синем фоне меню; `python tools/gen_rl_icon.py --preview out.png` показывает картинку). Иконка закоммичена, сборка скрипт не запускает. `app/resources/RocketArena.rc.in` превращается CMake в `RocketArena.rc` в папке сборки: иконка с id 1 (Проводник и панель задач, а `Window.cpp` берёт её же для окна), `VERSIONINFO` (название «Rocket Arena», описание, версия файла и продукта `x.y.z`, коммит в `ProductVersion`, оригинальное имя файла). Оба exe (`RocketArena.exe` и `myengine.exe`) получают ресурсы со своими названиями. `package_game.ps1` останавливается, если версия в exe не совпала с версией проекта (папку сборки надо переконфигурировать), а `check_package.ps1` проверяет иконку и поля.
+
+Папка с ресурсами: `app/resources/` (иконка и шаблон `.rc`); версия и коммит в `Version.h` (`cmake/Version.h.in`, генерируется в `<build>/generated/myengine/core/`).
+
+## Падения: minidump и тост
+
+`engine/include/myengine/core/CrashHandler.h`, подключён первой строкой `wWinMain` (`main.cpp`). Что ловится: необработанные исключения (`SetUnhandledExceptionFilter`: обращение по null, деление на ноль, необработанный C++ `throw`), `std::terminate`, `abort()`, чисто виртуальный вызов, неверный параметр CRT. Что пишется в `%LOCALAPPDATA%\RocketArena\crashes\`:
+
+- `crash-<дата>-<время>.dmp`: minidump (стеки всех потоков, список модулей, исключение; 70-250 КБ), через `dbghelp.dll` из System32, который подгружается только при падении. С сегментами данных библиотек дамп этой игры весит около 40 МБ: для присылки другом это много, поэтому их нет; если для разбора понадобится больше, добавьте `MiniDumpWithDataSegs` в `CrashHandler.cpp`;
+- `crash-<дата>-<время>.txt`: версия и коммит, время, исключение (код, `RocketArena.exe+0x…`), последние 40 строк лога (лог при следующем запуске перезаписывается, поэтому его конец копируется сюда; при падении в первые миллисекунды лога ещё нет);
+- `pending.txt`: маркер, пишется последним; в нём путь к `.txt` и одна строка о причине.
+
+Папка `crashes` создаётся вместе с родителями (первый же запуск, упавший до создания `%LOCALAPPDATA%\RocketArena`, тоже оставляет отчёт). Игрок видит окно «Rocket Arena has stopped working» с папкой отчёта. При следующем запуске, на первом главном меню, игра находит маркер, удаляет его и показывает красный тост: «The game crashed last time. Send crash-….txt from %LOCALAPPDATA%\RocketArena\crashes» (12 с); в лог идёт строка `Game UI: the previous run crashed: …`. Тост показывается один раз на падение. Отчёт и дамп лежат, пока игрок их не удалит.
+
+**Steam забирает обработчики себе.** `SteamAPI_Init` (его вызывает экран Private match, когда ему нужен Steam) пишет в консоль «Setting breakpad minidump AppID = 480» и ставит свой обработчик необработанных исключений (на машине разработки порядок не проверялся без `Reassert`: он дешёвый и страхует от замены). Поэтому экраны игры каждый кадр зовут `crash::Reassert()` (`RlGameFlow::Draw`): один атомарный обмен фильтра, и если на месте оказался чужой, все обработчики (фильтр, `std::terminate`, `abort`, чисто виртуальный вызов, неверный параметр CRT) возвращаются. Проверяется в `check_package.ps1` падением через 10 с после открытия экрана Steam (`MYENGINE_CRASH_TEST=2`).
+
+Чтобы дамп можно было читать, shipping-сборка линкуется с `/DEBUG` (PDB с именами функций, без исходных строк) и `/PDBALTPATH:%_PDB%` (в exe имя файла PDB без пути репозитория). PDB не входит в пакет: скрипт кладёт его в `dist/symbols/RocketArena-<версия>-<steam|nosteam>.pdb`. Открыть дамп: Visual Studio (File > Open > `.dmp`, «Debug with Native Only», путь к символам = папка с PDB) или WinDbg `.sympath`.
+
+Для проверки есть переменные окружения (работают в любой сборке): `MYENGINE_CRASH_TEST=1` роняет процесс в самом начале `wWinMain` (чтение по нулевому адресу), `MYENGINE_CRASH_TEST=2` роняет его через 10 с после первого кадра экранов игры (уже после старта Steam), `MYENGINE_CRASH_NO_DIALOG=1` не показывает окно (для скриптов). Не покрыто: переполнение стека (фильтр запускается на почти исчерпанном стеке и может не успеть), убийство процесса извне, зависание, сбой драйвера GPU (драйвер сам перезапускается, игра пишет «device removed» в лог).
+
+## Проверка на чистой папке
+
+`tools/check_package.ps1 [-WithoutScripting] [-Frames 600] [-Keep]` копирует `dist/RocketArena` в `%TEMP%\rocket_clean`, запускает `RocketArena.exe --exit-after-frames 600` из другой рабочей папки с подменёнными `LOCALAPPDATA` и `APPDATA` и проверяет:
+
+1. процесс завершился сам с кодом 0;
+2. рядом с exe ничего не появилось, не изменилось и не исчезло (снимок размеров и времени до и после);
+3. лог лежит в `<LOCALAPPDATA>\RocketArena\logs`, в нём нет путей репозитория (`Documents\GitHub`, `.team`, `build-shipping`, корень репозитория), нет строк `[ERROR]`, есть загрузка банка звуков и эффектов;
+4. в `APPDATA` ничего не записано;
+5. с `-WithoutScripting` то же без `python314.zip`: игра работает без скриптинга (`ScriptRuntime` предупреждает и продолжает).
+
+Дальше (G2b) скрипт проверяет ещё:
+
+6. иконку (`RT_GROUP_ICON` 1) и поля версии exe: «Rocket Arena», описание, версия как в `version.txt`;
+7. падение: запуск с `MYENGINE_CRASH_TEST=1` заканчивается кодом `0xC0000005`, в `crashes` появляются `.dmp` (больше 20 КБ) и `.txt` (с «access violation», версией и местом `RocketArena.exe+0x…`) и маркер; следующий обычный запуск пишет в лог «the previous run crashed» и снимает маркер;
+8. Steam (только в пакете со Steam): рядом лежат `steam_api64.dll` и `steam_appid.txt`; запуск копии без `steam_appid.txt` (Steam в таком запуске не стартует, как при выключенном клиенте) проходит экраны выбора Steam: игра не падает, а в логе написано, почему Steam недоступен.
+
+Результат последней проверки — в отчёте задачи `.team/tasks/g2.md`, G2b — `.team/tasks/g2b.md`. Проверка на «машине без Visual Studio и без репозитория» — запуск того же zip на другом компьютере; здесь она заменена чистой папкой и независимыми `LOCALAPPDATA` и `APPDATA`.
+
+## Steam
+
+SDK в репозиторий не кладётся ([steam-setup.md](steam-setup.md), [rl-online.md](rl-online.md) раздел 7.4). `package_game.ps1` ищет его до долгой сборки в таком порядке: `-SteamSdk <папка>`, переменная окружения `STEAMWORKS_SDK_DIR` (или `STEAMWORKS_SDK`), первая строка локального файла `tools\steam_sdk.txt` (в репозиторий его не коммитим), папки `sdk` и `steamworks_sdk` рядом с репозиторием и выше по дереву (так находится `C:\Users\пк\Documents\GitHub\sdk`). Папка считается SDK, если в ней есть `public\steam\steam_api.h` и `redistributable_bin\win64\steam_api64.dll`. Явно заданный и неверный `-SteamSdk` останавливает скрипт.
+
+- **SDK найден:** exe собирается с `MYENGINE_STEAM=ON`, рядом кладутся `steam_api64.dll` (из SDK) и `steam_appid.txt` со значением 480 (тестовый Spacewar), в zip добавляется `-steam`.
+- **SDK не найден:** предупреждение и сборка без Steam в `build-shipping-nosteam/` (отдельная папка: сборка настроена на одно из двух), zip `-nosteam`. Игра говорит «в этой сборке Steam нет», LAN и IP работают.
+- `-WithSteam` превращает отсутствие SDK в ошибку, `-NoSteam` отключает поиск.
+
+Что получает игрок: Steam работает у обоих, если запущен клиент Steam, оба в друзьях и оба запускают игру из папки со `steam_appid.txt` (в Steam пишется «Играет в Spacewar»). Без клиента Steam (или без `steam_appid.txt`) экраны выбора Steam показывают причину («Steam is not available: …»), всё остальное (боты, LAN, IP) работает. Условия распространения SDK подтверждает владелец аккаунта: в zip попадает только `steam_api64.dll` из `redistributable_bin`, ничего другого из SDK.
+
+## Лицензии
+
+`licenses/` собирается из `tools/package_licenses/` (`THIRD_PARTY_NOTICES.txt`, `OFL-1.1.txt` для шрифтов Inter и JetBrains Mono) и из лицензий в репозитории (Python, Jolt, FreeType, pybind11, Lucide). Тексты MIT для RocketSim, Dear ImGui, ImGuizmo, nlohmann/json, DirectXTK и DirectXTex приведены в `THIRD_PARTY_NOTICES.txt` общим текстом со ссылками на источники: авторские строки по годам нужно сверить с репозиториями проектов.
+
+## Ограничения
+
+- Игровой режим (`startInGame`) идёт без панелей редактора (G1).
+- Личные клавиши, настройки и свой `rl_tuning.json` в shipping лежат в `UserDataDirectory()` (`%LOCALAPPDATA%\RocketArena`): их пишут экраны игры и окно RL Tuning (G1).
+- `PrefabLibrary` пишет в лог предупреждение, что `assets/prefabs` нет: префабы редактора в дистрибутив не входят, на игру это не влияет.
+- PDB shipping-сборки содержит только имена функций (компилятор не получает `/Zi`), без исходных строк; для строк нужны `/Zi` у всех целей и пересборка. PDB хранится в `dist/symbols` и подходит только к той сборке, из которой он взят: храните его вместе с отправленным zip.
+- Подпись кода и установщик не делались: zip распаковывается и запускается; SmartScreen может предупредить о неподписанном exe.

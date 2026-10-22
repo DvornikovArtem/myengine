@@ -1,0 +1,75 @@
+{
+  "id": "bulwark",
+  "name": "Bulwark",
+  "class": "Tall",
+  "hitboxClass": "Merc",
+  "description": "Heavy and tall. Wins the 50s, turns like a truck.",
+  "order": 5,
+  "hitbox": {
+    "halfExtentX": 0.39605,
+    "halfExtentY": 0.2208,
+    "halfExtentZ": 0.6161,
+    "comOffsetY": -0.21505,
+    "comOffsetZ": -0.11376,
+    "wheelMountXFront": 0.259,
+    "wheelMountXRear": 0.295,
+    "wheelFrontZ": 0.39874,
+    "wheelRearZ": -0.45126,
+    "wheelMountYOffset": 0.0,
+    "wheelRadiusFront": 0.15,
+    "wheelRadiusRear": 0.15,
+    "suspensionRestFront": 0.27505,
+    "suspensionRestRear": 0.27105,
+    "rocketSim": {
+      "size": [123.22, 79.2103, 44.1591],
+      "offset": [11.3757, 0.0, 21.505]
+    }
+  },
+  "mesh": {
+    "body": "assets/models/rl2/car_bulwark_body.obj",
+    "bodyScale": 1.029,
+    "lights": "assets/models/rl2/car_bulwark_lights.obj",
+    "lightsScale": 0.954,
+    "materials": {
+      "blue": "assets/materials/rl2/car_bulwark_blue.material.json",
+      "orange": "assets/materials/rl2/car_bulwark_orange.material.json"
+    },
+    "boostNozzle": [0.0, -0.12, -0.75]
+  },
+  "preview": {
+    "blue": "assets/ui/cars/bulwark_blue.png",
+    "orange": "assets/ui/cars/bulwark_orange.png"
+  },
+  "physics": {
+    "mass": 216.0,
+    "inertiaMultiplier": 1.15,
+    "friction": 0.3,
+    "maxSpeed": 22.31,
+    "maxAngularSpeed": 5.5,
+    "supersonicSpeed": 21.34,
+    "supersonicMaintainSpeed": 20.37,
+    "throttleAccel": 14.4,
+    "driveSpeed": [0.0, 14.0, 14.1],
+    "driveFactor": [1.0, 0.1, 0.0],
+    "brakeAccel": 35.0,
+    "steerSpeed": [0.0, 5.0, 10.0, 15.0, 17.5, 30.0],
+    "steerAngle": [0.469533, 0.280984, 0.160186, 0.093016, 0.0748616, 0.0303952],
+    "powerslideSteerSpeed": [0.0, 25.0],
+    "powerslideSteerAngle": [0.345268, 0.110968],
+    "latFrictionSlip": [0.0, 1.0],
+    "latFriction": [1.0, 0.2],
+    "handbrakeLatFriction": 0.1,
+    "jumpImpulse": 2.91667,
+    "jumpHoldAccel": 14.5833,
+    "doubleJumpImpulse": 2.91667,
+    "dodgeImpulse": 5.0,
+    "airPitchTorque": 11.5911,
+    "airYawTorque": 8.47039,
+    "airRollTorque": 35.665,
+    "boostStart": 33.3,
+    "boostMax": 100.0,
+    "boostUsePerSecond": 33.3,
+    "boostAccelGround": 9.6192,
+    "boostAccelAir": 10.2658
+  }
+}

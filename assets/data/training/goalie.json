@@ -1,0 +1,176 @@
+{
+  "id": "goalie",
+  "name": "Goalie",
+  "order": 2,
+  "description": "Save the shots: low, high, from the corner, hard.",
+  "exercises": [
+    {
+      "id": "straight-on",
+      "name": "Straight on",
+      "hint": "A slow shot down the middle.",
+      "car": {
+        "x": 5,
+        "z": -42,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [0.0, 0.9125, -20.0],
+        "velocity": [0.0, 0.0, -14.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 6.2286,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "left-post",
+      "name": "Left post",
+      "hint": "It goes to the near post: slide across.",
+      "car": {
+        "x": 6,
+        "z": -44,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [-14.0, 0.9125, -18.0],
+        "velocity": [3.3009, 0.0, -15.6558],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 6.1206,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "right-post",
+      "name": "Right post",
+      "hint": "The same from the other side.",
+      "car": {
+        "x": -6,
+        "z": -44,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [14.0, 0.9125, -18.0],
+        "velocity": [-3.3009, 0.0, -15.6558],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 6.1206,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "bouncing-shot",
+      "name": "Bouncing shot",
+      "hint": "The ball comes in the air: time the jump.",
+      "car": {
+        "x": -5,
+        "z": -42,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [0.0, 0.9125, -8.0],
+        "velocity": [1.247, 8.2708, -17.9568],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 6.4058,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "across-the-goal",
+      "name": "Across the goal",
+      "hint": "A ground shot from the left wing: slide across.",
+      "car": {
+        "x": -5,
+        "z": -44,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [-24.0, 0.9125, -14.0],
+        "velocity": [9.6028, 0.0, -11.5233],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 7.2282,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "hard-drive",
+      "name": "Hard drive",
+      "hint": "No time to think: it is fast.",
+      "car": {
+        "x": 4,
+        "z": -46,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [8.0, 0.9125, -25.0],
+        "velocity": [-7.5561, 0.0, -15.2284],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 5.7205,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "from-the-corner",
+      "name": "From the corner",
+      "hint": "A low shot from the corner flag.",
+      "car": {
+        "x": -3,
+        "z": -46,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [-32.0, 0.9125, -38.0],
+        "velocity": [13.375, 0.0, -6.7904],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 5.9439,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    },
+    {
+      "id": "second-bounce",
+      "name": "Second bounce",
+      "hint": "The ball bounces in front of the goal: time your touch.",
+      "car": {
+        "x": 3,
+        "z": -44,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [6.0, 0.9125, -12.0],
+        "velocity": [-2.7994, 9.4232, -13.7173],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 6.8577,
+      "attempts": 3,
+      "success": {
+        "type": "saved"
+      }
+    }
+  ]
+}

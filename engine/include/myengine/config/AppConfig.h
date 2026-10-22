@@ -35,6 +35,13 @@ namespace myengine::config
 		std::vector<WindowConfig> windows;
 		InputConfig input;
 
+		// The map the application opens when the command line names none, and whether it starts in Play
+		// (the shipped game: assets/scenes/rocket_league.json, Play)
+		std::string startScene;
+		bool startInPlay = false;
+		// Open the game (docs/game/rl-ui.md): the screens of the Rocket League game instead of the editor, like --game
+		bool startInGame = false;
+
 		static AppConfig Default();
 		static AppConfig LoadFromFile(const std::filesystem::path& path, core::Logger* logger = nullptr);
 	};

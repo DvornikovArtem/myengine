@@ -6,10 +6,16 @@
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
+#include <cstdlib>
 #include <string>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/FramePacer.h>
+#include <imm.h>
+#include "UiScript.h"
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/editor/EditorState.h>
 #include <myengine/editor/ThumbnailService.h>
@@ -24,17 +30,25 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/components/WindowBindingComponent.h>
 #include <myengine/ecs/systems/CameraControlSystem.h>
+#include <myengine/audio/AudioSystem.h>
 #include <myengine/ecs/systems/DebugRenderSystem.h>
+#include <myengine/ecs/systems/FxSystem.h>
+#include <myengine/fx/ParticleSystem.h>
 #include <myengine/ecs/systems/MotionSystem.h>
 #include <myengine/ecs/systems/PhysicsSystem.h>
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
+#include <myengine/ecs/systems/RlGameSystem.h>
+#include <myengine/game/RlGameFlow.h>
+#include <myengine/game/RlGameSettings.h>
 #include <myengine/jobs/JobSystem.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/scene/SceneEvents.h>
 #include <myengine/scene/SceneSerializer.h>
 #include <myengine/scripting/ScriptSystem.h>
+#include <myengine/ui/rl/RlUiGallery.h>
+#include <myengine/ui/rl/RlUiHost.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -156,11 +170,33 @@ namespace myengine::core
         Shutdown();
     }
 
-    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& scenePath, const bool startInPlay)
+    bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& requestedScene, const bool requestedPlay)
     {
         config_ = config;
 
-        const auto logPath = GetExecutableDirectory() / "logs/myengine.log";
+        // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json
+        // The game mode (--game or "startInGame" of app.json) plays the Rocket League map with the screens of the game instead of the editor
+        gameMode_ = gameMode_ || config.startInGame;
+        char* keepIme = nullptr;
+        std::size_t keepImeLength = 0;
+        const bool keepTextServices = _dupenv_s(&keepIme, &keepImeLength, "MYENGINE_KEEP_IME") == 0 && keepIme != nullptr && *keepIme != '\0';  // for the comparison of the frame times
+        std::free(keepIme);
+        if (gameMode_ && !keepTextServices)
+        {
+            // The text services of Windows (the IME and the Text Services Framework) look at every key and mouse message, and on some machines they take 6 - 20 ms for
+            // each one (G8: every press of a key was a frame of that length). The game has no composition to take in: the keyboard layout is enough.
+            ImmDisableIME(static_cast<DWORD>(-1));
+            ImmDisableTextFrameService(0);
+        }
+        const bool sceneFromConfig = requestedScene.empty() && !config.startScene.empty();
+        std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
+        if (gameMode_ && scenePath.empty())
+        {
+            scenePath = "assets/scenes/rocket_league.json";
+        }
+        const bool startInPlay = requestedPlay || gameMode_ || (sceneFromConfig && config.startInPlay);
+
+        const auto logPath = apppaths::LogDirectory() / "myengine.log";
         if (!logger_.Initialize(logPath))
         {
             return false;
@@ -292,13 +328,14 @@ namespace myengine::core
         }
 
         resourceManager_ = std::make_unique<resource::ResourceManager>(*renderAdapter_, logger_);
+        resourceManager_->SetHotReloadAsync(true);  // the scan for changed files does not hold the frame
 
         {
-            // Asset previews: images are cached under <project>/Saved/Thumbnails
+            // Asset previews: images are cached under <project>/Saved/Thumbnails (%LOCALAPPDATA%\RocketArena\Saved in shipping)
             editor::ThumbnailServiceConfig thumbnailConfig;
             if (const auto& projectContext = ServiceLocator::GetProjectContext(); projectContext.IsInitialized())
             {
-                thumbnailConfig.cacheDirectory = projectContext.Root() / "Saved" / "Thumbnails";
+                thumbnailConfig.cacheDirectory = apppaths::SavedDirectory(projectContext.Root()) / "Thumbnails";
             }
             thumbnailService_ = std::make_unique<editor::ThumbnailService>(*renderAdapter_, *resourceManager_, logger_, std::move(thumbnailConfig));
         }
@@ -448,8 +485,25 @@ namespace myengine::core
                     lines.push_back(line.second);
                 }
             }
+            if (rlGameSystem_ != nullptr)
+            {
+                for (auto& line : rlGameSystem_->HudLines())
+                {
+                    lines.push_back(std::move(line));
+                }
+            }
             return lines;
         };
+        sceneEditorServices.rlTuning = [this]() { return rlGameSystem_ != nullptr ? rlGameSystem_->EditableTuning() : nullptr; };
+        sceneEditorServices.rlTuningEdited = [this]()
+        {
+            if (rlGameSystem_ != nullptr)
+            {
+                rlGameSystem_->TuningEdited();
+            }
+        };
+        sceneEditorServices.rlTuningSave = [this]() { return rlGameSystem_ != nullptr ? rlGameSystem_->SaveTuning() : std::string(); };
+        sceneEditorServices.rlTuningReload = [this]() { return rlGameSystem_ != nullptr ? rlGameSystem_->ReloadTuning() : std::string(); };
         sceneEditorServices.scriptConsole.execute = [this](const std::string& source)
         {
             return scriptSystem_ != nullptr ? scriptSystem_->ExecuteConsole(source) : scripting::ScriptConsoleResult{};
@@ -478,6 +532,165 @@ namespace myengine::core
             return false;
         }
 
+        // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena; it is added to the world below
+        auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
+        rlGame->SetOnlineOptions(rlOnline_);
+        rlGame->SetGameMode(gameMode_);
+        rlGameSystem_ = rlGame.get();
+
+        // The game mode: the screens of the game (menus, HUD) instead of the editor
+        if (gameMode_)
+        {
+            game::RlGameFlowServices services;
+            services.system = rlGameSystem_;
+            services.ui = &uiManager_;
+            services.quit = [this]() { RequestQuit(); };
+            services.applyVideo = [this](const game::RlVideoSettings& video) { ApplyVideoSettings(video); };
+            services.resolutions = [this]() { return ListDisplayResolutions(); };
+            services.windowSize = [this]() { return GetWindowSize(); };
+            services.sceneReady = [this]() { return sceneLoaded_; };
+            services.loadingProgress = [this]()
+            {
+                const auto operations = loadingService_.Visible();
+                return operations.empty() ? -1.0f : operations.front().progress;
+            };
+            services.fps = [this]() { return averagedFps_; };
+            services.log = [this](const std::string& text) { logger_.Info(text); };
+            services.setLighting = [this](const bool menu)
+            {
+                if (renderAdapter_ == nullptr)
+                {
+                    return;
+                }
+                render::SceneLighting lighting;  // the defaults are the light of the field
+                if (menu)
+                {
+                    // the night behind the menus: the field is dark, the car on the plinth stands in the light of the sun
+                    lighting.color = {0.95f, 0.98f, 1.1f};
+                    lighting.skyAmbient = {0.12f, 0.14f, 0.23f};
+                    lighting.groundAmbient = {0.04f, 0.05f, 0.08f};
+                }
+                renderAdapter_->SetSceneLighting(lighting);
+            };
+            // the pictures and the assets of the garage (docs/game/rl-cars.md): the profile previews are PNG files of the project drawn by the kit as images
+            services.loadImage = [this](const std::string& path) -> std::uint64_t
+            {
+                if (resourceManager_ == nullptr || path.empty())
+                {
+                    return 0;
+                }
+                const auto texture = resourceManager_->Load<resource::TextureAsset>(path);
+                if (resourceManager_->IsLoadPending(path) || texture == nullptr || !texture->asset.gpuHandle.IsValid() ||
+                    texture->asset.gpuHandle.value == resourceManager_->GetFallbackTextureHandle().value)
+                {
+                    return 0;
+                }
+                return static_cast<std::uint64_t>(texture->asset.gpuHandle.value);
+            };
+            services.preload = [this](const std::string& path)
+            {
+                if (resourceManager_ == nullptr || path.empty())
+                {
+                    return;
+                }
+                const auto ends = [&](const char* suffix)
+                {
+                    const std::size_t n = std::char_traits<char>::length(suffix);
+                    return path.size() >= n && path.compare(path.size() - n, n, suffix) == 0;
+                };
+                if (ends(".obj"))
+                {
+                    resourceManager_->Load<resource::MeshAsset>(path);
+                }
+                else if (ends(".material.json"))
+                {
+                    resourceManager_->Load<resource::MaterialAsset>(path);
+                }
+                else
+                {
+                    resourceManager_->Load<resource::TextureAsset>(path);
+                }
+            };
+            // MYENGINE_GAME_SETTINGS=<file>: another settings file (the tests)
+            {
+                char* settingsPath = nullptr;
+                std::size_t settingsPathLength = 0;
+                if (_dupenv_s(&settingsPath, &settingsPathLength, "MYENGINE_GAME_SETTINGS") == 0 && settingsPath != nullptr && *settingsPath != 0)
+                {
+                    services.settingsFile = std::filesystem::path(settingsPath);
+                }
+                std::free(settingsPath);
+            }
+            gameFlow_ = std::make_unique<game::RlGameFlow>(services);
+            gameFlow_->Install();
+
+            // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md)
+            char* scriptPath = nullptr;
+            std::size_t scriptPathLength = 0;
+            if (_dupenv_s(&scriptPath, &scriptPathLength, "MYENGINE_UI_SCRIPT") == 0 && scriptPath != nullptr && *scriptPath != 0)
+            {
+                std::ifstream scriptFile(std::filesystem::path(scriptPath), std::ios::binary);
+                std::stringstream scriptText;
+                scriptText << scriptFile.rdbuf();
+                std::string scriptError;
+                auto script = std::make_unique<UiScript>();
+                if (!scriptFile || !script->Load(scriptText.str(), scriptError))
+                {
+                    logger_.Error(std::string("MYENGINE_UI_SCRIPT: ") + (scriptFile ? scriptError : std::string("cannot read ") + scriptPath));
+                }
+                else
+                {
+                    uiScript_ = std::move(script);
+                    UiScript* raw = uiScript_.get();
+                    gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    logger_.Info(std::string("UI script: ") + scriptPath);
+                }
+            }
+            std::free(scriptPath);
+        }
+
+        // MYENGINE_UI_GALLERY=<screen> or "all": the gallery of the UI kit of the game instead of the editor (docs/game/rl-ui.md)
+        if (!gameMode_)
+        {
+            char* gallery = nullptr;
+            std::size_t galleryLength = 0;
+            _dupenv_s(&gallery, &galleryLength, "MYENGINE_UI_GALLERY");
+            if (gallery != nullptr && *gallery != '\0')
+            {
+                struct Cycle
+                {
+                    rlui::GalleryScreen screen = rlui::GalleryScreen::Main;
+                    bool all = false;
+                    double clock = 0.0;
+                    int shown = -1;
+                };
+                auto cycle = std::make_shared<Cycle>();
+                cycle->all = std::string(gallery) == "all";
+                if (!cycle->all && !rlui::ParseGalleryScreen(gallery, cycle->screen))
+                {
+                    logger_.Warning(std::string("MYENGINE_UI_GALLERY: unknown screen '") + gallery + "', showing main");
+                }
+                uiGallery_ = std::make_unique<rlui::Host>();
+                uiGallery_->Install(uiManager_, {});
+                uiGallery_->SetScreen([cycle](rlui::Frame& frame)
+                {
+                    cycle->clock += static_cast<double>(frame.DeltaTime());
+                    if (cycle->all)
+                    {
+                        cycle->screen = static_cast<rlui::GalleryScreen>(static_cast<int>(cycle->clock / 4.0) % static_cast<int>(rlui::GalleryScreen::Count));
+                    }
+                    if (cycle->shown != static_cast<int>(cycle->screen))
+                    {
+                        cycle->shown = static_cast<int>(cycle->screen);
+                        frame.ResetFocus();
+                    }
+                    rlui::DrawGalleryScreen(frame, cycle->screen);
+                });
+                logger_.Info(std::string("UI gallery: ") + gallery);
+            }
+            std::free(gallery);
+        }
+
         for (const auto& runtime : windows_)
         {
             if (runtime.window != nullptr && runtime.surface.IsValid())
@@ -493,6 +706,7 @@ namespace myengine::core
 
         world_.AddUpdateSystem(std::make_unique<ecs::systems::CameraControlSystem>(input_, inputOwnerWindowId_));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PlayerControlSystem>(input_));
+        world_.AddUpdateSystem(std::move(rlGame));
         world_.AddUpdateSystem(std::make_unique<ecs::systems::MotionSystem>());
         world_.AddUpdateSystem(std::make_unique<ecs::systems::PhysicsSystem>());
         // After physics: scripts see this frame's collision/trigger events
@@ -501,7 +715,33 @@ namespace myengine::core
             scriptSystem_ = scriptSystem.get();
             world_.AddUpdateSystem(std::move(scriptSystem));
         }
+        // Sound and particles (G7c): the device and the sound bank, the presets of the effects; the systems play the components of the scene
+        {
+            auto& audioSystem = audio::GetAudioSystem();
+            audio::AudioConfig audioConfig;
+            {
+                char* off = nullptr;
+                std::size_t offLength = 0;
+                if (_dupenv_s(&off, &offLength, "MYENGINE_AUDIO") == 0 && off != nullptr)
+                {
+                    audioConfig.useDevice = std::string(off) != "0"; // MYENGINE_AUDIO=0: no device (machines without sound, the capture of a frame)
+                    std::free(off);
+                }
+            }
+            audioSystem.SetLogger(&logger_);
+            audioSystem.Initialize(audioConfig);
+            audioSystem.LoadBank(ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/audio_bank.json"));
+            std::vector<std::string> fxMessages;
+            const std::uint32_t effects = fx::GetParticleSystem().LoadEffects(ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/fx"), &fxMessages);
+            logger_.Info("Particle effects loaded: " + std::to_string(effects));
+            for (const std::string& message : fxMessages)
+            {
+                logger_.Warning("Particle effect: " + message);
+            }
+        }
+        world_.AddUpdateSystem(std::make_unique<ecs::systems::FxUpdateSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::RenderSystem>());
+        world_.AddRenderSystem(std::make_unique<ecs::systems::FxRenderSystem>());
         world_.AddRenderSystem(std::make_unique<ecs::systems::DebugRenderSystem>());
         // --scene is a file path or a path inside the project; without it the project's default map is opened
         std::error_code scenePathError;
@@ -518,7 +758,7 @@ namespace myengine::core
             sceneSavePath_ = project.ResolveContentPath(scenePath);
         }
 
-        gpuCapture_.SetOutput(project.Root() / "Saved" / "Captures", sceneSavePath_.stem().u8string());
+        gpuCapture_.SetOutput(apppaths::SavedDirectory(project.Root()) / "Captures", sceneSavePath_.stem().u8string());
 
         BindRuntimeEventListeners();
 
@@ -628,6 +868,7 @@ namespace myengine::core
 
         logger_.Info("Main loop started");
         tracy::SetThreadName("Main");
+        FramePacer framePacer;
 
         while (!quitRequested_)
         {
@@ -635,14 +876,40 @@ namespace myengine::core
 
             input_.BeginFrame();
 
-            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
             {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-
-                if (msg.message == WM_QUIT)
+                ZoneScopedN("Frame::Messages");
+                for (;;)
                 {
-                    quitRequested_ = true;
+                    const auto peekStart = std::chrono::steady_clock::now();
+                    const bool have = PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE) != FALSE;
+                    const auto peekEnd = std::chrono::steady_clock::now();
+                    if (!have)
+                    {
+                        // the call that finds nothing can take long as well (the messages that are sent, not posted, are handled inside it)
+                        const double peekMs = std::chrono::duration<double, std::milli>(peekEnd - peekStart).count();
+                        if (peekMs > 6.0 && slowMessageLogs_ < 40)
+                        {
+                            ++slowMessageLogs_;
+                            logger_.Warning("PeekMessage took " + std::to_string(peekMs) + " ms without a message for the loop");
+                        }
+                        break;
+                    }
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                    const auto dispatchEnd = std::chrono::steady_clock::now();
+                    const double dispatchMs = std::chrono::duration<double, std::milli>(dispatchEnd - peekEnd).count();
+                    const double peekMs = std::chrono::duration<double, std::milli>(peekEnd - peekStart).count();
+                    if ((dispatchMs > 6.0 || peekMs > 6.0) && slowMessageLogs_ < 40)
+                    {
+                        ++slowMessageLogs_;
+                        logger_.Warning("Slow window message 0x" + [&] { char text[16]; std::snprintf(text, sizeof(text), "%04x", static_cast<unsigned>(msg.message)); return std::string(text); }() +
+                                        ": PeekMessage " + std::to_string(peekMs) + " ms, DispatchMessage " + std::to_string(dispatchMs) + " ms");
+                    }
+
+                    if (msg.message == WM_QUIT)
+                    {
+                        quitRequested_ = true;
+                    }
                 }
             }
 
@@ -659,13 +926,50 @@ namespace myengine::core
             }
 
             // A map that was read on a worker is applied here, between frames
-            PumpPendingSceneLoad();
-            SyncBackgroundOperations();
-            loadingService_.Update();
+            {
+                ZoneScopedN("Frame::Background");
+                PumpPendingSceneLoad();
+                SyncBackgroundOperations();
+                loadingService_.Update();
+            }
 
             timer_.Tick();
             const float deltaTime = timer_.DeltaTime();
             const auto frameStartTime = std::chrono::steady_clock::now();
+
+            if (uiScript_ != nullptr)
+            {
+                UiScript::Sink sink;
+                const WindowId scriptWindow = windows_.empty() || windows_.front().window == nullptr ? 0 : windows_.front().window->Id();
+                sink.key = [this, scriptWindow](const int code, const bool down)
+                {
+                    input_.SetActiveWindow(scriptWindow);
+                    down ? input_.OnKeyDown(static_cast<std::uint32_t>(code)) : input_.OnKeyUp(static_cast<std::uint32_t>(code));
+                };
+                sink.mouseButton = [this, scriptWindow](const int button, const bool down)
+                {
+                    input_.SetActiveWindow(scriptWindow);
+                    const MouseButton which = button == 1 ? MouseButton::Right : MouseButton::Left;
+                    down ? input_.OnMouseDown(which) : input_.OnMouseUp(which);
+                };
+                sink.screenshot = [this](const std::string& path)
+                {
+                    if (renderAdapter_ != nullptr)
+                    {
+                        renderAdapter_->RequestScreenshot(path);
+                    }
+                };
+                sink.note = [this](const std::string& text) { logger_.Info("UI script: " + text); };
+                sink.game = [this](const std::string& command)
+                {
+                    if (rlGameSystem_ != nullptr)
+                    {
+                        rlGameSystem_->DebugCommand(command);
+                    }
+                };
+                sink.quit = [this]() { RequestQuit(); };
+                uiScript_->Advance(static_cast<double>(deltaTime), sink);
+            }
 
             const auto worldUpdateStartTime = std::chrono::steady_clock::now();
             {
@@ -768,6 +1072,17 @@ namespace myengine::core
                 frameTimingStats = {};
             }
 
+            // the limit of the frames per second of the video settings
+            framePacer.Wait(fpsLimit_);
+
+            // a running match hides the cursor (only while this application is the one in front)
+            if (gameMode_ && !cameraControlActive_)
+            {
+                const bool hide = core::ServiceLocator::GetEditorRuntimeState().gameHidesCursor && GetForegroundWindow() != nullptr &&
+                                  !windows_.empty() && windows_.front().window != nullptr && GetForegroundWindow() == windows_.front().window->Handle();
+                SetCursorVisible(!hide);
+            }
+
             if (exitAfterFrames_ != 0 && ++framesRun_ >= exitAfterFrames_)
             {
                 logger_.Info("Exit after " + std::to_string(framesRun_) + " frames");
@@ -816,12 +1131,16 @@ namespace myengine::core
             core::ServiceLocator::GetPhysicsWorldState().physicsPaused = true;
         }
 
-        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_)
+        // The maps of a shipping build are never written: they lie next to the exe, where nothing may be changed
+        if (sceneLoaded_ && !sceneSavePath_.empty() && !discardSceneOnExit_ && !apppaths::IsShipping() && !gameMode_)
         {
             scene::SaveWorldToJson(world_, sceneSavePath_, &logger_);
         }
 
+        gameFlow_.reset();    // before the UiManager it is hooked into (it saves the settings)
+        uiGallery_.reset();
         uiManager_.Shutdown();
+        audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
         resourceManager_.reset();
 
@@ -857,6 +1176,76 @@ namespace myengine::core
         diagnostics_ = options;
     }
 
+    void Application::SetRlOnlineOptions(const ecs::systems::RlOnlineOptions& options)
+    {
+        rlOnline_ = options;
+    }
+
+    void Application::SetGameMode(const bool enabled)
+    {
+        gameMode_ = enabled;
+    }
+
+    bool Application::GameMode() const
+    {
+        return gameMode_;
+    }
+
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> Application::ListDisplayResolutions() const
+    {
+        if (windows_.empty() || windows_.front().window == nullptr)
+        {
+            return {};
+        }
+        return windows_.front().window->ListResolutions();
+    }
+
+    std::pair<std::uint32_t, std::uint32_t> Application::GetWindowSize() const
+    {
+        if (windows_.empty() || windows_.front().window == nullptr)
+        {
+            return {0, 0};
+        }
+        return {windows_.front().window->Width(), windows_.front().window->Height()};
+    }
+
+    void Application::ApplyVideoSettings(const game::RlVideoSettings& video)
+    {
+        if (renderAdapter_ != nullptr)
+        {
+            renderAdapter_->SetVSync(video.vsync);
+        }
+        fpsLimit_ = std::max(video.fpsLimit, 0);
+
+        // The quality of the passes: the command line (--render-settings) decides when it was given
+        char* fromCommandLine = nullptr;
+        std::size_t fromCommandLineLength = 0;
+        const bool quality = !(_dupenv_s(&fromCommandLine, &fromCommandLineLength, "MYENGINE_RENDER_SETTINGS") == 0 && fromCommandLine != nullptr && *fromCommandLine != '\0');
+        std::free(fromCommandLine);
+        if (quality && renderAdapter_ != nullptr)
+        {
+            render::RenderSettings settings = renderAdapter_->GetRenderSettings();
+            settings.shadowQuality = static_cast<std::uint8_t>(std::clamp(video.shadows, 0, 2));
+            settings.msaaSamples = video.msaa >= 4 ? 4 : 1;
+            settings.bloom = video.bloom;
+            renderAdapter_->SetRenderSettings(settings);
+        }
+
+        if (!windows_.empty() && windows_.front().window != nullptr)
+        {
+            Window& window = *windows_.front().window;
+            const auto mode = static_cast<DisplayMode>(std::clamp(video.windowMode, 0, 2));
+            const bool sameSize = lastVideoWidth_ == video.width && lastVideoHeight_ == video.height;
+            if (!videoApplied_ || mode != window.GetDisplayMode() || (mode != DisplayMode::Borderless && !sameSize))
+            {
+                window.SetDisplayMode(mode, static_cast<std::uint32_t>(video.width), static_cast<std::uint32_t>(video.height));
+                lastVideoWidth_ = video.width;
+                lastVideoHeight_ = video.height;
+                videoApplied_ = true;
+            }
+        }
+    }
+
     int Application::GetExitCode() const
     {
         return exitCode_;
@@ -883,7 +1272,7 @@ namespace myengine::core
         if (triggered)
         {
             message = "GPU capture of the next frame requested; the file goes to " +
-                      (core::ServiceLocator::GetProjectContext().Root() / "Saved" / "Captures").u8string();
+                      (apppaths::SavedDirectory(core::ServiceLocator::GetProjectContext().Root()) / "Captures").u8string();
             logger_.Info(message);
         }
         return triggered;
@@ -978,7 +1367,7 @@ namespace myengine::core
         std::filesystem::path target = diagnostics_.frameStatsOut;
         if (target.empty())
         {
-            target = core::ServiceLocator::GetProjectContext().Root() / "Saved" / "FrameStats" /
+            target = apppaths::SavedDirectory(core::ServiceLocator::GetProjectContext().Root()) / "FrameStats" /
                      std::filesystem::u8path("frame_stats_" + map + "_" + std::to_string(diagnostics_.frameStatsFrame) + ".json");
         }
 
@@ -1018,10 +1407,23 @@ namespace myengine::core
         const float mouseClientY = hasMouseClientPosition
             ? static_cast<float>(static_cast<short>(HIWORD(lparam)))
             : 0.0f;
+        // A running game that uses the mouse buttons (the Rocket League game): over the viewport the clicks are its controls. They never go
+        // through ImGui: a button that ImGui sees as held makes an item "active", and then it claims the keyboard (WantCaptureKeyboard)
+        // and every key pressed while the button is held (steer while boosting with the left button) would be lost.
+        const editor::EditorRuntimeState& runtimeState = core::ServiceLocator::GetEditorRuntimeState();
+        const editor::WindowEditorState* windowEditorState = runtimeState.FindWindowState(window.Id());
+        const bool gameMouseMode = runtimeState.mode == editor::RuntimeMode::Play && runtimeState.gameCapturesMouse;
+        // (in the game mode the whole window is the game; in the editor only the viewport)
+        const bool gameMouse = gameMouseMode && (gameMode_ || (windowEditorState != nullptr && windowEditorState->viewportHovered));
+        const bool gameClick =
+            ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK || msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) && gameMouse) ||
+            (msg == WM_LBUTTONUP && gameMouseMode && input_.IsMouseDown(MouseButton::Left)) ||
+            (msg == WM_RBUTTONUP && gameMouseMode && !cameraControlActive_ && input_.IsMouseDown(MouseButton::Right));
         const bool startSceneNavigationNow =
-            (msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) &&
+            (msg == WM_RBUTTONDOWN || msg == WM_RBUTTONDBLCLK) && !gameClick &&
             uiManager_.CanStartSceneNavigation(window.Id(), mouseClientX, mouseClientY);
         const bool bypassUiForCamera =
+            gameClick ||
             startSceneNavigationNow ||
             cameraControlActive_ &&
             (msg == WM_RBUTTONDOWN ||
@@ -1041,6 +1443,8 @@ namespace myengine::core
         const bool uiAllowsSceneNavigation =
             startSceneNavigationNow ||
             uiManager_.CanStartSceneNavigation(window.Id(), mouseClientX, mouseClientY);
+        // the keys of a running game: only a text field that is being edited takes them from it (an ImGui item held by the mouse does not)
+        const bool uiBlocksKeys = uiWantsKeyboardCapture && !(gameMouseMode && !uiManager_.WantsTextInput(window.Id()));
 
         switch (msg)
         {
@@ -1106,6 +1510,14 @@ namespace myengine::core
                 if (input_.GetActiveWindowId() == window.Id())
                 {
                     input_.ReleaseAllInputs();
+                    if (runtimeState.gameCapturesMouse)
+                    {
+                        input_.OnMouseUp(MouseButton::Left);
+                        if (!cameraControlActive_)
+                        {
+                            input_.OnMouseUp(MouseButton::Right);
+                        }
+                    }
                 }
                 if (inputOwnerWindowId_ == window.Id())
                 {
@@ -1150,7 +1562,7 @@ namespace myengine::core
             {
                 const auto key = static_cast<std::uint32_t>(wparam);
 
-                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard && key != VK_F3 && key != VK_F5)
+                if (uiBlocksKeys && !cameraConsumesKeyboard && key != VK_F3 && key != VK_F5)
                 {
                     return 0;
                 }
@@ -1184,7 +1596,7 @@ namespace myengine::core
             {
                 // Release even if an editor widget captured the keyboard after our key-down.
                 input_.OnKeyUp(static_cast<std::uint32_t>(wparam));
-                if (uiWantsKeyboardCapture && !cameraConsumesKeyboard)
+                if (uiBlocksKeys && !cameraConsumesKeyboard)
                 {
                     return 0;
                 }
@@ -1203,6 +1615,14 @@ namespace myengine::core
                 // and ImGui keeps the button held until the next click
                 AcquireMouseCapture(window, kCaptureLeftButton);
 
+                if (gameMouse)
+                {
+                    // a running game that uses the mouse (the buttons over its viewport are its controls)
+                    input_.SetActiveWindow(window.Id());
+                    input_.OnMouseDown(MouseButton::Left);
+                    return 0;
+                }
+
                 if (uiWantsMouseCapture)
                 {
                     return 0;
@@ -1220,6 +1640,12 @@ namespace myengine::core
             {
                 ReleaseMouseCapture(kCaptureLeftButton);
 
+                if (gameMouseMode && input_.IsMouseDown(MouseButton::Left))
+                {
+                    input_.OnMouseUp(MouseButton::Left);  // the release of a click that went to the game
+                    return 0;
+                }
+
                 if (uiWantsMouseCapture)
                 {
                     return 0;
@@ -1235,6 +1661,15 @@ namespace myengine::core
 
             case WM_RBUTTONDOWN:
             {
+                if (gameMouse)
+                {
+                    // the game's right button (jump): no fly camera, no hidden cursor
+                    input_.SetActiveWindow(window.Id());
+                    AcquireMouseCapture(window, kCaptureRightButton);
+                    input_.OnMouseDown(MouseButton::Right);
+                    return 0;
+                }
+
                 if (!uiAllowsSceneNavigation)
                 {
                     return 0;
@@ -1257,6 +1692,11 @@ namespace myengine::core
             {
                 if (!cameraControlActive_)
                 {
+                    if (gameMouseMode && input_.IsMouseDown(MouseButton::Right))
+                    {
+                        ReleaseMouseCapture(kCaptureRightButton);
+                        input_.OnMouseUp(MouseButton::Right);
+                    }
                     return 0;
                 }
 
@@ -1365,6 +1805,17 @@ namespace myengine::core
     void Application::UpdateWindowTitles()
     {
         titleShowsPlay_ = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
+        if (gameMode_)
+        {
+            for (auto& runtime : windows_)
+            {
+                if (!runtime.closed && runtime.window)
+                {
+                    runtime.window->SetTitle(L"Rocket Arena");
+                }
+            }
+            return;
+        }
         std::wstring suffix;
         if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized() && !sceneSavePath_.empty())
         {
@@ -1389,7 +1840,7 @@ namespace myengine::core
 
     bool Application::SaveSceneToDisk()
     {
-        if (!sceneLoaded_ || sceneSavePath_.empty())
+        if (!sceneLoaded_ || sceneSavePath_.empty() || apppaths::IsShipping())
         {
             return false;
         }
@@ -1593,7 +2044,7 @@ namespace myengine::core
 
     bool Application::SaveSceneAs(const std::string& scenePath)
     {
-        if (!sceneLoaded_ || scenePath.empty())
+        if (!sceneLoaded_ || scenePath.empty() || apppaths::IsShipping())
         {
             return false;
         }

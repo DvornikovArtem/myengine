@@ -269,7 +269,11 @@ function Build-AndTest([string]$StepName, [string]$BuildDir, [string[]]$Configur
     if (-not $ok) { return $false }
 
     $testLog = Join-Path $logs "$StepName-ctest.log"
-    $code = Invoke-Logged $testLog $script:Ctest @('--test-dir', $BuildDir, '-C', $Config, '--output-on-failure') $TestEnvironment 1200
+    # ASan makes the tests about ten times slower (rl_match 5 min, rl_net 7 min): four at a time and an hour and a half, not 20 minutes in a row
+    $ctestArguments = @('--test-dir', $BuildDir, '-C', $Config, '--output-on-failure')
+    $ctestTimeout = 1200
+    if ($StepName -eq 'asan') { $ctestArguments += @('-j', '4'); $ctestTimeout = 5400 }
+    $code = Invoke-Logged $testLog $script:Ctest $ctestArguments $TestEnvironment $ctestTimeout
     $summary = Read-CtestSummary $testLog
     if ($summary) {
         Add-Result "$StepName ctest" ($summary.Failed -eq 0 -and $code -eq 0) ("{0}/{1} passed" -f ($summary.Total - $summary.Failed), $summary.Total) $testLog

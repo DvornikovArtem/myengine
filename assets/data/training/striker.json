@@ -1,0 +1,176 @@
+{
+  "id": "striker",
+  "name": "Striker",
+  "order": 1,
+  "description": "Score from every position: a still ball, a rolling one, a bouncing one, a cross.",
+  "exercises": [
+    {
+      "id": "open-net",
+      "name": "Open net",
+      "hint": "The ball stands in front of you: drive through it.",
+      "car": {
+        "x": 0,
+        "z": -12,
+        "yaw": 0,
+        "boost": 33.3
+      },
+      "ball": {
+        "position": [0.0, 0.9125, 8.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 10,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "rolling-ball",
+      "name": "Rolling ball",
+      "hint": "Catch up with the ball and shoot.",
+      "car": {
+        "x": 0,
+        "z": -30,
+        "yaw": 0,
+        "boost": 33.3
+      },
+      "ball": {
+        "position": [0.0, 0.9125, -10.0],
+        "velocity": [0.0, 0.0, 5.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 10,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "turn-and-shoot",
+      "name": "Turn and shoot",
+      "hint": "The ball is on your right: turn and put it in.",
+      "car": {
+        "x": -14,
+        "z": -26,
+        "yaw": 0,
+        "boost": 50
+      },
+      "ball": {
+        "position": [2.0, 0.9125, 4.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 10,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "bouncing-ball",
+      "name": "Bouncing ball",
+      "hint": "Wait for the bounce, then hit it.",
+      "car": {
+        "x": 0,
+        "z": -16,
+        "yaw": 0,
+        "boost": 33.3
+      },
+      "ball": {
+        "position": [3.0, 6.0, 10.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 14,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "cross",
+      "name": "Cross",
+      "hint": "The ball crosses the field: meet it and score.",
+      "car": {
+        "x": 4,
+        "z": -20,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [-16.0, 0.9125, 20.0],
+        "velocity": [6.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 12,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "far-shot",
+      "name": "Far shot",
+      "hint": "A long way to the goal: use the boost.",
+      "car": {
+        "x": 0,
+        "z": -34,
+        "yaw": 0,
+        "boost": 100
+      },
+      "ball": {
+        "position": [0.0, 0.9125, -16.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 12,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "corner",
+      "name": "From the corner",
+      "hint": "Go round the ball and aim at the far post.",
+      "car": {
+        "x": 24,
+        "z": 8,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [30.0, 0.9125, 38.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 14,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    },
+    {
+      "id": "falling-ball",
+      "name": "Falling ball",
+      "hint": "Hit it out of the air.",
+      "car": {
+        "x": 0,
+        "z": -10,
+        "yaw": 0,
+        "boost": 66
+      },
+      "ball": {
+        "position": [0.0, 11.0, 14.0],
+        "velocity": [0.0, 0.0, 0.0],
+        "spin": [0, 0, 0]
+      },
+      "timeLimit": 12,
+      "attempts": 3,
+      "success": {
+        "type": "goal"
+      }
+    }
+  ]
+}

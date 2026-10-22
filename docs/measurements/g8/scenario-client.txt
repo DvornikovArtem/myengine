@@ -1,0 +1,2 @@
+# the guest of the online match: --rl-join goes to the lobby by itself, the host starts the match
+66.0 quit

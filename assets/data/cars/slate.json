@@ -1,0 +1,75 @@
+{
+  "id": "slate",
+  "name": "Slate",
+  "class": "Flat",
+  "hitboxClass": "Plank",
+  "description": "Flat and wide. A shovel for dribbles and pinches.",
+  "order": 2,
+  "hitbox": {
+    "halfExtentX": 0.43585,
+    "halfExtentY": 0.15947,
+    "halfExtentZ": 0.6566,
+    "comOffsetY": -0.12094,
+    "comOffsetZ": -0.09009,
+    "wheelMountXFront": 0.278,
+    "wheelMountXRear": 0.2028,
+    "wheelFrontZ": 0.40961,
+    "wheelRearZ": -0.44439,
+    "wheelMountYOffset": 0.0,
+    "wheelRadiusFront": 0.125,
+    "wheelRadiusRear": 0.17,
+    "suspensionRestFront": 0.19924,
+    "suspensionRestRear": 0.15924,
+    "rocketSim": {
+      "size": [131.32, 87.1704, 31.8944],
+      "offset": [9.00857, 0.0, 12.0942]
+    }
+  },
+  "mesh": {
+    "body": "assets/models/rl2/car_slate_body.obj",
+    "bodyScale": 1.168,
+    "lights": "assets/models/rl2/car_slate_lights.obj",
+    "lightsScale": 1.031,
+    "materials": {
+      "blue": "assets/materials/rl2/car_slate_blue.material.json",
+      "orange": "assets/materials/rl2/car_slate_orange.material.json"
+    },
+    "boostNozzle": [0.0, -0.04, -0.795]
+  },
+  "preview": {
+    "blue": "assets/ui/cars/slate_blue.png",
+    "orange": "assets/ui/cars/slate_orange.png"
+  },
+  "physics": {
+    "mass": 201.6,
+    "inertiaMultiplier": 1.08,
+    "friction": 0.3,
+    "maxSpeed": 22.54,
+    "maxAngularSpeed": 5.5,
+    "supersonicSpeed": 21.56,
+    "supersonicMaintainSpeed": 20.58,
+    "throttleAccel": 15.36,
+    "driveSpeed": [0.0, 14.0, 14.1],
+    "driveFactor": [1.0, 0.1, 0.0],
+    "brakeAccel": 35.0,
+    "steerSpeed": [0.0, 5.0, 10.0, 15.0, 17.5, 30.0],
+    "steerAngle": [0.490875, 0.293756, 0.167468, 0.097244, 0.0782644, 0.0317768],
+    "powerslideSteerSpeed": [0.0, 25.0],
+    "powerslideSteerAngle": [0.360962, 0.116012],
+    "latFrictionSlip": [0.0, 1.0],
+    "latFriction": [1.0, 0.2],
+    "handbrakeLatFriction": 0.1,
+    "jumpImpulse": 2.91667,
+    "jumpHoldAccel": 14.5833,
+    "doubleJumpImpulse": 2.91667,
+    "dodgeImpulse": 5.0,
+    "airPitchTorque": 11.8404,
+    "airYawTorque": 8.65255,
+    "airRollTorque": 36.432,
+    "boostStart": 33.3,
+    "boostMax": 100.0,
+    "boostUsePerSecond": 33.3,
+    "boostAccelGround": 9.9167,
+    "boostAccelAir": 10.5833
+  }
+}
