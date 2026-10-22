@@ -185,6 +185,16 @@ namespace myengine::rlui::paint
         DrawRadial(f.DrawList(), ToIm(c), rx * scale, ry * scale, color, f.Alpha() * (f.space() == Space::Menu ? f.TransitionAlpha() : 1.0f));
     }
 
+    void Image(Frame& f, const std::uint64_t texture, const Rect& rect, const Color color)
+    {
+        if (texture == 0)
+        {
+            return;
+        }
+        const Rect r = f.ToScreen(rect);
+        f.DrawList()->AddImage(static_cast<ImTextureID>(texture), ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), Tint(f, color));
+    }
+
     void FillRect(Frame& f, const Rect& rect, const Color color)
     {
         const Rect r = f.ToScreen(rect);

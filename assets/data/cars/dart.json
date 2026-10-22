@@ -1,0 +1,75 @@
+{
+  "id": "dart",
+  "name": "Dart",
+  "class": "Low-long",
+  "hitboxClass": "Breakout",
+  "description": "Long and quick. Great for flicks and dribbles.",
+  "order": 3,
+  "hitbox": {
+    "halfExtentX": 0.41511,
+    "halfExtentY": 0.164,
+    "halfExtentZ": 0.66996,
+    "comOffsetY": -0.1175,
+    "comOffsetZ": -0.125,
+    "wheelMountXFront": 0.2667,
+    "wheelMountXRear": 0.35,
+    "wheelFrontZ": 0.39,
+    "wheelRearZ": -0.4825,
+    "wheelMountYOffset": 0.0,
+    "wheelRadiusFront": 0.135,
+    "wheelRadiusRear": 0.15,
+    "suspensionRestFront": 0.177,
+    "suspensionRestRear": 0.17666,
+    "rocketSim": {
+      "size": [133.992, 83.021, 32.8],
+      "offset": [12.5, 0.0, 11.75]
+    }
+  },
+  "mesh": {
+    "body": "assets/models/rl2/car_dart_body.obj",
+    "bodyScale": 1.025,
+    "lights": "assets/models/rl2/car_dart_lights.obj",
+    "lightsScale": 0.996,
+    "materials": {
+      "blue": "assets/materials/rl2/car_dart_blue.material.json",
+      "orange": "assets/materials/rl2/car_dart_orange.material.json"
+    },
+    "boostNozzle": [0.0, -0.07, -0.805]
+  },
+  "preview": {
+    "blue": "assets/ui/cars/dart_blue.png",
+    "orange": "assets/ui/cars/dart_orange.png"
+  },
+  "physics": {
+    "mass": 180.0,
+    "inertiaMultiplier": 1.0,
+    "friction": 0.3,
+    "maxSpeed": 23.0,
+    "maxAngularSpeed": 5.5,
+    "supersonicSpeed": 22.0,
+    "supersonicMaintainSpeed": 21.0,
+    "throttleAccel": 16.0,
+    "driveSpeed": [0.0, 14.0, 14.1],
+    "driveFactor": [1.0, 0.1, 0.0],
+    "brakeAccel": 35.0,
+    "steerSpeed": [0.0, 5.0, 10.0, 15.0, 17.5, 30.0],
+    "steerAngle": [0.53356, 0.3193, 0.18203, 0.1057, 0.08507, 0.03454],
+    "powerslideSteerSpeed": [0.0, 25.0],
+    "powerslideSteerAngle": [0.39235, 0.1261],
+    "latFrictionSlip": [0.0, 1.0],
+    "latFriction": [1.0, 0.2],
+    "handbrakeLatFriction": 0.1,
+    "jumpImpulse": 2.91667,
+    "jumpHoldAccel": 14.5833,
+    "doubleJumpImpulse": 2.91667,
+    "dodgeImpulse": 5.0,
+    "airPitchTorque": 12.4636,
+    "airYawTorque": 9.10795,
+    "airRollTorque": 38.3495,
+    "boostStart": 33.3,
+    "boostMax": 100.0,
+    "boostUsePerSecond": 33.3,
+    "boostAccelGround": 9.9167,
+    "boostAccelAir": 10.5833
+  }
+}

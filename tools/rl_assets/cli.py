@@ -18,6 +18,11 @@ def budgets(ctx, items):
         rows.append((name, value, limit, value <= limit, unit))
     if "car_body" in m:
         row("car triangles (body + lights + 4 wheels)", tris("car_body", "car_lights") + 4 * tris("car_wheel"), 4000)
+    from . import cars
+    for d in cars.DESIGNS:
+        prefix = "car" if d.key == "pulse" else "car_" + d.key
+        if d.key != "pulse" and prefix + "_body" in m:
+            row("car %s triangles (body + lights + 4 wheels)" % d.name, tris(prefix + "_body", prefix + "_lights") + 4 * tris("car_wheel"), 4000)
     if "ball" in m:
         row("ball triangles", tris("ball"), 2000)
     if "arena_floor" in m:

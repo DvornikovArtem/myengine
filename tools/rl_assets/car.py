@@ -302,17 +302,31 @@ def check_tuning():
 
 
 def build(ctx):
+    """Pulse keeps its names (car_body, car_lights, car_blue, car_orange), the other five cars of cars.py are car_<key>_body ... car_<key>_<team>."""
     check_tuning()
-    for team in ("blue", "orange"):
-        atlas = body_texture(team)
-        ctx.texture("car_" + team, atlas.image())
-        if team == "blue":
-            body = build_body(atlas)  # the UV rects are the same for both teams
-    ctx.mesh("car_body", body, origin=(0, 0, 0), part_of="car", note="hull + cabin + spoiler + nozzle, one atlas")
+    from . import cars
+    for d in cars.DESIGNS:
+        prefix = "car" if d.key == "pulse" else "car_" + d.key
+        body = None
+        for team in ("blue", "orange"):
+            atlas = cars.body_texture(team, d)
+            ctx.texture("%s_%s" % (prefix, team), atlas.image())
+            if team == "blue":
+                body = cars.build_body(atlas, d)  # the UV rects are the same for both teams
+        info = ctx.mesh(prefix + "_body", body, origin=(0, 0, 0), part_of="car", note="hull + cabin + spoiler + nozzle, one atlas" if d.key == "pulse" else "%s: hull + cabin + details, one atlas" % d.name)
+        lights = ctx.mesh(prefix + "_lights", cars.build_lights(d), origin=(0, 0, 0), part_of="car", note="head and tail lights" if d.key == "pulse" else "%s: head and tail lights" % d.name)
+        del info, lights
     ctx.texture("car_lights", lights_texture())
-    ctx.mesh("car_lights", build_lights((0.0, 0.0, 1.0, 1.0)), origin=(0, 0, 0), part_of="car", note="head and tail lights")
     ctx.texture("car_wheel", wheel_texture())
     ctx.mesh("car_wheel", build_wheel(), origin=(0, 0, 0), unit_scale=None, part_of="car",
              note="the rear wheel (r 0.15 m); the front wheels (r 0.125 m) use the entity scale x 0.8333")
     ctx.texture("car_boost", boost_texture())
     ctx.mesh("car_boost", build_boost(), origin=(0, 0, 0), part_of="car", note="flame cone behind the nozzle (additive in G7b)")
+    from . import cardata
+    n = cardata.write_data(ctx.meshes)
+    print("  cars     %d data files assets/data/cars/*.json" % n)
+    try:
+        n = cardata.write_previews(ctx.meshes)
+        print("  cars     %d profile previews assets/ui/cars/*.png" % n)
+    except ImportError as error:
+        print("  cars     previews skipped (%s)" % error)

@@ -1,0 +1,15 @@
+{
+  "shader": "../../shaders/lit.shader.json",
+  "texture": "../../textures/rl2/car_slate_blue.tga",
+  "tint": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "params": {
+    "gSpecular": 1.1,
+    "gGloss": 90,
+    "gFresnel": 0.55
+  }
+}

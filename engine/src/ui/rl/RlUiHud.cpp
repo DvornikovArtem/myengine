@@ -868,7 +868,16 @@ namespace myengine::rlui
                 FillRect(f, row, local ? Color::Hex(0x2c3a5c, 0.92f) : style::kNavySolid.Faded(0.9f));
                 FillRect(f, {row.x, row.y, 6.0f, row.h}, style::TeamColor(team));
                 IconGlyph(f, player->bot ? Icon::Robot : Icon::Person, 20.0f, {row.x + 30.0f, row.y + row.h * 0.5f}, style::kTextDim);
-                TextIn(f, FontStyle::SemiBold, 26.0f, {row.x + 80.0f, row.y, 540.0f, row.h}, style::kText, player->name);
+                if (player->car.empty())
+                {
+                    TextIn(f, FontStyle::SemiBold, 26.0f, {row.x + 80.0f, row.y, 540.0f, row.h}, style::kText, player->name);
+                }
+                else
+                {
+                    // the name of the car under the name of the player
+                    TextIn(f, FontStyle::SemiBold, 26.0f, {row.x + 80.0f, row.y - 9.0f, 540.0f, row.h}, style::kText, player->name);
+                    Text(f, FontStyle::SemiBold, 16.0f, {row.x + 80.0f, row.y + 35.0f}, style::kTextDim, player->car);
+                }
                 TextIn(f, FontStyle::BlackItalic, 26.0f, {row.x + colScore - 60.0f, row.y, 120.0f, row.h}, style::kText, std::to_string(player->score), Align::Center);
                 const int values[5] = {player->goals, player->assists, player->saves, player->shots, player->demos};
                 const float columns[5] = {colGoals, colAssists, colSaves, colShots, colDemos};

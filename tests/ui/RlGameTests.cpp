@@ -13,6 +13,7 @@
 #include <myengine/ecs/components/TransformComponent.h>
 #include <myengine/ecs/systems/RlGameSystem.h>
 #include <myengine/editor/EditorState.h>
+#include <myengine/game/RlCars.h>
 #include <myengine/game/RlGameSettings.h>
 #include <myengine/input/InputManager.h>
 
@@ -89,6 +90,7 @@ namespace
         changed.camera.ballCamHold = true;
         changed.audio.music = 0.25f;
         changed.invertPitch = true;
+        changed.car = "bulwark";
         changed.play.mode = 3;
         changed.play.joinAddress = "192.168.1.42:27015";
         changed.play.recent = {"10.0.0.2:27015", "192.168.1.42:27015"};
@@ -101,6 +103,8 @@ namespace
               "the video settings come back");
         Check(back.camera.fov == 95.0f && back.camera.distanceCm == 300.0f && back.camera.ballCamHold && back.audio.music == 0.25f && back.invertPitch,
               "the camera, the audio and the pitch come back");
+        Check(back.car == "bulwark", "the car of the garage comes back");
+        Check(game::RlGameSettings{}.car == "pulse", "the first start has Pulse");
         Check(back.play.mode == 3 && back.play.joinAddress == "192.168.1.42:27015" && back.play.recent.size() == 2 && back.play.playerName == changed.play.playerName,
               "the Play screen comes back, with the Cyrillic name");
         Check(!fs::exists(file.string() + ".tmp"), "no half-written file is left");
@@ -240,7 +244,7 @@ namespace
                 }
             };
             add("RlCamera", true);
-            for (const char* name : {"RlArena", "RlBall", "RlBlue0", "RlOrange0", "RlPodium"})
+            for (const char* name : {"RlArena", "RlBall", "RlBlue0", "RlOrange0", "RlBlue0Lights", "RlOrange0Lights", "RlPodium"})
             {
                 add(name);
             }
@@ -408,6 +412,71 @@ namespace
             rig.system.LeaveMatch();
             rig.Frames(2);
             Check(status.stage == sys::RlGameStage::Menu, "and the menu comes back");
+        }
+
+        // ---- the garage: the car of the player on the podium, in focus in the garage (a change is at once, the paint of the team), and in the match
+        {
+            const game::RlCarCatalog& cars = game::Cars();
+            Check(cars.Cars().size() == 6, "the game reads the six cars");
+            const auto entityOf = [&](const char* tag)
+            {
+                ecs::EntityId found = ecs::kInvalidEntity;
+                rig.world.ForEach<components::TagComponent>([&](const ecs::EntityId entity, const components::TagComponent& t) { found = t.name == tag ? entity : found; });
+                return found;
+            };
+            const auto meshOf = [&](const char* tag)
+            {
+                const auto* renderer = rig.world.TryGet<components::MeshRendererComponent>(entityOf(tag));
+                return renderer != nullptr ? renderer->meshPath : std::string();
+            };
+            const auto paintOf = [&](const char* tag)
+            {
+                const auto* renderer = rig.world.TryGet<components::MeshRendererComponent>(entityOf(tag));
+                return renderer != nullptr ? renderer->materialPath : std::string();
+            };
+            rig.system.SetSelectedCar("vector");
+            Check(rig.system.SelectedCar() == "vector", "the car of the player is set");
+            rig.system.SetSelectedCar("no-such-car");
+            Check(rig.system.SelectedCar() == "pulse", "a key that is not in the data is Pulse");
+            rig.system.SetSelectedCar("vector");
+            rig.Frames(4);
+            Check(meshOf("RlBlue0") == cars.Find("vector")->bodyMesh, "the podium of the menu shows the car of the player");
+
+            // the garage: the car in focus replaces the body at once, in the paint of the preview team
+            sys::RlGarageView view;
+            view.active = true;
+            view.car = "bulwark";
+            view.team = 1;
+            rig.system.SetGarageView(view);
+            rig.Frames(4);
+            Check(meshOf("RlOrange0") == cars.Find("bulwark")->bodyMesh && paintOf("RlOrange0") == cars.Find("bulwark")->material[1], "the garage shows Bulwark in orange");
+            Check(meshOf("RlOrange0Lights") == cars.Find("bulwark")->lightsMesh, "with its own lights");
+            view.car = "slate";
+            view.team = 0;
+            rig.system.SetGarageView(view);
+            rig.Frames(4);
+            Check(meshOf("RlBlue0") == cars.Find("slate")->bodyMesh && paintOf("RlBlue0") == cars.Find("slate")->material[0], "the next car in focus is on the podium the next frame, in blue");
+            rig.system.RotateGarageCar(40.0f);
+            rig.Frames(2);
+            rig.system.SetGarageView({});
+            rig.Frames(4);
+            Check(meshOf("RlBlue0") == cars.Find("vector")->bodyMesh, "leaving the garage shows the car of the player again (the choice was not changed by the viewing)");
+
+            // the match: the car of the local player is the one of the garage, the others are Pulse
+            rig.system.SetSelectedCar("dart");
+            sys::RlGameMatchSetup match;
+            match.mode = 1;
+            match.botLevel = 0;
+            rig.system.StartMatch(match);
+            rig.Frames(6);
+            Check(status.stage == sys::RlGameStage::Playing, "the match is on");
+            Check(meshOf("RlBlue0") == cars.Find("dart")->bodyMesh && paintOf("RlBlue0") == cars.Find("dart")->material[0], "the car of the player in the match is Dart in blue");
+            Check(meshOf("RlOrange0") == cars.Find("pulse")->bodyMesh, "the bot drives Pulse");
+            Check(status.hud.players.size() == 2 && status.hud.players[0].car == "Dart" && status.hud.players[1].car == "Pulse", "the table has the names of the cars");
+            rig.system.LeaveMatch();
+            rig.Frames(4);
+            Check(meshOf("RlBlue0") == cars.Find("dart")->bodyMesh, "after the match the podium shows the car of the player");
+            rig.system.SetSelectedCar("pulse");
         }
 
         // ---- a private match: the host waits in the lobby

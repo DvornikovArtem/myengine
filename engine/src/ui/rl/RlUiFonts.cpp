@@ -26,12 +26,13 @@ namespace myengine::rlui
 
         // The Lucide icons the kit draws (Icon, in the order of the enum, None first): U+E140 play, E184 target, E158 settings, E112 log-out,
         // E149 refresh-cw, E0F8 house, E17A star, E19F user, E1BB bot, E1AE wifi, E1AF wifi-off, E15C shield, E1B4 zap, E349 circle-dot,
-        // E157 server, E111 log-in, E0BE eye, E0FE info, E072 chevron-left, E073 chevron-right, E381 arrow-up-down, E24A arrow-left-right
+        // E157 server, E111 log-in, E0BE eye, E0FE info, E072 chevron-left, E073 chevron-right, E381 arrow-up-down, E24A arrow-left-right,
+        // E1D5 car, E070 check, E14F ruler
         const ImWchar kIconCodepoints[] = {0, 0xE140, 0xE184, 0xE158, 0xE112, 0xE149, 0xE0F8, 0xE17A, 0xE19F, 0xE1BB, 0xE1AE, 0xE1AF, 0xE15C,
-                                           0xE1B4, 0xE349, 0xE157, 0xE111, 0xE0BE, 0xE0FE, 0xE072, 0xE073, 0xE381, 0xE24A};
+                                           0xE1B4, 0xE349, 0xE157, 0xE111, 0xE0BE, 0xE0FE, 0xE072, 0xE073, 0xE381, 0xE24A, 0xE1D5, 0xE070, 0xE14F};
 
         // The glyphs of a size: big sizes get only what is drawn with them, otherwise the atlas would not fit a 4K screen
-        const ImWchar kRangesFull[] = {0x0020, 0x007E, 0x00A0, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0x2190, 0x2193, 0x2212, 0x2212, 0};
+        const ImWchar kRangesFull[] = {0x0020, 0x007E, 0x00A0, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0x2190, 0x2193, 0x2212, 0x2212, 0x2248, 0x2248, 0};
         const ImWchar kRangesLatin[] = {0x0020, 0x007E, 0x00B7, 0x00B7, 0x00D7, 0x00D7, 0x2013, 0x2014, 0};
         const ImWchar kRangesBanner[] = {0x0020, 0x005A, 0x2014, 0x2014, 0};   // space .. Z: the capitals, the digits, the signs
         const ImWchar kRangesDigits[] = {0x0020, 0x0021, 0x002B, 0x003A, 0x0047, 0x0047, 0x004F, 0x004F, 0};   // " !+,-./0-9:GO"

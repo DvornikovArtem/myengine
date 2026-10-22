@@ -86,9 +86,19 @@ namespace myengine::ecs::systems
         int trainingExercise = 0;       // Training: the exercise to begin with
     };
 
+    // What the garage screen asks the scene to show (docs/game/rl-cars.md): the podium of the menu with the car in focus in the paint of a team, the camera
+    // in the frame of the garage. The screen sends it every frame it is open.
+    struct RlGarageView
+    {
+        bool active = false;
+        std::string car;      // the key of the car in focus (assets/data/cars/<id>.json)
+        int team = 0;         // 0 blue, 1 orange: the paint of the preview
+    };
+
     struct RlLobbySlot
     {
         std::string name;
+        std::string car;      // the key of the car of the slot
         int team = 0;
         bool bot = false;
         bool you = false;
@@ -173,6 +183,14 @@ namespace myengine::ecs::systems
         void PlayUiSound(const char* eventName);
         // The name of the player in the table
         void SetPlayerName(const std::string& name);
+        // The car of the garage that the player drives: the podium of the menu and the car of the player in the match show it (the physics of every car is
+        // the one of rl_tuning.json until G4i-physics). A key that is not in assets/data/cars is Pulse.
+        void SetSelectedCar(const std::string& id);
+        const std::string& SelectedCar() const;
+        // The garage: the car in focus on the podium (a change is at once, the body is replaced), the camera in the frame of the garage
+        void SetGarageView(const RlGarageView& view);
+        // The player turns the car by hand (a drag of the mouse, the right stick): degrees; the car turns by itself again after 3 s
+        void RotateGarageCar(float degrees);
         // Commands of the tests (UiScript: `game <command>`): "goal-blue" / "goal-orange" put the ball into that goal, "demolish" demolishes the car of the player,
         // "boost" fills its boost, "time <seconds>" sets the clock. They work in a running match only. In a training "autopilot" / "autopilot-off" hands
         // the car to the bot of the training (RlTrainingAutopilot), "next" / "previous" / "retry" press the keys of the exercise.

@@ -75,6 +75,9 @@ namespace myengine::game
         RlAudioSettings audio;
         RlPlaySettings play;
         bool invertPitch = false;
+        // The car of the garage (assets/data/cars/<id>.json, docs/game/rl-cars.md): the key of the car the player drives; a key that is not in the data of
+        // the game (the car was removed) is put back to "pulse" by the garage, not here
+        std::string car = "pulse";
 
         // Returns false (the settings stay at the defaults) when the file exists but cannot be read; a missing file is fine. `error` says why.
         bool Load(const std::filesystem::path& file, std::string* error = nullptr);
