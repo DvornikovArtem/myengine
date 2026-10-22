@@ -156,12 +156,13 @@ namespace myengine::render::dx12
                 {
                     continue;
                 }
-                if (pass.name == "Shadow Map") TracyPlot("GPU Shadow Map ms", pass.gpuMs);
-                else if (pass.name == "Scene") TracyPlot("GPU Scene ms", pass.gpuMs);
-                else if (pass.name == "Scene Transparent") TracyPlot("GPU Scene Transparent ms", pass.gpuMs);
-                else if (pass.name == "Bloom") TracyPlot("GPU Bloom ms", pass.gpuMs);
-                else if (pass.name == "Composite") TracyPlot("GPU Composite ms", pass.gpuMs);
-                else if (pass.name == "UI") TracyPlot("GPU UI ms", pass.gpuMs);
+                // braces: without Tracy TracyPlot is empty and "if (...) ;" is C4390
+                if (pass.name == "Shadow Map") { TracyPlot("GPU Shadow Map ms", pass.gpuMs); }
+                else if (pass.name == "Scene") { TracyPlot("GPU Scene ms", pass.gpuMs); }
+                else if (pass.name == "Scene Transparent") { TracyPlot("GPU Scene Transparent ms", pass.gpuMs); }
+                else if (pass.name == "Bloom") { TracyPlot("GPU Bloom ms", pass.gpuMs); }
+                else if (pass.name == "Composite") { TracyPlot("GPU Composite ms", pass.gpuMs); }
+                else if (pass.name == "UI") { TracyPlot("GPU UI ms", pass.gpuMs); }
             }
         }
 

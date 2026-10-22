@@ -71,6 +71,13 @@ namespace
     // A host and clients on a loopback with a virtual clock
     // ------------------------------------------------------------------------------------------------------------------------------
 
+    // The time budgets (a rollback in milliseconds) are for an optimised build: a Debug build has none and is an order of magnitude slower
+#ifdef _DEBUG
+    constexpr double kBudgetScale = 20.0;
+#else
+    constexpr double kBudgetScale = 1.0;
+#endif
+
     struct Rig
     {
         net::LoopbackHub hub;
@@ -678,7 +685,7 @@ namespace
         // the client lives ahead of the host by about half the round trip plus the margin
         const int lead = static_cast<int>(c.tick) - static_cast<int>(h.tick);
         CHECK(lead >= 0 && lead < 60);
-        CHECK(c.maxRollbackMs < 12.0);
+        CHECK(c.maxRollbackMs < 12.0 * kBudgetScale);
         // the world to draw is near the physics state
         const RlWorldState shown = client.RenderWorld();
         const RlWorldState& physics = client.Match()->World();
@@ -1631,7 +1638,7 @@ namespace
             // go back to the same state for the next round
         }
         Note("restore + 20 ticks with saving each one: average %.2f ms, worst %.2f ms (budget 6 ms)", totalRollback / rounds, worstRollback);
-        CHECK(worstRollback < 6.0);
+        CHECK(worstRollback < 6.0 * kBudgetScale);
         Note("size of a saved state: %zu bytes", saved.size());
     }
 }

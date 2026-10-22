@@ -1937,7 +1937,7 @@ namespace myengine::game
             std::string prompt = pad ? "Press a gamepad button or move a stick / trigger..." : "Press a key or a mouse button...";
             if (pad && row.slotCount == 2 && rebind.step == 0)
             {
-                prompt = std::string("Move a stick towards ") + (row.slots[0].action == Axis(rl::RlAxisAction::Pitch) ? "NOSE UP" : (row.slots[0].action == Axis(rl::RlAxisAction::Roll) ? "RIGHT" : "RIGHT")) +
+                prompt = std::string("Move a stick towards ") + (row.slots[0].action == Axis(rl::RlAxisAction::Pitch) ? "NOSE UP" : "RIGHT") +
                          ", or press a button for " + row.leftName;
             }
             RebindDialog(f, {header, name, prompt, "Esc \xE2\x80\x94 cancel \xC2\xB7 Del \xE2\x80\x94 clear", "", std::max(rebind.timer / 5.0f, 0.0f)});

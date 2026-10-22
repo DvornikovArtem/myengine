@@ -286,6 +286,11 @@ namespace myengine::render::dx12
 
         D3D12_CLEAR_VALUE colorClear{};
         colorClear.Format = kSceneColorFormat;
+        // the optimized clear value is the colour the target is cleared with every frame (a mismatch is the debug layer's warning 820 and a slower clear)
+        colorClear.Color[0] = sceneClearColor_.r;
+        colorClear.Color[1] = sceneClearColor_.g;
+        colorClear.Color[2] = sceneClearColor_.b;
+        colorClear.Color[3] = sceneClearColor_.a;
         const auto colorDesc = CD3DX12_RESOURCE_DESC::Tex2D(kSceneColorFormat, width, height, 1, 1, samples, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
         HRESULT hr = context_.device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE, &colorDesc, D3D12_RESOURCE_STATE_RENDER_TARGET,
             &colorClear, IID_PPV_ARGS(sceneTargets_.color.GetAddressOf()));

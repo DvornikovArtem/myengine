@@ -115,7 +115,10 @@ namespace myengine::core::crash
             from.QuadPart = size.QuadPart > kLogBytes ? size.QuadPart - kLogBytes : 0;
             SetFilePointerEx(log, from, nullptr, FILE_BEGIN);
             DWORD read = 0;
-            ReadFile(log, buffer, kLogBytes, &read, nullptr);
+            if (!ReadFile(log, buffer, kLogBytes, &read, nullptr))
+            {
+                read = 0;
+            }
             CloseHandle(log);
             buffer[read] = 0;
 
@@ -268,6 +271,7 @@ namespace myengine::core::crash
         void CrashNow()
         {
             volatile int* nothing = nullptr;
+#pragma warning(suppress : 6011)  // on purpose: the crash that the crash handler is tested with
             *nothing = 1;
         }
     }

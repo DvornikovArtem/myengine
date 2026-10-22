@@ -2481,7 +2481,7 @@ namespace
                 if (p.y > g_tuning.ball.radius + 0.5f && Len(V(s.ball.linearVelocity)) < 0.3f) ++hanging;
                 if (p.x < lo.x || p.x > hi.x || p.y < lo.y || p.y > hi.y || p.z < lo.z || p.z > hi.z) out = true;
                 if (p.z > end + g_tuning.ball.radius) crossed = true;
-                if (!(p.x == p.x) || !(p.y == p.y) || !(p.z == p.z)) bad = true;
+                if (std::isnan(p.x) || std::isnan(p.y) || std::isnan(p.z)) bad = true;
             });
             const RlBallState& b = sim.State().ball;
             const float speed = Len(V(b.linearVelocity));

@@ -287,6 +287,9 @@ set(IMGUIZMO_SOURCES
   ${IMGUIZMO_ROOT}/ImGuizmo.cpp
 )
 
+# ImGuizmo is third-party code that is built with our /W4: its float -> ImDrawFlags and int -> ImGuiID conversions are not ours to fix
+set_source_files_properties(${IMGUIZMO_SOURCES} PROPERTIES COMPILE_OPTIONS "/wd4244;/wd4245")
+
 list(APPEND ENGINE_HEADERS ${IMGUI_HEADERS})
 list(APPEND ENGINE_SOURCES ${IMGUI_SOURCES})
 list(APPEND ENGINE_HEADERS ${IMGUIZMO_HEADERS})
