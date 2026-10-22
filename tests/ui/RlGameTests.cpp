@@ -26,7 +26,10 @@
 
 #include "../../engine/src/core/UiScript.h"
 
+#include <DirectXMath.h>
+
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -299,6 +302,13 @@ namespace
             {
                 add(name);
             }
+            for (const char* team : {"RlBlue0", "RlOrange0"})
+            {
+                for (int w = 0; w < 4; ++w)
+                {
+                    add((std::string(team) + "Wheel" + std::to_string(w)).c_str());
+                }
+            }
             core::ServiceLocator::GetEditorRuntimeState().mode = editor::RuntimeMode::Play;
         }
 
@@ -323,6 +333,102 @@ namespace
             return false;
         }
     };
+
+    // RL-B2: the wheels of the car of the bot (nobody holds its stick: the picture works from the state of the car) turn about their axle as the car rolls
+    // forward, and the front ones turn with the steering. The rotation of a wheel entity is that of the body under the turn of the wheel, so the turn of
+    // the wheel is the wheel's matrix times the inverse of the body's.
+    void TestWheelsOfTheBot(Rig& rig)
+    {
+        namespace dx = DirectX;
+        constexpr float kDegToRad = 0.01745329f;
+        const auto entityOf = [&](const std::string& tag)
+        {
+            ecs::EntityId found = ecs::kInvalidEntity;
+            rig.world.ForEach<components::TagComponent>([&](const ecs::EntityId entity, const components::TagComponent& t) { found = t.name == tag ? entity : found; });
+            return found;
+        };
+        const auto rotationOf = [&](const ecs::EntityId entity)
+        {
+            const auto* transform = rig.world.TryGet<components::TransformComponent>(entity);
+            return dx::XMMatrixRotationRollPitchYaw(transform->rotationDeg.x * kDegToRad, transform->rotationDeg.y * kDegToRad, transform->rotationDeg.z * kDegToRad);
+        };
+        const ecs::EntityId body = entityOf("RlOrange0");
+        ecs::EntityId wheel[4];
+        for (int w = 0; w < 4; ++w)
+        {
+            wheel[w] = entityOf("RlOrange0Wheel" + std::to_string(w));
+            Check(wheel[w] != ecs::kInvalidEntity, "the rig has the wheels of the car of the bot");
+        }
+        // the turn of a wheel relative to the body: about X by `spin`, about the up by `steer` (Spin * Steer * Body = Wheel)
+        const auto relative = [&](const int w, float& spin, float& steer)
+        {
+            dx::XMFLOAT4X4 m;
+            dx::XMStoreFloat4x4(&m, dx::XMMatrixMultiply(rotationOf(wheel[w]), dx::XMMatrixInverse(nullptr, rotationOf(body))));
+            steer = std::atan2(-m._13, m._11);  // where the wheel's axle (X) points: the spin leaves it alone, the steering swings it from X towards -Z
+            spin = std::atan2(m._23, m._22);    // the top (Y) of the wheel tilts to the front (+Z) for a positive spin
+        };
+        const auto positionOf = [&](const ecs::EntityId entity) { return rig.world.TryGet<components::TransformComponent>(entity)->position; };
+
+        float spinSum[4] = {};
+        float last[4] = {};
+        float steerFront = 0.0f;
+        float steerRear = 0.0f;
+        int rolling = 0;
+        int forward = 0;
+        components::Vec3 lastPosition = positionOf(body);
+        for (int i = 0; i < 360; ++i)
+        {
+            rig.Frames(1, 1.0f / 120.0f);
+            const components::Vec3 position = positionOf(body);
+            const float dx2 = position.x - lastPosition.x;
+            const float dz2 = position.z - lastPosition.z;
+            const float speed = std::sqrt(dx2 * dx2 + dz2 * dz2) * 120.0f;
+            lastPosition = position;
+            for (int w = 0; w < 4; ++w)
+            {
+                float spin = 0.0f;
+                float steer = 0.0f;
+                relative(w, spin, steer);
+                float step = spin - last[w];
+                last[w] = spin;
+                if (i == 0)
+                {
+                    continue;
+                }
+                while (step > 3.14159265f)
+                {
+                    step -= 6.2831853f;
+                }
+                while (step < -3.14159265f)
+                {
+                    step += 6.2831853f;
+                }
+                spinSum[w] += step;
+                if (w == 2 && speed > 3.0f)
+                {
+                    ++rolling;
+                    forward += step > 0.0f ? 1 : 0;
+                }
+                if (w < 2)
+                {
+                    steerFront = std::max(steerFront, std::fabs(steer));
+                }
+                else
+                {
+                    steerRear = std::max(steerRear, std::fabs(steer));
+                }
+            }
+        }
+        std::cout << "  wheels of the bot: spin " << spinSum[0] << " " << spinSum[1] << " " << spinSum[2] << " " << spinSum[3] << " rad, rolling frames " << rolling
+                  << ", forward " << forward << ", front steer up to " << steerFront << ", rear " << steerRear << "\n";
+        Check(rolling > 60, "the car of the bot drove (the wheels have something to turn with)");
+        for (int w = 0; w < 4; ++w)
+        {
+            Check(spinSum[w] > 10.0f, "the wheels of a car that drives forward turn forward (positive spin, many radians)");
+        }
+        Check(forward * 100 >= rolling * 90, "the wheel turns forward in nearly every frame of rolling");
+        Check(steerRear < 0.001f, "the rear wheels do not steer");
+    }
 
     void TestSystem(const fs::path& source)
     {
@@ -358,6 +464,7 @@ namespace
         Check(status.hud.phase == rlui::HudPhase::Countdown && status.hud.clock > 5.9f, "it starts with the countdown and the whole clock");
 
         Check(rig.Until([&] { return status.hud.phase == rlui::HudPhase::Playing; }, 400), "the countdown ends");
+        TestWheelsOfTheBot(rig);
         // the pause stands still
         rig.system.SetPaused(true);
         rig.Frames(1);

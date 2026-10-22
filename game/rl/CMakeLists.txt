@@ -23,6 +23,7 @@ set(RL_HEADERS
   include/rl/RlTrainingAutopilot.h
   include/rl/RlTuning.h
   include/rl/RlTypes.h
+  include/rl/RlWheels.h
 )
 
 set(RL_SOURCES
@@ -56,6 +57,7 @@ set(RL_SOURCES
   src/RlTraining.cpp
   src/RlTrainingAutopilot.cpp
   src/RlTuning.cpp
+  src/RlWheels.cpp
 )
 
 # The physics of the Rocket League game: Jolt world, arena mesh, car controller. No DX12, ImGui or ECS in here.

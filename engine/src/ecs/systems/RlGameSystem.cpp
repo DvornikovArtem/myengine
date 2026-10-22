@@ -35,6 +35,7 @@
 #include <rl/RlNet.h>
 #include <rl/RlTraining.h>
 #include <rl/RlTrainingAutopilot.h>
+#include <rl/RlWheels.h>
 #include <rl/net/NetReliable.h>
 
 #include <tracy/Tracy.hpp>
@@ -137,6 +138,7 @@ namespace myengine::ecs::systems
         EntityId marker = kInvalidEntity;
         EntityId cars[2][4] = {};
         EntityId wheels[2][4][rl::kWheelCount] = {};
+        rl::RlWheelAnimator wheelAnimator;   // the spin and the steer of the wheels of every slot of the match, worked out from its state
         EntityId lights[2][4] = {};     // the headlights and tail lights of the car (a mesh of their own)
         EntityId boosts[2][4] = {};     // the flame of the boost
         EntityId pads[rl::kPadCount] = {};
@@ -984,6 +986,8 @@ namespace myengine::ecs::systems
             skipPressed = false;
             lastShot = shot;
             lastReplay = shot.replay;
+            // the wheels of a replay in slow motion turn slowly too (they turn with the speed of the car, which the clip shows slowed down)
+            const float wheelDt = deltaTime * (lastReplay.active ? std::max(lastReplay.speed, 0.0f) : 1.0f);
             const rl::RlWorldState& now = *nowWorld;
             const rl::RlWorldState& before = *beforeWorld;
             const int teamSize = std::max(slotCount / 2, 1);
@@ -1052,6 +1056,31 @@ namespace myengine::ecs::systems
                     transform->scale = {base.x * flicker, base.y * flicker, base.z * (0.85f + 0.3f * flicker)};
                 }
                 SetVisible(world, boosts[team][index], boosting);
+
+                // The wheels turn from the state of the car, which every machine has whoever drives it (the local player, a bot, a car that the network
+                // brings, a car of the replay): the sim has no spin of a wheel. The state is shown as interpolated, like the body.
+                const rl::RlCarTuning& carTuning = slot < sim.CarCount() ? sim.CarTuning(slot) : t.car;
+                if (jumped)
+                {
+                    wheelAnimator.ResetCar(slot);  // a kick-off or a respawn: no spin from the place where the car was
+                }
+                {
+                    rl::RlCarState shownState = b;
+                    dx::XMFLOAT4 q;
+                    dx::XMStoreFloat4(&q, rotation);
+                    shownState.rotation = {q.x, q.y, q.z, q.w};
+                    const auto lerp = [s](const rl::RlVec3& from, const rl::RlVec3& to)
+                    {
+                        return rl::RlVec3{from.x + (to.x - from.x) * s, from.y + (to.y - from.y) * s, from.z + (to.z - from.z) * s};
+                    };
+                    shownState.linearVelocity = lerp(a.linearVelocity, b.linearVelocity);
+                    shownState.angularVelocity = lerp(a.angularVelocity, b.angularVelocity);
+                    for (int w = 0; w < rl::kWheelCount; ++w)
+                    {
+                        shownState.wheelCompression[w] = a.wheelCompression[w] + (b.wheelCompression[w] - a.wheelCompression[w]) * s;
+                    }
+                    wheelAnimator.Update(slot, shownState, carTuning, wheelDt);
+                }
                 for (int w = 0; w < rl::kWheelCount; ++w)
                 {
                     const EntityId wheelEntity = wheels[team][index][w];
@@ -1063,17 +1092,27 @@ namespace myengine::ecs::systems
                     }
                     const bool frontWheel = w < 2;
                     const float side = (w & 1) ? 1.0f : -1.0f;
-                    const float z = frontWheel ? t.car.wheelFrontZ : t.car.wheelRearZ;
-                    const float radius = frontWheel ? t.car.wheelRadiusFront : t.car.wheelRadiusRear;
+                    const float z = frontWheel ? carTuning.wheelFrontZ : carTuning.wheelRearZ;
+                    const float radius = frontWheel ? carTuning.wheelRadiusFront : carTuning.wheelRadiusRear;
                     // the wheel hangs under its mount by the length of the spring
                     const float compression = a.wheelCompression[w] + (b.wheelCompression[w] - a.wheelCompression[w]) * s;
-                    const float drop = (frontWheel ? t.car.suspensionRestFront : t.car.suspensionRestRear) - compression;
-                    const dx::XMVECTOR local = dx::XMVectorSet(side * (frontWheel ? t.car.wheelMountXFront : t.car.wheelMountXRear), t.car.wheelMountYOffset - drop, z, 0.0f);
+                    const float drop = (frontWheel ? carTuning.suspensionRestFront : carTuning.suspensionRestRear) - compression;
+                    const dx::XMVECTOR local = dx::XMVectorSet(side * (frontWheel ? carTuning.wheelMountXFront : carTuning.wheelMountXRear), carTuning.wheelMountYOffset - drop, z, 0.0f);
                     wheel->position = ToVec3(dx::XMVectorAdd(position, dx::XMVector3Rotate(local, rotation)));
-                    wheel->rotationDeg = eulerRotation;
+                    // the turn of the wheel about its axle (X) under the turn of the steering (up) under the body: XMQuaternionMultiply applies its left argument first
+                    const rl::RlWheelPose pose = wheelAnimator.Pose(slot, w);
+                    const dx::XMVECTOR spin = dx::XMQuaternionRotationAxis(dx::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f), pose.spin);
+                    const dx::XMVECTOR steer = dx::XMQuaternionRotationAxis(dx::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), pose.steer);
+                    wheel->rotationDeg = EulerDegrees(dx::XMQuaternionMultiply(dx::XMQuaternionMultiply(spin, steer), rotation));
                     if (oldCubes)
                     {
                         wheel->scale = {0.16f, radius, radius};
+                    }
+                    else
+                    {
+                        // the mesh is the wheel of the rear radius (0.15 m) at the scale of the scene: the radius of this car's axle sets the scale
+                        const float wheelScale = wheelUnit * radius / 0.15f;
+                        wheel->scale = {wheelScale, wheelScale, wheelScale};
                     }
                 }
             }
