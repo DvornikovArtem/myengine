@@ -1,0 +1,5 @@
+# the offline match 4v4 with bots: the Play screen (the mode 4 is in the settings file) -> Start match -> 55 s of the match (the flight over the stadium, the countdown, the game)
+3.0 key Enter
+4.5 mouse 1590 915
+5.0 click left
+60.0 quit
