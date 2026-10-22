@@ -215,6 +215,17 @@ add_test(NAME frame_pacer COMMAND myengine_frame_pacer_tests)
 # RUN_SERIAL: it measures the length of frames in real time (3 % and half a millisecond); with `ctest -j 8` next to the heavy tests it fails
 set_tests_properties(frame_pacer PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 
+# RL-B1: the scale of Windows (DPI -> scale, sizes in real and logical pixels, WM_DPICHANGED, the scale of the game UI in real pixels, a hidden window)
+add_executable(myengine_dpi_scale_tests
+  core/DpiScaleTests.cpp)
+
+target_link_libraries(myengine_dpi_scale_tests PRIVATE myengine_engine)
+target_include_directories(myengine_dpi_scale_tests PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_dpi_scale_tests)
+set_property(TARGET myengine_dpi_scale_tests PROPERTY FOLDER "Tests")
+add_test(NAME dpi_scale COMMAND myengine_dpi_scale_tests)
+set_tests_properties(dpi_scale PROPERTIES TIMEOUT 60)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)

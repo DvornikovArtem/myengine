@@ -18,6 +18,7 @@
   include/myengine/core/Logger.h
   include/myengine/core/AppPaths.h
   include/myengine/core/CrashHandler.h
+  include/myengine/core/DpiScale.h
   include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -135,6 +136,7 @@ set(ENGINE_SOURCES
   src/config/AppConfig.cpp
   src/core/AppPaths.cpp
   src/core/CrashHandler.cpp
+  src/core/DpiScale.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/FramePacer.cpp

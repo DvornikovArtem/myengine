@@ -27,23 +27,31 @@ namespace myengine::rlui
         // The atlas is baked for one of these scales and the text is scaled by the small difference to the real one: the fonts are not baked
         // again while a window is dragged to another size, only when its size class changes
         constexpr float kBuckets[] = {0.5f, 0.67f, 0.8f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
+    }
 
-        float BucketFor(const float scale)
+    float FontBucketFor(const float scale)
+    {
+        float best = kBuckets[0];
+        float bestDistance = 1e9f;
+        for (const float bucket : kBuckets)
         {
-            float best = kBuckets[0];
-            float bestDistance = 1e9f;
-            for (const float bucket : kBuckets)
+            const float distance = std::fabs(std::log(bucket / std::max(scale, 0.1f)));
+            if (distance < bestDistance)
             {
-                const float distance = std::fabs(std::log(bucket / std::max(scale, 0.1f)));
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    best = bucket;
-                }
+                bestDistance = distance;
+                best = bucket;
             }
-            return best;
         }
+        return best;
+    }
 
+    float UiScaleForWindow(const std::uint32_t width, const std::uint32_t height, const float uiScaleSetting)
+    {
+        return std::min(static_cast<float>(height) / 1080.0f, static_cast<float>(width) / 1920.0f) * uiScaleSetting;
+    }
+
+    namespace
+    {
         std::filesystem::path FindFontDirectory()
         {
             std::vector<std::filesystem::path> candidates;
@@ -171,8 +179,7 @@ namespace myengine::rlui
         Impl* impl = impl_;
         hooks.bakeFonts = [impl](ImFontAtlas& atlas, const std::uint32_t width, const std::uint32_t height)
         {
-            const float scale = std::min(static_cast<float>(height) / 1080.0f, static_cast<float>(width) / 1920.0f) * impl->owner->uiScale_;
-            impl->bakedBucket = BucketFor(scale);
+            impl->bakedBucket = FontBucketFor(UiScaleForWindow(width, height, impl->owner->uiScale_));
             impl->fonts.Clear();
             std::string error;
             if (!impl->fonts.Bake(atlas, impl->fontDirectory, impl->bakedBucket, &error))
@@ -226,8 +233,8 @@ namespace myengine::rlui
             host.lastRaw_ = raw;
 
             // the size class of the window changed: the fonts have to be baked again (not more often than twice a second)
-            const float scale = std::min(static_cast<float>(height) / 1080.0f, static_cast<float>(width) / 1920.0f) * host.uiScale_;
-            if (impl->manager != nullptr && BucketFor(scale) != impl->bakedBucket && impl->time - impl->lastRebuild > 0.5)
+            const float scale = UiScaleForWindow(width, height, host.uiScale_);
+            if (impl->manager != nullptr && FontBucketFor(scale) != impl->bakedBucket && impl->time - impl->lastRebuild > 0.5)
             {
                 impl->lastRebuild = impl->time;
                 impl->manager->RequestFontRebuild();
