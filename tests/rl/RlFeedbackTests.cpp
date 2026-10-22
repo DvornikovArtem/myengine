@@ -501,7 +501,9 @@ namespace
         };
         // the match starts with a kick-off, the forced goal brings a second one: every kick-off counts 3, 2, 1 and starts
         const int goals = count(RlFeedbackKind::Goal);
-        Check(count(RlFeedbackKind::CountdownBeep) == 3 * (1 + goals) && count(RlFeedbackKind::KickoffGo) == 1 + goals, "every kick-off counts 3, 2, 1 and starts");
+        // (a goal in the last seconds ends the match: its kick-off does not come, and G4i moved the goals of the match)
+        const int kickoffs = count(RlFeedbackKind::KickoffGo);
+        Check(count(RlFeedbackKind::CountdownBeep) == 3 * kickoffs && (kickoffs == 1 + goals || kickoffs == goals), "every kick-off counts 3, 2, 1 and starts");
         Check(first.journal.front().kind == RlFeedbackKind::CountdownBeep && first.journal.front().number == 3, "the first sound of a match is the 3");
         Check(count(RlFeedbackKind::Goal) >= 1, "the forced goal is in the journal");
         Check(count(RlFeedbackKind::BallHit) >= 3, "the bots hit the ball");

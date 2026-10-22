@@ -444,10 +444,16 @@ namespace rl
         RlTrainingResults results;
         std::string resultsPath;
 
-        explicit Impl(const RlTuning& t)
+        RlCarVariant car;  // the car of the player
+
+        Impl(const RlTuning& t, const RlCarVariant* playerCar)
             : tuning(t)
         {
-            sim = std::make_unique<RlSim>(tuning, 1);
+            if (playerCar != nullptr)
+            {
+                car = *playerCar;
+            }
+            sim = std::make_unique<RlSim>(tuning, 1, &car);
             StartFreePlay();
         }
 
@@ -539,6 +545,7 @@ namespace rl
                 config.seed = 7919u + static_cast<uint64_t>(index) * 31u + static_cast<uint64_t>(attemptsUsed);
                 config.humanMask = 1;
                 config.botLevel = e.botLevel;
+                config.cars[0] = car;
                 match = std::make_unique<RlMatch>(tuning, config);
                 const RlSpot mine = RlKickoffSpot(0, e.kickoffSpot);
                 const RlSpot theirs = RlKickoffSpot(1, e.kickoffSpot);
@@ -781,8 +788,8 @@ namespace rl
         }
     };
 
-    RlTraining::RlTraining(const RlTuning& tuning)
-        : impl_(std::make_unique<Impl>(tuning))
+    RlTraining::RlTraining(const RlTuning& tuning, const RlCarVariant* playerCar)
+        : impl_(std::make_unique<Impl>(tuning, playerCar))
     {
     }
 

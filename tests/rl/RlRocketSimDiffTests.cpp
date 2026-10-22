@@ -4,13 +4,19 @@
 // by tests/rl/rocketsim_diff/gen.cpp and are in tests/rl/rocketsim_diff/traces (see the README there). The test replays every scenario on
 // the flat middle of our arena and compares the positions, speeds, angular speeds and orientations tick by tick.
 // Arguments: --verbose prints every scenario, --only <name> runs one.
+//
+// G4i: after the Octane scenarios the same is done for every car of the catalog (assets/data/cars/*.physics.json) with the hitbox and the wheels
+// of its class and WITHOUT the differences of ours (RlCarCharacter at 1), against the traces <class>_<scenario>.csv that RocketSim wrote for the
+// Dominus, Plank, Breakout, Hybrid and Merc (rsgen <dir> <class>). It runs the scenarios of rldiff::InCarSubset.
 
+#include <rl/RlCars.h>
 #include <rl/RlSim.h>
 #include <rl/RlTuning.h>
 
 #include "RlDiffScenarios.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -138,17 +144,21 @@ namespace
         float ticks = 0;
         int firstOff = -1;               // the first tick the position is 0.1 m or the orientation 3 degrees off
         float finalSpeedRs = 0, finalSpeedOurs = 0;
+        float secondFinalRs = 0, secondFinalOurs = 0;
     };
 
     bool g_dump = false;
     float g_ballFriction = -1.0f;
     float g_carRestitution = -1.0f;
 
-    Result Run(int index, const std::vector<Row>& rows, const RlTuning& tuning)
+    Result Run(int index, const std::vector<Row>& rows, const RlTuning& tuning, const RlCarVariant& variant = RlCarVariant{})
     {
         const rldiff::Scenario sc = rldiff::Get(index);
         const int cars = sc.second ? 2 : 1;
-        RlSim sim(tuning, cars);
+        const RlCarVariant variants[2] = {variant, variant};
+        RlSim sim(tuning, cars, variants);
+        // a car that stands on its wheels has the origin of the car 17 uu up (RocketSim): the hitbox is that much higher plus its own offset
+        const float restY = variant.hasBody ? 0.17f - variant.values.comOffsetY : 0.3776f;
         sim.ResetCar(0, sc.car.x, sc.car.z, 0.0f);
         if (sc.second)
         {
@@ -168,13 +178,13 @@ namespace
         {
             const RlQuat q = Mul(Mul(AxisAngle(0, 1, 0, sc.car.yawDeg), AxisAngle(1, 0, 0, sc.car.pitchDeg)), AxisAngle(0, 0, 1, sc.car.rollDeg));
             const V nose = Rotate(q, {0, 0, 1});
-            const float y = sc.car.y > 0.0f ? sc.car.y : 0.3776f;
+            const float y = sc.car.y > 0.0f ? sc.car.y : restY;
             sim.SetCarPose(0, {sc.car.x, y, sc.car.z}, q, {nose.x * sc.car.speed, nose.y * sc.car.speed, nose.z * sc.car.speed});
         }
         sim.SetCarBoost(0, sc.boostStart);
         if (sc.second)
         {
-            sim.SetCarPose(1, {sc.secondX, 0.3776f, sc.secondZ}, {0, 0, 0, 1}, {});
+            sim.SetCarPose(1, {sc.secondX, restY, sc.secondZ}, {0, 0, 0, 1}, {});
             sim.SetCarBoost(1, 0.0f);
         }
 
@@ -272,6 +282,8 @@ namespace
                     res.secondPosMax = std::max(res.secondPosMax, Len(Sub(FromRl(s.position), r.second)));
                     const float ss = Len(r.secondVel);
                     res.secondSpeedMax = std::max(res.secondSpeedMax, std::fabs(Len(FromRl(s.linearVelocity)) - ss) / std::max(ss, 5.0f));
+                    res.secondFinalRs = ss;
+                    res.secondFinalOurs = Len(FromRl(s.linearVelocity));
                 }
                 if (sc.second && r.secondDemo != 0 && res.demoTickRs < 0)
                 {
@@ -413,6 +425,89 @@ int main(int argc, char** argv)
         }
         std::printf("  %-22s %7.2f %7.2f %7.1f %7.2f %7.2f %7.1f %6d  %s\n", sc.name, static_cast<double>(r.posMax), static_cast<double>(r.pos2s),
                     static_cast<double>(r.speedMax * 100.0f), static_cast<double>(r.velMax), static_cast<double>(r.angMax), static_cast<double>(r.orientMax), r.firstOff, extra);
+    }
+
+    // ---- the cars of the catalog, with the layer of RocketSim only
+    RlCarCatalog catalog;
+    std::string catalogError;
+    if (!catalog.LoadDirectory(RL_CARS_DIR, &catalogError))
+    {
+        std::printf("  cannot read the cars: %s\n", catalogError.c_str());
+        CHECK(false);
+    }
+    else
+    {
+        CHECK(catalog.Count() == rldiff::kCarClassCount);
+        std::printf("\nthe %d cars of the catalog, the hitbox and the wheels of RocketSim, no differences of ours\n", catalog.Count());
+        std::printf("  %-26s %7s %7s %7s %7s %7s %7s %6s\n", "car / scenario", "pos", "pos 2s", "speed%", "vel", "ang", "orient", "off at");
+        for (int c = 0; c < catalog.Count(); ++c)
+        {
+            const RlCarVariant variant = RlBodyOnly(catalog.Spec(c).variant);
+            std::string cls = catalog.Spec(c).hitboxClass;
+            for (char& ch : cls)
+            {
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            }
+            CHECK(variant.hasBody);
+            CHECK(cls == rldiff::CarClassName(c));
+            float worstPos = 0.0f, worstSpeed = 0.0f;
+            for (int index = 0; index < rldiff::kScenarioCount; ++index)
+            {
+                const rldiff::Scenario sc = rldiff::Get(index);
+                if (sc.ticks <= 0 || !rldiff::InCarSubset(sc.name) || (only != nullptr && std::strcmp(only, sc.name) != 0))
+                {
+                    continue;
+                }
+                std::vector<Row> rows;
+                const std::string file = (cls == "octane" ? std::string() : cls + "_") + sc.name + ".csv";
+                if (!ReadTrace(std::string(RL_DIFF_TRACES) + "/" + file, rows))
+                {
+                    std::printf("  cannot read %s\n", file.c_str());
+                    CHECK(false);
+                    continue;
+                }
+                const Result r = Run(index, rows, tuning, variant);
+                const Limit limit = LimitOf(sc.name);
+                CHECK(r.pos2s <= limit.pos);
+                CHECK(r.speedMax <= limit.speed);
+                CHECK(r.orientMax <= limit.orient);
+                if (sc.ball)
+                {
+                    CHECK(r.ballPosMax <= 0.4f);
+                    CHECK(r.ballSpeedMax <= 0.02f);
+                }
+                if (sc.second)
+                {
+                    // the car that was bumped hops and lands again, and the landing of RocketSim's Hybrid takes 1 m/s more than ours (the others agree to
+                    // 0.1 m/s): the position of the second car is allowed 0.8 m after two seconds, its speed 5 %
+                    CHECK(r.secondPosMax <= 0.8f);
+                    CHECK(r.secondSpeedMax <= 0.05f);
+                    CHECK((r.demoTickRs < 0 && r.demoTickOurs < 0) || (r.demoTickOurs > r.demoTickRs - 4 && r.demoTickOurs <= r.demoTickRs));
+                }
+                worstPos = std::max(worstPos, r.pos2s);
+                worstSpeed = std::max(worstSpeed, r.speedMax);
+                const bool contactOff = (sc.ball && (r.ballPosMax > 0.4f || r.ballSpeedMax > 0.02f)) || (sc.second && (r.secondPosMax > 0.3f || r.secondSpeedMax > 0.05f));
+                if (g_verbose || contactOff || r.pos2s > limit.pos || r.speedMax > limit.speed || r.orientMax > limit.orient)
+                {
+                    char name[64];
+                    std::snprintf(name, sizeof(name), "%s / %s", cls.c_str(), sc.name);
+                    char extra[128] = "";
+                    if (sc.ball)
+                    {
+                        std::snprintf(extra, sizeof(extra), "  ball %.2f m %.1f%%", static_cast<double>(r.ballPosMax), static_cast<double>(r.ballSpeedMax * 100.0f));
+                    }
+                    if (sc.second)
+                    {
+                        std::snprintf(extra, sizeof(extra), "  second %.2f m %.1f%% (end speed %.2f, RocketSim %.2f), demolished at %d (RocketSim %d)", static_cast<double>(r.secondPosMax),
+                                      static_cast<double>(r.secondSpeedMax * 100.0f), static_cast<double>(r.secondFinalOurs), static_cast<double>(r.secondFinalRs), r.demoTickOurs,
+                                      r.demoTickRs);
+                    }
+                    std::printf("  %-26s %7.2f %7.2f %7.1f %7.2f %7.2f %7.1f %6d%s\n", name, static_cast<double>(r.posMax), static_cast<double>(r.pos2s),
+                                static_cast<double>(r.speedMax * 100.0f), static_cast<double>(r.velMax), static_cast<double>(r.angMax), static_cast<double>(r.orientMax), r.firstOff, extra);
+                }
+            }
+            std::printf("  %-10s worst of the scenarios: position in the first 2 s %.3f m, speed %.2f%%\n", cls.c_str(), static_cast<double>(worstPos), static_cast<double>(worstSpeed * 100.0f));
+        }
     }
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

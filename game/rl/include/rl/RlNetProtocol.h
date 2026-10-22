@@ -2,11 +2,12 @@
 // The messages of the Rocket League netcode (docs/game/rl-online.md, 7.2) and their byte layout. Everything is little endian and fits one
 // packet (kMaxMessageBytes = 1100). The first byte of a message is its type.
 //
-//   Join      client -> host   reliable    protocol version, hash of the tuning, name
+//   Join      client -> host   reliable    protocol version, hash of the tuning, hash of the catalog of cars, name, car
 //   Welcome   host -> client   reliable    slot, mode, bot level, seed, mask of human slots, hash of the tuning (or Reject)
 //   Input     client -> host   unreliable  the inputs of the last <= 8 ticks, one per tick, quantized
 //   Snapshot  host -> clients  unreliable  60 Hz: tick, match, ball, cars, pads, the inputs the host really used, a hash of the full state
-//   Names     host -> clients  reliable    the names of the table (before MatchStart: they are part of the state)
+//   Names     host -> clients  reliable    the names and the cars of the table (before MatchStart: they are part of the state)
+//   CarSelect client -> host   reliable    the car of the player changed in the lobby
 //   Event     host -> clients  reliable    match start, a slot that took a player / went to a bot, goal, assist, save, shot, demolition, match end
 //
 // Inputs are quantized to bytes before the simulation takes them, on both sides, so that the numbers the host and the client simulate are
@@ -23,7 +24,7 @@
 
 namespace rl
 {
-    constexpr uint16_t kNetProtocolVersion = 3;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: names up to 32 bytes (G1n, kNameBytes 33)
+    constexpr uint16_t kNetProtocolVersion = 4;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: a car per slot (G4i); 4: names up to 32 bytes (G1n, kNameBytes 33)
     constexpr int kNetInputBytes = 5;
     constexpr int kNetInputWindow = 8;   // ticks of input carried by one Input and one Snapshot message
     constexpr int kSnapshotInterval = 2; // ticks between snapshots: 60 Hz
@@ -39,7 +40,8 @@ namespace rl
         StateChunk = 7,     // host -> client, reliable: a piece of the full state of the match (a player who joins a running match)
         InputRequest = 8,   // client -> host, reliable: the inputs the host used for these ticks
         InputHistory = 9,   // host -> client, reliable: the answer
-        Names = 10,         // host -> clients, reliable: the names of the table, before MatchStart (they are part of the state)
+        Names = 10,         // host -> clients, reliable: the names and the cars of the table, before MatchStart (they are part of the state)
+        CarSelect = 11,     // client -> host, reliable: the car of the player (the lobby)
     };
 
     enum class RlRejectReason : uint8_t
@@ -48,6 +50,7 @@ namespace rl
         Tuning = 2,    // other rl_tuning.json
         Full = 3,      // no free slot
         Started = 4,   // the match is on already (no longer sent: a running match takes new players into the slots of bots)
+        Cars = 5,      // another catalog of cars (assets/data/cars)
     };
 
     const char* RlRejectText(RlRejectReason reason);
@@ -65,7 +68,9 @@ namespace rl
     {
         uint16_t version = kNetProtocolVersion;
         uint64_t tuningHash = 0;
-        std::string name;  // up to kPlayerNameBytes bytes (RlName.h)
+        uint64_t carsHash = 0;  // RlCarCatalog::Hash(): the numbers of the cars must be the same on both sides
+        uint8_t car = 0;        // the car the player wants (an index of the catalog)
+        std::string name;       // up to kPlayerNameBytes bytes (RlName.h)
     };
 
     struct RlWelcomeMsg
@@ -78,6 +83,12 @@ namespace rl
         uint64_t seed = 1;
         uint32_t humanMask = 0;
         uint64_t tuningHash = 0;
+        uint8_t cars[kMaxCars] = {};  // the car of every slot; only a match that runs already has them settled (the others come with Names)
+    };
+
+    struct RlCarMsg
+    {
+        uint8_t car = 0;
     };
 
     struct RlInputMsg
@@ -115,6 +126,7 @@ namespace rl
     struct RlNamesMsg
     {
         std::string names[kMaxCars];
+        uint8_t cars[kMaxCars] = {};  // the car of every slot (the bots have theirs drawn by the host)
     };
 
     // What the host knows at tick `tick` (the state before the step of that tick). The world is the dequantized one: positions,
@@ -170,6 +182,7 @@ namespace rl
     void RlEncode(const RlEventMsg& msg, std::vector<uint8_t>& out);
     void RlEncode(const RlSnapshotMsg& msg, std::vector<uint8_t>& out);
     void RlEncode(const RlNamesMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlCarMsg& msg, std::vector<uint8_t>& out);
 
     bool RlDecode(const uint8_t* data, size_t size, RlJoinMsg& msg);
     bool RlDecode(const uint8_t* data, size_t size, RlWelcomeMsg& msg);
@@ -178,6 +191,7 @@ namespace rl
     bool RlDecode(const uint8_t* data, size_t size, RlEventMsg& msg);
     bool RlDecode(const uint8_t* data, size_t size, RlSnapshotMsg& msg);
     bool RlDecode(const uint8_t* data, size_t size, RlNamesMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlCarMsg& msg);
 
     inline RlMsg RlMessageType(const uint8_t* data, size_t size) { return size == 0 ? static_cast<RlMsg>(0) : static_cast<RlMsg>(data[0]); }
 }

@@ -538,8 +538,11 @@ namespace
             rig.Frames(6);
             Check(status.stage == sys::RlGameStage::Playing, "the match is on");
             Check(meshOf("RlBlue0") == cars.Find("dart")->bodyMesh && paintOf("RlBlue0") == cars.Find("dart")->material[0], "the car of the player in the match is Dart in blue");
-            Check(meshOf("RlOrange0") == cars.Find("pulse")->bodyMesh, "the bot drives Pulse");
-            Check(status.hud.players.size() == 2 && status.hud.players[0].car == "Dart" && status.hud.players[1].car == "Pulse", "the table has the names of the cars");
+            // the bot drives the car the match drew for it (G4i): the body on the field is the one of that car, the table says which
+            Check(status.carIds.size() == 2 && status.carIds[0] == "dart", "the table knows the cars of the two slots");
+            const game::RlCarDef* botCar = status.carIds.size() == 2 ? cars.Find(status.carIds[1]) : nullptr;
+            Check(botCar != nullptr && meshOf("RlOrange0") == botCar->bodyMesh, "the bot drives the car the match drew for it");
+            Check(status.hud.players.size() == 2 && status.hud.players[0].car == "Dart" && botCar != nullptr && status.hud.players[1].car == botCar->name, "the table has the names of the cars");
             rig.system.LeaveMatch();
             rig.Frames(4);
             Check(meshOf("RlBlue0") == cars.Find("dart")->bodyMesh, "after the match the podium shows the car of the player");

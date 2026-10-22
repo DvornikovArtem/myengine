@@ -217,6 +217,7 @@ namespace myengine::ecs::systems
         bool previewActive = false;      // Settings > Camera: the scene shows the practice field seen through the settings
         // The garage (docs/game/rl-cars.md): the car the player drives, what the garage screen has in focus, what each body entity shows now
         std::string selectedCar = "pulse";
+        std::uint64_t lobbySeed = 1;    // the seed of the match the host builds: the bots draw their cars from it (the lobby shows them before the start)
         RlGarageView garage;
         float garageBlend = 0.0f;       // 0 the camera of the menu, 1 the camera of the garage
         float garageYaw = 215.0f;       // degrees: where the car on the podium looks
@@ -268,6 +269,36 @@ namespace myengine::ecs::systems
                 return netHost->Match();
             }
             return netClient != nullptr ? netClient->Match() : nullptr;
+        }
+
+        // The car of a slot of the match that is shown (G4i): the key of the car in the catalog. Without a match (a training) the player has the car of the
+        // garage and the others Pulse.
+        std::string CarIdOfSlot(const rl::RlMatch* view, const int slot) const
+        {
+            if (view == nullptr)
+            {
+                return slot == localSlot ? selectedCar : std::string("pulse");
+            }
+            const rl::RlCarCatalog& catalog = game::SimCars();
+            const int index = view->CarId(slot);
+            return (index >= 0 && index < catalog.Count()) ? catalog.Spec(index).id : std::string("pulse");
+        }
+
+        // The cars of a match that this window plays: the player's choice in slot 0 (or the slot given), a random one for every bot
+        void ChooseCars(rl::RlMatchConfig& config, const int slots, const int humanSlot) const
+        {
+            const rl::RlCarCatalog& catalog = game::SimCars();
+            int wanted[rl::kMaxCars];
+            for (int& w : wanted)
+            {
+                w = -1;
+            }
+            wanted[std::clamp(humanSlot, 0, rl::kMaxCars - 1)] = game::SimCarIndex(selectedCar);
+            rl::RlChooseCars(catalog, config.seed, slots, config.humanMask, wanted, config.carIds);
+            for (int slot = 0; slot < rl::kMaxCars; ++slot)
+            {
+                config.cars[slot] = catalog.Spec(catalog.Valid(config.carIds[slot])).variant;
+            }
         }
 
         double OnlineNow() const { return std::chrono::duration<double>(std::chrono::steady_clock::now() - onlineEpoch).count(); }
@@ -577,6 +608,7 @@ namespace myengine::ecs::systems
             static uint64_t started = 0;
             config.seed = 0x5EED0000ull + ++started;
             config.names[0] = playerName;
+            ChooseCars(config, config.mode == 0 ? 1 : 2 * config.mode, 0);
             match = std::make_unique<rl::RlMatch>(tuning, config);
             mode = Mode::Match;
             accumulator = 0.0f;
@@ -968,7 +1000,7 @@ namespace myengine::ecs::systems
                 }
                 const int team = view != nullptr ? view->Team(slot) : slot;   // a training: the player is blue, the bot of a kick-off orange
                 const int index = slot % teamSize;
-                ShowCar(world, team, index, slot == localSlot ? selectedCar : std::string("pulse"));   // the cars of the others are Pulse until the network carries the choice
+                ShowCar(world, team, index, CarIdOfSlot(view, slot));
                 const bool shown = !b.demolished;
                 const Vec3 eulerRotation = EulerDegrees(rotation);
                 // The meshes of the pack carry their own scale (the scene has it); a scene of the old kind (boxes) is scaled to the hitbox
@@ -1209,6 +1241,9 @@ namespace myengine::ecs::systems
                 options.match.mode = std::clamp(online.playersPerTeam, 1, 4);
                 options.match.botLevel = botLevel;
                 options.match.seed = 0x5EED0000ull + static_cast<uint64_t>(GetCurrentProcessId());
+                options.cars = &game::SimCars();
+                options.hostCar = game::SimCarIndex(selectedCar);
+                lobbySeed = options.match.seed;
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(online.port, error))
                 {
@@ -1222,7 +1257,8 @@ namespace myengine::ecs::systems
             }
             else
             {
-                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning);
+                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning, &game::SimCars());
+                netClient->SetCar(game::SimCarIndex(selectedCar));
                 if (!netClient->Connect(online.address, "player", error))
                 {
                     onlineStatus = error;
@@ -1567,6 +1603,9 @@ namespace myengine::ecs::systems
                 options.match.botLevel = setup.botLevel;
                 options.match.seed = 0x5EED0000ull + static_cast<std::uint64_t>(GetCurrentProcessId()) + started;
                 options.match.names[0] = playerName;
+                options.cars = &game::SimCars();
+                options.hostCar = game::SimCarIndex(selectedCar);
+                lobbySeed = options.match.seed;
                 netHost = std::make_unique<rl::RlNetHost>(*transport, tuning, options);
                 if (!netHost->Listen(setup.port, error))
                 {
@@ -1581,7 +1620,8 @@ namespace myengine::ecs::systems
             }
             else
             {
-                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning);
+                netClient = std::make_unique<rl::RlNetClient>(*transport, tuning, &game::SimCars());
+                netClient->SetCar(game::SimCarIndex(selectedCar));
                 if (!netClient->Connect(setup.address, playerName, error))
                 {
                     netClient.reset();
@@ -1681,6 +1721,22 @@ namespace myengine::ecs::systems
             {
                 const int teamSize = std::clamp(status_.setup.mode, 1, 4);
                 const std::vector<rl::RlNetPeerInfo> peers = netHost->Peers();
+                // the cars as the host will settle them at the start (the draw of a bot does not depend on the others)
+                int wantedCars[rl::kMaxCars];
+                for (int& w : wantedCars)
+                {
+                    w = -1;
+                }
+                wantedCars[0] = game::SimCarIndex(selectedCar);
+                for (const rl::RlNetPeerInfo& peer : peers)
+                {
+                    if (peer.slot >= 0 && peer.slot < rl::kMaxCars)
+                    {
+                        wantedCars[peer.slot] = peer.car;
+                    }
+                }
+                uint8_t lobbyCars[rl::kMaxCars];
+                rl::RlChooseCars(game::SimCars(), lobbySeed, teamSize * 2, netHost->HumanMask(), wantedCars, lobbyCars);
                 for (int slot = 0; slot < teamSize * 2; ++slot)
                 {
                     RlLobbySlot entry;
@@ -1704,6 +1760,11 @@ namespace myengine::ecs::systems
                         {
                             entry.bot = status_.setup.fillWithBots;
                             entry.name = status_.setup.fillWithBots ? "Bot" : "";
+                        }
+                        if (!entry.name.empty())
+                        {
+                            const rl::RlCarCatalog& catalog = game::SimCars();
+                            entry.car = catalog.Spec(catalog.Valid(lobbyCars[slot])).id;
                         }
                     }
                     status_.lobby.push_back(entry);
@@ -1863,6 +1924,7 @@ namespace myengine::ecs::systems
             h.ballCamKey = status_.ballCamKey.empty() ? "Space" : status_.ballCamKey;
             h.localPlayer = slot;
             h.players.resize(static_cast<size_t>(view->SlotCount()));
+            status_.carIds.assign(static_cast<size_t>(view->SlotCount()), std::string("pulse"));
             for (int i = 0; i < view->SlotCount(); ++i)
             {
                 rlui::HudPlayer& p = h.players[static_cast<size_t>(i)];
@@ -1870,8 +1932,8 @@ namespace myengine::ecs::systems
                 p.team = view->Team(i);
                 p.bot = view->IsBot(i);
                 {
-                    // the cars of the others are Pulse until the network carries the choice
-                    const game::RlCarDef* playerCar = game::Cars().FindOrDefault(i == slot ? selectedCar : std::string("pulse"));
+                    status_.carIds[static_cast<size_t>(i)] = CarIdOfSlot(view, i);
+                    const game::RlCarDef* playerCar = game::Cars().FindOrDefault(status_.carIds[static_cast<size_t>(i)]);
                     p.car = playerCar != nullptr ? playerCar->name : std::string();
                 }
                 p.score = m.points[i];
@@ -1984,7 +2046,24 @@ namespace myengine::ecs::systems
                 }
             }
             status_.mvp = mvp;
-            podiumCar = (m.winner >= 0 && m.winner == view->Team(localSlot)) ? selectedCar : std::string("pulse");   // the cars of the others are Pulse until the network carries the choice
+            // the car on the podium: the one of the MVP; a bot is not "the player", so with a bot as the MVP it is the car of the best live player of the
+            // winning team (the same order of points and goals), and only a team of bots shows the car of its bot
+            int podiumSlot = mvp;
+            if (mvp >= 0 && view->IsBot(mvp))
+            {
+                for (int slot = 0; slot < view->SlotCount(); ++slot)
+                {
+                    if (view->Team(slot) != m.winner || view->IsBot(slot))
+                    {
+                        continue;
+                    }
+                    if (podiumSlot == mvp || m.points[slot] > m.points[podiumSlot] || (m.points[slot] == m.points[podiumSlot] && m.goals[slot] > m.goals[podiumSlot]))
+                    {
+                        podiumSlot = slot;
+                    }
+                }
+            }
+            podiumCar = podiumSlot >= 0 ? CarIdOfSlot(view, podiumSlot) : std::string("pulse");
             status_.stage = RlGameStage::Finished;
             paused = false;
             EnterPodium(world, m.winner < 0 ? 0 : m.winner);
@@ -2000,7 +2079,7 @@ namespace myengine::ecs::systems
         // Begins free play (no pack) or a pack of exercises; a pack that is not there fails like a network that is not there
         void StartTraining(World& world, const RlGameMatchSetup& setup)
         {
-            training = std::make_unique<rl::RlTraining>(tuning);
+            training = std::make_unique<rl::RlTraining>(tuning, &game::SimCars().Spec(game::SimCarIndex(selectedCar)).variant);  // the car of the garage
             game::AttachTrainingResults(*training);
             autopilot.reset();
             autopilotOn = false;
@@ -2446,6 +2525,7 @@ namespace myengine::ecs::systems
                 config.humanMask = 1u;
                 config.seed = 77;
                 config.names[0] = playerName;
+                ChooseCars(config, 1, 0);
                 match = std::make_unique<rl::RlMatch>(tuning, config);
                 std::vector<rl::RlCarInput> idle(static_cast<size_t>(match->SlotCount()));
                 for (int t = 0; t < static_cast<int>(rl::kTickRate * 3.4f); ++t)

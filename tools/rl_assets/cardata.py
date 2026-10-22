@@ -2,8 +2,9 @@
 
 The json is what the game reads (engine/include/myengine/game/RlCars.h): the name and the class of the car, the hitbox of Rocket League it follows (the
 numbers of the car section of rl_tuning.json for that hitbox, from the car configs of RocketSim), the meshes and the paint of the two teams, the
-profile previews of the carousel and `physics`: the numbers the car of the match is driven with. Until G4i-physics every car has the values of Pulse
-there (the car section of rl_tuning.json as it is now); the garage reads them to draw the bars of the stats.
+profile previews of the carousel and `physics`: the numbers the car of the match is driven with. Pulse has the values of the car section of
+rl_tuning.json, the others differ from it by the factors of CHARACTER below (G4i-physics, docs/game/rl-cars.md); the match reads them (game/rl/RlCars.h)
+and the garage draws the bars of the stats from them.
 """
 
 import json
@@ -25,6 +26,30 @@ PHYSICS_KEYS = ["mass", "inertiaMultiplier", "friction", "maxSpeed", "maxAngular
                 "boostUsePerSecond", "boostAccelGround", "boostAccelAir"]
 
 
+# What makes one car feel different from another, as factors on the numbers of Pulse (10 to 20 percent, the balance of the six has to hold: what a car gains
+# in one thing it pays in another). The hitbox and the wheels are not in here: they are the ones of the class of Rocket League (cars.hitbox_numbers).
+#   mass          the mass of the body: the hits and the bumps (a heavier car pushes the ball and the others around), not the drive
+#   inertia       the inertia of the box: how it turns in a collision
+#   acceleration  the drive force on the ground (throttleAccel)
+#   topSpeed      the speed limit and the supersonic speed with it (maxSpeed, supersonicSpeed, supersonicMaintainSpeed)
+#   boost         the push of the boost (boostAccelGround, boostAccelAir)
+#   steering      the angle of the front wheels at every speed (steerAngle, powerslideSteerAngle)
+#   air           the angular acceleration of the air control (airPitchTorque, airYawTorque, airRollTorque)
+CHARACTER = {
+    #            mass  inertia accel  top   boost steer air
+    "pulse":   (1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00),   # the all-rounder: the numbers of the tuning
+    "vector":  (1.08, 1.05, 1.00, 1.00, 0.98, 0.94, 0.97),   # long and low: hits hard, turns a little wide
+    "slate":   (1.12, 1.08, 0.96, 0.98, 1.00, 0.92, 0.95),   # flat and wide: a shovel, the heavy body wants a longer run-up
+    "dart":    (0.92, 0.95, 1.08, 1.04, 1.03, 0.97, 1.05),   # long and quick: light, the best in the air, easy to push around
+    "fusion":  (1.04, 1.03, 1.00, 1.01, 1.00, 1.02, 1.00),   # between Pulse and Vector: a little of everything
+    "bulwark": (1.20, 1.15, 0.90, 0.97, 0.97, 0.88, 0.93),   # heavy and tall: wins the 50-50s, turns like a truck
+}
+
+
+def _round(x):
+    return float("%.6g" % x)
+
+
 def names(d):
     prefix = "car" if d.key == "pulse" else "car_" + d.key
     return {"body": prefix + "_body", "lights": prefix + "_lights", "blue": prefix + "_blue", "orange": prefix + "_orange"}
@@ -33,6 +58,25 @@ def names(d):
 def physics_of_pulse():
     car = json.loads((ROOT / "assets" / "data" / "rl_tuning.json").read_text(encoding="utf-8"))["car"]
     return {k: car[k] for k in PHYSICS_KEYS}
+
+
+def physics_of(d):
+    """The `physics` section of the car: the numbers of Pulse with the factors of the car on top."""
+    base = physics_of_pulse()
+    mass, inertia, accel, top, boost, steer, air = CHARACTER[d.key]
+    p = dict(base)
+    p["mass"] = _round(base["mass"] * mass)
+    p["inertiaMultiplier"] = _round(base["inertiaMultiplier"] * inertia)
+    p["throttleAccel"] = _round(base["throttleAccel"] * accel)
+    for key in ("maxSpeed", "supersonicSpeed", "supersonicMaintainSpeed"):
+        p[key] = _round(base[key] * top)
+    for key in ("boostAccelGround", "boostAccelAir"):
+        p[key] = _round(base[key] * boost)
+    for key in ("steerAngle", "powerslideSteerAngle"):
+        p[key] = [_round(v * steer) for v in base[key]]
+    for key in ("airPitchTorque", "airYawTorque", "airRollTorque"):
+        p[key] = _round(base[key] * air)
+    return p
 
 
 def car_json(d, meshes):
@@ -50,7 +94,7 @@ def car_json(d, meshes):
             "boostNozzle": list(cars.nozzle_position(d)),
         },
         "preview": {"blue": "assets/ui/cars/%s_blue.png" % d.key, "orange": "assets/ui/cars/%s_orange.png" % d.key},
-        "physics": physics_of_pulse(),
+        "physics": physics_of(d),
     }
 
 

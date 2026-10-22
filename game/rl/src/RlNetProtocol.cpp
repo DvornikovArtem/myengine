@@ -271,6 +271,7 @@ namespace rl
         case RlRejectReason::Tuning: return "the host uses another rl_tuning.json (the numbers of the cars differ)";
         case RlRejectReason::Full: return "the match has no free slot";
         case RlRejectReason::Started: return "the match has started already";
+        case RlRejectReason::Cars: return "the host has other cars (the files assets/data/cars differ)";
         }
         return "the host refused the connection";
     }
@@ -331,6 +332,8 @@ namespace rl
         w.U8(static_cast<uint8_t>(RlMsg::Join));
         w.U16(msg.version);
         w.U64(msg.tuningHash);
+        w.U64(msg.carsHash);
+        w.U8(msg.car);
         const std::string name = SanitizePlayerName(msg.name);  // up to kPlayerNameBytes, a character is never cut in the middle
         w.U8(static_cast<uint8_t>(name.size()));
         w.Bytes(reinterpret_cast<const uint8_t*>(name.data()), name.size());
@@ -348,6 +351,10 @@ namespace rl
         w.U64(msg.seed);
         w.U32(msg.humanMask);
         w.U64(msg.tuningHash);
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            w.U8(msg.cars[slot]);
+        }
     }
 
     void RlEncodeReject(RlRejectReason reason, std::vector<uint8_t>& out)
@@ -395,6 +402,17 @@ namespace rl
             w.U8(static_cast<uint8_t>(length));
             w.Bytes(reinterpret_cast<const uint8_t*>(msg.names[slot].data()), length);
         }
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            w.U8(msg.cars[slot]);
+        }
+    }
+
+    void RlEncode(const RlCarMsg& msg, std::vector<uint8_t>& out)
+    {
+        Writer w(out);
+        w.U8(static_cast<uint8_t>(RlMsg::CarSelect));
+        w.U8(msg.car);
     }
 
     void RlEncode(const RlSnapshotMsg& msg, std::vector<uint8_t>& out)
@@ -471,6 +489,8 @@ namespace rl
         }
         msg.version = r.U16();
         msg.tuningHash = r.U64();
+        msg.carsHash = r.U64();
+        msg.car = r.U8();
         const size_t length = r.U8();
         char name[kNameBytes] = {};
         if (length > kPlayerNameBytes)
@@ -497,6 +517,10 @@ namespace rl
         msg.seed = r.U64();
         msg.humanMask = r.U32();
         msg.tuningHash = r.U64();
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            msg.cars[slot] = r.U8();
+        }
         return r.Ok();
     }
 
@@ -569,6 +593,21 @@ namespace rl
             r.Bytes(reinterpret_cast<uint8_t*>(name), length);
             msg.names[slot].assign(name, length);
         }
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            msg.cars[slot] = r.U8();
+        }
+        return r.Ok();
+    }
+
+    bool RlDecode(const uint8_t* data, size_t size, RlCarMsg& msg)
+    {
+        Reader r(data, size);
+        if (r.U8() != static_cast<uint8_t>(RlMsg::CarSelect))
+        {
+            return false;
+        }
+        msg.car = r.U8();
         return r.Ok();
     }
 

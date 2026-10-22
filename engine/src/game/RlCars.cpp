@@ -242,6 +242,28 @@ namespace myengine::game
         return core::ServiceLocator::GetProjectContext().ResolveContentPath("assets/data/cars");
     }
 
+    const rl::RlCarCatalog& SimCars()
+    {
+        static rl::RlCarCatalog catalog;
+        static bool loaded = false;
+        if (!loaded)
+        {
+            std::string error;
+            if (!catalog.LoadDirectory(CarsDirectory().generic_u8string(), &error))
+            {
+                catalog = rl::RlCarCatalog::Fallback();  // a game without the files plays with Pulse
+            }
+            loaded = true;
+        }
+        return catalog;
+    }
+
+    int SimCarIndex(const std::string& id)
+    {
+        const int index = SimCars().Find(id);
+        return index < 0 ? rl::kDefaultCar : index;
+    }
+
     const RlCarCatalog& Cars()
     {
         static RlCarCatalog catalog;
