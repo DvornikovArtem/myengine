@@ -126,6 +126,8 @@ namespace myengine::editor
         // A game that runs in Play wants the mouse buttons over the viewport (the RL game: left button boosts, right button jumps): the clicks
         // go to the game input instead of the UI and the right button does not start the fly camera. Set by that game each frame.
         bool gameCapturesMouse = false;
+        // The game mode (--game) hides the cursor while a match runs (the menus show it)
+        bool gameHidesCursor = false;
         ecs::EntityId selectedEntity = ecs::kInvalidEntity;
         GizmoOperation gizmoOperation = GizmoOperation::Translate;
         GizmoSpace gizmoSpace = GizmoSpace::Local;

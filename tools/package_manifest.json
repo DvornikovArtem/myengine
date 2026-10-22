@@ -49,8 +49,7 @@
     ],
     "input": { "moveSpeed": 0.8, "scaleSpeed": 0.7, "rotateSpeedDeg": 120.0 },
     "startScene": "assets/scenes/rocket_league.json",
-    "startInPlay": true,
-    "todo": "G1: when RocketArena.exe takes --game, start the game mode from the config instead of the editor in Play"
+    "startInGame": true
   },
 
   "project": {

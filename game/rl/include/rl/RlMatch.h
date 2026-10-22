@@ -15,6 +15,7 @@
 #include <rl/RlTypes.h>
 
 #include <cstdint>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -26,11 +27,19 @@ namespace rl
         uint64_t seed = 1;            // seed of the random numbers of the match
         uint32_t humanMask = 1;       // bit i set: slot i takes its input from Step(), the others are bots
         int botLevel = 1;             // 0 easy, 1 normal, 2 hard
+        // Names for the HUD and the results; an empty one gets "Player" (a human) or a name of the list of the bots (Comet, Blaze, Nova, Spark,
+        // Bolt, Drift, Flux, in the order of the bot slots).
+        std::string names[kMaxCars];
         int botVersion = 2;           // 1: the bots of G4b (kept for comparison), 2: the bots of G4f
         // The orange team plays with other bots (tests that measure one kind against another); -1: the same as the blue team
         int botLevelOrange = -1;
         int botVersionOrange = -1;
     };
+
+    // Whether a ball with this state, flying without any touch (the gravity, bounces on the floor), crosses the plane of the goal at
+    // z = goalSide * (halfLength + radius) inside the posts and under the bar within `horizon` seconds. goalSide is +1 for the goal blue attacks
+    // and -1 for the goal orange attacks. The shots and the saves of the statistics use it, and so can the bots.
+    bool RlBallHeadsIntoGoal(const RlTuning& tuning, const RlBallState& ball, int goalSide, float horizon = 2.0f);
 
     // The places of the rules, in metres (RLBot field info, uu / 100).
     struct RlSpot
@@ -62,6 +71,11 @@ namespace rl
         // an agreed tick (a player joins or leaves) and sets it again before each replayed tick of a rollback.
         uint32_t HumanMask() const;
         void SetHumanMask(uint32_t mask);
+        // The names of the table, kMaxCars entries (the empty ones get the defaults); the netcode sets them from the host before tick 0 so that
+        // every side has the same bytes of state.
+        void SetPlayerNames(const std::string* names);
+        // Takes the statistics of the table (not the touches or the events) from another state: the netcode does it after a hard correction.
+        void SetStatistics(const RlMatchState& from);
         const RlTuning& Tuning() const;
         void SetTuning(const RlTuning& tuning);  // see RlSim::SetTuning
         const RlSim& Sim() const;

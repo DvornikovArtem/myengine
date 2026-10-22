@@ -1,6 +1,6 @@
 # Звук и эффекты матча (G7d)
 
-Модуль `RlFeedback` (`engine/include/myengine/game/RlFeedback.h`, `engine/src/game/RlFeedback.cpp`) делает из состояния симуляции звуки ([../engine/audio.md](../engine/audio.md)) и эффекты частиц ([../render/particles.md](../render/particles.md)): мотор, буст, прыжки, приземления, удары, пады, демолиш, отсчёт, гол, трибуны, музыка меню. Он ничего не знает о сцене, рендере и вводе: читает `rl::RlWorldState` двух тиков и отдаёт команды `AudioSystem` и `ParticleSystem`. `RlGameSystem`, `RlMatch` и `RlSim` модуль не меняет; подключение — три вызова ниже.
+Модуль `RlFeedback` (`engine/include/myengine/game/RlFeedback.h`, `engine/src/game/RlFeedback.cpp`) делает из состояния симуляции звуки ([../engine/audio.md](../engine/audio.md)) и эффекты частиц ([../render/particles.md](../render/particles.md)): мотор, буст, прыжки, приземления, удары, пады, демолиш, отсчёт, гол, трибуны, музыка меню. Он ничего не знает о сцене, рендере и вводе: читает `rl::RlWorldState` двух тиков и отдаёт команды `AudioSystem` и `ParticleSystem`. `RlGameSystem`, `RlMatch` и `RlSim` модуль не меняет; подключение — три вызова ниже (сделано в G1: `RlGameSystem` зовёт их и в редакторе, и в игровом режиме, громкости идут из Settings > Audio, клики меню — события `ui_click`, `ui_hover`, `ui_back`).
 
 ## Подключение к `RlGameSystem`
 

@@ -32,10 +32,10 @@ class Ctx:
 
 
 def run(parts=None):
-    from . import arena, ball, car, stadium
+    from . import arena, ball, car, podium, stadium
     ctx = Ctx()
     t0 = time.time()
-    modules = {"car": car, "ball": ball, "arena": arena, "stadium": stadium}
+    modules = {"car": car, "ball": ball, "arena": arena, "stadium": stadium, "podium": podium}
     for name, mod in modules.items():
         if parts and name not in parts:
             continue

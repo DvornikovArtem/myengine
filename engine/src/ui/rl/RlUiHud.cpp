@@ -326,7 +326,7 @@ namespace myengine::rlui
         AlphaScope fade(f, alpha);
         const float size = 220.0f * scale;
         const float lineHeight = TextHeight(f, FontStyle::BlackItalic, size);
-        RadialGlow(f, {cx, cy}, 260.0f * scale, 210.0f * scale, style::kAccent.Faded(0.30f));
+        RadialGlow(f, {cx, cy}, 330.0f * scale, 260.0f * scale, style::kAccent.Faded(0.55f));
         TextShadow(f, FontStyle::BlackItalic, size, {cx, cy - lineHeight * 0.52f}, style::kText, text, style::kBlueDark, 8.0f * scale, Align::Center);
     }
 
@@ -440,7 +440,8 @@ namespace myengine::rlui
             }
             const float plateWidth = width + 66.0f;
             const Rect plate{right - plateWidth + offset, y, plateWidth, 44.0f};
-            Parallelogram(f, plate, style::kNavySolid.Faded(0.82f));
+            Parallelogram(f, plate, style::kNavy);
+            ParallelogramOutline(f, plate, style::kLine, 1.0f);
             Icon icon = Icon::Ball;
             Color iconColor = style::TeamHi(line.team[0]);
             switch (line.event.type)
@@ -472,7 +473,7 @@ namespace myengine::rlui
     void Hud::DrawBallCamHint(Frame& f) const
     {
         const bool visible = ballCamHint_ > 0.0f || firstMinutesLeft_ > 0.0f;
-        if (!visible || state_.phase == HudPhase::Finished)
+        if (!visible || state_.phase == HudPhase::Finished || state_.phase == HudPhase::GoalScored)
         {
             return;
         }
@@ -892,7 +893,8 @@ namespace myengine::rlui
             {
                 if (player.pingMs >= 0)
                 {
-                    text += " " + player.name + " " + std::to_string(player.pingMs);
+                    // the host of a private match has no ping to itself
+                    text += " " + player.name + " " + (player.pingMs == 0 ? std::string("host") : std::to_string(player.pingMs));
                 }
             }
             IconGlyph(f, Icon::Wifi, 18.0f, {x + 9.0f, y + 14.0f}, style::kTextDim);

@@ -41,9 +41,9 @@ def budgets(ctx, items):
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="gen_rl_assets.py pack", description=__doc__)
-    ap.add_argument("--only", help="comma separated parts: car, ball, arena, stadium (default: all)")
+    ap.add_argument("--only", help="comma separated parts: car, ball, arena, stadium, podium (default: all)")
     ap.add_argument("--preview", metavar="DIR", help="also render the PNG previews (software rasterizer, needs numpy) into DIR")
-    ap.add_argument("--no-scene", action="store_true", help="do not write assets/scenes/rl_showcase.json")
+    ap.add_argument("--no-scene", action="store_true", help="do not write assets/scenes/rl_showcase.json and assets/scenes/rocket_league.json")
     args = ap.parse_args(argv)
 
     print("RL asset pack -> assets/{models,textures,materials}/%s" % common.PACK)
@@ -57,6 +57,9 @@ def main(argv):
         if not args.no_scene:
             n = scene.write_scene(items)
             print("  scene assets/scenes/rl_showcase.json: %d entities" % n)
+            from . import game_scene
+            n = game_scene.write_game_scene(game_scene.game_items(ctx.meshes, tuning))
+            print("  scene assets/scenes/rocket_league.json: %d entities" % n)
     rows, ok = budgets(ctx, items)
     print("budgets")
     for name, value, limit, good, unit in rows:

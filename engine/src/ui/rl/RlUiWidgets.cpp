@@ -99,7 +99,7 @@ namespace myengine::rlui
 
     namespace
     {
-        bool BevelButton(Frame& f, const Id id, const Rect& rect, const std::string_view label, const Icon icon, const bool enabled, const bool centered, const float fontSize)
+        bool BevelButton(Frame& f, const Id id, const Rect& rect, const std::string_view label, const Icon icon, const bool enabled, const bool centered, const float fontSize, const bool primary = false)
         {
             const ItemState state = f.Item(id, rect, enabled);
             const float b = Bevel(rect.h);
@@ -107,11 +107,16 @@ namespace myengine::rlui
             {
                 FocusPlate(f, rect, state.glow);
             }
+            else if (primary)
+            {
+                // the main button of a screen is blue even without the focus (it must not get lost in the background)
+                Parallelogram(f, rect, Enabled(state.hovered ? style::kBlueHi : style::kBlue, enabled));
+            }
             else
             {
                 Parallelogram(f, rect, Enabled(state.hovered ? style::kNavy3.Faded(0.85f) : style::kNavy, enabled));
             }
-            const Color textColor = Enabled(state.focused ? style::kFocusText : style::kText, enabled);
+            const Color textColor = Enabled(state.focused ? style::kFocusText : (primary ? style::kFocusText : style::kText), enabled);
             const float iconSize = fontSize * 0.8f;
             const float textWidth = TextWidth(f, FontStyle::ExtraBoldItalic, fontSize, label);
             const bool hasIcon = icon != Icon::None;
@@ -159,10 +164,10 @@ namespace myengine::rlui
         return state.activated;
     }
 
-    bool ActionButton(Frame& f, const Id id, const Rect& rect, const std::string_view label, const Icon icon, const bool enabled)
+    bool ActionButton(Frame& f, const Id id, const Rect& rect, const std::string_view label, const Icon icon, const bool enabled, const bool primary)
     {
         const float size = std::clamp(rect.h * 0.5f, 22.0f, 38.0f);
-        return BevelButton(f, id, rect, label, icon, enabled, true, size);
+        return BevelButton(f, id, rect, label, icon, enabled, true, size, primary);
     }
 
     bool DialogButton(Frame& f, const Id id, const Rect& rect, const std::string_view label, const bool enabled)
@@ -553,8 +558,9 @@ namespace myengine::rlui
         {
             const std::size_t end = big.find('\n', start);
             const std::string_view line = big.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
-            Text(f, FontStyle::BlackItalic, 96.0f, {pos.x, y}, style::kText, line);
-            y += 86.0f;
+            // the name of the game is 96 px (the main menu), the title of a screen 64 px (§4.3)
+            Text(f, FontStyle::BlackItalic, brand ? 96.0f : 64.0f, {pos.x, y}, style::kText, line);
+            y += brand ? 86.0f : 60.0f;
             if (end == std::string_view::npos)
             {
                 break;

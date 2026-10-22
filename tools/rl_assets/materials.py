@@ -40,6 +40,8 @@ OPTIONS = {
     "sky": {"shader": "lit_clamp", "params": {"gUnlit": 1}},
     "floodlight": {"params": {"gSpecular": 0.2, "gGloss": 20, "gEmissiveStrength": 1.4}},
     "scoreboard": {"params": {"gSpecular": 0.1, "gGloss": 12, "gEmissiveStrength": 0.9}},
+    # the podium of the menu: a dark plate with rings that glow
+    "podium": {"params": {"gSpecular": 0.5, "gGloss": 40, "gFresnel": 0.2, "gEmissiveStrength": 1.2}},
 }
 
 

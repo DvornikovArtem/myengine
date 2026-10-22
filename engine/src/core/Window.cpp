@@ -1,5 +1,6 @@
 // Window.cpp
 
+#include <algorithm>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -28,6 +29,14 @@ namespace myengine::core
                 WideCharToMultiByte(CP_UTF8, 0, text, length, result.data(), bytes, nullptr, nullptr);
             }
             return result;
+        }
+
+        bool MonitorInfoOf(HWND hwnd, MONITORINFOEXW& info)
+        {
+            const HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            info = {};
+            info.cbSize = sizeof(info);
+            return monitor != nullptr && GetMonitorInfoW(monitor, &info) != FALSE;
         }
 
         // Accepts files dragged in from Explorer (OLE drop target) and reports them through the editor state:
@@ -145,6 +154,15 @@ namespace myengine::core
 
     Window::~Window()
     {
+        if (displaySwitched_ && hwnd_ != nullptr)
+        {
+            MONITORINFOEXW info{};
+            if (MonitorInfoOf(hwnd_, info))
+            {
+                ChangeDisplaySettingsExW(info.szDevice, nullptr, nullptr, 0, nullptr);
+            }
+            displaySwitched_ = false;
+        }
         if (hwnd_ != nullptr)
         {
             if (dropRegistered_)
@@ -234,6 +252,114 @@ namespace myengine::core
     {
         desc_.width = width;
         desc_.height = height;
+    }
+
+    bool Window::GetMonitorSize(std::uint32_t& width, std::uint32_t& height) const
+    {
+        MONITORINFOEXW info{};
+        if (hwnd_ == nullptr || !MonitorInfoOf(hwnd_, info))
+        {
+            return false;
+        }
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (EnumDisplaySettingsW(info.szDevice, ENUM_REGISTRY_SETTINGS, &mode) != FALSE)
+        {
+            width = mode.dmPelsWidth;
+            height = mode.dmPelsHeight;
+        }
+        else
+        {
+            width = static_cast<std::uint32_t>(info.rcMonitor.right - info.rcMonitor.left);
+            height = static_cast<std::uint32_t>(info.rcMonitor.bottom - info.rcMonitor.top);
+        }
+        return true;
+    }
+
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> Window::ListResolutions() const
+    {
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> result;
+        MONITORINFOEXW info{};
+        if (hwnd_ == nullptr || !MonitorInfoOf(hwnd_, info))
+        {
+            return result;
+        }
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        for (DWORD index = 0; EnumDisplaySettingsW(info.szDevice, index, &mode) != FALSE; ++index)
+        {
+            if (mode.dmPelsWidth < 1280 || mode.dmPelsHeight < 720 || mode.dmBitsPerPel < 32)
+            {
+                continue;
+            }
+            const std::pair<std::uint32_t, std::uint32_t> size{mode.dmPelsWidth, mode.dmPelsHeight};
+            if (std::find(result.begin(), result.end(), size) == result.end())
+            {
+                result.push_back(size);
+            }
+        }
+        std::sort(result.begin(), result.end());
+        return result;
+    }
+
+    bool Window::SetDisplayMode(const DisplayMode mode, std::uint32_t width, std::uint32_t height)
+    {
+        if (hwnd_ == nullptr)
+        {
+            return false;
+        }
+        MONITORINFOEXW info{};
+        if (!MonitorInfoOf(hwnd_, info))
+        {
+            return false;
+        }
+
+        // Back to the desktop display first: a switch made for Fullscreen ends here, whatever the new mode is
+        if (displaySwitched_)
+        {
+            ChangeDisplaySettingsExW(info.szDevice, nullptr, nullptr, 0, nullptr);
+            displaySwitched_ = false;
+            MonitorInfoOf(hwnd_, info);
+        }
+
+        if (mode == DisplayMode::Windowed)
+        {
+            width = std::max<std::uint32_t>(width, 640u);
+            height = std::max<std::uint32_t>(height, 360u);
+            SetWindowLongPtrW(hwnd_, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+            RECT frame{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
+            AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, FALSE);
+            const int outerWidth = frame.right - frame.left;
+            const int outerHeight = frame.bottom - frame.top;
+            const RECT& work = info.rcWork;
+            // centred on the monitor, and never larger than its work area (the frame would be off the screen)
+            const int x = work.left + std::max<int>(0, ((work.right - work.left) - outerWidth) / 2);
+            const int y = work.top + std::max<int>(0, ((work.bottom - work.top) - outerHeight) / 2);
+            SetWindowPos(hwnd_, HWND_NOTOPMOST, x, y, outerWidth, outerHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        }
+        else
+        {
+            if (mode == DisplayMode::Fullscreen && width > 0 && height > 0)
+            {
+                DEVMODEW current{};
+                current.dmSize = sizeof(current);
+                EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &current);
+                if (current.dmPelsWidth != width || current.dmPelsHeight != height)
+                {
+                    DEVMODEW wanted = current;
+                    wanted.dmPelsWidth = width;
+                    wanted.dmPelsHeight = height;
+                    wanted.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+                    displaySwitched_ = ChangeDisplaySettingsExW(info.szDevice, &wanted, nullptr, CDS_FULLSCREEN, nullptr) == DISP_CHANGE_SUCCESSFUL;
+                    MonitorInfoOf(hwnd_, info);
+                }
+            }
+            SetWindowLongPtrW(hwnd_, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+            const RECT& screen = info.rcMonitor;
+            SetWindowPos(hwnd_, HWND_TOP, screen.left, screen.top, screen.right - screen.left, screen.bottom - screen.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        }
+        displayMode_ = mode;
+        return true;
     }
 
     LRESULT CALLBACK Window::StaticWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)

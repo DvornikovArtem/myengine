@@ -469,9 +469,22 @@ namespace
         event.tick = 4000;
         event.slot = -1;
         event.a = 1;
+        event.other = 3;
+        event.value = 235;
         RlEncode(event, bytes);
         RlEventMsg eventBack;
         CHECK(RlDecode(bytes.data(), bytes.size(), eventBack) && eventBack.kind == RlEventKind::Goal && eventBack.slot == -1 && eventBack.a == 1);
+        CHECK(eventBack.other == 3 && eventBack.value == 235);
+
+        RlNamesMsg names;
+        names.names[0] = "Artem";
+        names.names[3] = "Comet";
+        names.names[7] = "a name that is much too long for the field";
+        RlEncode(names, bytes);
+        RlNamesMsg namesBack;
+        CHECK(RlDecode(bytes.data(), bytes.size(), namesBack) && namesBack.names[0] == "Artem" && namesBack.names[3] == "Comet" && namesBack.names[1].empty());
+        CHECK(namesBack.names[7].size() == static_cast<size_t>(kNameBytes - 1));
+        CHECK(!RlDecode(bytes.data(), bytes.size() - 1, namesBack));
 
         // a full 4v4 snapshot
         RlSnapshotMsg snapshot;
@@ -503,6 +516,18 @@ namespace
         snapshot.world.match.score[1] = 1;
         snapshot.world.match.clock = 123.5f;
         snapshot.world.match.phase = RlMatchPhase::Playing;
+        for (int i = 0; i < 8; ++i)
+        {
+            snapshot.world.match.points[i] = 100 * i + 3;
+            snapshot.world.match.goals[i] = i;
+            snapshot.world.match.assists[i] = i / 2;
+            snapshot.world.match.saves[i] = i % 3;
+            snapshot.world.match.shots[i] = i + 1;
+            snapshot.world.match.demos[i] = 7 - i;
+        }
+        snapshot.world.match.points[2] = 4321;
+        snapshot.world.match.lastGoalSpeed = 27.25f;
+        snapshot.world.match.lastGoalAssist = 5;
         RlEncode(snapshot, bytes);
         Note("sizes: Input %zu B (8 ticks), 4v4 Snapshot %zu B (limit %zu)", inputSize, bytes.size(), net::kMaxMessageBytes);
         CHECK(bytes.size() <= net::kMaxMessageBytes);
@@ -512,6 +537,14 @@ namespace
         CHECK(snapshotBack.tick == 5000 && snapshotBack.stateHash == snapshot.stateHash && snapshotBack.world.carCount == 8);
         CHECK(snapshotBack.world.match.score[0] == 2 && snapshotBack.world.match.score[1] == 1);
         CHECK(std::fabs(snapshotBack.world.match.clock - 123.5f) < 1e-6f);
+        for (int i = 0; i < 8; ++i)
+        {
+            const RlMatchState& a = snapshot.world.match;
+            const RlMatchState& b = snapshotBack.world.match;
+            CHECK(a.points[i] == b.points[i] && a.goals[i] == b.goals[i] && a.assists[i] == b.assists[i] && a.saves[i] == b.saves[i] && a.shots[i] == b.shots[i] &&
+                  a.demos[i] == b.demos[i]);
+        }
+        CHECK(snapshotBack.world.match.lastGoalSpeed == 27.25f && snapshotBack.world.match.lastGoalAssist == 5);
         float worstPosition = 0.0f;
         float worstVelocity = 0.0f;
         float worstRotation = 0.0f;
@@ -660,6 +693,62 @@ namespace
              client.Match()->World().match.score[1], static_cast<unsigned long long>(client.Stats().hardCorrections));
         CHECK(compared >= 20 && close == compared);
         CHECK(client.Stats().hardCorrections < 20);  // a few, not one per snapshot
+    }
+
+    // The statistics of the table travel with the match: the names of the host's lobby, the points of a goal, the events of the feed
+    void TestStatisticsOverNet()
+    {
+        std::printf("names, statistics and events of the table over the net\n");
+        net::NetSimParams sim;
+        sim.latencyMs = 40.0f;
+        sim.jitterMs = 10.0f;
+        Rig rig(sim, 1);
+        rig.recordHashes = true;
+        rig.scripted = false;
+        RlNetClient& client = rig.AddClient();
+        CHECK(rig.RunUntil(10.0, &AllInLobby));
+        CHECK(rig.host->StartMatch(rig.now));
+        rig.Run(5.0);  // the countdown is over
+        CHECK(rig.host->Match()->World().match.phase == RlMatchPhase::Playing);
+
+        // the names: the host's resolved ones on both sides, the guest with the name it joined with
+        const RlMatchState& hostMatch = rig.host->Match()->World().match;
+        const RlMatchState& clientMatch = client.Match()->World().match;
+        std::printf("  names: host '%s' / '%s', client '%s' / '%s'\n", hostMatch.names[0], hostMatch.names[1], clientMatch.names[0], clientMatch.names[1]);
+        CHECK(std::strcmp(hostMatch.names[0], "Player") == 0 && std::strcmp(hostMatch.names[1], "player0") == 0);
+        CHECK(std::memcmp(hostMatch.names, clientMatch.names, sizeof(hostMatch.names)) == 0);
+
+        // the host's car (slot 0, blue) scores from a run-up: the ball goes into the orange goal at +Z
+        RlMatch* match = rig.host->MutableMatch();
+        match->MutableSim().SetCarPose(1, {-36.0f, 0.3776f, 0.0f}, {0, 0, 0, 1}, {});
+        match->MutableSim().ResetBall({0.0f, g_tuning.ball.radius + 0.01f, 47.0f});
+        match->MutableSim().SetCarPose(0, {0.0f, 0.3776f, 40.0f}, {0, 0, 0, 1}, {0.0f, 0.0f, 18.0f});
+        RlCarInput throttle;
+        throttle.throttle = 1.0f;
+        rig.host->SetLocalInput(throttle);
+        for (int i = 0; i < 1000 && rig.host->Match()->World().match.score[0] == 0; ++i)
+        {
+            rig.host->SetLocalInput(throttle);
+            rig.Step(1.0 / 240.0);
+        }
+        rig.Run(4.0);
+
+        const RlMatchState& hm = rig.host->Match()->World().match;
+        const RlMatchState& cm = client.Match()->World().match;
+        Note("host: goals %d, points %d, shots %d; client: goals %d, points %d; goal speed %.1f m/s", hm.goals[0], hm.points[0], hm.shots[0], cm.goals[0], cm.points[0],
+             static_cast<double>(hm.lastGoalSpeed));
+        CHECK(hm.goals[0] == 1 && hm.points[0] >= 100);
+        CHECK(cm.goals[0] == hm.goals[0] && cm.points[0] == hm.points[0] && cm.shots[0] == hm.shots[0] && cm.points[1] == hm.points[1]);
+        CHECK(std::memcmp(hm.names, cm.names, sizeof(hm.names)) == 0);
+        bool goal = false;
+        bool shot = false;
+        for (const RlEventMsg& event : client.TakeEvents())
+        {
+            goal = goal || (event.kind == RlEventKind::Goal && event.slot == 0 && event.a == 0 && event.value > 100 && event.other == -1);
+            shot = shot || (event.kind == RlEventKind::Shot && event.slot == 0);
+        }
+        CHECK(goal);
+        CHECK(shot);
     }
 
     void TestSeveralClientsAndLeaving()
@@ -1343,6 +1432,7 @@ int main(int argc, char** argv)
     slow.duplicatePercent = 3.0f;
     TestHostAndClient("one-way 100 ms +-30 (RTT 200), 10% loss, 3% duplicates", slow, 20.0);
     TestGoalAndOutOfBandChange();
+    TestStatisticsOverNet();
     TestSeveralClientsAndLeaving();
     {
         net::NetSimParams sim;

@@ -6,7 +6,8 @@
 //   Welcome   host -> client   reliable    slot, mode, bot level, seed, mask of human slots, hash of the tuning (or Reject)
 //   Input     client -> host   unreliable  the inputs of the last <= 8 ticks, one per tick, quantized
 //   Snapshot  host -> clients  unreliable  60 Hz: tick, match, ball, cars, pads, the inputs the host really used, a hash of the full state
-//   Event     host -> clients  reliable    match start, a slot that took a player / went to a bot, goal, demolition, match end
+//   Names     host -> clients  reliable    the names of the table (before MatchStart: they are part of the state)
+//   Event     host -> clients  reliable    match start, a slot that took a player / went to a bot, goal, assist, save, shot, demolition, match end
 //
 // Inputs are quantized to bytes before the simulation takes them, on both sides, so that the numbers the host and the client simulate are
 // the same ones.
@@ -22,7 +23,7 @@
 
 namespace rl
 {
-    constexpr uint16_t kNetProtocolVersion = 1;
+    constexpr uint16_t kNetProtocolVersion = 2;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot
     constexpr int kNetInputBytes = 5;
     constexpr int kNetInputWindow = 8;   // ticks of input carried by one Input and one Snapshot message
     constexpr int kSnapshotInterval = 2; // ticks between snapshots: 60 Hz
@@ -38,6 +39,7 @@ namespace rl
         StateChunk = 7,     // host -> client, reliable: a piece of the full state of the match (a player who joins a running match)
         InputRequest = 8,   // client -> host, reliable: the inputs the host used for these ticks
         InputHistory = 9,   // host -> client, reliable: the answer
+        Names = 10,         // host -> clients, reliable: the names of the table, before MatchStart (they are part of the state)
     };
 
     enum class RlRejectReason : uint8_t
@@ -89,9 +91,13 @@ namespace rl
     {
         MatchStart = 1,  // tick 0: the match begins; `mask` is the human slots
         SlotMask = 2,    // from `tick` on the human slots are `mask`; `slot` joined (a = 1) or went to a bot (a = 0)
-        Goal = 3,        // `slot` scored for team a (slot -1 = nobody touched the ball)
-        Demolition = 4,  // slot `slot` was demolished
+        Goal = 3,        // `slot` scored for team a (slot -1 = nobody touched the ball); other: the assisting slot or -1; value: the speed of the ball, dm/s
+                         // (an own goal: the team of `slot` is not a)
+        Demolition = 4,  // slot `slot` was demolished by `other` (-1 unknown)
         MatchEnd = 5,    // winner a (0 blue, 1 orange)
+        Assist = 6,      // `slot` assisted the goal of `other`
+        Save = 7,        // `slot` saved a shot
+        Shot = 8,        // `slot` shot at the goal
     };
 
     struct RlEventMsg
@@ -101,10 +107,19 @@ namespace rl
         int8_t slot = -1;
         uint8_t a = 0;
         uint32_t mask = 0;
+        int8_t other = -1;
+        uint16_t value = 0;
+    };
+
+    // The names of the table: one per slot, up to kNameBytes - 1 bytes (UTF-8), the empty ones are filled with the defaults by RlMatch.
+    struct RlNamesMsg
+    {
+        std::string names[kMaxCars];
     };
 
     // What the host knows at tick `tick` (the state before the step of that tick). The world is the dequantized one: positions,
-    // rotations and velocities of the cars and the ball, the boost and a few flags, the score and the clock; the rest is zero.
+    // rotations and velocities of the cars and the ball, the boost and a few flags, the score and the clock, the statistics of the table (points, goals,
+    // assists, saves, shots, demolitions per slot) and the last goal's speed and assist; the rest is zero.
     struct RlSnapshotMsg
     {
         uint32_t tick = 0;
@@ -154,6 +169,7 @@ namespace rl
     void RlEncode(const RlInputMsg& msg, std::vector<uint8_t>& out);
     void RlEncode(const RlEventMsg& msg, std::vector<uint8_t>& out);
     void RlEncode(const RlSnapshotMsg& msg, std::vector<uint8_t>& out);
+    void RlEncode(const RlNamesMsg& msg, std::vector<uint8_t>& out);
 
     bool RlDecode(const uint8_t* data, size_t size, RlJoinMsg& msg);
     bool RlDecode(const uint8_t* data, size_t size, RlWelcomeMsg& msg);
@@ -161,6 +177,7 @@ namespace rl
     bool RlDecode(const uint8_t* data, size_t size, RlInputMsg& msg);
     bool RlDecode(const uint8_t* data, size_t size, RlEventMsg& msg);
     bool RlDecode(const uint8_t* data, size_t size, RlSnapshotMsg& msg);
+    bool RlDecode(const uint8_t* data, size_t size, RlNamesMsg& msg);
 
     inline RlMsg RlMessageType(const uint8_t* data, size_t size) { return size == 0 ? static_cast<RlMsg>(0) : static_cast<RlMsg>(data[0]); }
 }

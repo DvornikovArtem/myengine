@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <cstring>
 #include <type_traits>
 
@@ -68,6 +69,33 @@ namespace rl
         bool IsBigPad(int index) { return index == 3 || index == 4 || index == 15 || index == 18 || index == 29 || index == 30; }
     }
 
+    bool RlBallHeadsIntoGoal(const RlTuning& tuning, const RlBallState& ball, int goalSide, float horizon)
+    {
+        const float line = tuning.arena.halfLength + tuning.ball.radius;
+        const float step = 1.0f / 60.0f;
+        float x = ball.position.x, y = ball.position.y, z = ball.position.z;
+        float vx = ball.linearVelocity.x, vy = ball.linearVelocity.y, vz = ball.linearVelocity.z;
+        for (float t = 0.0f; t < horizon; t += step)
+        {
+            vy -= tuning.gravity * step;
+            const float lastZ = z;
+            x += vx * step;
+            y += vy * step;
+            z += vz * step;
+            if (y < tuning.ball.radius && vy < 0.0f)
+            {
+                y = tuning.ball.radius;
+                vy = -vy * tuning.ball.restitution;
+            }
+            const float side = static_cast<float>(goalSide);
+            if (lastZ * side < line && z * side >= line)
+            {
+                return std::fabs(x) < tuning.arena.goalHalfWidth && y < tuning.arena.goalHeight;
+            }
+        }
+        return false;
+    }
+
     RlSpot RlKickoffSpot(int team, int order) { return ToSpot(kKickoffUu[std::clamp(order, 0, 4)], team); }
     RlSpot RlRespawnSpot(int team, int order) { return ToSpot(kRespawnUu[std::clamp(order, 0, 3)], team); }
 
@@ -82,6 +110,14 @@ namespace rl
     namespace
     {
         constexpr float kWedgedSeconds = 7.0f;
+        constexpr int kTouchGapTicks = 60;      // a touch counts once in half a second
+        constexpr int kAssistTicks = 600;       // an assist: the touch of a mate at most 5 s before the goal
+        constexpr int kPointsGoal = 100;
+        constexpr int kPointsAssist = 50;
+        constexpr int kPointsSave = 50;
+        constexpr int kPointsShot = 20;
+        constexpr int kPointsDemo = 25;
+        constexpr int kPointsTouch = 2;
 
         // The part of the match that lives outside RlSim and outside RlWorldState: plain data for the snapshot.
         struct MatchRuntime
@@ -94,6 +130,8 @@ namespace rl
             float roleTimer[2];
             int32_t wasDemolished[kMaxCars];
             float stillSeconds[kMaxCars];  // how long a bot has not moved (the rescue of a wedged bot)
+            int32_t lastTouchTick[kMaxCars];      // the tick of the last contact of the car with the ball (assists)
+            int32_t countedTouchTick[kMaxCars];   // the tick of the last touch that was counted (a touch counts once in half a second)
         };
         static_assert(std::is_trivially_copyable_v<MatchRuntime>, "the match runtime is copied as bytes");
         static_assert(std::is_trivially_copyable_v<RlRng>, "the generator is copied as bytes");
@@ -134,8 +172,14 @@ namespace rl
                 rt.wasDemolished[i] = 0;
             }
             rt.roleTimer[0] = rt.roleTimer[1] = 0.0f;
+            for (int i = 0; i < kMaxCars; ++i)
+            {
+                rt.lastTouchTick[i] = -100000;
+                rt.countedTouchTick[i] = -100000;
+            }
             rt.match = RlMatchState{};
             rt.match.mode = config.mode;
+            SetNames();
             rt.match.clock = config.mode == 0 ? 0.0f : tuning.match.matchSeconds;
             BeginKickoff();
             RefreshWorld();
@@ -163,6 +207,76 @@ namespace rl
         {
             world = sim->State();
             world.match = rt.match;
+        }
+
+        // The names of the table: the given ones, "Player" for a human and the names of the bots in the order of the bot slots.
+        void SetNames()
+        {
+            static const char* const kBotNames[] = {"Comet", "Blaze", "Nova", "Spark", "Bolt", "Drift", "Flux"};
+            int bots = 0;
+            for (int slot = 0; slot < slots; ++slot)
+            {
+                std::string name = config.names[slot];
+                if (name.empty())
+                {
+                    name = IsBot(slot) ? kBotNames[bots % 7] : "Player";
+                }
+                if (IsBot(slot))
+                {
+                    ++bots;
+                }
+                size_t length = std::min(name.size(), static_cast<size_t>(kNameBytes - 1));
+                while (length > 0 && length < name.size() && (static_cast<unsigned char>(name[length]) & 0xC0) == 0x80)
+                {
+                    --length;  // not in the middle of a character
+                }
+                std::memset(rt.match.names[slot], 0, kNameBytes);
+                std::memcpy(rt.match.names[slot], name.data(), length);
+            }
+        }
+
+        void PushEvent(RlMatchEventType type, int slot, int other, uint32_t tick)
+        {
+            RlMatchState& m = rt.match;
+            RlMatchEvent& e = m.events[static_cast<uint32_t>(m.eventHead) % kEventRing];
+            e.tick = tick;
+            e.type = static_cast<int32_t>(type);
+            e.slot = slot;
+            e.other = other;
+            ++m.eventHead;
+        }
+
+        // The touch of a car: the points, the shot on goal and the save (the rules of docs/game/rl-match.md).
+        void OnTouch(int slot, const RlBallState& before, const RlBallState& after, uint32_t tick)
+        {
+            RlMatchState& m = rt.match;
+            const int now = static_cast<int>(tick);
+            rt.lastTouchTick[slot] = now;
+            if (now - rt.countedTouchTick[slot] < kTouchGapTicks)
+            {
+                return;
+            }
+            rt.countedTouchTick[slot] = now;
+            ++m.touches[slot];
+            m.points[slot] += kPointsTouch;
+            if (config.mode == 0)
+            {
+                return;
+            }
+            const int team = TeamOf(slot);
+            const int attacked = team == 0 ? 1 : -1;  // the side of the goal this team shoots at
+            if (RlBallHeadsIntoGoal(tuning, after, attacked) && !RlBallHeadsIntoGoal(tuning, before, attacked))
+            {
+                ++m.shots[slot];
+                m.points[slot] += kPointsShot;
+                PushEvent(RlMatchEventType::Shot, slot, -1, tick);
+            }
+            if (RlBallHeadsIntoGoal(tuning, before, -attacked) && !RlBallHeadsIntoGoal(tuning, after, -attacked))
+            {
+                ++m.saves[slot];
+                m.points[slot] += kPointsSave;
+                PushEvent(RlMatchEventType::Save, slot, -1, tick);
+            }
         }
 
         void BeginKickoff()
@@ -267,9 +381,22 @@ namespace rl
             }
             sim->Step(effective);
             events = sim->LastEvents();
-            if (events.ballHits > 0 && sim->State().lastBallToucher >= 0)
+            if (m.phase == RlMatchPhase::Playing)
             {
-                ++m.touches[sim->State().lastBallToucher];
+                if (events.ballHits > 0 && sim->State().lastBallToucher >= 0)
+                {
+                    OnTouch(sim->State().lastBallToucher, world.ball, sim->State().ball, sim->State().tick);
+                }
+                for (int i = 0; i < std::min(events.demolitions, kMaxCars); ++i)
+                {
+                    const int by = events.demoBy[i];
+                    if (by >= 0 && by < slots)
+                    {
+                        ++m.demos[by];
+                        m.points[by] += kPointsDemo;
+                        PushEvent(RlMatchEventType::Demo, by, events.demoVictim[i], sim->State().tick);
+                    }
+                }
             }
 
             // a car that was just demolished comes back at one of the respawn spots of its team
@@ -400,9 +527,45 @@ namespace rl
                 m.lastGoalTeam = team;
                 m.lastGoalScorer = state.lastBallToucher;
                 m.lastGoalOwn = (state.lastBallToucher >= 0 && TeamOf(state.lastBallToucher) != team) ? 1 : 0;
-                if (state.lastBallToucher >= 0 && m.lastGoalOwn == 0)
+                const RlVec3 v = state.ball.linearVelocity;
+                m.lastGoalSpeed = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+                m.lastGoalAssist = -1;
+                const int scorer = state.lastBallToucher;
+                if (scorer >= 0 && m.lastGoalOwn == 0)
                 {
-                    ++m.goals[state.lastBallToucher];
+                    ++m.goals[scorer];
+                    m.points[scorer] += kPointsGoal;
+                    // the assist: the last touch of a mate before the touch of the scorer, at most 5 s before the goal
+                    int assist = -1;
+                    for (int slot = 0; slot < slots; ++slot)
+                    {
+                        if (slot == scorer || TeamOf(slot) != team)
+                        {
+                            continue;
+                        }
+                        const int touched = rt.lastTouchTick[slot];
+                        if (touched < rt.lastTouchTick[scorer] && static_cast<int>(state.tick) - touched <= kAssistTicks &&
+                            (assist < 0 || touched > rt.lastTouchTick[assist]))
+                        {
+                            assist = slot;
+                        }
+                    }
+                    m.lastGoalAssist = assist;
+                    PushEvent(RlMatchEventType::Goal, scorer, assist, state.tick);
+                    if (assist >= 0)
+                    {
+                        ++m.assists[assist];
+                        m.points[assist] += kPointsAssist;
+                        PushEvent(RlMatchEventType::Assist, assist, scorer, state.tick);
+                    }
+                }
+                else if (scorer >= 0)
+                {
+                    PushEvent(RlMatchEventType::OwnGoal, scorer, -1, state.tick);
+                }
+                else
+                {
+                    PushEvent(RlMatchEventType::Goal, -1, -1, state.tick);
                 }
                 m.phase = RlMatchPhase::GoalScored;
                 m.phaseTimer = tuning.match.goalSeconds;
@@ -503,6 +666,33 @@ namespace rl
     bool RlMatch::IsBot(int slot) const { return impl_->IsBot(slot); }
     uint32_t RlMatch::HumanMask() const { return impl_->config.humanMask; }
     void RlMatch::SetHumanMask(uint32_t mask) { impl_->config.humanMask = mask; }
+
+    void RlMatch::SetStatistics(const RlMatchState& from)
+    {
+        RlMatchState* targets[2] = {&impl_->rt.match, &impl_->world.match};
+        for (RlMatchState* target : targets)
+        {
+            std::memcpy(target->goals, from.goals, sizeof(from.goals));
+            std::memcpy(target->points, from.points, sizeof(from.points));
+            std::memcpy(target->assists, from.assists, sizeof(from.assists));
+            std::memcpy(target->saves, from.saves, sizeof(from.saves));
+            std::memcpy(target->shots, from.shots, sizeof(from.shots));
+            std::memcpy(target->demos, from.demos, sizeof(from.demos));
+            target->lastGoalSpeed = from.lastGoalSpeed;
+            target->lastGoalAssist = from.lastGoalAssist;
+        }
+    }
+
+    void RlMatch::SetPlayerNames(const std::string* names)
+    {
+        for (int slot = 0; slot < kMaxCars; ++slot)
+        {
+            impl_->config.names[slot] = names[slot];
+        }
+        impl_->SetNames();
+        std::memcpy(impl_->world.match.names, impl_->rt.match.names, sizeof(impl_->rt.match.names));
+        std::memcpy(impl_->previous.match.names, impl_->rt.match.names, sizeof(impl_->rt.match.names));
+    }
     const RlTuning& RlMatch::Tuning() const { return impl_->tuning; }
 
     void RlMatch::SetTuning(const RlTuning& tuning)

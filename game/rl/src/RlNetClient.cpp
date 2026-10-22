@@ -91,6 +91,8 @@ namespace rl
         std::string error;
         net::PeerId host = net::kInvalidPeer;
         std::string name;
+        std::string pendingNames[kMaxCars];  // the host's names of the table, applied at MatchStart
+        bool haveNames = false;
         int slot = -1;
         int slotCount = 0;
         std::unique_ptr<RlMatch> match;
@@ -563,6 +565,10 @@ namespace rl
             case RlEventKind::MatchStart:
                 if (state == RlNetClientState::Lobby)
                 {
+                    if (haveNames && match != nullptr)
+                    {
+                        match->SetPlayerNames(pendingNames);  // before tick 0, like the host
+                    }
                     AddMask(0, event.mask);
                     BeginPlaying(now);
                 }
@@ -691,10 +697,17 @@ namespace rl
 
         // Is our state of the same tick close enough to the quantized state of the host that no correction is needed? After a hard correction
         // the two can never be bit-equal again (the host's numbers were rounded), but they stay this close until something really differs.
+        static bool SameStatistics(const RlMatchState& a, const RlMatchState& b)
+        {
+            return std::memcmp(a.points, b.points, sizeof(a.points)) == 0 && std::memcmp(a.goals, b.goals, sizeof(a.goals)) == 0 &&
+                   std::memcmp(a.assists, b.assists, sizeof(a.assists)) == 0 && std::memcmp(a.saves, b.saves, sizeof(a.saves)) == 0 &&
+                   std::memcmp(a.shots, b.shots, sizeof(a.shots)) == 0 && std::memcmp(a.demos, b.demos, sizeof(a.demos)) == 0;
+        }
+
         static bool Similar(const RlWorldState& local, const RlWorldState& host)
         {
             if (local.match.phase != host.match.phase || local.match.score[0] != host.match.score[0] || local.match.score[1] != host.match.score[1] ||
-                local.match.overtime != host.match.overtime || local.carCount != host.carCount)
+                local.match.overtime != host.match.overtime || local.carCount != host.carCount || !SameStatistics(local.match, host.match))
             {
                 return false;
             }
@@ -741,6 +754,7 @@ namespace rl
                 sim.SetCarBoost(i, world.cars[i].boost);
             }
             sim.ResetBall(world.ball.position, world.ball.linearVelocity, world.ball.angularVelocity);
+            match->SetStatistics(world.match);
             ++stats.hardCorrections;
             Resimulate(msg.tick, false, shown);
         }
@@ -833,6 +847,19 @@ namespace rl
                         break;
                     }
                     case RlMsg::Snapshot: OnSnapshot(event.data, now); break;
+                    case RlMsg::Names:
+                    {
+                        RlNamesMsg names;
+                        if (state == RlNetClientState::Lobby && RlDecode(event.data.data(), event.data.size(), names))
+                        {
+                            for (int i = 0; i < kMaxCars; ++i)
+                            {
+                                pendingNames[i] = names.names[i];
+                            }
+                            haveNames = true;
+                        }
+                        break;
+                    }
                     case RlMsg::StateChunk: OnStateChunk(event.data); break;
                     case RlMsg::InputHistory: OnInputHistory(event.data, now); break;
                     case RlMsg::Event:

@@ -391,11 +391,34 @@ namespace rl
             }
             RlMatchConfig config = options.match;
             config.humanMask = humanMask;
+            for (const auto& entry : clients)
+            {
+                if (entry.second.slot >= 0)
+                {
+                    config.names[entry.second.slot] = entry.second.name;
+                }
+            }
             match = std::make_unique<RlMatch>(tuning, config);
             started = true;
             startTime = now;
             tick = 0;
             std::memset(used, 0, sizeof(used));
+
+            // the names are part of the state: every side takes the host's resolved ones before its tick 0
+            RlNamesMsg names;
+            for (int slot = 0; slot < slotCount; ++slot)
+            {
+                names.names[slot] = match->World().match.names[slot];
+            }
+            std::vector<uint8_t> nameBytes;
+            RlEncode(names, nameBytes);
+            for (auto& entry : clients)
+            {
+                if (entry.second.slot >= 0)
+                {
+                    Send(entry.first, nameBytes, true);
+                }
+            }
 
             RlEventMsg event;
             event.kind = RlEventKind::MatchStart;
@@ -476,19 +499,32 @@ namespace rl
                     event.tick = tick;
                     event.slot = static_cast<int8_t>(now.match.lastGoalScorer);
                     event.a = static_cast<uint8_t>(team);
+                    event.other = static_cast<int8_t>(now.match.lastGoalAssist);
+                    event.value = static_cast<uint16_t>(std::clamp(std::lround(now.match.lastGoalSpeed * 10.0f), 0l, 65535l));
                     BroadcastEvent(event);
                 }
             }
-            for (int i = 0; i < now.carCount; ++i)
+            // the events of the ring that are new since the last tick: assists, saves, shots and who demolished whom
+            for (int n = std::max(before.match.eventHead, now.match.eventHead - kEventRing); n < now.match.eventHead; ++n)
             {
-                if (now.cars[i].demolished && !before.cars[i].demolished)
+                const RlMatchEvent& entry = now.match.events[n % kEventRing];
+                RlEventMsg event;
+                event.tick = tick;
+                event.slot = static_cast<int8_t>(entry.slot);
+                event.other = static_cast<int8_t>(entry.other);
+                switch (static_cast<RlMatchEventType>(entry.type))
                 {
-                    RlEventMsg event;
+                case RlMatchEventType::Assist: event.kind = RlEventKind::Assist; break;
+                case RlMatchEventType::Save: event.kind = RlEventKind::Save; break;
+                case RlMatchEventType::Shot: event.kind = RlEventKind::Shot; break;
+                case RlMatchEventType::Demo:
                     event.kind = RlEventKind::Demolition;
-                    event.tick = tick;
-                    event.slot = static_cast<int8_t>(i);
-                    BroadcastEvent(event);
+                    event.slot = static_cast<int8_t>(entry.other);  // the Demolition event names the victim
+                    event.other = static_cast<int8_t>(entry.slot);
+                    break;
+                default: continue;
                 }
+                BroadcastEvent(event);
             }
             if (now.match.phase == RlMatchPhase::Finished && before.match.phase != RlMatchPhase::Finished)
             {
@@ -595,6 +631,19 @@ namespace rl
             count += entry.second.slot >= 0 ? 1 : 0;
         }
         return count;
+    }
+    std::vector<RlNetPeerInfo> RlNetHost::Peers() const
+    {
+        std::vector<RlNetPeerInfo> peers;
+        for (const auto& entry : impl_->clients)
+        {
+            if (entry.second.slot >= 0)
+            {
+                peers.push_back({entry.second.slot, entry.second.name, impl_->transport.RoundTripSeconds(entry.first) * 1000.0});
+            }
+        }
+        std::sort(peers.begin(), peers.end(), [](const RlNetPeerInfo& a, const RlNetPeerInfo& b) { return a.slot < b.slot; });
+        return peers;
     }
     uint32_t RlNetHost::HumanMask() const { return impl_->humanMask; }
     float RlNetHost::TickFraction() const

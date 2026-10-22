@@ -195,9 +195,15 @@ namespace myengine::rlui
             raw.windowActive = ProcessIsForeground();
             if (raw.windowActive)
             {
-                for (int vk = 8; vk < 256; ++vk)
+                // The state of the keys as the window has seen them: one call. (256 calls of GetAsyncKeyState cost 20 ms a frame on a machine
+                // where every call into the input system takes 80 us.)
+                BYTE state[256] = {};
+                if (GetKeyboardState(state) != FALSE)
                 {
-                    raw.keys[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
+                    for (int vk = 8; vk < 256; ++vk)
+                    {
+                        raw.keys[vk] = (state[vk] & 0x80) != 0;
+                    }
                 }
             }
             raw.mouse[0] = io.MouseDown[0];
@@ -212,6 +218,10 @@ namespace myengine::rlui
             if (raw.windowActive)
             {
                 ReadPad(raw);
+            }
+            if (host.rawHook_)
+            {
+                host.rawHook_(raw);
             }
             host.lastRaw_ = raw;
 

@@ -85,6 +85,29 @@ namespace rl
         float respawnLeft = 0.0f;  // seconds until the pad is back, 0 = ready
     };
 
+    constexpr int kEventRing = 16;     // events of the match the UI shows (the feed): the ring keeps the last ones
+    constexpr int kNameBytes = 24;     // a player's name, UTF-8 with a zero at the end
+
+    // What happened in the match, for the feed and the tables of the UI and for the sound.
+    enum class RlMatchEventType : int32_t
+    {
+        None = 0,
+        Goal = 1,     // slot scored (other: the assisting slot or -1)
+        OwnGoal = 2,  // slot put the ball into its own goal
+        Assist = 3,   // slot assisted (other: the scorer)
+        Save = 4,     // slot saved a shot
+        Shot = 5,     // slot shot at the goal
+        Demo = 6,     // slot demolished other
+    };
+
+    struct RlMatchEvent
+    {
+        uint32_t tick = 0;
+        int32_t type = 0;
+        int32_t slot = -1;
+        int32_t other = -1;
+    };
+
     // Everything of a match outside the physics. A plain structure: a snapshot copies the bytes.
     struct RlMatchState
     {
@@ -100,7 +123,19 @@ namespace rl
         int32_t winner = -1;            // 0 blue, 1 orange once the match is Finished
         uint32_t kickoffs = 0;
         int32_t goals[kMaxCars] = {};     // per slot: goals scored (own goals not counted)
-        int32_t touches[kMaxCars] = {};   // per slot: hits of the ball
+        int32_t touches[kMaxCars] = {};   // per slot: touches of the ball (a touch counts once in half a second)
+        // The statistics of the table (rules in docs/game/rl-match.md): points = 100 per goal, 50 per assist and per save, 20 per shot on goal,
+        // 25 per demolition, 2 per touch.
+        int32_t points[kMaxCars] = {};
+        int32_t assists[kMaxCars] = {};
+        int32_t saves[kMaxCars] = {};
+        int32_t shots[kMaxCars] = {};
+        int32_t demos[kMaxCars] = {};
+        float lastGoalSpeed = 0.0f;       // m/s, the speed of the ball at the tick of the last goal
+        int32_t lastGoalAssist = -1;      // slot of the assist of the last goal, -1 without one
+        int32_t eventHead = 0;            // how many events there have been; event number n is events[n % kEventRing]
+        RlMatchEvent events[kEventRing];
+        char names[kMaxCars][kNameBytes] = {};  // UTF-8, with the zero at the end
         RlPadState pads[kPadCount];
     };
 
@@ -120,5 +155,7 @@ namespace rl
     {
         int ballHits = 0;
         int demolitions = 0;
+        int demoBy[kMaxCars] = {};      // demoBy[i] demolished demoVictim[i], for i < demolitions
+        int demoVictim[kMaxCars] = {};
     };
 }

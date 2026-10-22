@@ -14,6 +14,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace
@@ -321,6 +323,373 @@ namespace
         CHECK(back.position.z > 40.0f);
         CHECK(!match.World().cars[0].demolished);
         Note("orange came back at (%.1f, %.1f)", back.position.x, back.position.z);
+    }
+
+    // ---------------------------------------------------------------- the statistics of the table (G1.0)
+
+    RlQuat YawQuat(float radians) { return {0.0f, std::sin(radians * 0.5f), 0.0f, std::cos(radians * 0.5f)}; }
+
+    // a match in the Playing phase with every slot human (neutral inputs), ready for the staging of a play through MutableSim
+    std::unique_ptr<RlMatch> PlayingMatch(int mode, uint64_t seed = 1)
+    {
+        RlMatchConfig config = HumanConfig(mode);
+        config.seed = seed;
+        auto match = std::make_unique<RlMatch>(g_tuning, config);
+        Idle(*match, Ticks(3.2f));
+        return match;
+    }
+
+    // Steps with slot `slot` at full throttle (the others idle) until `done` is true or `limit` ticks have passed; returns the ticks.
+    template <typename Done>
+    int RunPlay(RlMatch& match, int slot, int limit, Done done, bool boost = false)
+    {
+        std::vector<RlCarInput> inputs(static_cast<size_t>(match.SlotCount()));
+        inputs[static_cast<size_t>(slot)].throttle = 1.0f;
+        inputs[static_cast<size_t>(slot)].boost = boost;
+        for (int t = 0; t < limit; ++t)
+        {
+            match.Step(inputs.data());
+            if (done(match.World()))
+            {
+                return t + 1;
+            }
+        }
+        return limit;
+    }
+
+    bool HasEvent(const RlWorldState& w, RlMatchEventType type, int slot, int other)
+    {
+        const int total = w.match.eventHead;
+        for (int n = std::max(0, total - kEventRing); n < total; ++n)
+        {
+            const RlMatchEvent& e = w.match.events[n % kEventRing];
+            if (e.type == static_cast<int32_t>(type) && e.slot == slot && (other == -2 || e.other == other))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // blue slot 0 runs at a ball at rest on the floor in front of the goal at +Z and scores
+    struct GoalPlay
+    {
+        bool scored = false;
+        int goalTick = 0;
+        float ballSpeedAtGoal = 0.0f;
+    };
+
+    // the cars that do not take part stand at the touchline, away from the ball and the goals
+    void ParkOthers(RlMatch& match, int keep)
+    {
+        for (int i = 0; i < match.SlotCount(); ++i)
+        {
+            if (i != keep)
+            {
+                match.MutableSim().SetCarPose(i, {-36.0f + 3.0f * static_cast<float>(i), 0.3776f, 0.0f}, {0, 0, 0, 1}, {});
+            }
+        }
+    }
+
+    GoalPlay ScoreFrom(RlMatch& match, int slot, float x, float z, float yaw, float speed, float ballZ)
+    {
+        RlSim& sim = match.MutableSim();
+        ParkOthers(match, slot);
+        sim.ResetBall({0.0f, g_tuning.ball.radius + 0.01f, ballZ});
+        sim.SetCarPose(slot, {x, 0.3776f, z}, YawQuat(yaw), {std::sin(yaw) * speed, 0.0f, std::cos(yaw) * speed});
+        GoalPlay play;
+        RunPlay(match, slot, Ticks(4.0f), [&](const RlWorldState& w) {
+            if (w.match.phase == RlMatchPhase::GoalScored)
+            {
+                play.scored = true;
+                play.goalTick = static_cast<int>(w.tick);
+                const RlVec3 v = w.ball.linearVelocity;
+                play.ballSpeedAtGoal = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+                return true;
+            }
+            return false;
+        });
+        return play;
+    }
+
+    int PointsOf(const RlMatchState& m, int slot)
+    {
+        return 100 * m.goals[slot] + 50 * m.assists[slot] + 50 * m.saves[slot] + 20 * m.shots[slot] + 25 * m.demos[slot] + 2 * m.touches[slot];
+    }
+
+    void TestMatchStatistics()
+    {
+        std::printf("statistics of the match: points, assists, shots, saves, demolitions, events\n");
+
+        // ---- the goal: +100 points and a goal for the scorer, nothing for the mate who did not touch, the speed of the ball, the events
+        {
+            auto match = PlayingMatch(2);
+            const GoalPlay play = ScoreFrom(*match, 0, 0.0f, 40.0f, 0.0f, 18.0f, 47.0f);
+            const RlMatchState& m = match->World().match;
+            Note("goal at tick %.0f, ball %.1f m/s (%.0f km/h), points %.0f, touches %.0f, shots %.0f", play.goalTick, play.ballSpeedAtGoal, play.ballSpeedAtGoal * 3.6f,
+                 m.points[0], m.touches[0], m.shots[0]);
+            CHECK(play.scored);
+            CHECK(m.score[0] == 1 && m.goals[0] == 1 && m.lastGoalTeam == 0 && m.lastGoalScorer == 0 && m.lastGoalOwn == 0);
+            CHECK(m.points[0] == PointsOf(m, 0) && m.points[0] >= 100);
+            CHECK(m.points[1] == 0 && m.assists[0] == 0 && m.lastGoalAssist == -1);
+            CHECK(std::fabs(m.lastGoalSpeed - play.ballSpeedAtGoal) < 1e-4f);  // the speed of the ball at the tick of the goal
+            CHECK(HasEvent(match->World(), RlMatchEventType::Goal, 0, -1));
+        }
+
+        // ---- an own goal: the score goes to the other team, the player gets no points for it
+        {
+            auto match = PlayingMatch(1, 2);
+            const GoalPlay play = ScoreFrom(*match, 0, 0.0f, -40.0f, 3.14159265f, 18.0f, -47.0f);  // blue runs at the ball and puts it into its own goal
+            const RlMatchState& m = match->World().match;
+            CHECK(play.scored);
+            CHECK(m.score[1] == 1 && m.score[0] == 0 && m.lastGoalOwn == 1 && m.lastGoalScorer == 0);
+            CHECK(m.goals[0] == 0 && m.points[0] == PointsOf(m, 0) && m.points[0] < 100);
+            CHECK(HasEvent(match->World(), RlMatchEventType::OwnGoal, 0, -1));
+        }
+
+        // ---- the assist: a mate's touch counts when it is at most 5 s before the goal (and before the touch of the scorer)
+        {
+            struct Outcome
+            {
+                bool scored = false;
+                int assist = -2;
+                int gap = 0;  // ticks between the touch of the mate and the goal
+                int points = 0, assists = 0;
+            };
+            const auto play = [&](int waitTicks) {
+                auto match = PlayingMatch(2);
+                RlSim& sim = match->MutableSim();
+                // the mate (slot 1) touches the ball in the middle of the field
+                ParkOthers(*match, 1);
+                sim.ResetBall({10.0f, g_tuning.ball.radius + 0.01f, 0.0f});
+                sim.SetCarPose(1, {10.0f, 0.3776f, -6.0f}, YawQuat(0.0f), {0.0f, 0.0f, 8.0f});
+                int touchTick = -1;
+                RunPlay(*match, 1, Ticks(2.0f), [&](const RlWorldState& w) {
+                    if (w.match.touches[1] > 0)
+                    {
+                        touchTick = static_cast<int>(w.tick);
+                        return true;
+                    }
+                    return false;
+                });
+                sim.ResetBall({30.0f, g_tuning.ball.radius + 0.01f, 0.0f});  // the ball rests until the scorer comes
+                Idle(*match, waitTicks);
+                const GoalPlay goal = ScoreFrom(*match, 0, 0.0f, 40.0f, 0.0f, 18.0f, 47.0f);
+                Outcome o;
+                o.scored = goal.scored;
+                o.assist = match->World().match.lastGoalAssist;
+                o.gap = goal.goalTick - touchTick;
+                o.points = match->World().match.points[1];
+                o.assists = match->World().match.assists[1];
+                return o;
+            };
+            const Outcome probe = play(60);
+            const int base = probe.gap - 60;  // what the run to the goal takes
+            const Outcome inside = play(588 - base);   // 4.9 s
+            const Outcome outside = play(612 - base);  // 5.1 s
+            Note("the mate's touch %.0f ticks before the goal: assist slot %.0f; %.0f ticks: assist slot %.0f", inside.gap, inside.assist, outside.gap, outside.assist);
+            CHECK(inside.scored && outside.scored);
+            CHECK(inside.gap >= 586 && inside.gap <= 590);
+            CHECK(inside.assist == 1 && inside.assists == 1 && inside.points >= 50);
+            CHECK(outside.assist == -1 && outside.assists == 0);
+        }
+
+        // ---- a shot on goal: a touch after which the ball flies at the goal counts, a touch that misses does not
+        for (int miss = 0; miss < 2; ++miss)
+        {
+            auto match = PlayingMatch(1, 3);
+            RlSim& sim = match->MutableSim();
+            const float x = miss != 0 ? 30.0f : 0.0f;
+            ParkOthers(*match, 0);
+            sim.ResetBall({x, g_tuning.ball.radius + 0.01f, 25.0f});
+            sim.SetCarPose(0, {x, 0.3776f, 18.0f}, YawQuat(0.0f), {0.0f, 0.0f, 18.0f});
+            RunPlay(*match, 0, Ticks(1.0f), [&](const RlWorldState& w) { return w.match.touches[0] > 0 && w.tick > 0; });
+            Idle(*match, 6);
+            const RlMatchState& m = match->World().match;
+            Note("%.0f = touch wide of the goal, 0 = at the goal: shots %.0f, points %.0f", miss, m.shots[0], m.points[0]);
+            CHECK(m.touches[0] >= 1);
+            CHECK(m.shots[0] == (miss != 0 ? 0 : 1));
+            CHECK(HasEvent(match->World(), RlMatchEventType::Shot, 0, -1) == (miss == 0));
+        }
+
+        // ---- a save: the ball heads for the own goal, the touch of a defender sends it away (+50); a touch that leaves it heading in is no save
+        for (int still = 0; still < 2; ++still)
+        {
+            auto match = PlayingMatch(1, 4);
+            RlSim& sim = match->MutableSim();
+            ParkOthers(*match, 0);
+            if (still == 0)
+            {
+                sim.ResetBall({0.0f, 1.2f, -30.0f}, {0.0f, 0.0f, -18.0f});
+                sim.SetCarPose(0, {0.0f, 0.3776f, -38.0f}, YawQuat(0.0f), {});
+                Idle(*match, Ticks(1.0f));
+            }
+            else
+            {
+                sim.ResetBall({0.0f, g_tuning.ball.radius + 0.01f, -30.0f}, {0.0f, 0.0f, -10.0f});
+                sim.SetCarPose(0, {0.0f, 0.3776f, -22.0f}, YawQuat(3.14159265f), {0.0f, 0.0f, -22.0f});
+                RunPlay(*match, 0, Ticks(1.5f), [&](const RlWorldState& w) { return w.match.touches[0] > 0; });
+                Idle(*match, 6);
+            }
+            const RlMatchState& m = match->World().match;
+            Note("%.0f = a touch that pushes it on, 0 = a defender in the way: saves %.0f, touches %.0f, ball velocity z %.1f", still, m.saves[0], m.touches[0],
+                 match->World().ball.linearVelocity.z);
+            CHECK(m.touches[0] >= 1);
+            if (still == 0)
+            {
+                CHECK(m.saves[0] == 1 && m.points[0] >= 50 && HasEvent(match->World(), RlMatchEventType::Save, 0, -1));
+            }
+            else
+            {
+                CHECK(m.saves[0] == 0);
+            }
+        }
+
+        // ---- a demolition: +1 demo, +25, the event with who and whom
+        {
+            RlMatch match(g_tuning, HumanConfig(1, 0x3u));
+            Idle(match, Ticks(3.2f));
+            RlSim& sim = match.MutableSim();
+            sim.SetCarPose(0, {-30.0f, 0.32f, -10.0f}, {0, 0.70710678f, 0, 0.70710678f}, {23.0f, 0.0f, 0.0f});
+            sim.SetCarPose(1, {-24.0f, 0.32f, -10.0f}, {0, 0.70710678f, 0, 0.70710678f}, {});
+            RunPlay(match, 0, Ticks(3.0f), [&](const RlWorldState& w) { return w.cars[1].demolished; }, true);
+            const RlMatchState& m = match.World().match;
+            CHECK(match.World().cars[1].demolished);
+            CHECK(m.demos[0] == 1 && m.demos[1] == 0 && m.points[0] >= 25);
+            CHECK(HasEvent(match.World(), RlMatchEventType::Demo, 0, 1));
+        }
+
+        // ---- the rules hold over whole matches of bots: the points are exactly the sum of the rules, the ring keeps the last events, two runs agree
+        {
+            std::vector<uint8_t> first;
+            for (int run = 0; run < 2; ++run)
+            {
+                RlMatchConfig config;
+                config.mode = 4;
+                config.seed = 21;
+                config.humanMask = 0;
+                config.botLevel = 1;
+                RlMatch match(g_tuning, config);
+                std::vector<RlCarInput> inputs(8);
+                for (int t = 0; t < Ticks(300.0f); ++t)
+                {
+                    match.Step(inputs.data());
+                }
+                const RlMatchState& m = match.World().match;
+                int sum = 0;
+                for (int slot = 0; slot < 8; ++slot)
+                {
+                    CHECK(m.points[slot] == PointsOf(m, slot));
+                    sum += m.points[slot];
+                }
+                if (run == 0)
+                {
+                    Note("4v4 bots, 5 min: %.0f events, %.0f points in all, score %.0f : %.0f", m.eventHead, sum, m.score[0], m.score[1]);
+                    CHECK(m.eventHead >= 1 && sum > 0);
+                    const auto* bytes = reinterpret_cast<const uint8_t*>(&m);
+                    first.assign(bytes, bytes + sizeof(RlMatchState));
+                }
+                else
+                {
+                    CHECK(std::memcmp(first.data(), &m, sizeof(RlMatchState)) == 0);  // the same run, the same bytes (the statistics, the events, the names)
+                }
+            }
+        }
+
+        // ---- the ring: the oldest events are overwritten, the order is kept
+        {
+            auto match = PlayingMatch(1, 5);
+            const RlWorldState& w = match->World();
+            // goals one after another: each kick-off the ball is put in front of the goal again
+            int goals = 0;
+            for (int n = 0; n < kEventRing + 4 && goals < kEventRing + 4; ++n)
+            {
+                Idle(*match, Ticks(3.5f) + Ticks(3.2f));
+                if (match->World().match.phase != RlMatchPhase::Playing)
+                {
+                    break;
+                }
+                const GoalPlay p = ScoreFrom(*match, 0, 0.0f, 40.0f, 0.0f, 18.0f, 47.0f);
+                goals += p.scored ? 1 : 0;
+            }
+            Note("%.0f goals in a row, %.0f events: the ring holds the last %.0f", goals, w.match.eventHead, kEventRing);
+            CHECK(goals >= 2);
+            if (w.match.eventHead > kEventRing)
+            {
+                uint32_t lastTick = 0;
+                bool ordered = true;
+                for (int n = w.match.eventHead - kEventRing; n < w.match.eventHead; ++n)
+                {
+                    const RlMatchEvent& e = w.match.events[n % kEventRing];
+                    ordered = ordered && e.tick >= lastTick;
+                    lastTick = e.tick;
+                }
+                CHECK(ordered);
+            }
+        }
+
+        // ---- the names: the given ones, "Player" for a human, the names of the bots in order, a long name is cut at a character
+        {
+            RlMatchConfig config = HumanConfig(2, 0x1u);
+            config.names[0] = "Artem";
+            config.names[3] = "Very long name of a player that does not fit in the field of the table, \xD0\x98\xD0\xB2\xD0\xB0\xD0\xBD";
+            RlMatch match(g_tuning, config);
+            const RlMatchState& m = match.World().match;
+            CHECK(std::strcmp(m.names[0], "Artem") == 0);
+            CHECK(std::strcmp(m.names[1], "Comet") == 0 && std::strcmp(m.names[2], "Blaze") == 0);
+            CHECK(std::strlen(m.names[3]) == static_cast<size_t>(kNameBytes - 1) && m.names[3][kNameBytes - 1] == 0);
+            RlMatch other(g_tuning, HumanConfig(1, 0x1u));
+            CHECK(std::strcmp(other.World().match.names[0], "Player") == 0 && std::strcmp(other.World().match.names[1], "Comet") == 0);
+        }
+
+        // ---- the prediction of the shots: straight at the goal, wide, too slow, over the bar, with a bounce
+        {
+            RlBallState ball;
+            ball.position = {0.0f, 1.0f, 30.0f};
+            ball.linearVelocity = {0.0f, 0.0f, 25.0f};
+            CHECK(RlBallHeadsIntoGoal(g_tuning, ball, 1));
+            CHECK(!RlBallHeadsIntoGoal(g_tuning, ball, -1));
+            ball.position.x = 20.0f;
+            CHECK(!RlBallHeadsIntoGoal(g_tuning, ball, 1));  // wide of the posts
+            ball.position = {0.0f, 1.0f, 30.0f};
+            ball.linearVelocity = {0.0f, 0.0f, 3.0f};
+            CHECK(!RlBallHeadsIntoGoal(g_tuning, ball, 1));  // too slow for 2 s
+            ball.linearVelocity = {0.0f, 12.0f, 25.0f};
+            CHECK(!RlBallHeadsIntoGoal(g_tuning, ball, 1));  // over the bar
+            ball.position = {0.0f, 6.0f, 25.0f};
+            ball.linearVelocity = {0.0f, -3.0f, 15.0f};
+            CHECK(RlBallHeadsIntoGoal(g_tuning, ball, 1));  // comes down, bounces on the floor and goes in
+            ball.position = {0.0f, 1.0f, -30.0f};
+            ball.linearVelocity = {0.0f, 0.0f, -25.0f};
+            CHECK(RlBallHeadsIntoGoal(g_tuning, ball, -1));
+        }
+
+        // ---- a snapshot and the way back: the statistics are part of the state, the same ticks again give the same bytes
+        {
+            RlMatchConfig config;
+            config.mode = 2;
+            config.seed = 8;
+            config.humanMask = 0;
+            RlMatch match(g_tuning, config);
+            std::vector<RlCarInput> inputs(4);
+            for (int t = 0; t < Ticks(40.0f); ++t)
+            {
+                match.Step(inputs.data());
+            }
+            std::vector<uint8_t> snapshot;
+            match.SaveState(snapshot);
+            for (int t = 0; t < Ticks(40.0f); ++t)
+            {
+                match.Step(inputs.data());
+            }
+            const RlMatchState forward = match.World().match;
+            CHECK(match.RestoreState(snapshot));
+            for (int t = 0; t < Ticks(40.0f); ++t)
+            {
+                match.Step(inputs.data());
+            }
+            CHECK(std::memcmp(&forward, &match.World().match, sizeof(RlMatchState)) == 0);
+        }
     }
 
     // ---------------------------------------------------------------- the bots
@@ -906,6 +1275,7 @@ int main(int argc, char** argv)
     TestCountdownAndClock();
     TestPads();
     TestDemolishRespawn();
+    TestMatchStatistics();
     TestTuningFile();
     TestBotMatches();
     TestDeterminismAndRollback();

@@ -445,7 +445,7 @@ namespace rl
             lastToucher = -1;
         }
 
-        void Demolish(int index)
+        void Demolish(int index, int by)
         {
             CarRuntime& rt = runtimes[index];
             rt.demolished = 1;
@@ -453,6 +453,11 @@ namespace rl
             rt.boost = 0.0f;
             rt.dodging = 0;
             physics.GetBodyInterfaceNoLock().SetObjectLayer(carIds[index], Layers::kGhost);
+            if (events.demolitions < kMaxCars)
+            {
+                events.demoBy[events.demolitions] = by;
+                events.demoVictim[events.demolitions] = index;
+            }
             ++events.demolitions;
         }
 
@@ -629,7 +634,7 @@ namespace rl
                         const bool demolish = rtOne.supersonic != 0 && teams[one] != teams[other];
                         if (demolish)
                         {
-                            Demolish(other);
+                            Demolish(other, one);
                         }
                         else
                         {
