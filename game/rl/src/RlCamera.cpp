@@ -89,8 +89,8 @@ namespace rl
         const float transitionSeconds = 0.24f / std::max(t.transitionSpeed, 0.05f);
         state.ballBlend = first ? blendTarget : state.ballBlend + (blendTarget - state.ballBlend) * (1.0f - std::exp(-dt * 3.0f / transitionSeconds));
 
-        // ---- the heading of the car cam: where the camera looks along. The nose of the car on the floor; along the motion on a wall, on the ceiling and in the air (the
-        // nose of a car that climbs a wall or flips points anywhere, the motion is what the player follows); the last heading when there is nothing to go by.
+        // ---- the heading of the car cam: where the camera looks along. The nose of the car on the floor; along the motion on a wall and on the ceiling (the nose of a car
+        // that climbs a wall points anywhere, the motion is what the player follows); in the air the way the car faces (below); the last heading when there is nothing to go by.
         const V3 lastHeading = Norm(OnPlane(FromRl(state.heading), up), {0.0f, 0.0f, 1.0f});
         const V3 carForward = Rotate(in.carRotation, {0.0f, 0.0f, 1.0f});
         const V3 noseHeading = OnPlane(carForward, up);
@@ -104,8 +104,6 @@ namespace rl
         // on a wall or the ceiling the motion decides (more so the less the camera is meant to lean with the surface)
         const float wallness = std::clamp((0.85f - surfaceUp.y) / 0.5f, 0.0f, 1.0f);
         const V3 groundHeading = Norm(Lerp(nose, motionDirection, wallness * (1.0f - rollFollow) * motionWeight), nose);
-        const V3 airHeading = Norm(Lerp(nose, motionDirection, motionWeight), nose);
-        const V3 carTarget = Norm(Lerp(airHeading, groundHeading, state.groundBlend), nose);
 
         // a heading turned by a share of the angle to another one, about the up (both lie in its plane): the angle is what is mixed, not the vectors (the
         // vectors of a half turn pass through nothing and the camera would not move)
@@ -115,6 +113,28 @@ namespace rl
             const float step = std::clamp(angle * share, -limit, limit);
             return Norm(from * std::cos(step) + Cross(up, from) * std::sin(step), from);
         };
+
+        // The way the car faces in the air: its nose on the ground plane. A flip takes the nose through the vertical and round to the back (a backflip: the nose is behind the
+        // car for a while), so the nose alone says "the car turned round" when it did not. The nose and its opposite are the two candidates, the one that is closest to where the
+        // car faced a moment ago (the memory, not the camera) is the answer: a car that flips over keeps its heading, a car that turns turns it (a frame is a few degrees, the
+        // candidates are 180 apart). With the nose (almost) straight up or down the memory stays.
+        const V3 memory = first ? nose : Norm(OnPlane(FromRl(state.facing), up), nose);
+        V3 facing = memory;
+        if (in.onSurface)
+        {
+            facing = nose;   // on a surface the nose is the yaw
+        }
+        else if (Len(noseHeading) > 0.08f)
+        {
+            const V3 candidate = Norm(noseHeading, memory);
+            facing = Dot(candidate, memory) >= 0.0f ? candidate : candidate * -1.0f;
+        }
+        state.facing = ToRl(facing);
+
+        // in the air the camera follows where the car faces; "airVelocityFollow" lets the direction of the motion count as well (the camera before G4h3: it jerked in a dodge)
+        const V3 airHeading = turned(facing, motionDirection, t.airVelocityFollow * motionWeight, 10.0f);
+        const V3 carTarget = turned(airHeading, groundHeading, state.groundBlend, 10.0f);
+
         // the swing of a heading towards its target: exponential, and never faster than the limit (a flip, the car upside down, a wall)
         const float turnLimit = std::max(t.maxTurnRate, 30.0f) * kDegToRad * dt;
         const auto swing = [&](V3 from, V3 target, float rate) { return turned(from, target, 1.0f - std::exp(-dt * rate), turnLimit); };

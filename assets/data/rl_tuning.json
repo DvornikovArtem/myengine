@@ -230,6 +230,7 @@
     "wallMargin": 0.3,
     "ballCamMaxPitch": 35.0,
     "rollFollow": 0.0,
+    "airVelocityFollow": 0.0,
     "maxTurnRate": 540.0
   },
   "match": {

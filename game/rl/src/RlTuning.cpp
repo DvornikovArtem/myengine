@@ -192,6 +192,7 @@ namespace rl
             v.Float("wallMargin", t.camera.wallMargin);
             v.Float("ballCamMaxPitch", t.camera.ballCamMaxPitch);
             v.Float("rollFollow", t.camera.rollFollow);
+            v.Float("airVelocityFollow", t.camera.airVelocityFollow);
             v.Float("maxTurnRate", t.camera.maxTurnRate);
             v.End();
 
