@@ -171,6 +171,9 @@ namespace myengine::ecs::systems
         void StartHostedMatch();
         // Back to the menu: the match, the lobby or the connection ends
         void LeaveMatch();
+        // The screen showed the reason of a Failed stage (Status().error): the stage is Menu again. A failure is shown once; while it stays Failed every
+        // screen that is not the main one would be thrown back to the main menu with the same error. The match and the network were already closed.
+        void AcknowledgeFailure();
         // Offline: stands still / goes on. Online the match does not stop; the pause screen only covers it.
         void SetPaused(bool paused);
         void RestartMatch();  // offline: the same setup again

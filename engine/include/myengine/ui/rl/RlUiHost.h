@@ -15,6 +15,7 @@
 #pragma once
 
 #include <filesystem>
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -27,6 +28,15 @@ namespace myengine::ui
 
 namespace myengine::rlui
 {
+    /// The scale of the game UI for a window of this size in REAL pixels (the process is Per-Monitor V2 DPI aware, so a window of a screen of 125 %
+    /// is 1920 x 1080 pixels, not the virtual 1536 x 864): the smaller side of the design (1920 x 1080) fitted into the window, times the UI scale
+    /// setting. The Windows scale does not come in: the UI is sharp at every size because the fonts are baked for this scale.
+    float UiScaleForWindow(std::uint32_t width, std::uint32_t height, float uiScaleSetting);
+
+    /// The size class of the baked fonts for a scale: the nearest of 0.5, 0.67, 0.8, 1, 1.25, 1.5, 2, 3 (by ratio). The atlas is baked again
+    /// only when the class changes, not on every pixel of a window that is dragged.
+    float FontBucketFor(float scale);
+
     struct HostConfig
     {
         std::filesystem::path fontDirectory;   // empty: the usual search (next to the exe, then the sources): assets/fonts

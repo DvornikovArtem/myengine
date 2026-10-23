@@ -36,9 +36,11 @@ endif()
 configure_file(resources/RocketArena.rc.in "${CMAKE_CURRENT_BINARY_DIR}/RocketArena.rc" @ONLY)
 configure_file(resources/RocketArena.ico "${CMAKE_CURRENT_BINARY_DIR}/RocketArena.ico" COPYONLY)
 set(APP_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/RocketArena.rc")
+# Per-Monitor V2 DPI awareness (resources/myengine.manifest): a .manifest among the sources is merged into the manifest of the exe by the linker
+set(APP_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/resources/myengine.manifest")
 set_source_files_properties(${APP_RESOURCES} PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/RocketArena.ico")
 
-add_executable(myengine WIN32 ${APP_HEADERS} ${APP_CPP} ${APP_SHADER_FILES} ${APP_RESOURCES})
+add_executable(myengine WIN32 ${APP_HEADERS} ${APP_CPP} ${APP_SHADER_FILES} ${APP_RESOURCES} ${APP_MANIFEST})
 target_link_libraries(myengine PRIVATE myengine_engine myengine_directxtk myengine_directxtex)
 target_include_directories(myengine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(MYENGINE_SHIPPING)

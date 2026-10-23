@@ -8,6 +8,7 @@
 #include <ole2.h>
 #include <shellapi.h>
 
+#include <myengine/core/DpiScale.h>
 #include <myengine/core/Window.h>
 #include <myengine/core/Application.h>
 #include <myengine/core/ServiceLocator.h>
@@ -114,8 +115,9 @@ namespace myengine::core
                         GlobalUnlock(medium.hGlobal);
                         POINT client{point.x, point.y};
                         ScreenToClient(hwnd_, &client);
-                        drag.dropX = static_cast<float>(client.x);
-                        drag.dropY = static_cast<float>(client.y);
+                        const float scale = dpi::ScaleFromDpi(GetDpiForWindow(hwnd_));
+                        drag.dropX = dpi::ToLogical(static_cast<float>(client.x), scale); // the panels are laid out in logical pixels
+                        drag.dropY = dpi::ToLogical(static_cast<float>(client.y), scale);
                         drag.windowId = windowId_;
                         *effect = DROPEFFECT_COPY;
                     }
@@ -137,10 +139,11 @@ namespace myengine::core
                 auto& drag = ServiceLocator::GetEditorRuntimeState().fileDrag;
                 POINT client{point.x, point.y};
                 ScreenToClient(hwnd_, &client);
+                const float scale = dpi::ScaleFromDpi(GetDpiForWindow(hwnd_));
                 drag.windowId = windowId_;
                 drag.dragging = dragging;
-                drag.x = static_cast<float>(client.x);
-                drag.y = static_cast<float>(client.y);
+                drag.x = dpi::ToLogical(static_cast<float>(client.x), scale);
+                drag.y = dpi::ToLogical(static_cast<float>(client.y), scale);
             }
 
             HWND hwnd_ = nullptr;
@@ -184,17 +187,40 @@ namespace myengine::core
             return false;
         }
 
-        RECT rect{0, 0, static_cast<LONG>(desc_.width), static_cast<LONG>(desc_.height)};
-        AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-
-        const int width = rect.right - rect.left;
-        const int height = rect.bottom - rect.top;
+        // The window does not exist yet: the DPI of the system (of the main screen) decides the size; the real one is read below
+        const std::uint32_t creationDpi = std::max<std::uint32_t>(GetDpiForSystem(), dpi::kBaseDpi);
+        const auto outerSizeFor = [this](const std::uint32_t dpiForSize, int& outWidth, int& outHeight)
+        {
+            const float scale = desc_.scaleToDpi ? dpi::ScaleFromDpi(dpiForSize) : 1.0f;
+            RECT rect{0, 0, static_cast<LONG>(dpi::ScaleLength(desc_.width, scale)), static_cast<LONG>(dpi::ScaleLength(desc_.height, scale))};
+            AdjustWindowRectExForDpi(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0, dpiForSize);
+            outWidth = rect.right - rect.left;
+            outHeight = rect.bottom - rect.top;
+        };
+        int width = 0;
+        int height = 0;
+        outerSizeFor(creationDpi, width, height);
 
         hwnd_ = CreateWindowExW(0, ClassName(), desc_.title.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                 width, height, nullptr, nullptr, GetModuleHandleW(nullptr), this);
 
         if (hwnd_ != nullptr)
         {
+            // The window may have been put on a screen of another scale than the main one: the size is made again for the real DPI
+            dpi_ = std::max<std::uint32_t>(GetDpiForWindow(hwnd_), dpi::kBaseDpi);
+            if (dpi_ != creationDpi)
+            {
+                outerSizeFor(dpi_, width, height);
+                SetWindowPos(hwnd_, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            // desc_ keeps the real client size from now on (the swap chain is made with it)
+            RECT client{};
+            if (GetClientRect(hwnd_, &client) != FALSE)
+            {
+                desc_.width = static_cast<std::uint32_t>(client.right - client.left);
+                desc_.height = static_cast<std::uint32_t>(client.bottom - client.top);
+            }
+
             // Files dragged in from Explorer: the assistant attaches them. A failure only costs this feature.
             const HRESULT initialized = OleInitialize(nullptr);
             if (SUCCEEDED(initialized) || initialized == RPC_E_CHANGED_MODE)
@@ -252,6 +278,23 @@ namespace myengine::core
     {
         desc_.width = width;
         desc_.height = height;
+    }
+
+    float Window::DpiScale() const
+    {
+        return dpi::ScaleFromDpi(dpi_);
+    }
+
+    bool Window::OnDpiChanged(const std::uint32_t newDpi, const RECT& suggested)
+    {
+        dpi_ = std::max<std::uint32_t>(newDpi, dpi::kBaseDpi);
+        if (hwnd_ == nullptr || !dpi::FollowsSuggestedRect(displayMode_ == DisplayMode::Windowed))
+        {
+            return false;
+        }
+        SetWindowPos(hwnd_, nullptr, suggested.left, suggested.top, suggested.right - suggested.left, suggested.bottom - suggested.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        return true;
     }
 
     bool Window::GetMonitorSize(std::uint32_t& width, std::uint32_t& height) const
@@ -328,7 +371,7 @@ namespace myengine::core
             height = std::max<std::uint32_t>(height, 360u);
             SetWindowLongPtrW(hwnd_, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
             RECT frame{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
-            AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, FALSE);
+            AdjustWindowRectExForDpi(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi_);
             const int outerWidth = frame.right - frame.left;
             const int outerHeight = frame.bottom - frame.top;
             const RECT& work = info.rcWork;
@@ -410,8 +453,8 @@ namespace myengine::core
             wc.hInstance = instance;
             wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
             // The icon of the exe (app/resources, resource id 1) for the title bar and the taskbar; a binary without the resource (tests) has the default one
-            wc.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
-            wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+            wc.hIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetricsForDpi(SM_CXICON, GetDpiForSystem()), GetSystemMetricsForDpi(SM_CYICON, GetDpiForSystem()), LR_DEFAULTCOLOR));
+            wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()), GetSystemMetricsForDpi(SM_CYSMICON, GetDpiForSystem()), LR_DEFAULTCOLOR));
             // The editor background (kTitle): before the first frame the window is dark, not white
             wc.hbrBackground = CreateSolidBrush(RGB(0x15, 0x15, 0x15));
             wc.lpszClassName = Window::ClassName();

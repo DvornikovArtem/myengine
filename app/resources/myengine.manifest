@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  The manifest of the exe: Windows reads it before the first line of the program runs.
+  Per-Monitor V2 DPI awareness: the process sees the real pixels of every screen (1920 x 1080 at a scale of 125 %, not the virtual 1536 x 864 that
+  Windows stretches). Without it the whole picture, the 3D scene and the UI, is drawn small and enlarged by Windows: the text is blurred and the slanted
+  edges have steps. WM_DPICHANGED (a window moved to a screen of another scale) is handled by Application, the sizes by core/DpiScale.h.
+  A CMake source of the target `myengine` (app/CMakeLists.txt): the linker merges it with the manifest that it makes itself.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- the first for old systems (Windows 8.1 and the first Windows 10), the second for the current ones: PerMonitorV2 where it is known -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>

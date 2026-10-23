@@ -16,6 +16,7 @@
 #include <myengine/editor/EditorState.h>
 #include <myengine/game/RlCars.h>
 #include <myengine/game/RlGameSettings.h>
+#include <myengine/game/RlVideoWindowChange.h>
 #include <myengine/input/InputManager.h>
 
 #include <rl/RlControls.h>
@@ -26,13 +27,18 @@
 
 #include "../../engine/src/core/UiScript.h"
 
+#include <DirectXMath.h>
+
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -299,6 +305,13 @@ namespace
             {
                 add(name);
             }
+            for (const char* team : {"RlBlue0", "RlOrange0"})
+            {
+                for (int w = 0; w < 4; ++w)
+                {
+                    add((std::string(team) + "Wheel" + std::to_string(w)).c_str());
+                }
+            }
             core::ServiceLocator::GetEditorRuntimeState().mode = editor::RuntimeMode::Play;
         }
 
@@ -323,6 +336,102 @@ namespace
             return false;
         }
     };
+
+    // RL-B2: the wheels of the car of the bot (nobody holds its stick: the picture works from the state of the car) turn about their axle as the car rolls
+    // forward, and the front ones turn with the steering. The rotation of a wheel entity is that of the body under the turn of the wheel, so the turn of
+    // the wheel is the wheel's matrix times the inverse of the body's.
+    void TestWheelsOfTheBot(Rig& rig)
+    {
+        namespace dx = DirectX;
+        constexpr float kDegToRad = 0.01745329f;
+        const auto entityOf = [&](const std::string& tag)
+        {
+            ecs::EntityId found = ecs::kInvalidEntity;
+            rig.world.ForEach<components::TagComponent>([&](const ecs::EntityId entity, const components::TagComponent& t) { found = t.name == tag ? entity : found; });
+            return found;
+        };
+        const auto rotationOf = [&](const ecs::EntityId entity)
+        {
+            const auto* transform = rig.world.TryGet<components::TransformComponent>(entity);
+            return dx::XMMatrixRotationRollPitchYaw(transform->rotationDeg.x * kDegToRad, transform->rotationDeg.y * kDegToRad, transform->rotationDeg.z * kDegToRad);
+        };
+        const ecs::EntityId body = entityOf("RlOrange0");
+        ecs::EntityId wheel[4];
+        for (int w = 0; w < 4; ++w)
+        {
+            wheel[w] = entityOf("RlOrange0Wheel" + std::to_string(w));
+            Check(wheel[w] != ecs::kInvalidEntity, "the rig has the wheels of the car of the bot");
+        }
+        // the turn of a wheel relative to the body: about X by `spin`, about the up by `steer` (Spin * Steer * Body = Wheel)
+        const auto relative = [&](const int w, float& spin, float& steer)
+        {
+            dx::XMFLOAT4X4 m;
+            dx::XMStoreFloat4x4(&m, dx::XMMatrixMultiply(rotationOf(wheel[w]), dx::XMMatrixInverse(nullptr, rotationOf(body))));
+            steer = std::atan2(-m._13, m._11);  // where the wheel's axle (X) points: the spin leaves it alone, the steering swings it from X towards -Z
+            spin = std::atan2(m._23, m._22);    // the top (Y) of the wheel tilts to the front (+Z) for a positive spin
+        };
+        const auto positionOf = [&](const ecs::EntityId entity) { return rig.world.TryGet<components::TransformComponent>(entity)->position; };
+
+        float spinSum[4] = {};
+        float last[4] = {};
+        float steerFront = 0.0f;
+        float steerRear = 0.0f;
+        int rolling = 0;
+        int forward = 0;
+        components::Vec3 lastPosition = positionOf(body);
+        for (int i = 0; i < 360; ++i)
+        {
+            rig.Frames(1, 1.0f / 120.0f);
+            const components::Vec3 position = positionOf(body);
+            const float dx2 = position.x - lastPosition.x;
+            const float dz2 = position.z - lastPosition.z;
+            const float speed = std::sqrt(dx2 * dx2 + dz2 * dz2) * 120.0f;
+            lastPosition = position;
+            for (int w = 0; w < 4; ++w)
+            {
+                float spin = 0.0f;
+                float steer = 0.0f;
+                relative(w, spin, steer);
+                float step = spin - last[w];
+                last[w] = spin;
+                if (i == 0)
+                {
+                    continue;
+                }
+                while (step > 3.14159265f)
+                {
+                    step -= 6.2831853f;
+                }
+                while (step < -3.14159265f)
+                {
+                    step += 6.2831853f;
+                }
+                spinSum[w] += step;
+                if (w == 2 && speed > 3.0f)
+                {
+                    ++rolling;
+                    forward += step > 0.0f ? 1 : 0;
+                }
+                if (w < 2)
+                {
+                    steerFront = std::max(steerFront, std::fabs(steer));
+                }
+                else
+                {
+                    steerRear = std::max(steerRear, std::fabs(steer));
+                }
+            }
+        }
+        std::cout << "  wheels of the bot: spin " << spinSum[0] << " " << spinSum[1] << " " << spinSum[2] << " " << spinSum[3] << " rad, rolling frames " << rolling
+                  << ", forward " << forward << ", front steer up to " << steerFront << ", rear " << steerRear << "\n";
+        Check(rolling > 60, "the car of the bot drove (the wheels have something to turn with)");
+        for (int w = 0; w < 4; ++w)
+        {
+            Check(spinSum[w] > 10.0f, "the wheels of a car that drives forward turn forward (positive spin, many radians)");
+        }
+        Check(forward * 100 >= rolling * 90, "the wheel turns forward in nearly every frame of rolling");
+        Check(steerRear < 0.001f, "the rear wheels do not steer");
+    }
 
     void TestSystem(const fs::path& source)
     {
@@ -358,6 +467,7 @@ namespace
         Check(status.hud.phase == rlui::HudPhase::Countdown && status.hud.clock > 5.9f, "it starts with the countdown and the whole clock");
 
         Check(rig.Until([&] { return status.hud.phase == rlui::HudPhase::Playing; }, 400), "the countdown ends");
+        TestWheelsOfTheBot(rig);
         // the pause stands still
         rig.system.SetPaused(true);
         rig.Frames(1);
@@ -718,6 +828,226 @@ namespace
         }
     }
 
+    // RL-B3: the host of a private match is gone (it crashed and says nothing, or it leaves). The guest gets a Failed stage with the reason, the screens show
+    // it once and acknowledge it, and then the menu works as ever: nothing throws the player back to the main screen, an offline match and a new lobby start.
+    // The other way round (a guest goes) is no failure for the host. One scenario = one host, one guest, a loopback hub, frame by frame like the lobby screens.
+    // The lobby list always has a row for every seat of the match (a bot or an empty one in the seats nobody took): the players are the rows with a name and no bot
+    int HumansIn(const sys::RlGameStatus& status)
+    {
+        return static_cast<int>(std::count_if(status.lobby.begin(), status.lobby.end(), [](const sys::RlLobbySlot& slot) { return !slot.name.empty() && !slot.bot; }));
+    }
+
+    void RunHostLost(const bool inMatch, const bool hostCrashes, const int port)
+    {
+        const std::string title = std::string("the host is gone ") + (inMatch ? "in the match" : "in the lobby") + (hostCrashes ? ", silently" : ", leaving");
+        std::cout << "  " << title << std::endl;
+        rl::net::LoopbackHub hub;
+        Rig hostRig;
+        Rig guestRig;
+        hostRig.system.SetGameMode(true);
+        guestRig.system.SetGameMode(true);
+        hostRig.Frames(2);
+        guestRig.Frames(2);
+
+        sys::RlGameMatchSetup host;
+        host.kind = sys::RlGameMatchSetup::Kind::Host;
+        host.mode = 1;
+        host.port = static_cast<std::uint16_t>(port);
+        host.playerName = "Host";
+        host.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 1); };
+        hostRig.system.StartMatch(host);
+        hostRig.Frames(3);
+        sys::RlGameMatchSetup join;
+        join.kind = sys::RlGameMatchSetup::Kind::Join;
+        join.mode = 1;
+        join.address = std::to_string(port);
+        join.playerName = "Guest";
+        join.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 2); };
+        guestRig.system.StartMatch(join);
+
+        bool hostAlive = true;
+        bool guestAlive = true;
+        const auto step = [&](const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames; ++i)
+            {
+                if (hostAlive)
+                {
+                    hostRig.system.Update(hostRig.world, 1.0f / 60.0f);
+                }
+                if (guestAlive)
+                {
+                    guestRig.system.Update(guestRig.world, 1.0f / 60.0f);
+                }
+                if (slow)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16));  // the network clock of the game is the real one: a silence of five seconds takes five
+                }
+            }
+        };
+        const auto stageOf = [](Rig& rig) { return rig.system.Status().stage; };
+        const auto waitFor = [&](const std::function<bool()>& done, const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames && !done(); ++i)
+            {
+                step(1, slow);
+            }
+            return done();
+        };
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Lobby && HumansIn(hostRig.system.Status()) >= 2; }, 600), "the guest is in the lobby of the host");
+        if (inMatch)
+        {
+            hostRig.system.StartHostedMatch();
+            Check(waitFor([&] { return stageOf(hostRig) == sys::RlGameStage::Playing && stageOf(guestRig) == sys::RlGameStage::Playing; }, 1200), "the match is on for both");
+            step(30);
+        }
+
+        // the host goes: with its goodbye, or without one (the guest finds out when nothing has come for five seconds)
+        if (hostCrashes)
+        {
+            hostAlive = false;
+        }
+        else
+        {
+            hostRig.system.LeaveMatch();
+            step(3);
+            hostAlive = false;
+        }
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Failed; }, 900, true), "the guest's stage turns Failed");
+        Check(!guestRig.system.Status().error.empty(), "and says why");
+        step(20);
+        Check(stageOf(guestRig) == sys::RlGameStage::Failed, "the failure waits for the screen that shows it");
+
+        // the screen showed it: the failure is over, it does not come back by itself
+        guestRig.system.AcknowledgeFailure();
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu && guestRig.system.Status().error.empty(), "an acknowledged failure is the menu again, without the error");
+        step(120);
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu && guestRig.system.Status().error.empty(), "and the menu stays the menu (no network object is left to fail again)");
+        guestRig.system.AcknowledgeFailure();
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu, "acknowledging when nothing failed changes nothing");
+
+        // everything starts again: a match against bots, a new lobby of this player, another guest in it
+        sys::RlGameMatchSetup offline;
+        offline.mode = 1;
+        offline.botLevel = 1;
+        guestRig.system.StartMatch(offline);
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Playing; }, 120), "an offline match starts after the failure");
+        guestRig.system.LeaveMatch();
+        step(3);
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu, "and ends in the menu");
+
+        sys::RlGameMatchSetup again;
+        again.kind = sys::RlGameMatchSetup::Kind::Host;
+        again.mode = 1;
+        again.port = static_cast<std::uint16_t>(port + 1);
+        again.playerName = "Guest";
+        again.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 3); };
+        guestRig.system.StartMatch(again);
+        Check(waitFor([&] { return stageOf(guestRig) == sys::RlGameStage::Lobby; }, 120), "a new lobby opens after the failure");
+        guestRig.system.LeaveMatch();
+        step(3);
+        Check(stageOf(guestRig) == sys::RlGameStage::Menu, "and closes into the menu");
+    }
+
+    // A guest who goes is not a failure of the host: the lobby loses a name, the match goes on, no error appears
+    void RunGuestLost(const bool inMatch, const bool guestCrashes, const int port)
+    {
+        const std::string title = std::string("the guest is gone ") + (inMatch ? "in the match" : "in the lobby") + (guestCrashes ? ", silently" : ", leaving");
+        std::cout << "  " << title << std::endl;
+        rl::net::LoopbackHub hub;
+        Rig hostRig;
+        Rig guestRig;
+        hostRig.system.SetGameMode(true);
+        guestRig.system.SetGameMode(true);
+        hostRig.Frames(2);
+        guestRig.Frames(2);
+        sys::RlGameMatchSetup host;
+        host.kind = sys::RlGameMatchSetup::Kind::Host;
+        host.mode = 1;
+        host.port = static_cast<std::uint16_t>(port);
+        host.playerName = "Host";
+        host.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 1); };
+        hostRig.system.StartMatch(host);
+        hostRig.Frames(3);
+        sys::RlGameMatchSetup join;
+        join.kind = sys::RlGameMatchSetup::Kind::Join;
+        join.mode = 1;
+        join.address = std::to_string(port);
+        join.playerName = "Guest";
+        join.transportFactory = [&](const rl::net::NetSimParams& sim) { return rl::net::MakeLoopbackTransport(hub, sim, 2); };
+        guestRig.system.StartMatch(join);
+
+        bool guestAlive = true;
+        const auto step = [&](const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames; ++i)
+            {
+                hostRig.system.Update(hostRig.world, 1.0f / 60.0f);
+                if (guestAlive)
+                {
+                    guestRig.system.Update(guestRig.world, 1.0f / 60.0f);
+                }
+                if (slow)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                }
+            }
+        };
+        const auto waitFor = [&](const std::function<bool()>& done, const int frames, const bool slow = false)
+        {
+            for (int i = 0; i < frames && !done(); ++i)
+            {
+                step(1, slow);
+            }
+            return done();
+        };
+        const sys::RlGameStatus& hostStatus = hostRig.system.Status();
+        Check(waitFor([&] { return guestRig.system.Status().stage == sys::RlGameStage::Lobby && HumansIn(hostStatus) >= 2; }, 600), "the guest is in the lobby of the host");
+        if (inMatch)
+        {
+            hostRig.system.StartHostedMatch();
+            Check(waitFor([&] { return hostStatus.stage == sys::RlGameStage::Playing && guestRig.system.Status().stage == sys::RlGameStage::Playing; }, 1200), "the match is on for both");
+            step(30);
+        }
+        if (guestCrashes)
+        {
+            guestAlive = false;
+        }
+        else
+        {
+            guestRig.system.LeaveMatch();
+            step(3);
+            guestAlive = false;
+        }
+        bool failed = false;
+        const auto watch = [&] { failed = failed || hostStatus.stage == sys::RlGameStage::Failed || !hostStatus.error.empty(); return false; };
+        waitFor(watch, guestCrashes ? 420 : 150, true);  // the clock of the network is the real one; a silent guest is dropped after five seconds, one that says goodbye is not heard at once
+        Check(!failed, "the host never fails because a guest went");
+        Check(hostStatus.stage == (inMatch ? sys::RlGameStage::Playing : sys::RlGameStage::Lobby), "the host stays in its lobby / match");
+        if (!inMatch)
+        {
+            Check(HumansIn(hostStatus) == 1, "the lobby lost the name of the guest");
+        }
+        hostRig.system.LeaveMatch();
+        step(3);
+        Check(hostStatus.stage == sys::RlGameStage::Menu, "the host leaves into the menu");
+    }
+
+    void TestHostLost()
+    {
+        std::cout << "RlGameSystem: a host that is gone is one error, shown once; a guest that is gone is no error" << std::endl;
+        const fs::path appdata = TempFolder("myengine_game_host_lost_test");
+        _putenv_s("APPDATA", appdata.string().c_str());
+        _putenv_s("LOCALAPPDATA", appdata.string().c_str());
+        RunHostLost(false, false, 47910);
+        RunHostLost(true, false, 47912);
+        RunHostLost(false, true, 47914);
+        RunHostLost(true, true, 47916);
+        RunGuestLost(false, false, 47920);
+        RunGuestLost(true, false, 47922);
+        RunGuestLost(true, true, 47924);
+    }
+
     // A demolished car is parked under the map until it comes back. The camera of the player must stay where the car was blown up, not follow it
     // down (the player looked at the arena from below, "under the textures", for the three seconds of the respawn).
     void TestDemolishCamera()
@@ -860,6 +1190,112 @@ namespace
         Check(brightest < 150, "the turf in front of the goals is turf, not a white dot");
         stbi_image_free(pixels);
     }
+
+    // ---------------------------------------------------------------- the video window: chosen, applied, kept or reverted
+
+    // The window mode and the resolution of Settings > Video wait for APPLY: the steps only choose, APPLY hands the window ONE change and opens the question,
+    // Keep / Revert / the end of the time answer it, leaving with a choice asks, Discard throws the choice away without a touch of the window.
+    void TestVideoWindowChange()
+    {
+        using game::RlVideoWindowChange;
+        using game::RlWindowChoice;
+
+        // the way the screen drives it: every change of the window that reaches the display is counted
+        int windowChanges = 0;
+        RlWindowChoice shown{};
+        RlVideoWindowChange w;
+        const auto apply = [&]() -> bool
+        {
+            if (!w.Apply())
+            {
+                return false;
+            }
+            ++windowChanges;
+            shown = w.Applied();
+            return true;
+        };
+        const auto revert = [&]()
+        {
+            if (w.Revert())
+            {
+                ++windowChanges;
+                shown = w.Applied();
+            }
+        };
+
+        w.Set({0, 1600, 900});
+        shown = w.Applied();
+        Check(!w.Dirty() && !w.Keeping(), "the window that was loaded is applied: nothing is chosen, no question");
+        Check(!apply() && windowChanges == 0, "APPLY with nothing chosen does nothing");
+
+        // steps of the resolution and a window mode only choose
+        w.SetPendingSize(1280, 720);
+        w.SetPendingSize(1366, 768);
+        w.SetPendingSize(1920, 1080);
+        w.SetPendingMode(2);
+        Check(windowChanges == 0 && shown.width == 1600 && shown.mode == 0, "steps and clicks do not touch the window");
+        Check(w.Dirty() && w.Pending().width == 1920 && w.Pending().mode == 2, "the chosen values are shown");
+        Check(w.Applied().width == 1600 && w.Applied().mode == 0, "and the applied ones are the old ones");
+
+        // APPLY: both at once, one change, then the question
+        Check(apply(), "APPLY applies a chosen window");
+        Check(windowChanges == 1 && shown.mode == 2 && shown.width == 1920 && shown.height == 1080, "the window changed once, to the mode and the size together");
+        Check(w.Keeping() && std::abs(w.Remaining() - RlVideoWindowChange::kKeepSeconds) < 1e-4f, "the question of Keep / Revert is open for 15 s");
+        Check(!w.Dirty(), "nothing is chosen any more");
+        Check(!apply() && windowChanges == 1, "APPLY while the question is open does nothing");
+        w.SetPendingMode(0);
+        w.SetPendingSize(1280, 720);
+        Check(!w.Dirty() && w.Pending().mode == 2, "a choice cannot be made while the question is open");
+
+        // Keep
+        w.Keep();
+        Check(!w.Keeping() && w.Applied().mode == 2 && w.Applied().width == 1920, "Keep leaves the new window");
+        Check(!w.Revert() && windowChanges == 1, "a Revert after Keep has nothing to bring back");
+        Check(!w.Tick(100.0f) && windowChanges == 1, "the time of a closed question does not run");
+
+        // Revert
+        w.SetPendingMode(0);
+        w.SetPendingSize(1600, 900);
+        Check(apply() && windowChanges == 2, "the next APPLY");
+        Check(!w.Tick(5.0f) && w.Keeping() && std::abs(w.Remaining() - 10.0f) < 1e-3f, "5 s later 10 s are left");
+        revert();
+        Check(windowChanges == 3 && shown.mode == 2 && shown.width == 1920, "Revert brings the old window back, once");
+        Check(!w.Keeping() && !w.Dirty() && w.Pending().mode == 2 && w.Pending().width == 1920, "and the chosen values are the old ones again");
+
+        // the time is up: the same as Revert
+        w.SetPendingSize(1280, 720);
+        Check(apply() && windowChanges == 4, "APPLY again");
+        Check(!w.Tick(14.0f) && w.Keeping(), "14 s: still waiting");
+        Check(w.Tick(1.5f), "past 15 s the question ends");
+        windowChanges += 1;
+        shown = w.Applied();
+        Check(!w.Keeping() && shown.width == 1920 && !w.Dirty() && w.Pending().width == 1920, "the time out is a Revert: the old window and the chosen values");
+        Check(!w.Revert(), "and it was one answer, not two");
+
+        // Discard: the window is not touched, because nothing was applied
+        const int before = windowChanges;
+        w.SetPendingMode(1);
+        w.SetPendingSize(1366, 768);
+        Check(w.Dirty(), "a choice again");
+        w.Discard();
+        Check(!w.Dirty() && w.Pending().mode == 2 && w.Pending().width == 1920 && windowChanges == before, "Discard returns the chosen values to the applied ones and applies nothing");
+
+        // Borderless takes the desktop: its size is not a choice
+        w.Set({1, 2560, 1440});
+        w.SetPendingSize(1280, 720);
+        Check(!w.Dirty(), "a size is no change of a Borderless window");
+        w.SetPendingMode(0);
+        Check(w.Dirty(), "but the mode is");
+        w.SetPendingMode(1);
+        Check(!w.Dirty(), "back to Borderless: nothing is chosen again");
+
+        // Set() (the settings were loaded, a reset) ends everything
+        w.SetPendingMode(2);
+        Check(apply() && w.Keeping(), "the question is open");
+        w.Set({0, 1600, 900});
+        Check(!w.Keeping() && !w.Dirty() && w.Applied().mode == 0, "Set starts from the applied window with no question");
+        Check(game::SameWindow({1, 1, 1}, {1, 2, 2}) && !game::SameWindow({0, 1, 1}, {0, 2, 2}) && !game::SameWindow({0, 1, 1}, {2, 1, 1}), "the same window: Borderless by the mode, the others by the size too");
+    }
 }
 
 int main()
@@ -868,9 +1304,11 @@ int main()
     {
         const fs::path source = fs::u8path(MYENGINE_SOURCE_DIR);
         TestSettings();
+        TestVideoWindowChange();
         TestScript();
         TestSystem(source);
         TestOnlineVisuals();
+        TestHostLost();
         TestDemolishCamera();
         TestBallVisibleEverywhere();
         TestFloorHasNoSpotsAtTheKickoffCamera(source);

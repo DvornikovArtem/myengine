@@ -1384,6 +1384,74 @@ namespace
         CHECK(!lonely->LastError().empty());
     }
 
+    // RL-B3: the host of a lobby vanishes without a word. The guest hears it once (HostLeft), is Idle and keeps no old error, and its next Create, Join and
+    // RefreshList work as on the first day; a failed Join does not spoil the next one. A guest who goes is no error for the host.
+    void TestLanLobbyHostLost()
+    {
+        std::printf("LAN lobby: the host vanishes, the guest starts again from a clean sheet\n");
+        net::NetSimParams none;
+        net::LoopbackHub hub;
+        double now = 0.0;
+        auto host = MakeTestLobby(hub, "alice", none, 41);
+        auto guest = MakeTestLobby(hub, "bob", none, 42);
+        std::string error;
+        net::LobbyCreateOptions create;
+        create.hostName = "alice";
+        create.maxPlayers = 2;
+        create.lobbyPort = 5300;
+        CHECK(host->Create(create, error));
+        CHECK(guest->Join("5300", error));
+        StepLobbies(now, 2.0, {host.get(), guest.get()});
+        CHECK(guest->State() == net::LobbyState::Joined);
+        guest->TakeEvents();
+
+        // the host crashes: it is not updated any more and says nothing
+        StepLobbies(now, 8.0, {guest.get()});
+        const std::vector<net::LobbyEvent> events = guest->TakeEvents();
+        CHECK(std::count_if(events.begin(), events.end(), [](const net::LobbyEvent& e) { return e.kind == net::LobbyEventKind::HostLeft; }) == 1);
+        CHECK(!HasEvent(events, net::LobbyEventKind::Error));
+        CHECK(guest->State() == net::LobbyState::Idle);
+        CHECK(guest->LastError().empty());
+        StepLobbies(now, 3.0, {guest.get()});
+        CHECK(guest->TakeEvents().empty());  // told once
+        CHECK(guest->State() == net::LobbyState::Idle && guest->LastError().empty());
+
+        // the guest opens a lobby of its own; others find it, join it
+        create.hostName = "bob";
+        create.lobbyPort = 5301;
+        CHECK(guest->Create(create, error));
+        CHECK(guest->State() == net::LobbyState::Hosting && guest->LastError().empty());
+        auto seeker = MakeTestLobby(hub, "erin", none, 43);
+        seeker->RefreshList();
+        StepLobbies(now, 3.0, {guest.get(), seeker.get()});
+        CHECK(seeker->Lobbies().size() == 1);
+        // a Join that fails (nobody there) leaves the next one clean
+        CHECK(seeker->Join("5999", error));
+        StepLobbies(now, 12.0, {guest.get(), seeker.get()});
+        CHECK(seeker->State() == net::LobbyState::Failed && !seeker->LastError().empty());
+        CHECK(seeker->Join("5301", error));
+        StepLobbies(now, 2.0, {guest.get(), seeker.get()});
+        CHECK(seeker->State() == net::LobbyState::Joined && seeker->LastError().empty());
+        CHECK(guest->Members().size() == 2);
+
+        // the guest of this lobby goes: the host sees a member leave, no error, no HostLeft
+        guest->TakeEvents();
+        seeker->Leave();
+        StepLobbies(now, 1.0, {guest.get(), seeker.get()});
+        const std::vector<net::LobbyEvent> hostEvents = guest->TakeEvents();
+        CHECK(HasEvent(hostEvents, net::LobbyEventKind::MemberLeft));
+        CHECK(!HasEvent(hostEvents, net::LobbyEventKind::Error) && !HasEvent(hostEvents, net::LobbyEventKind::HostLeft));
+        CHECK(guest->State() == net::LobbyState::Hosting && guest->LastError().empty() && guest->Members().size() == 1);
+        // and a silent one is dropped without a word
+        CHECK(seeker->Join("5301", error));
+        StepLobbies(now, 2.0, {guest.get(), seeker.get()});
+        CHECK(guest->Members().size() == 2);
+        guest->TakeEvents();
+        StepLobbies(now, 8.0, {guest.get()});
+        CHECK(guest->Members().size() == 1 && guest->State() == net::LobbyState::Hosting && guest->LastError().empty());
+        CHECK(!HasEvent(guest->TakeEvents(), net::LobbyEventKind::Error));
+    }
+
     // The same over the real network of this PC: the broadcast of the beacon, the ping, the join. A firewall or a network without
     // broadcasts (some virtual adapters) can keep the beacon from arriving: that is reported, the join by hand is checked anyway.
     void TestLanLobbyUdp()
@@ -1699,6 +1767,7 @@ int main(int argc, char** argv)
     TestJoinRefusals();
     TestLanLobby();
     TestLanLobbyEdges();
+    TestLanLobbyHostLost();
     TestNicknames();
     TestLanLobbyUdp();
     TestSteamWithoutSdk();

@@ -40,12 +40,18 @@ namespace myengine::ui
         bool Initialize(render::IRenderAdapter& renderAdapter, core::Logger& logger, SceneEditorServices services);
         void Shutdown();
 
-        bool RegisterWindow(core::WindowId windowId, HWND hwnd, render::RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height);
+        // `width` and `height` are the real client size. The DPI of the window (0: asked from `hwnd`) sets the scale of the editor, see GetUiScale.
+        bool RegisterWindow(core::WindowId windowId, HWND hwnd, render::RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height, std::uint32_t dpi = 0);
         void UnregisterWindow(core::WindowId windowId);
 
         void HandleWindowMessage(core::WindowId windowId, HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
         // The held mouse buttons are released at the current position (the capture was lost, the window lost the focus)
         void ReleaseMouseButtons(core::WindowId windowId);
+        // The window moved to a screen of another scale (WM_DPICHANGED): the editor is laid out and baked again for the new scale on the next Update
+        void OnWindowDpiChanged(core::WindowId windowId, std::uint32_t dpi);
+        // How many real pixels one pixel of the editor layout is: the Windows scale of the window (1.25 at 125 %) for the editor, 1 for the game UI
+        // (it scales itself by the size of the window) and for an unknown window. The editor rectangles (the viewport) are multiplied by it.
+        float GetUiScale(core::WindowId windowId) const;
         void Update(float deltaTime);
         void RenderWindow(core::WindowId windowId);
 
@@ -66,7 +72,8 @@ namespace myengine::ui
     private:
         struct WindowUiContext;
 
-        std::unique_ptr<WindowUiContext> CreateWindowContext(core::WindowId windowId, HWND hwnd, render::RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height);
+        std::unique_ptr<WindowUiContext> CreateWindowContext(core::WindowId windowId, HWND hwnd, render::RenderSurfaceHandle surface, std::uint32_t width, std::uint32_t height, std::uint32_t dpi);
+        float EffectiveUiScale(std::uint32_t dpi) const;
         void BuildWindowUi(WindowUiContext& windowContext);
 
         void RebuildWindowContexts();

@@ -905,6 +905,95 @@ namespace
         std::cout << "HUD frame (4v4, table half of the frames): median " << median << " ms, worst " << times.back() << " ms, " << h.vertices() << " vertices" << std::endl;
         Check(median < 1.0, "the HUD costs under 1 ms of the CPU (" + std::to_string(median) + " ms)");
     }
+
+    // ---------------------------------------------------------------- sharp text
+
+    // The text of the kit is sharp when its glyphs lie on the pixels as they were rasterised: the font is baked at a whole number of pixels, the text is
+    // drawn at that size (a fraction of a pixel in the size scales every glyph and puts its edges between two pixels) and the glyphs stand on whole pixels.
+    void TestSharpText()
+    {
+        Harness h(1920.0f, 1080.0f);
+        h.Run([](Frame& f)
+        {
+            for (int style = 0; style < static_cast<int>(FontStyle::Count); ++style)
+            {
+                for (const float size : Fonts::DesignSizes(static_cast<FontStyle>(style)))
+                {
+                    const FontHandle handle = f.fonts().Get(static_cast<FontStyle>(style), size);
+                    const std::string label = "style " + std::to_string(style) + " at " + std::to_string(size);
+                    Check(handle.pixelSize >= 1.0f && handle.pixelSize == std::round(handle.pixelSize), label + ": baked at a whole number of pixels");
+                    Check(handle.DrawSize(size, 1.0f) == handle.pixelSize, label + ": drawn at the baked size on the screen it was baked for");
+                    Check(std::fabs(handle.DrawSize(size, 1.0f) - size * handle.lineScale) <= 0.5f + 1e-3f, label + ": and that is within half a pixel of the design");
+                    Check(handle.DrawSize(size, 1.3f) > handle.pixelSize + 0.5f, label + ": a screen far from the baked class draws at the wanted size");
+                    Check(handle.DrawSize(size, 1.02f) == handle.pixelSize || std::fabs(size * 1.02f * handle.lineScale - handle.pixelSize) > 0.5f,
+                          label + ": a few per cent off the class keeps the baked size while it is within half a pixel");
+                }
+            }
+            for (const float size : {16.0f, 20.0f, 30.0f})
+            {
+                const FontHandle icons = f.fonts().Icons(size);
+                Check(icons.Valid() && icons.pixelSize == std::round(icons.pixelSize), "the icons are baked at a whole number of pixels");
+            }
+
+            // text at positions that are not whole pixels: every corner of every glyph is a whole pixel (so the texels land 1:1 on the screen pixels)
+            paint::Text(f, FontStyle::ExtraBoldItalic, 22.0f, {101.37f, 203.61f}, Color::Hex(0xFFFFFF), "Windowed Borderless Fullscreen 144 Hz");
+            paint::Text(f, FontStyle::SemiBold, 18.0f, {333.5f, 411.25f}, Color::Hex(0xFFFFFF), "Window mode and resolution ask to keep the change");
+            paint::Text(f, FontStyle::BlackItalic, 84.0f, {640.75f, 100.5f}, Color::Hex(0xFFFFFF), "VIDEO");
+            paint::Text(f, FontStyle::Bold, 24.0f, {900.3f, 300.8f}, Color::Hex(0xFFFFFF), "Resolution", Align::Center);
+            const ImDrawList* list = ImGui::GetForegroundDrawList();
+            Check(list->VtxBuffer.Size >= 4 * 80, "the text made its glyph quads (" + std::to_string(list->VtxBuffer.Size) + " vertices)");
+            int offGrid = 0;
+            for (int i = 0; i < list->VtxBuffer.Size; ++i)
+            {
+                const ImVec2 p = list->VtxBuffer[i].pos;
+                if (std::fabs(p.x - std::round(p.x)) > 1e-3f || std::fabs(p.y - std::round(p.y)) > 1e-3f)
+                {
+                    ++offGrid;
+                }
+            }
+            Check(offGrid == 0, "every glyph corner is on a whole pixel (" + std::to_string(offGrid) + " are not)");
+        }, RawInput{});
+    }
+
+    // The atlas of the game UI is rasterised by FreeType while the atlas of a window already holds the fonts of the editor (stb_truetype): the loader is
+    // changed under them. The glyphs are there, and the atlas is smaller than the oversampled one.
+    void TestFontLoaderSwitch()
+    {
+        ImGuiContext* context = ImGui::CreateContext();
+        ImGui::SetCurrentContext(context);
+        ImGuiIO& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        // the editor's fonts as UiManager makes them: a text font without its private use area, the icons merged into it, an icon-only font
+        const fs::path fontRoot = fs::u8path(MYENGINE_SOURCE_DIR) / "assets" / "fonts";
+        static const ImWchar kExcludePrivateUse[] = {0xE000, 0xF8FF, 0};
+        static const ImWchar kIcon[] = {0xE140, 0xE140, 0};
+        ImFontConfig text;
+        text.GlyphExcludeRanges = kExcludePrivateUse;
+        ImFont* editorText = io.Fonts->AddFontFromFileTTF((fontRoot / "Inter-Regular.ttf").string().c_str(), 17.0f, &text);
+        ImFontConfig merged;
+        merged.MergeMode = true;
+        merged.PixelSnapH = true;
+        io.Fonts->AddFontFromFileTTF((fontRoot / "lucide.ttf").string().c_str(), 14.0f, &merged, kIcon);
+        ImFontConfig iconOnly;
+        iconOnly.PixelSnapH = true;
+        io.Fonts->AddFontFromFileTTF((fontRoot / "lucide.ttf").string().c_str(), 18.0f, &iconOnly, kIcon);
+        if (editorText == nullptr)
+        {
+            io.Fonts->AddFontDefault();
+        }
+        Fonts fonts;
+        std::string error;
+        const bool baked = fonts.Bake(*io.Fonts, fs::u8path(MYENGINE_SOURCE_DIR) / "assets" / "fonts", 1.0f, &error);
+        Check(baked, "the kit bakes into an atlas that has a font already: " + error);
+        unsigned char* pixels = nullptr;
+        int width = 0;
+        int height = 0;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        Check(pixels != nullptr && width > 0 && height > 0, "the atlas is built");
+        const FontHandle handle = fonts.Get(FontStyle::ExtraBoldItalic, 22.0f);
+        Check(handle.Valid() && handle.font->IsGlyphInFont('W') && handle.font->IsGlyphInFont(0x0416), "the glyphs of the kit are in the atlas");
+        ImGui::DestroyContext(context);
+    }
 }
 
 int main()
@@ -921,6 +1010,8 @@ int main()
         TestHudTraining();
         TestLayout();
         TestGalleryDraw();
+        TestSharpText();
+        TestFontLoaderSwitch();
         TestCost();
     }
     catch (const std::exception& exception)

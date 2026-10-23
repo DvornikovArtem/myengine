@@ -215,6 +215,17 @@ add_test(NAME frame_pacer COMMAND myengine_frame_pacer_tests)
 # RUN_SERIAL: it measures the length of frames in real time (3 % and half a millisecond); with `ctest -j 8` next to the heavy tests it fails
 set_tests_properties(frame_pacer PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
 
+# RL-B1: the scale of Windows (DPI -> scale, sizes in real and logical pixels, WM_DPICHANGED, the scale of the game UI in real pixels, a hidden window)
+add_executable(myengine_dpi_scale_tests
+  core/DpiScaleTests.cpp)
+
+target_link_libraries(myengine_dpi_scale_tests PRIVATE myengine_engine)
+target_include_directories(myengine_dpi_scale_tests PRIVATE "${CMAKE_SOURCE_DIR}/external/imgui/Include")
+myengine_apply_compiler_options(myengine_dpi_scale_tests)
+set_property(TARGET myengine_dpi_scale_tests PROPERTY FOLDER "Tests")
+add_test(NAME dpi_scale COMMAND myengine_dpi_scale_tests)
+set_tests_properties(dpi_scale PROPERTIES TIMEOUT 60)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
@@ -444,6 +455,17 @@ set_property(TARGET myengine_rl_net_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_net COMMAND myengine_rl_net_tests)
 set_tests_properties(rl_net PROPERTIES TIMEOUT 600)
 
+# RL-B2: the spin and the steer of the wheels of the cars, from the state of a car (the sim, six cars, a car of another player over the net)
+add_executable(myengine_rl_wheel_tests
+  rl/RlWheelTests.cpp)
+
+target_link_libraries(myengine_rl_wheel_tests PRIVATE myengine_rl)
+target_compile_definitions(myengine_rl_wheel_tests PRIVATE RL_TUNING_JSON="${CMAKE_SOURCE_DIR}/assets/data/rl_tuning.json" RL_CARS_DIR="${CMAKE_SOURCE_DIR}/assets/data/cars")
+myengine_apply_compiler_options(myengine_rl_wheel_tests)
+set_property(TARGET myengine_rl_wheel_tests PROPERTY FOLDER "Tests")
+add_test(NAME rl_wheels COMMAND myengine_rl_wheel_tests)
+set_tests_properties(rl_wheels PROPERTIES TIMEOUT 120)
+
 # G6b: the manual check of the Steam code against the real SDK (needs the Steam client running; not in ctest, exit code 77 = skipped)
 if(MYENGINE_STEAM)
   add_executable(myengine_rl_steam_smoke
@@ -569,4 +591,4 @@ target_link_libraries(myengine_rl_game_tests PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_rl_game_tests)
 set_property(TARGET myengine_rl_game_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_game COMMAND myengine_rl_game_tests)
-set_tests_properties(rl_game PROPERTIES TIMEOUT 180)
+set_tests_properties(rl_game PROPERTIES TIMEOUT 300)

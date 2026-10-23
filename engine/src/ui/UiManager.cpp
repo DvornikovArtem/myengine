@@ -2,6 +2,7 @@
 #include <deque>
 #include <array>
 #include <cfloat>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <cstring>
@@ -16,6 +17,7 @@
 #include "ImGuizmo.h"
 
 #include <myengine/core/AppPaths.h>
+#include <myengine/core/DpiScale.h>
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
 #include <myengine/ui/UiManager.h>
@@ -342,8 +344,12 @@ namespace myengine::ui
         core::WindowId windowId = 0;
         HWND hwnd = nullptr;
         render::RenderSurfaceHandle surface;
-        std::uint32_t width = 0;
+        std::uint32_t width = 0;  // real pixels of the client area
         std::uint32_t height = 0;
+        std::uint32_t dpi = core::dpi::kBaseDpi;
+        // Real pixels per pixel of the editor layout: ImGui works in logical pixels (DisplaySize = size / uiScale, 100 % screen = what the editor
+        // was drawn for), the vertices are multiplied by it when they are handed to the renderer and the fonts are baked at it (RasterizerDensity)
+        float uiScale = 1.0f;
         ImGuiContext* imguiContext = nullptr;
         ImFont* bodyFont = nullptr;
         ImFont* monoFont = nullptr;
@@ -449,14 +455,15 @@ namespace myengine::ui
         const HWND hwnd,
         const render::RenderSurfaceHandle surface,
         const std::uint32_t width,
-        const std::uint32_t height)
+        const std::uint32_t height,
+        const std::uint32_t dpi)
     {
         if (!initialized_)
         {
             return false;
         }
 
-        auto windowContext = CreateWindowContext(windowId, hwnd, surface, width, height);
+        auto windowContext = CreateWindowContext(windowId, hwnd, surface, width, height, dpi != 0 ? dpi : GetDpiForWindow(hwnd));
         if (!windowContext)
         {
             return false;
@@ -520,11 +527,16 @@ namespace myengine::ui
 
         // A mouse button message: the position of the click, then the button. A press remembers whether Windows
         // reported it as the second click of a double click.
+        const auto clientToLogical = [&](const LPARAM position)
+        {
+            return ImVec2(
+                core::dpi::ToLogical(static_cast<float>(static_cast<short>(LOWORD(position))), windowContext.uiScale),
+                core::dpi::ToLogical(static_cast<float>(static_cast<short>(HIWORD(position))), windowContext.uiScale));
+        };
         const auto queueMouseButton = [&](const int button, const bool down, const bool osDoubleClick)
         {
-            io.AddMousePosEvent(
-                static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                static_cast<float>(static_cast<short>(HIWORD(lparam))));
+            const ImVec2 position = clientToLogical(lparam);
+            io.AddMousePosEvent(position.x, position.y);
             io.AddMouseButtonEvent(button, down);
 
             // ImGui drops a press of a button that is already down; keep the same filter so the flags stay in step
@@ -562,10 +574,11 @@ namespace myengine::ui
             }
 
             case WM_MOUSEMOVE:
-                io.AddMousePosEvent(
-                    static_cast<float>(static_cast<short>(LOWORD(lparam))),
-                    static_cast<float>(static_cast<short>(HIWORD(lparam))));
+            {
+                const ImVec2 position = clientToLogical(lparam);
+                io.AddMousePosEvent(position.x, position.y);
                 break;
+            }
 
             case WM_MOUSELEAVE:
                 io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
@@ -682,19 +695,47 @@ namespace myengine::ui
             render::RenderSurfaceHandle surface;
             std::uint32_t width;
             std::uint32_t height;
+            std::uint32_t dpi;
         };
         std::vector<Saved> saved;
         for (const auto& [windowId, context] : windows_)
         {
             if (context != nullptr)
             {
-                saved.push_back({windowId, context->hwnd, context->surface, context->width, context->height});
+                saved.push_back({windowId, context->hwnd, context->surface, context->width, context->height, context->dpi});
             }
         }
         for (const Saved& window : saved)
         {
             UnregisterWindow(window.id);
-            RegisterWindow(window.id, window.hwnd, window.surface, window.width, window.height);
+            RegisterWindow(window.id, window.hwnd, window.surface, window.width, window.height, window.dpi);
+        }
+    }
+
+    float UiManager::EffectiveUiScale(const std::uint32_t dpi) const
+    {
+        // the game UI sizes itself by the window (physical pixels, its own font buckets): the layer under it must not scale it again
+        return gameUi_.build ? 1.0f : core::dpi::ScaleFromDpi(dpi);
+    }
+
+    float UiManager::GetUiScale(const core::WindowId windowId) const
+    {
+        const auto it = windows_.find(windowId);
+        return it != windows_.end() && it->second != nullptr ? it->second->uiScale : 1.0f;
+    }
+
+    void UiManager::OnWindowDpiChanged(const core::WindowId windowId, const std::uint32_t dpi)
+    {
+        const auto it = windows_.find(windowId);
+        if (it == windows_.end() || it->second == nullptr)
+        {
+            return;
+        }
+        it->second->dpi = dpi != 0 ? dpi : core::dpi::kBaseDpi;
+        // The fonts of the atlas are baked for one scale: another one needs a new atlas (the layout of the docks is kept in the ini file)
+        if (!core::dpi::SameScale(EffectiveUiScale(it->second->dpi), it->second->uiScale))
+        {
+            fontRebuild_ = true;
         }
     }
 
@@ -721,9 +762,9 @@ namespace myengine::ui
             ImGui::SetCurrentContext(windowContext.imguiContext);
             ImGuiIO& io = ImGui::GetIO();
             io.DisplaySize = ImVec2(
-                static_cast<float>(std::max<std::uint32_t>(windowContext.width, 1u)),
-                static_cast<float>(std::max<std::uint32_t>(windowContext.height, 1u)));
-            io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+                core::dpi::ToLogical(static_cast<float>(std::max<std::uint32_t>(windowContext.width, 1u)), windowContext.uiScale),
+                core::dpi::ToLogical(static_cast<float>(std::max<std::uint32_t>(windowContext.height, 1u)), windowContext.uiScale));
+            io.DisplayFramebufferScale = ImVec2(windowContext.uiScale, windowContext.uiScale);
             // The real frame time: a floor of 1/600 s made ImGui's clock run up to several times faster than the
             // wall clock above 600 FPS, which shrank the double click window to a fraction of the system one
             io.DeltaTime = std::max(deltaTime, 1.0f / 100000.0f);
@@ -827,7 +868,7 @@ namespace myengine::ui
             {
                 const ImDrawVert& sourceVertex = drawList->VtxBuffer[vertexIndex];
                 render::UiVertex& destinationVertex = windowContext.scratchVertices[static_cast<std::size_t>(vertexIndex)];
-                destinationVertex.position = {sourceVertex.pos.x, sourceVertex.pos.y};
+                destinationVertex.position = {sourceVertex.pos.x * clipScale.x, sourceVertex.pos.y * clipScale.y}; // logical -> real pixels
                 destinationVertex.color = {
                     static_cast<std::uint8_t>((sourceVertex.col >> IM_COL32_R_SHIFT) & 0xff),
                     static_cast<std::uint8_t>((sourceVertex.col >> IM_COL32_G_SHIFT) & 0xff),
@@ -914,8 +955,8 @@ namespace myengine::ui
                 uiDrawData.indices = windowContext.scratchCommandIndices.data();
                 uiDrawData.indexCount = elementCount;
                 uiDrawData.texture = ImGuiTextureIdToRenderTexture(command.GetTexID());
-                uiDrawData.translationX = -clipOff.x;
-                uiDrawData.translationY = -clipOff.y;
+                uiDrawData.translationX = -clipOff.x * clipScale.x;
+                uiDrawData.translationY = -clipOff.y * clipScale.y;
                 uiDrawData.scissorEnabled = true;
                 uiDrawData.scissor = {
                     scissorLeft,
@@ -954,7 +995,9 @@ namespace myengine::ui
 
     bool UiManager::CanStartSceneNavigation(const core::WindowId windowId, const float mouseX, const float mouseY) const
     {
-        return sceneEditor_.CanStartSceneNavigation(windowId, mouseX, mouseY);
+        // the mouse comes in real pixels, the viewport of the editor is in logical ones
+        const float scale = GetUiScale(windowId);
+        return sceneEditor_.CanStartSceneNavigation(windowId, core::dpi::ToLogical(mouseX, scale), core::dpi::ToLogical(mouseY, scale));
     }
 
     std::unique_ptr<UiManager::WindowUiContext> UiManager::CreateWindowContext(
@@ -962,7 +1005,8 @@ namespace myengine::ui
         const HWND hwnd,
         const render::RenderSurfaceHandle surface,
         const std::uint32_t width,
-        const std::uint32_t height)
+        const std::uint32_t height,
+        const std::uint32_t dpi)
     {
         auto windowContext = std::make_unique<WindowUiContext>();
         windowContext->windowId = windowId;
@@ -970,6 +1014,9 @@ namespace myengine::ui
         windowContext->surface = surface;
         windowContext->width = width;
         windowContext->height = height;
+        windowContext->dpi = dpi != 0 ? dpi : core::dpi::kBaseDpi;
+        windowContext->uiScale = EffectiveUiScale(windowContext->dpi);
+        const float uiScale = windowContext->uiScale;
 
         windowContext->imguiContext = ImGui::CreateContext();
         if (windowContext->imguiContext == nullptr)
@@ -1035,11 +1082,13 @@ namespace myengine::ui
             // Inter has its own glyphs in the Private Use Area; they would shadow the icons that merge in later
             static const ImWchar kExcludePrivateUse[] = {0xE000, 0xF8FF, 0};
             ImFontConfig textConfig;
+            textConfig.RasterizerDensity = uiScale;
             textConfig.GlyphExcludeRanges = kExcludePrivateUse;
             ImFont* font = LoadFontFromPath(*io.Fonts, file, bakedSize, glyphRanges, &textConfig);
             if (font != nullptr && mergeIcons)
             {
                 ImFontConfig iconConfig;
+                iconConfig.RasterizerDensity = uiScale;
                 iconConfig.MergeMode = true;
                 iconConfig.PixelSnapH = true;
                 iconConfig.GlyphMinAdvanceX = size;
@@ -1051,6 +1100,7 @@ namespace myengine::ui
         auto addIconFont = [&](const float size) -> ImFont*
         {
             ImFontConfig iconConfig;
+            iconConfig.RasterizerDensity = uiScale;
             iconConfig.PixelSnapH = true;
             return LoadFontFromPath(*io.Fonts, lucide, size, iconRanges.data(), &iconConfig);
         };
@@ -1062,7 +1112,9 @@ namespace myengine::ui
         editorFonts.tiny = addTextFont(interRegular, style::kFontTiny, true, editorFonts.tinySize);
         // The mono size of the spec (13) is the em; bake the size that ImGui reads as a line height
         editorFonts.monoSize = style::kFontMono * LineHeightPerEm(mono);
-        editorFonts.mono = LoadFontFromPath(*io.Fonts, mono, editorFonts.monoSize, glyphRanges);
+        ImFontConfig monoConfig;
+        monoConfig.RasterizerDensity = uiScale;
+        editorFonts.mono = LoadFontFromPath(*io.Fonts, mono, editorFonts.monoSize, glyphRanges, &monoConfig);
         editorFonts.icon12 = addIconFont(12.0f);
         editorFonts.icon14 = addIconFont(14.0f);
         editorFonts.icon16 = addIconFont(16.0f);
@@ -1077,7 +1129,9 @@ namespace myengine::ui
         const bool customMonoFont = windowContext->monoFont != nullptr;
         if (windowContext->bodyFont == nullptr)
         {
-            windowContext->bodyFont = io.Fonts->AddFontDefault();
+            ImFontConfig defaultConfig;
+            defaultConfig.RasterizerDensity = uiScale;
+            windowContext->bodyFont = io.Fonts->AddFontDefault(&defaultConfig);
             editorFonts.body = windowContext->bodyFont;
             editorFonts.bodySize = 0.0f;
         }
@@ -1177,8 +1231,9 @@ namespace myengine::ui
     {
         SceneEditorWindowContext context;
         context.windowId = windowContext.windowId;
-        context.width = windowContext.width;
-        context.height = windowContext.height;
+        // the editor is laid out in logical pixels
+        context.width = static_cast<std::uint32_t>(std::lround(core::dpi::ToLogical(static_cast<float>(windowContext.width), windowContext.uiScale)));
+        context.height = static_cast<std::uint32_t>(std::lround(core::dpi::ToLogical(static_cast<float>(windowContext.height), windowContext.uiScale)));
         context.monoFont = windowContext.monoFont;
         context.stateLabel = stateLabel_;
         sceneEditor_.BuildWindowUi(context);

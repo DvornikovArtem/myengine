@@ -13,6 +13,7 @@
 
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/DpiScale.h>
 #include <myengine/core/FramePacer.h>
 #include <imm.h>
 #include "UiScript.h"
@@ -110,6 +111,7 @@ namespace myengine::core
 
         bool TryBuildEditorRenderRegion(
             const Window& window,
+            const float uiScale,
             render::IntRect& outRegion,
             std::uint32_t& outWidth,
             std::uint32_t& outHeight)
@@ -126,12 +128,14 @@ namespace myengine::core
                 return false;
             }
 
+            // The viewport rectangle is laid out by ImGui in logical pixels, the back buffer is in real ones
             const int windowWidth = static_cast<int>(window.Width());
             const int windowHeight = static_cast<int>(window.Height());
-            const int left = std::clamp(static_cast<int>(std::floor(windowState->viewport.x)), 0, windowWidth);
-            const int top = std::clamp(static_cast<int>(std::floor(windowState->viewport.y)), 0, windowHeight);
-            const int right = std::clamp(static_cast<int>(std::ceil(windowState->viewport.x + windowState->viewport.width)), 0, windowWidth);
-            const int bottom = std::clamp(static_cast<int>(std::ceil(windowState->viewport.y + windowState->viewport.height)), 0, windowHeight);
+            const auto& viewport = windowState->viewport;
+            const int left = std::clamp(static_cast<int>(std::floor(dpi::ToPhysical(viewport.x, uiScale))), 0, windowWidth);
+            const int top = std::clamp(static_cast<int>(std::floor(dpi::ToPhysical(viewport.y, uiScale))), 0, windowHeight);
+            const int right = std::clamp(static_cast<int>(std::ceil(dpi::ToPhysical(viewport.x + viewport.width, uiScale))), 0, windowWidth);
+            const int bottom = std::clamp(static_cast<int>(std::ceil(dpi::ToPhysical(viewport.y + viewport.height, uiScale))), 0, windowHeight);
 
             if (right <= left || bottom <= top)
             {
@@ -358,7 +362,7 @@ namespace myengine::core
                 return false;
             }
 
-            auto surface = renderAdapter_->CreateSurface(window->Handle(), windowConfig.width, windowConfig.height);
+            auto surface = renderAdapter_->CreateSurface(window->Handle(), window->Width(), window->Height()); // the real client size: the window grows with the screen scale
             if (!surface.IsValid())
             {
                 logger_.Error("Failed to create DX12 surface for a window");
@@ -1501,6 +1505,19 @@ namespace myengine::core
                 event.width = width;
                 event.height = height;
                 stateMachine_.HandleEvent(*this, event);
+                return 0;
+            }
+
+            case WM_DPICHANGED:
+            {
+                // The window was moved to a screen of another scale (or the scale was changed in Windows): the suggested rectangle is the same
+                // physical size for the new scale; WM_SIZE follows and resizes the swap chain. The UI follows the new scale on its next frame.
+                const auto* suggested = reinterpret_cast<const RECT*>(lparam);
+                if (suggested != nullptr)
+                {
+                    window.OnDpiChanged(dpi::DpiFromWParam(wparam), *suggested);
+                }
+                uiManager_.OnWindowDpiChanged(window.Id(), dpi::DpiFromWParam(wparam));
                 return 0;
             }
 
@@ -2717,7 +2734,7 @@ namespace myengine::core
             std::uint32_t renderHeight = runtime.window->Height();
             const bool hasEditorRenderRegion =
                 runtime.window != nullptr &&
-                TryBuildEditorRenderRegion(*runtime.window, renderRegion, renderWidth, renderHeight);
+                TryBuildEditorRenderRegion(*runtime.window, uiManager_.GetUiScale(runtime.window->Id()), renderRegion, renderWidth, renderHeight);
             renderAdapter_->SetRenderRegion(runtime.surface, hasEditorRenderRegion ? &renderRegion : nullptr);
 
             ecs::RenderFrameContext context{

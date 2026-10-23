@@ -18,6 +18,7 @@
   include/myengine/core/Logger.h
   include/myengine/core/AppPaths.h
   include/myengine/core/CrashHandler.h
+  include/myengine/core/DpiScale.h
   include/myengine/core/ProjectContext.h
   include/myengine/core/ServiceLocator.h
   include/myengine/core/Timer.h
@@ -81,6 +82,7 @@
   include/myengine/game/RlFeedback.h
   include/myengine/game/RlGameFlow.h
   include/myengine/game/RlGameSettings.h
+  include/myengine/game/RlVideoWindowChange.h
   include/myengine/game/RlTrainingStore.h
   include/myengine/ecs/components/FxComponents.h
   include/myengine/ecs/systems/FxSystem.h
@@ -135,6 +137,7 @@ set(ENGINE_SOURCES
   src/config/AppConfig.cpp
   src/core/AppPaths.cpp
   src/core/CrashHandler.cpp
+  src/core/DpiScale.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/FramePacer.cpp
@@ -187,6 +190,7 @@ set(ENGINE_SOURCES
   src/game/RlLobbyScreens.cpp
   src/game/RlLobbyScreens.h
   src/game/RlGameSettings.cpp
+  src/game/RlVideoWindowChange.cpp
   src/game/RlTrainingStore.cpp
   src/ecs/systems/FxSystem.cpp
   src/render/dx12/Dx12ScenePass.cpp
@@ -267,6 +271,7 @@ set(IMGUI_HEADERS
   ${IMGUI_ROOT}/Include/imgui/imstb_rectpack.h
   ${IMGUI_ROOT}/Include/imgui/imstb_textedit.h
   ${IMGUI_ROOT}/Include/imgui/imstb_truetype.h
+  ${IMGUI_ROOT}/Include/imgui/misc/imgui_freetype.h
   ${IMGUI_ROOT}/Include/imgui/misc/imgui_stdlib.h
 )
 
@@ -276,6 +281,7 @@ set(IMGUI_SOURCES
   ${IMGUI_ROOT}/src/imgui_draw.cpp
   ${IMGUI_ROOT}/src/imgui_tables.cpp
   ${IMGUI_ROOT}/src/imgui_widgets.cpp
+  ${IMGUI_ROOT}/src/misc/imgui_freetype.cpp
   ${IMGUI_ROOT}/src/misc/imgui_stdlib.cpp
 )
 
@@ -304,6 +310,7 @@ target_include_directories(myengine_engine
   PRIVATE
     ${IMGUI_ROOT}/Include
     ${IMGUI_ROOT}/Include/imgui
+    ${IMGUI_ROOT}/Include/imgui/misc
     ${IMGUIZMO_ROOT}
     ${CMAKE_SOURCE_DIR}/external/renderdoc)
 
@@ -315,6 +322,9 @@ else()
 endif()
 
 target_link_libraries(myengine_engine
+  PRIVATE
+    # the rasteriser of the fonts of the game UI (ImGuiFreeType::GetFontLoader(), engine/src/ui/rl/RlUiFonts.cpp); the editor keeps stb_truetype
+    Freetype::Freetype
   PUBLIC
     myengine_stb
     myengine_nlohmann_json
