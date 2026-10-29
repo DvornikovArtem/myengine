@@ -79,6 +79,8 @@ namespace myengine::ui
         void SetEditorOverlay(EditorOverlayHook overlay) { editorOverlay_ = std::move(overlay); }
 
         void SetStateLabel(std::string stateLabel);
+        // A command of the scripted input for the editor (SceneEditor::RunEditorCommand); the answer is a line for the log
+        std::string RunEditorCommand(const std::string& command) { return sceneEditor_.RunEditorCommand(command); }
         bool WantsMouseCapture(core::WindowId windowId) const;
         bool WantsKeyboardCapture(core::WindowId windowId) const;
         bool WantsTextInput(core::WindowId windowId) const; // a text field is being edited (not just an ImGui item held by the mouse)

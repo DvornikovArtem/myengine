@@ -231,6 +231,7 @@ namespace
             "2.5 pad A tap\n"
             "3.0 shot some/where.tga\n"
             "3.1 game goal-blue\n"
+            "3.15 editor build rocketarena rwdi nozip\n"
             "3.2 note a line of text\n"
             "9.0 quit\n";
         Check(script.Load(text, error), "the script loads: " + error);
@@ -241,6 +242,7 @@ namespace
         sink.mouseButton = [&](const int button, const bool down) { log.push_back(std::string(down ? "mouse down " : "mouse up ") + std::to_string(button)); };
         sink.screenshot = [&](const std::string& path) { log.push_back("shot " + path); };
         sink.game = [&](const std::string& command) { log.push_back("game " + command); };
+        sink.editor = [&](const std::string& command) { log.push_back("editor " + command); };
         sink.note = [&](const std::string& note) { log.push_back("note " + note); };
         sink.quit = [&]() { log.push_back("quit"); };
 
@@ -269,6 +271,7 @@ namespace
         script.Advance(1.2, sink);  // 3.3: pad, shot, game command, note
         Check(std::find(log.begin(), log.end(), "shot some/where.tga") != log.end(), "the screenshot request reaches the sink with its path");
         Check(std::find(log.begin(), log.end(), "game goal-blue") != log.end() && std::find(log.begin(), log.end(), "note a line of text") != log.end(), "game commands and notes too");
+        Check(std::find(log.begin(), log.end(), "editor build rocketarena rwdi nozip") != log.end(), "the editor command arrives whole, with its words");
         Check(!script.Finished(), "the script is not over before the last command");
         script.Advance(10.0, sink);
         Check(log.back() == "quit" || std::find(log.begin(), log.end(), "quit") != log.end(), "the last command quits");
