@@ -286,7 +286,7 @@ Notes:
 - `engine/include/myengine/...` - engine public headers
 - `engine/src/...` - engine implementation
 - `app/src/...` - application entry point and states
-- `game/flybrain/` - the fly brain of FlyDoom: MaleCNS v1.0 connectome (CC BY 4.0, downloaded from the HuggingFace mirror by `tools/flybrain/fetch_malecns.ps1`, not in git) and its LIF simulation on the job system ([docs/flybrain/flybrain.md](docs/flybrain/flybrain.md), in Russian)
+- `game/flybrain/` - the fly brain of FlyDoom: MaleCNS v1.0 connectome (CC BY 4.0, downloaded from the HuggingFace mirror by `tools/flybrain/fetch_malecns.ps1`, not in git) and its LIF simulation on the job system or on the GPU with DX12 compute shaders, spike for spike the same ([docs/flybrain/flybrain.md](docs/flybrain/flybrain.md), in Russian)
 - `assets/shaders/primitive.hlsl` - shader used by renderer
 - `assets/textures/debug.bmp` - sample texture
 - `assets/scenes/scene.json` - serialized scene file

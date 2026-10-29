@@ -659,3 +659,16 @@ add_executable(myengine_flybrain_bench
 target_link_libraries(myengine_flybrain_bench PRIVATE myengine_flybrain myengine_engine psapi)
 myengine_apply_compiler_options(myengine_flybrain_bench)
 set_property(TARGET myengine_flybrain_bench PROPERTY FOLDER "Tests")
+
+# N0b: the GPU backend of the fly brain (DX12 compute, assets/shaders/flybrain.hlsl) against the CPU: the same spikes on a
+# synthetic graph and on the connectome when it is downloaded. Skipped (exit code 77) without a DX12 adapter with doubles
+add_executable(myengine_flybrain_gpu_tests
+  flybrain/FlyBrainGpuTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_gpu_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_gpu_tests)
+myengine_copy_runtime_assets(myengine_flybrain_gpu_tests)
+set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
+set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
