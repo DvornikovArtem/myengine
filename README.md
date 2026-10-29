@@ -106,7 +106,7 @@ cmake -S . -B build-wwise -DMYENGINE_WWISE=ON -DWWISE_SDK_DIR=<path to Wwise_202
 cmake --build build-wwise --config Debug --target myengine
 ```
 
-CMake looks at `-DWWISE_SDK_DIR` first, then at `WWISESDK`; if neither is there, or the version or the platform is wrong, it stops with a message that says what is missing. `tools/package_game.ps1` (the package of the game) builds with Wwise when it finds the same SDK (`-WwiseSdk <folder>` names it); without the SDK it prints a warning and builds the package with XAudio2, like `-NoWwise` does. Details: [docs/engine/wwise.md](docs/engine/wwise.md) (in Russian).
+CMake looks at `-DWWISE_SDK_DIR` first, then at `WWISESDK`; if neither is there, or the version or the platform is wrong, it stops with a message that says what is missing. `tools/package_game.ps1` (the package of the game) builds with Wwise when it finds the same SDK (`-WwiseSdk <folder>` names it); without the SDK it prints a warning and builds the package with XAudio2, like `-NoWwise` does. Step-by-step recipes (switch Wwise on and off, add or change a sound, fix a build or bank error): [docs/engine/wwise-guide.md](docs/engine/wwise-guide.md) (in Russian). How it is built: [docs/engine/wwise.md](docs/engine/wwise.md) (in Russian).
 
 License: the Wwise license terms are Audiokinetic's, and each developer accepts them for themselves when installing (the Launcher shows them). On [their pricing page](https://www.audiokinetic.com/en/wwise/pricing/) the free trial (no license key) is for non-commercial projects and is limited to 200 media assets in the SoundBanks; our project has 24 media files. A free non-commercial license without that limit is given when the project is [registered](https://www.audiokinetic.com/register-project/).
 

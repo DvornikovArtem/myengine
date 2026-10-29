@@ -1,5 +1,7 @@
 # W2: проект Wwise и банки звуков
 
+Пошаговые рецепты (добавить звук, поменять звук, разобрать ошибку скрипта): [wwise-guide.md](wwise-guide.md). Этот документ описывает, как устроены проект и скрипт.
+
 Wwise 2025.1.12.9287 заменит XAudio2 как звуковой движок игры. Эта задача превращает `assets/data/audio_bank.json` в проект Wwise и банки. В сборке с `-DMYENGINE_WWISE=ON` игра играет через эти банки (раздел «AudioSystem на Wwise» в [wwise.md](wwise.md#audiosystem-на-wwise)); без опции она играет через XAudio2 ([audio.md](audio.md)).
 
 ## Зачем это нужно
@@ -39,7 +41,7 @@ powershell -ExecutionPolicy Bypass -File tools\wwise\build_wwise_project.ps1 -Re
 Параметры:
 
 - `-WwiseRoot` — папка, в которой есть `Authoring\x64\Release\bin\WwiseConsole.exe`. Если не задан, берётся `$env:WWISEROOT`, затем `HKCU\Environment\WWISEROOT` (сессия, запущенная до установки Wwise, переменную не видит, а реестр её хранит).
-- `-HttpPort` — порт сервера WAAPI, по умолчанию 8090. Если на порту уже кто-то отвечает (например, открыт Authoring), скрипт останавливается с ошибкой.
+- `-HttpPort` — порт сервера WAAPI, по умолчанию 8090; нужен только режиму `-Rebuild`. Если на порту уже кто-то отвечает (например, открыт Authoring), скрипт останавливается с ошибкой.
 
 ## Как это устроено
 
@@ -126,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File tools\wwise\build_wwise_project.ps1 -Ve
 ## Правки руками в Authoring
 
 1. Открыть `wwise/RocketArena/RocketArena.wproj`.
-2. После правок сохранить проект (Ctrl+S) и закрыть Authoring (иначе порт WAAPI занят).
+2. После правок сохранить проект (Ctrl+S) и лучше закрыть Authoring, чтобы банк собрался ровно из сохранённых файлов. Порт WAAPI здесь не нужен: `-BanksOnly` и `-Verify` сервер не поднимают, порт 8090 нужен только `-Rebuild`.
 3. Запустить `-BanksOnly`: банки в `assets/audio/wwise` обновятся.
 4. Закоммитить изменения `.wwu` и `.bnk` вместе.
 

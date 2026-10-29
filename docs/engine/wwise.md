@@ -1,5 +1,7 @@
 # Wwise в сборке и AudioSystem на Wwise (W1, W3)
 
+Пошаговые рецепты (включить Wwise, добавить или поменять звук, разобрать ошибку): [wwise-guide.md](wwise-guide.md). Этот документ описывает, как всё устроено.
+
 Звуковой движок Audiokinetic Wwise 2025.1.12 собирается вместе с движком (W1), запускается и останавливается в нужном порядке, а при `-DMYENGINE_WWISE=ON` через него играет `AudioSystem` (W3, раздел [AudioSystem на Wwise](#audiosystem-на-wwise)). Код: `cmake/Wwise.cmake`, `engine/src/audio/wwise/`, тесты `tests/audio/WwiseRuntimeTests.cpp` и `tests/audio/WwiseAudioTests.cpp`, SDK Wwise в репозитории нет: его ставит сам разработчик (раздел [Установка SDK](#установка-sdk)).
 
 ## Зачем это нужно
@@ -117,7 +119,7 @@ cmake -S . -B build -DMYENGINE_WWISE=ON
 cmake --build build --config RelWithDebInfo
 ```
 
-Код игры не меняется. При `OFF` всё как раньше: играет XAudio2. Звук через XAudio2 остаётся в `OFF`-сборке до замеров W4 и удаления (W6).
+Код игры не меняется. При `OFF` всё как раньше: играет XAudio2. Замеры (W4) сделаны ([ниже](#стабильность-и-замеры)); XAudio2 остаётся в `OFF`-сборке, а полный переход на Wwise (W6) будет отдельной задачей позже.
 
 ### Вызов AudioSystem и что делает Wwise
 
@@ -273,4 +275,4 @@ ctest --test-dir build -C RelWithDebInfo -R audio_wwise_runtime --output-on-fail
 - Проект Wwise (папка `wwise/`) и банки собираются скриптом, описанным в [wwise-project.md](wwise-project.md).
 - Опция `MYENGINE_WWISE` остаётся `OFF` по умолчанию, пока игра не играет через Wwise.
 - Направление звука справа/слева проверено только по заголовкам SDK, не по выходу: это надо оценить на слух.
-- XAudio2 остаётся в `OFF`-сборке до замеров W4 и удаления (W6).
+- XAudio2 остаётся в `OFF`-сборке. Замеры (W4) сделаны; полный переход на Wwise (W6) будет отдельной задачей позже.
