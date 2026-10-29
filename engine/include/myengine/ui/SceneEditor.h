@@ -68,6 +68,7 @@ namespace myengine::ui
     struct ContentEntry;
     struct ContentThumbnail;
     struct ProjectUiState;
+    struct BuildPanelState;
     class AssistantPanel;
     class PrefabInspector;
     enum class AssetViewerType : std::uint8_t;
@@ -102,6 +103,8 @@ namespace myengine::ui
         editor::ThumbnailService* thumbnails = nullptr; // asset previews (null without a render adapter)
         editor::LoadingService* loading = nullptr;      // the long operations to show (null: none are shown)
         std::function<void()> requestQuit;
+        std::function<void(const std::string& path)> screenshot; // a screenshot of the next frame (.tga); the commands of the scripted input use it
+        std::function<void()> openFaceId;   // the Face ID window (Window > Face ID); empty without Face ID
         std::function<bool()> saveScene;
         // Re-read the open map from disk; `done(success)` runs on the main thread when it has been applied
         std::function<void(std::function<void(bool)> done)> loadScene;
@@ -158,6 +161,10 @@ namespace myengine::ui
         void Shutdown();
         void BuildWindowUi(const SceneEditorWindowContext& windowContext);
         bool CanStartSceneNavigation(core::WindowId windowId, float mouseX, float mouseY) const;
+        // A command of the scripted input (UiScript: `editor <command>`, docs/editor/build-panel.md): `build <game> [rwdi] [nosteam] [nowwise] [nozip] [out=<folder>] [builddir=<folder>]` opens the
+        // Build window and presses Build & Package, `build-cancel` presses Cancel, `build-open` only opens the window, `build-finish <file.tga> <seconds>` takes a screenshot
+        // when the run ends and quits the editor `seconds` after it. Answers with a line for the log.
+        std::string RunEditorCommand(const std::string& command);
 
     private:
         void BuildDockSpace(const SceneEditorWindowContext& windowContext);
@@ -201,6 +208,7 @@ namespace myengine::ui
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void DrawShaderLayoutsWindow();   // Help > Developer > Shader Layouts (what the reflection reads from the shaders)
         void DrawRlTuningWindow();        // Window > RL Tuning: the sliders of the Rocket League numbers (SceneEditorRlTuning.cpp)
+        void DrawBuildWindow();           // Window > Build: the build and the package of a game by the button (SceneEditorBuild.cpp, docs/editor/build-panel.md)
         // The loading window of a long operation (SceneEditorLoading.cpp). Also blocks the input while one runs.
         void DrawLoadingUi();
         // The startup splash instead of the editor; true while it is on (nothing else is drawn then)
@@ -257,6 +265,7 @@ namespace myengine::ui
         std::unique_ptr<ScriptConsole> scriptConsole_;
         std::unique_ptr<ContentBrowser> contentBrowser_;
         std::unique_ptr<ProjectUiState> projectUi_;
+        std::unique_ptr<BuildPanelState> buildPanel_;
         std::string pendingOpenScenePath_; // waits for the answer of the unsaved changes prompt
         std::string pinnedMaterialPath_; // a material opened from the Content Browser, shown instead of the selected entity's one
         ecs::EntityId pinnedMaterialEntity_ = ecs::kInvalidEntity; // selection when it was pinned; another selection unpins
@@ -275,6 +284,7 @@ namespace myengine::ui
         bool showThumbnailsDebug_ = false; // Help > Developer > Thumbnails
         bool showShaderLayouts_ = false;   // Help > Developer > Shader Layouts
         bool showRlTuning_ = true;         // Window > RL Tuning (drawn while a Rocket League match runs)
+        bool showBuild_ = false;           // Window > Build
         std::string rlTuningMessage_;      // what the window last did
         std::string shaderLayoutsText_;    // the table of the window; empty: built at the next frame
         int shaderLayoutsFailures_ = 0;    // programs that did not compile

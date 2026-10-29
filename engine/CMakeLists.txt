@@ -26,6 +26,8 @@
   include/myengine/core/Window.h
   include/myengine/editor/EditorCommandHistory.h
   include/myengine/editor/EditorState.h
+  include/myengine/editor/BuildPanelModel.h
+  include/myengine/editor/BuildRunner.h
   include/myengine/editor/LoadingService.h
   include/myengine/editor/MaterialEditorModel.h
   include/myengine/editor/ThumbnailService.h
@@ -141,6 +143,12 @@ set(ENGINE_SOURCES
   src/core/Application.cpp
   src/core/FileWatcher.cpp
   src/core/FramePacer.cpp
+  src/faceid/FaceAlign.cpp
+  src/faceid/FaceCamera.cpp
+  src/faceid/FaceIdGate.cpp
+  src/faceid/FaceIdService.cpp
+  src/faceid/FaceMatcher.cpp
+  src/faceid/FaceProfileStore.cpp
   src/core/Logger.cpp
   src/core/ProjectContext.cpp
   src/core/Timer.cpp
@@ -148,6 +156,8 @@ set(ENGINE_SOURCES
   src/core/UiScript.h
   src/core/Window.cpp
   src/editor/EditorCommandHistory.cpp
+  src/editor/BuildPanelModel.cpp
+  src/editor/BuildRunner.cpp
   src/editor/LoadingService.cpp
   src/editor/MaterialEditorModel.cpp
   src/editor/ThumbnailService.cpp
@@ -238,6 +248,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
   src/ui/editor/SceneEditorProject.cpp
+  src/ui/editor/SceneEditorBuild.cpp
   src/ui/editor/SceneEditorRlTuning.cpp
   src/ui/editor/SceneEditorViewers.cpp
   src/ui/editor/SceneEditorToolbar.cpp
@@ -310,6 +321,13 @@ if(MYENGINE_WWISE)
   list(APPEND ENGINE_SOURCES src/audio/wwise/WwiseAudioSystem.cpp)
 endif()
 
+# Face ID (cmake/FaceId.cmake, docs/editor/faceid.md): the detection and the recognition run on ONNX Runtime; without it a stub with the same interface
+if(MYENGINE_FACEID)
+  list(APPEND ENGINE_SOURCES src/faceid/FaceModels.cpp)
+else()
+  list(APPEND ENGINE_SOURCES src/faceid/FaceModelsStub.cpp)
+endif()
+
 add_library(myengine_engine STATIC ${ENGINE_HEADERS} ${ENGINE_SOURCES})
 
 target_include_directories(myengine_engine
@@ -322,6 +340,13 @@ target_include_directories(myengine_engine
     ${IMGUI_ROOT}/Include/imgui/misc
     ${IMGUIZMO_ROOT}
     ${CMAKE_SOURCE_DIR}/external/renderdoc)
+
+if(MYENGINE_FACEID)
+  # PRIVATE: the headers and the library of ONNX Runtime stay inside engine/src/faceid/FaceModels.cpp; the macro tells the rest (the tests) that Face ID is built
+  target_include_directories(myengine_engine PRIVATE "${MYENGINE_ONNXRUNTIME_DIR}/include")
+  target_link_libraries(myengine_engine PRIVATE "${MYENGINE_ONNXRUNTIME_DIR}/lib/onnxruntime.lib")
+  target_compile_definitions(myengine_engine PUBLIC MYENGINE_FACEID=1)
+endif()
 
 if(MYENGINE_WWISE)
   # PRIVATE: the types of the SDK stay inside engine/src/audio/wwise; the macro tells the rest (the tests) that the runtime is built
@@ -361,6 +386,13 @@ target_link_libraries(myengine_engine
     comdlg32
     shell32
     xinput
+    # Face ID: the camera (Media Foundation), DPAPI and PBKDF2
+    mf
+    mfplat
+    mfreadwrite
+    mfuuid
+    crypt32
+    bcrypt
     xaudio2
     TracyClient
     myengine_rl

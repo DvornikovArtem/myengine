@@ -1,4 +1,4 @@
-﻿# Visual Studio
+# Visual Studio
 .vs/
 *.VC.db
 *.VC.VC.opendb
@@ -66,3 +66,8 @@ Saved/
 assets/flybrain/*.fbrain
 assets/flybrain/*.fbrain.partial
 assets/flybrain/*.report.json
+# Face ID: ONNX Runtime and the models (tools/faceid/fetch_models.ps1), the test photos and the profiles never go to the repository
+external/onnxruntime/
+assets/faceid/models/
+assets/faceid/licenses/
+assets/faceid/test/

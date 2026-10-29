@@ -11,6 +11,7 @@
 //   <seconds> shot <file>                     a screenshot of the next frame (.tga)
 //   <seconds> note <text>                     a line in the log
 //   <seconds> game <command> [...]            a command for the game system (RlGameSystem::DebugCommand: goal-blue, goal-orange, demolish ...)
+//   <seconds> editor <command> [...]          a command for the editor (SceneEditor::RunEditorCommand: build <game> ..., build-cancel, build-open; docs/editor/build-panel.md)
 //   <seconds> quit
 //
 // Lines starting with # are comments. The times are seconds since the first frame of the script and are not sorted: they run in the order of the times.
@@ -35,6 +36,7 @@ namespace myengine::core
             std::function<void(const std::string& path)> screenshot;
             std::function<void(const std::string& text)> note;
             std::function<void(const std::string& command)> game;
+            std::function<void(const std::string& command)> editor;
             std::function<void()> quit;
         };
 
