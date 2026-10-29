@@ -592,3 +592,37 @@ myengine_apply_compiler_options(myengine_rl_game_tests)
 set_property(TARGET myengine_rl_game_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_game COMMAND myengine_rl_game_tests)
 set_tests_properties(rl_game PROPERTIES TIMEOUT 300)
+
+# W1: the sound engine of Wwise starts and stops without a device (cmake/Wwise.cmake, docs/engine/wwise.md). Only with -DMYENGINE_WWISE=ON.
+if(MYENGINE_WWISE)
+  add_executable(myengine_wwise_runtime_tests
+    audio/WwiseRuntimeTests.cpp)
+
+  target_link_libraries(myengine_wwise_runtime_tests PRIVATE myengine_engine)
+  myengine_apply_compiler_options(myengine_wwise_runtime_tests)
+  set_property(TARGET myengine_wwise_runtime_tests PROPERTY FOLDER "Tests")
+  add_test(NAME audio_wwise_runtime COMMAND myengine_wwise_runtime_tests)
+  set_tests_properties(audio_wwise_runtime PROPERTIES TIMEOUT 120)
+
+  # W3: audio::AudioSystem on Wwise: the banks, every event of audio_bank.json, the end of a sound, the loops, the buses, the positions (no device, offline time)
+  add_executable(myengine_wwise_audio_tests
+    audio/WwiseAudioTests.cpp)
+
+  # the test asks the sound engine itself (Query) what the AudioSystem has done: it has the SDK too
+  target_link_libraries(myengine_wwise_audio_tests PRIVATE myengine_engine myengine_wwise)
+  myengine_apply_compiler_options(myengine_wwise_audio_tests)
+  set_property(TARGET myengine_wwise_audio_tests PROPERTY FOLDER "Tests")
+  add_test(NAME audio_wwise COMMAND myengine_wwise_audio_tests)
+  set_tests_properties(audio_wwise PROPERTIES TIMEOUT 300)
+
+  # W4: the stability of that: 10 000 events over simulated minutes with a full pool, handles that are old or not given, a bank twice and banks that are cut,
+  # 20 starts and stops (docs/measurements/wwise/stability.md)
+  add_executable(myengine_wwise_stress_tests
+    audio/WwiseStressTests.cpp)
+
+  target_link_libraries(myengine_wwise_stress_tests PRIVATE myengine_engine)
+  myengine_apply_compiler_options(myengine_wwise_stress_tests)
+  set_property(TARGET myengine_wwise_stress_tests PROPERTY FOLDER "Tests")
+  add_test(NAME audio_wwise_stress COMMAND myengine_wwise_stress_tests)
+  set_tests_properties(audio_wwise_stress PROPERTIES TIMEOUT 60)
+endif()

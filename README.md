@@ -80,6 +80,36 @@ cmake --build build --config Debug --target myengine
 ./build/app/Debug/myengine.exe
 ```
 
+### 4.1 Wwise SDK (optional)
+
+The game can play its sound through Wwise (Audiokinetic) instead of XAudio2. This is the `MYENGINE_WWISE` option, **OFF by default**: without the SDK the build above works as it always did, and nothing in this section is needed. The Wwise SDK is **not in this repository** (it is Audiokinetic's software and is under their license): each developer installs it once on their machine, the way the Steamworks SDK is installed (`-SteamSdk`). Only our own code that uses Wwise is in the repository, together with the Wwise project (`wwise/RocketArena`) and its built banks (`assets/audio/wwise/*.bnk`).
+
+Install the SDK (steps from the [Audiokinetic Launcher guide](https://www.audiokinetic.com/en/public-library/Launcher_2026.1.1.6296/?source=InstallGuide&id=install_wwise_through_launcher)):
+
+1. Create an Audiokinetic account: the Launcher opens the Customer Portal on the first *Sign in* ([guide](https://www.audiokinetic.com/en/public-library/Launcher_2026.1.1.6296/?source=InstallGuide&id=log_in)).
+2. Install the Audiokinetic Launcher (download from audiokinetic.com, [guide](https://www.audiokinetic.com/en/public-library/launcher_2026.1.1.6296/?source=InstallGuide&id=getting_started)) and sign in.
+3. In the Launcher open the *Wwise* page, choose the version **2025.1.12.9287** in the *Install New Version* list and click *Install*. The project needs exactly this version: the banks of the repository are made by it. A different build of 2025.1 builds with a warning (banks of one build may not load in another), another series (not 2025.1) is refused by CMake.
+4. On the packages and platforms page mark:
+   - package **SDK (C++)** (required: the headers, the libraries, the samples of the sound engine);
+   - deployment platform **Microsoft / Windows / Visual Studio 2026** (the folder `x64_vc180` of the SDK) if you build with Visual Studio 2026, and/or **Microsoft / Windows / Visual Studio 2022** (`x64_vc170`) if you build with Visual Studio 2022: mark the one that is your Visual Studio, or both (CMake takes the platform of the compiler and names the missing one in its error);
+   - package **Authoring** only if you want to open `wwise/RocketArena/RocketArena.wproj` and change the sounds (not needed to build or play);
+   - no plug-ins are needed. Click *Install*.
+5. Set the environment variables: in the Launcher, next to the installed version, open the menu and choose *Set Environment Variables* (it offers `WWISEROOT` and `WWISESDK`). **Restart the terminal** (and the IDE) after that, so that new processes see `WWISESDK`.
+
+Build with the SDK:
+
+```powershell
+# WWISESDK is set (by the Launcher, step 5):
+cmake -S . -B build-wwise -DMYENGINE_WWISE=ON
+# or name the SDK yourself (the folder SDK of the installation) when the variable is not set:
+cmake -S . -B build-wwise -DMYENGINE_WWISE=ON -DWWISE_SDK_DIR=<path to Wwise_2025.1.12.9287>/SDK
+cmake --build build-wwise --config Debug --target myengine
+```
+
+CMake looks at `-DWWISE_SDK_DIR` first, then at `WWISESDK`; if neither is there, or the version or the platform is wrong, it stops with a message that says what is missing. `tools/package_game.ps1` (the package of the game) builds with Wwise when it finds the same SDK (`-WwiseSdk <folder>` names it); without the SDK it prints a warning and builds the package with XAudio2, like `-NoWwise` does. Details: [docs/engine/wwise.md](docs/engine/wwise.md) (in Russian).
+
+License: the Wwise license terms are Audiokinetic's, and each developer accepts them for themselves when installing (the Launcher shows them). On [their pricing page](https://www.audiokinetic.com/en/wwise/pricing/) the free trial (no license key) is for non-commercial projects and is limited to 200 media assets in the SoundBanks; our project has 24 media files. A free non-commercial license without that limit is given when the project is [registered](https://www.audiokinetic.com/register-project/).
+
 ## 5. Runtime Overview
 
 Startup:

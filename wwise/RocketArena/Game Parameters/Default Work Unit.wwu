@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WwiseDocument Type="WorkUnit" ID="{55D21685-6B42-F346-8763-36BB8F7D9080}" SchemaVersion="133">
+	<GameParameters>
+		<WorkUnit Name="Default Work Unit" ID="{55D21685-6B42-F346-8763-36BB8F7D9080}" PersistMode="Standalone">
+			<ChildrenList>
+				<GameParameter Name="Pitch" ID="{7BD6E21B-1FA1-F2C1-A88B-704A8B6637BF}">
+					<PropertyList>
+						<Property Name="InitialValue" Type="Real64" Value="1"/>
+						<Property Name="Max" Type="Real64" Value="4"/>
+						<Property Name="Min" Type="Real64" Value="0.25"/>
+					</PropertyList>
+				</GameParameter>
+				<GameParameter Name="Volume" ID="{C57D3A85-1CD8-3616-AA69-7F5878A9D9E6}">
+					<PropertyList>
+						<Property Name="InitialValue" Type="Real64" Value="1"/>
+						<Property Name="Max" Type="Real64" Value="4"/>
+					</PropertyList>
+				</GameParameter>
+				<GameParameter Name="Bus_Master" ID="{B2547FC6-08D9-A081-6C2A-9DDE93161A49}">
+					<PropertyList>
+						<Property Name="InitialValue" Type="Real64" Value="1"/>
+						<Property Name="Max" Type="Real64" Value="1"/>
+					</PropertyList>
+				</GameParameter>
+				<GameParameter Name="Bus_Sfx" ID="{C220ED78-7985-4E57-6754-4CD0F3B578A5}">
+					<PropertyList>
+						<Property Name="InitialValue" Type="Real64" Value="1"/>
+						<Property Name="Max" Type="Real64" Value="1"/>
+					</PropertyList>
+				</GameParameter>
+				<GameParameter Name="Bus_Music" ID="{36D3AB26-AD96-589E-F4AE-9534D6B8D268}">
+					<PropertyList>
+						<Property Name="InitialValue" Type="Real64" Value="1"/>
+						<Property Name="Max" Type="Real64" Value="1"/>
+					</PropertyList>
+				</GameParameter>
+				<GameParameter Name="Bus_Ui" ID="{F03B9FF1-16CF-BE0F-436D-77E57EF81DD0}">
+					<PropertyList>
+						<Property Name="InitialValue" Type="Real64" Value="1"/>
+						<Property Name="Max" Type="Real64" Value="1"/>
+					</PropertyList>
+				</GameParameter>
+			</ChildrenList>
+		</WorkUnit>
+	</GameParameters>
+</WwiseDocument>

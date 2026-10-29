@@ -1,0 +1,15 @@
+Wwise (the sound of the game)
+-----------------------------
+
+Rocket Arena plays its sounds through Wwise, the sound engine of Audiokinetic Inc.
+
+    Wwise (R) is (c) Audiokinetic Inc. All rights reserved. Used under license from Audiokinetic Inc.
+    https://www.audiokinetic.com
+
+The Wwise libraries that are linked into RocketArena.exe contain the decoders below. Their licenses are in this folder:
+
+    Ogg, Vorbis      BSD-3-Clause   Xiph.Org Foundation                       Ogg-Vorbis-Xiph-LICENSE.txt
+    Opus             BSD-3-Clause   Xiph.Org, Skype Limited, Octasic and others   Opus-LICENSE.txt
+    opusfile         BSD-3-Clause   Xiph.Org Foundation and contributors      OpusFile-LICENSE.txt
+
+Sources: https://xiph.org (Ogg, Vorbis, Opus, opusfile).

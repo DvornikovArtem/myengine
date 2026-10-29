@@ -74,6 +74,26 @@
     ]
   },
 
+  "wwise": {
+    "comment": "The sound of the package (docs/game/packaging.md). By default the game plays through Wwise: the banks (assets/audio/wwise, made by tools/wwise/build_wwise_project.ps1) go in, the WAV files of assets/audio stay out (the Wwise AudioSystem does not open them; the banks have the sound in them), and licenses/ gets the notice and the license files of the codecs that the libraries of the SDK have in them (copied at the packing from the folder Licenses of the installed Wwise, next to its folder SDK: the SDK is not in the repository; the libraries are static: no DLL, no header, no library of the SDK is in the package). With -NoWwise (the XAudio2 build) it is the other way round: the WAV files, no banks.",
+    "banks": [
+      "assets/audio/wwise/Init.bnk",
+      "assets/audio/wwise/RocketArena.bnk"
+    ],
+    "excludeWith": [
+      "assets/audio/*.wav"
+    ],
+    "excludeWithout": [
+      "assets/audio/wwise/**"
+    ],
+    "notice": "tools/package_licenses_wwise/Wwise-NOTICE.txt",
+    "licenses": [
+      { "from": "OggLicense.txt", "to": "Ogg-Vorbis-Xiph-LICENSE.txt" },
+      { "from": "OpusLicense.txt", "to": "Opus-LICENSE.txt" },
+      { "from": "OpusFileLicense.txt", "to": "OpusFile-LICENSE.txt" }
+    ]
+  },
+
   "steam": {
     "comment": "Steamworks: with -WithSteam -SteamSdk <folder> steam_api64.dll goes next to the exe and steam_appid.txt (480, the Spacewar test id) is written. Without the SDK nothing of Steam is in the package.",
     "dll": "redistributable_bin/win64/steam_api64.dll",

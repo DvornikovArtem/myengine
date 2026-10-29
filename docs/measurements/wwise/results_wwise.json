@@ -1,0 +1,410 @@
+{
+ "window_s": [
+  25.0,
+  80.0
+ ],
+ "sides": {
+  "off": {
+   "tracy_runs": [
+    {
+     "trace": "off_tracy_run1.tracy",
+     "zones": {
+      "Frame": {
+       "count": 36114,
+       "median": 1.5232670000000001,
+       "p95": 1.8203637,
+       "p99": 2.7630596300000025,
+       "sum": 54997.137995
+      },
+      "Audio::Update": {
+       "count": 36113,
+       "median": 0.002134,
+       "p95": 0.00548,
+       "p99": 0.008755799999999973,
+       "sum": 95.503812
+      },
+      "Audio::BackendUpdate": {
+       "count": 36113,
+       "median": 0.000131,
+       "p95": 0.000261,
+       "p99": 0.000521,
+       "sum": 5.626525
+      },
+      "Audio::PlayEvent": {
+       "count": 190,
+       "median": 0.008391,
+       "p95": 0.017914999999999997,
+       "p99": 0.026623039999999976,
+       "sum": 1.839971
+      },
+      "Physics::Step": {
+       "count": 3300,
+       "median": 0.035487,
+       "p95": 0.05278145,
+       "p99": 0.0631001,
+       "sum": 128.170408
+      },
+      "Present": {
+       "count": 36113,
+       "median": 0.283619,
+       "p95": 0.7904488000000001,
+       "p99": 1.5229984,
+       "sum": 14311.379377
+      },
+      "Wwise::RenderAudio": null
+     },
+     "frames": 36114,
+     "audioUpdateMsPerFrame": 0.0026445093869413524,
+     "audioUpdateShareOfFramePercent": 0.1736523307970728,
+     "framesPerSecond": 656.6181818181818
+    },
+    {
+     "trace": "off_tracy_run2.tracy",
+     "zones": {
+      "Frame": {
+       "count": 36232,
+       "median": 1.509842,
+       "p95": 1.8142118499999995,
+       "p99": 2.7938801400000015,
+       "sum": 54996.84566
+      },
+      "Audio::Update": {
+       "count": 36232,
+       "median": 0.002044,
+       "p95": 0.00519,
+       "p99": 0.008572900000000024,
+       "sum": 92.279094
+      },
+      "Audio::BackendUpdate": {
+       "count": 36232,
+       "median": 0.00013,
+       "p95": 0.000251,
+       "p99": 0.000501,
+       "sum": 5.420086
+      },
+      "Audio::PlayEvent": {
+       "count": 190,
+       "median": 0.008074999999999999,
+       "p95": 0.01471664999999998,
+       "p99": 0.025051629999999984,
+       "sum": 1.641158
+      },
+      "Physics::Step": {
+       "count": 3300,
+       "median": 0.0356375,
+       "p95": 0.0524595,
+       "p99": 0.06275511999999986,
+       "sum": 127.948399
+      },
+      "Present": {
+       "count": 36231,
+       "median": 0.277707,
+       "p95": 0.7752445,
+       "p99": 1.6010349999999989,
+       "sum": 14004.475247
+      },
+      "Wwise::RenderAudio": null
+     },
+     "frames": 36232,
+     "audioUpdateMsPerFrame": 0.0025468948443364984,
+     "audioUpdateShareOfFramePercent": 0.16778979392833782,
+     "framesPerSecond": 658.7636363636364
+    },
+    {
+     "trace": "off_tracy_run3.tracy",
+     "zones": {
+      "Frame": {
+       "count": 36205,
+       "median": 1.518743,
+       "p95": 1.8221089999999995,
+       "p99": 2.7329422799999987,
+       "sum": 54995.505094
+      },
+      "Audio::Update": {
+       "count": 36205,
+       "median": 0.002084,
+       "p95": 0.00516,
+       "p99": 0.007983839999999975,
+       "sum": 92.038279
+      },
+      "Audio::BackendUpdate": {
+       "count": 36205,
+       "median": 0.00013,
+       "p95": 0.000231,
+       "p99": 0.000461,
+       "sum": 5.3358680000000005
+      },
+      "Audio::PlayEvent": {
+       "count": 189,
+       "median": 0.008276,
+       "p95": 0.01705579999999999,
+       "p99": 0.04197204000000021,
+       "sum": 1.831598
+      },
+      "Physics::Step": {
+       "count": 3300,
+       "median": 0.035177,
+       "p95": 0.05276005,
+       "p99": 0.062078599999999984,
+       "sum": 127.234455
+      },
+      "Present": {
+       "count": 36206,
+       "median": 0.2813195,
+       "p95": 0.79716775,
+       "p99": 1.5521089999999984,
+       "sum": 14367.770217
+      },
+      "Wwise::RenderAudio": null
+     },
+     "frames": 36205,
+     "audioUpdateMsPerFrame": 0.002542142770335589,
+     "audioUpdateShareOfFramePercent": 0.16735600271819553,
+     "framesPerSecond": 658.2727272727273
+    }
+   ],
+   "plain_runs": [
+    {
+     "side": "off",
+     "tag": "off_plain_run1",
+     "tracy": false,
+     "exit": 0,
+     "wallSeconds": 94.1,
+     "cpuSecondsTotal": 87.73,
+     "cpuPercentOfOneCoreInWindow": 95.9,
+     "workingSetMaxMB": 545,
+     "workingSetWindowMeanMB": 522.5,
+     "privateMaxMB": 973.6,
+     "samples": 182
+    },
+    {
+     "side": "off",
+     "tag": "off_plain_run2",
+     "tracy": false,
+     "exit": 0,
+     "wallSeconds": 93.4,
+     "cpuSecondsTotal": 88.23,
+     "cpuPercentOfOneCoreInWindow": 96.6,
+     "workingSetMaxMB": 549.3,
+     "workingSetWindowMeanMB": 510.7,
+     "privateMaxMB": 972.2,
+     "samples": 181
+    },
+    {
+     "side": "off",
+     "tag": "off_plain_run3",
+     "tracy": false,
+     "exit": 0,
+     "wallSeconds": 93,
+     "cpuSecondsTotal": 88.36,
+     "cpuPercentOfOneCoreInWindow": 96.6,
+     "workingSetMaxMB": 546.3,
+     "workingSetWindowMeanMB": 530,
+     "privateMaxMB": 973,
+     "samples": 180
+    }
+   ]
+  },
+  "on": {
+   "tracy_runs": [
+    {
+     "trace": "on_tracy_run1.tracy",
+     "zones": {
+      "Frame": {
+       "count": 35911,
+       "median": 1.5056,
+       "p95": 1.8115335,
+       "p99": 2.773384900000002,
+       "sum": 54996.341722
+      },
+      "Audio::Update": {
+       "count": 35911,
+       "median": 0.00518,
+       "p95": 0.008136,
+       "p99": 0.012733000000000015,
+       "sum": 202.847431
+      },
+      "Audio::BackendUpdate": null,
+      "Audio::PlayEvent": {
+       "count": 190,
+       "median": 0.003687,
+       "p95": 0.005928549999999994,
+       "p99": 0.00961681999999998,
+       "sum": 0.697994
+      },
+      "Physics::Step": {
+       "count": 3300,
+       "median": 0.035968,
+       "p95": 0.052881,
+       "p99": 0.06474399999999997,
+       "sum": 129.089912
+      },
+      "Present": {
+       "count": 35911,
+       "median": 0.264312,
+       "p95": 0.7164665,
+       "p99": 1.4817525000000034,
+       "sum": 12758.125371
+      },
+      "Wwise::RenderAudio": {
+       "count": 35911,
+       "median": 0.003788,
+       "p95": 0.005841,
+       "p99": 0.009595100000000042,
+       "sum": 149.531925
+      }
+     },
+     "frames": 35911,
+     "audioUpdateMsPerFrame": 0.00564861549385982,
+     "audioUpdateShareOfFramePercent": 0.36883804385638913,
+     "framesPerSecond": 652.9272727272727
+    },
+    {
+     "trace": "on_tracy_run2.tracy",
+     "zones": {
+      "Frame": {
+       "count": 35930,
+       "median": 1.519417,
+       "p95": 1.81281015,
+       "p99": 2.7700885599999987,
+       "sum": 54999.076175
+      },
+      "Audio::Update": {
+       "count": 35930,
+       "median": 0.00523,
+       "p95": 0.008216,
+       "p99": 0.013335709999999999,
+       "sum": 205.306931
+      },
+      "Audio::BackendUpdate": null,
+      "Audio::PlayEvent": {
+       "count": 189,
+       "median": 0.003747,
+       "p95": 0.005663999999999999,
+       "p99": 0.014175,
+       "sum": 0.715096
+      },
+      "Physics::Step": {
+       "count": 3300,
+       "median": 0.035577,
+       "p95": 0.052761499999999996,
+       "p99": 0.06727440999999984,
+       "sum": 128.850286
+      },
+      "Present": {
+       "count": 35929,
+       "median": 0.271105,
+       "p95": 0.7365273999999999,
+       "p99": 1.4860236400000002,
+       "sum": 13349.445257
+      },
+      "Wwise::RenderAudio": {
+       "count": 35930,
+       "median": 0.003787,
+       "p95": 0.005841,
+       "p99": 0.010336389999999992,
+       "sum": 149.687038
+      }
+     },
+     "frames": 35930,
+     "audioUpdateMsPerFrame": 0.0057140810186473694,
+     "audioUpdateShareOfFramePercent": 0.3732915992020297,
+     "framesPerSecond": 653.2727272727273
+    },
+    {
+     "trace": "on_tracy_run3.tracy",
+     "zones": {
+      "Frame": {
+       "count": 34954,
+       "median": 1.538026,
+       "p95": 1.9280276999999981,
+       "p99": 2.9388079000000005,
+       "sum": 54995.82863
+      },
+      "Audio::Update": {
+       "count": 34955,
+       "median": 0.00538,
+       "p95": 0.008196,
+       "p99": 0.012673659999999982,
+       "sum": 201.984709
+      },
+      "Audio::BackendUpdate": null,
+      "Audio::PlayEvent": {
+       "count": 190,
+       "median": 0.003882,
+       "p95": 0.005838499999999999,
+       "p99": 0.007733899999999998,
+       "sum": 0.714645
+      },
+      "Physics::Step": {
+       "count": 3300,
+       "median": 0.037836999999999996,
+       "p95": 0.05396649999999998,
+       "p99": 0.06645601,
+       "sum": 132.686996
+      },
+      "Present": {
+       "count": 34954,
+       "median": 0.26627599999999996,
+       "p95": 0.75900875,
+       "p99": 1.6083208000000004,
+       "sum": 12995.277103
+      },
+      "Wwise::RenderAudio": {
+       "count": 34955,
+       "median": 0.003907,
+       "p95": 0.005871,
+       "p99": 0.009416399999999965,
+       "sum": 147.804769
+      }
+     },
+     "frames": 34954,
+     "audioUpdateMsPerFrame": 0.005778586399267609,
+     "audioUpdateShareOfFramePercent": 0.3672727805574297,
+     "framesPerSecond": 635.5272727272727
+    }
+   ],
+   "plain_runs": [
+    {
+     "side": "on",
+     "tag": "on_plain_run1",
+     "tracy": false,
+     "exit": 0,
+     "wallSeconds": 93.3,
+     "cpuSecondsTotal": 90.98,
+     "cpuPercentOfOneCoreInWindow": 100,
+     "workingSetMaxMB": 532.6,
+     "workingSetWindowMeanMB": 500,
+     "privateMaxMB": 987.8,
+     "samples": 180
+    },
+    {
+     "side": "on",
+     "tag": "on_plain_run2",
+     "tracy": false,
+     "exit": 0,
+     "wallSeconds": 93.5,
+     "cpuSecondsTotal": 90.94,
+     "cpuPercentOfOneCoreInWindow": 99.7,
+     "workingSetMaxMB": 538,
+     "workingSetWindowMeanMB": 515.6,
+     "privateMaxMB": 988.3,
+     "samples": 181
+    },
+    {
+     "side": "on",
+     "tag": "on_plain_run3",
+     "tracy": false,
+     "exit": 0,
+     "wallSeconds": 93.5,
+     "cpuSecondsTotal": 91.92,
+     "cpuPercentOfOneCoreInWindow": 101.1,
+     "workingSetMaxMB": 538.3,
+     "workingSetWindowMeanMB": 512.2,
+     "privateMaxMB": 992.9,
+     "samples": 181
+    }
+   ]
+  }
+ }
+}

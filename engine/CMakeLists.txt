@@ -301,6 +301,15 @@ list(APPEND ENGINE_SOURCES ${IMGUI_SOURCES})
 list(APPEND ENGINE_HEADERS ${IMGUIZMO_HEADERS})
 list(APPEND ENGINE_SOURCES ${IMGUIZMO_SOURCES})
 
+# Wwise (cmake/Wwise.cmake, docs/engine/wwise.md): the start and the stop of the sound engine of Audiokinetic, only with MYENGINE_WWISE=ON
+if(MYENGINE_WWISE)
+  list(APPEND ENGINE_HEADERS src/audio/wwise/WwiseRuntime.h)
+  list(APPEND ENGINE_SOURCES src/audio/wwise/WwiseRuntime.cpp)
+  # AudioSystem plays through Wwise: its implementation is this file instead of the XAudio2 one (and the backends of that one, that nothing else uses)
+  list(REMOVE_ITEM ENGINE_SOURCES src/audio/AudioSystem.cpp src/audio/NullAudioBackend.cpp src/audio/XAudio2Backend.cpp)
+  list(APPEND ENGINE_SOURCES src/audio/wwise/WwiseAudioSystem.cpp)
+endif()
+
 add_library(myengine_engine STATIC ${ENGINE_HEADERS} ${ENGINE_SOURCES})
 
 target_include_directories(myengine_engine
@@ -313,6 +322,12 @@ target_include_directories(myengine_engine
     ${IMGUI_ROOT}/Include/imgui/misc
     ${IMGUIZMO_ROOT}
     ${CMAKE_SOURCE_DIR}/external/renderdoc)
+
+if(MYENGINE_WWISE)
+  # PRIVATE: the types of the SDK stay inside engine/src/audio/wwise; the macro tells the rest (the tests) that the runtime is built
+  target_link_libraries(myengine_engine PRIVATE myengine_wwise myengine_wwise_io)
+  target_compile_definitions(myengine_engine PUBLIC MYENGINE_WWISE=1)
+endif()
 
 # A shipping build knows no repository (core::apppaths::SourceRoot() is empty) and keeps its files in %LOCALAPPDATA%
 if(MYENGINE_SHIPPING)

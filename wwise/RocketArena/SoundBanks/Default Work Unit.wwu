@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WwiseDocument Type="WorkUnit" ID="{A9A1D0FF-0F73-6973-A7F8-A466F40B7477}" SchemaVersion="133">
+	<SoundBanks>
+		<WorkUnit Name="Default Work Unit" ID="{A9A1D0FF-0F73-6973-A7F8-A466F40B7477}" PersistMode="Standalone">
+			<ChildrenList>
+				<SoundBank Name="RocketArena" ID="{59EB6483-5CA2-DF80-B07A-4C58E85515FE}">
+					<ObjectInclusionList>
+						<ObjectRef Name="Default Work Unit" ID="{E2485FB1-9D41-8522-8125-A8D1032BEAE1}" WorkUnitID="{E2485FB1-9D41-8522-8125-A8D1032BEAE1}" Origin="Manual" Filter="7"/>
+					</ObjectInclusionList>
+					<ObjectExclusionList/>
+					<GameSyncExclusionList/>
+				</SoundBank>
+			</ChildrenList>
+		</WorkUnit>
+	</SoundBanks>
+</WwiseDocument>

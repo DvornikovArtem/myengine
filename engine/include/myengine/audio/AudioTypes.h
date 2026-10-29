@@ -123,6 +123,11 @@ namespace myengine::audio
         std::uint64_t dropped = 0;         // sounds not played: no free voice, no weaker one to take
         std::uint32_t soundsLoaded = 0;
         std::uint64_t soundBytes = 0;
+        // What the sound engine behind holds (Wwise only; 0 with XAudio2 and in the Release libraries of Wwise, which do not count): the memory of its memory
+        // manager, and the game objects that are registered for voices (the playing ones and the stopped ones that wait for the end of their event). A leak shows
+        // here: after every voice has ended both go back to what they were.
+        std::uint64_t engineMemoryBytes = 0;
+        std::uint32_t engineObjects = 0;
     };
 
     // The result of the 3D calculation (a pure function: tested without a device)

@@ -37,10 +37,20 @@ namespace myengine::audio
         }
     }
 
+    // The state of the Wwise build: nothing here (the declaration is in the header, so that the class is the same in both builds)
+    struct AudioSystem::WwiseState
+    {
+    };
+
     AudioSystem& GetAudioSystem()
     {
         static AudioSystem instance;
         return instance;
+    }
+
+    std::uint32_t AudioSystem::VoiceCount() const
+    {
+        return static_cast<std::uint32_t>(voices_.size());
     }
 
     AudioSystem::AudioSystem() = default;
@@ -348,6 +358,7 @@ namespace myengine::audio
 
     VoiceHandle AudioSystem::PlayEvent(const std::string& name, const EventParams& params)
     {
+        ZoneScopedN("Audio::PlayEvent");
         const auto found = eventsByName_.find(name);
         if (!initialized_ || found == eventsByName_.end())
         {
@@ -684,7 +695,10 @@ namespace myengine::audio
             return;
         }
         ZoneScopedN("Audio::Update");
-        backend_->Update(deltaTime);
+        {
+            ZoneScopedN("Audio::BackendUpdate");
+            backend_->Update(deltaTime);
+        }
         std::uint32_t active = 0;
         for (Voice& voice : voices_)
         {

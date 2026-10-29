@@ -4,6 +4,8 @@
 
 Звуки процедурные: `tools/gen_rl_audio.py` (numpy + scipy) пишет `assets/audio/*.wav` и `manifest.json`; чужих сэмплов нет. Подключение к игре (`RlGameSystem`) — отдельная задача G7d; здесь движок, ассеты, компонент сцены, тесты и этот документ.
 
+Звук игры переезжает на Wwise: проект и банки описаны в [wwise-project.md](wwise-project.md). При сборке с `-DMYENGINE_WWISE=ON` реализация `AudioSystem` — Wwise, подробности в [wwise.md](wwise.md). XAudio2 остаётся в сборке с `OFF` до замеров W4 и удаления (W6); всё описанное ниже относится к этой сборке.
+
 ## Состав
 
 | Файл | Что |

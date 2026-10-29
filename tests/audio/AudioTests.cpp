@@ -51,6 +51,7 @@ namespace
         return data;
     }
 
+#ifndef MYENGINE_WWISE   // the tests of the XAudio2 mixer: with Wwise the system is tested by audio_wwise (WwiseAudioTests.cpp)
     AudioConfig NoDevice(const std::uint32_t mono = 4, const std::uint32_t stereo = 2)
     {
         AudioConfig config;
@@ -59,6 +60,7 @@ namespace
         config.stereoVoices = stereo;
         return config;
     }
+#endif
 
     // ---- WAV ----
 
@@ -162,6 +164,7 @@ namespace
 
     // ---- the system ----
 
+#ifndef MYENGINE_WWISE
     void TestVoicesAndLoops()
     {
         AudioSystem audio;
@@ -468,19 +471,21 @@ namespace
         audio.Shutdown();
         std::cout << "device smoke: " << (audio.HasDevice() ? "device" : "no device (simulated)") << "\n";
     }
+#endif   // MYENGINE_WWISE
 }
 
 int main()
 {
     try
     {
-        const fs::path source = fs::u8path(MYENGINE_SOURCE_DIR);
+        [[maybe_unused]] const fs::path source = fs::u8path(MYENGINE_SOURCE_DIR);
         const fs::path scratch = fs::temp_directory_path() / "myengine_audio_tests";
         std::error_code ec;
         fs::remove_all(scratch, ec);
 
         TestWav();
         TestSpatial();
+#ifndef MYENGINE_WWISE
         TestVoicesAndLoops();
         TestPoolStealing();
         TestBuses();
@@ -488,6 +493,7 @@ int main()
         TestBank(scratch);
         TestProjectSounds(source);
         TestDeviceSmoke();
+#endif
         fs::remove_all(scratch, ec);
     }
     catch (const std::exception& exception)
