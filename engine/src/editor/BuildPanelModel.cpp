@@ -6,6 +6,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -324,6 +325,16 @@ namespace myengine::editor
                 {
                     return false;
                 }
+                const auto optional = entry.find("optional");
+                if (optional != entry.end() && !optional->is_null())
+                {
+                    if (!optional->is_boolean())
+                    {
+                        error = where + ": \"optional\" must be true or false";
+                        return false;
+                    }
+                    item.optional = optional->get<bool>();
+                }
                 out.externalData.push_back(std::move(item));
             }
         }
@@ -391,8 +402,36 @@ namespace myengine::editor
 
     bool ExternalDataPresent(const fs::path& repoRoot, const ExternalDataItem& item)
     {
+        if (item.check.empty())
+        {
+            return false;
+        }
+        // %NAME% is an environment variable (the same as the script does): a path of the machine, outside the repository. The value is read as wide text:
+        // %LOCALAPPDATA% of a user with a Russian name is not UTF-8.
+        std::wstring text = fs::u8path(item.check).wstring();
+        for (std::size_t open = text.find(L'%'); open != std::wstring::npos; open = text.find(L'%', open))
+        {
+            const std::size_t close = text.find(L'%', open + 1);
+            if (close == std::wstring::npos)
+            {
+                break;
+            }
+            const std::wstring name = text.substr(open + 1, close - open - 1);
+            wchar_t* value = nullptr;
+            std::size_t valueSize = 0;
+            if (name.empty() || _wdupenv_s(&value, &valueSize, name.c_str()) != 0 || value == nullptr)
+            {
+                open = close;   // not a variable: left as it is
+                continue;
+            }
+            const std::wstring replacement(value);
+            free(value);
+            text.replace(open, close - open + 1, replacement);
+            open += replacement.size();
+        }
         std::error_code ec;
-        return !item.check.empty() && fs::exists(repoRoot / fs::u8path(item.check), ec);
+        const fs::path path(text);
+        return fs::exists(path.is_absolute() ? path : repoRoot / path, ec);
     }
 
     // ---------------------------------------------------------------- the lines

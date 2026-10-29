@@ -29,8 +29,9 @@ namespace myengine::editor
     struct ExternalDataItem
     {
         std::string name;   // "Freedoom (the free data of the game, WAD)"
-        std::string check;  // a file (relative to the repository) that is there when the data is there
+        std::string check;  // a file that is there when the data is there: relative to the repository, or with %NAME% (an environment variable: %LOCALAPPDATA%)
         std::string fetch;  // the script that downloads it (relative to the repository); empty: none
+        bool optional = false;   // the package goes without it, with a warning
     };
 
     struct GameManifest
@@ -65,7 +66,7 @@ namespace myengine::editor
 
     // Is `target` made by a CMake file of the repository (add_executable / add_library)? The CMake files under external/ and build folders are not read.
     bool CmakeTargetExists(const std::filesystem::path& repoRoot, std::string_view target);
-    // Is a file or a folder of the data there (relative to the repository)?
+    // Is a file or a folder of the data there (relative to the repository; %NAME% in the path is an environment variable)?
     bool ExternalDataPresent(const std::filesystem::path& repoRoot, const ExternalDataItem& item);
 
     // ---------------------------------------------------------------- the lines of the script

@@ -197,6 +197,7 @@ namespace doom
         if (!exeDirectory.empty())
         {
             addFolder(exeDirectory / "assets" / "doom", IwadSource::NextToExe);
+            addFolder(exeDirectory / "wads", IwadSource::NextToExe);   // where the package puts the shareware WAD
             addFolder(exeDirectory / "doom", IwadSource::NextToExe);
             addFolder(exeDirectory, IwadSource::NextToExe);
         }

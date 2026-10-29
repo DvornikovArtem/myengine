@@ -71,7 +71,8 @@ namespace
         "id": "demo", "displayName": "Demo Game", "name": "DemoGame", "exe": "DemoGame.exe",
         "build": { "cmakeTarget": "demo_target", "exePath": "app/Release/DemoGame.exe", "userDataFolder": "DemoGame", "icon": "app/demo.ico", "checkScript": "tools/check_package.ps1" },
         "options": { "steam": "optional", "wwise": "no", "zip": false },
-        "externalData": [ { "name": "Freedoom", "check": "external/freedoom/freedoom1.wad", "fetch": "tools/fetch_freedoom.ps1" } ]
+        "externalData": [ { "name": "Freedoom", "check": "external/freedoom/freedoom1.wad", "fetch": "tools/fetch_freedoom.ps1" },
+                          { "name": "Shareware", "check": "%MYENGINE_TEST_FOLDER%/doom1.wad", "optional": true } ]
     })";
 
     // ---- the manifests ----
@@ -86,7 +87,9 @@ namespace
               "the build part");
         Check(manifest.checkScript == "tools/check_package.ps1", "the check script");
         Check(manifest.steam == GameFeature::Optional && manifest.wwise == GameFeature::No && !manifest.zipByDefault, "the options");
-        Check(manifest.externalData.size() == 1 && manifest.externalData[0].check == "external/freedoom/freedoom1.wad" && manifest.externalData[0].fetch == "tools/fetch_freedoom.ps1", "the external data");
+        Check(manifest.externalData.size() == 2 && manifest.externalData[0].check == "external/freedoom/freedoom1.wad" && manifest.externalData[0].fetch == "tools/fetch_freedoom.ps1" &&
+                  !manifest.externalData[0].optional && manifest.externalData[1].optional && manifest.externalData[1].fetch.empty(),
+              "the external data and the optional one");
 
         // what is left out gets its default
         GameManifest minimal;
@@ -122,6 +125,8 @@ namespace
             {R"({"id": "x", "displayName": "X", "name": "X", "exe": "X.exe", "options": {"zip": "yes"}})", "x", "\"zip\" must be true or false"},
             {R"({"id": "x", "displayName": "X", "name": "X", "exe": "X.exe", "externalData": {}})", "x", "\"externalData\" must be an array"},
             {R"({"id": "x", "displayName": "X", "name": "X", "exe": "X.exe", "externalData": [{"name": "D"}]})", "x", "externalData[0]: \"check\" is missing"},
+            {R"({"id": "x", "displayName": "X", "name": "X", "exe": "X.exe", "externalData": [{"name": "D", "check": "a", "optional": "yes"}]})", "x",
+             "externalData[0]: \"optional\" must be true or false"},
         };
         for (const Case& test : cases)
         {
@@ -181,6 +186,23 @@ namespace
             Check(game.error.empty() && game.manifest.has_value(), "games/" + game.folder + "/game.json: " + game.error);
             rocket = rocket || game.folder == "rocketarena";
             doom = doom || game.folder == "flydoom";
+            if (game.folder == "flydoom")
+            {
+                const GameManifest& manifest = *game.manifest;
+                Check(manifest.name == "FlyDoom" && manifest.exe == "FlyDoom.exe" && manifest.cmakeTarget == "FlyDoom" && manifest.exePath == "app/Release/FlyDoom.exe",
+                      "FlyDoom is built from its target");
+                Check(manifest.steam == GameFeature::No && manifest.wwise == GameFeature::No, "FlyDoom has no Steam and no Wwise");
+                Check(CmakeTargetExists(root, manifest.cmakeTarget), "the target of FlyDoom is in the CMake files");
+                Check(!manifest.checkScript.empty() && fs::exists(root / manifest.checkScript), "the check script of FlyDoom is there");
+                bool freedoom = false;
+                bool brainOptional = false;
+                for (const ExternalDataItem& item : manifest.externalData)
+                {
+                    freedoom = freedoom || (item.check == "assets/doom/freedoom1.wad" && !item.fetch.empty() && !item.optional && fs::exists(root / item.fetch));
+                    brainOptional = brainOptional || (item.check == "assets/flybrain/malecns_v1.fbrain" && item.optional);
+                }
+                Check(freedoom && brainOptional, "Freedoom (with its script) and the optional fly brain are in the external data of FlyDoom");
+            }
         }
         Check(rocket && doom, "games/rocketarena and games/flydoom are in the repository");
         for (const GameEntry& game : games)
@@ -219,6 +241,21 @@ namespace
         Check(!ExternalDataPresent(repo.root, item), "the data is not there");
         WriteFile(repo.root / "external" / "freedoom" / "freedoom1.wad", "x");
         Check(ExternalDataPresent(repo.root, item), "the data is there");
+
+        // %NAME% is an environment variable: a file of the machine outside the repository (the folder %LOCALAPPDATA%/FlyDoom/wads of the player)
+        ExternalDataItem machine;
+        machine.name = "Machine data";
+        machine.check = "%MYENGINE_TEST_FOLDER%/doom1.wad";
+        // the folder has a Russian name, like the profile of the person who found the bug: the value of the variable is not UTF-8
+        const fs::path machineFolder = repo.root / L"\u043f\u043a";
+        _wputenv_s(L"MYENGINE_TEST_FOLDER", machineFolder.c_str());
+        Check(!ExternalDataPresent(repo.root, machine), "the file of the variable is not there");
+        WriteFile(machineFolder / "doom1.wad", "x");
+        Check(ExternalDataPresent(repo.root, machine), "the file of the variable is there (a folder with a Russian name)");
+        _wputenv_s(L"MYENGINE_TEST_FOLDER", L"");
+        ExternalDataItem unknown;
+        unknown.check = "%MYENGINE_NO_SUCH_VARIABLE%/doom1.wad";
+        Check(!ExternalDataPresent(repo.root, unknown), "a variable that is not set leaves the path as it is: no file");
     }
 
     // ---- the lines ----
