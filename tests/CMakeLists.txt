@@ -226,6 +226,16 @@ set_property(TARGET myengine_dpi_scale_tests PROPERTY FOLDER "Tests")
 add_test(NAME dpi_scale COMMAND myengine_dpi_scale_tests)
 set_tests_properties(dpi_scale PROPERTIES TIMEOUT 60)
 
+# B0: the model of the Build window of the editor (the manifests of the games, the lines of the script, the state of a run, the runner on a child process)
+add_executable(myengine_build_panel_model_tests
+  core/BuildPanelModelTests.cpp)
+
+target_link_libraries(myengine_build_panel_model_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_build_panel_model_tests)
+set_property(TARGET myengine_build_panel_model_tests PROPERTY FOLDER "Tests")
+add_test(NAME build_panel_model COMMAND myengine_build_panel_model_tests)
+set_tests_properties(build_panel_model PROPERTIES TIMEOUT 120)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
@@ -381,6 +391,17 @@ add_executable(myengine_render_target_smoke
 target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
+
+# D0: the classic DOOM of the engine (game/doom) with Freedoom, no window and no sound. Skipped (77) without the WAD:
+# tools/doom/fetch_freedoom.ps1 puts it into assets/doom
+add_executable(myengine_doom_core_tests
+  doom/DoomCoreTests.cpp)
+target_link_libraries(myengine_doom_core_tests PRIVATE myengine_doom)
+target_compile_definitions(myengine_doom_core_tests PRIVATE DOOM_TEST_WAD_DIR="${CMAKE_SOURCE_DIR}/assets/doom")
+myengine_apply_compiler_options(myengine_doom_core_tests)
+set_property(TARGET myengine_doom_core_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_core COMMAND myengine_doom_core_tests)
+set_tests_properties(doom_core PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 # G3: the Rocket League physics (Jolt) without a window
 add_executable(myengine_rl_physics_tests
@@ -672,3 +693,14 @@ myengine_copy_runtime_assets(myengine_flybrain_gpu_tests)
 set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
 add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
 set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+# F0: Face ID without a camera: the decisions, the alignment, the profile file and (when ONNX Runtime and the models are there) YuNet + SFace on two public domain
+# portraits. Exit code 77: no ONNX Runtime, models or portraits (tools/faceid/fetch_models.ps1 -WithTestImage), the test is skipped.
+add_executable(myengine_faceid_tests
+  faceid/FaceIdTests.cpp)
+
+target_link_libraries(myengine_faceid_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_faceid_tests)
+myengine_copy_runtime_assets(myengine_faceid_tests)
+set_property(TARGET myengine_faceid_tests PROPERTY FOLDER "Tests")
+add_test(NAME faceid COMMAND myengine_faceid_tests)
+set_tests_properties(faceid PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)

@@ -29,9 +29,9 @@ namespace flybrain
         constexpr uint32_t kMaxSteps = 4096;        // steps of one submission (a row of watch counts each)
         constexpr uint32_t kDeliverGroups = 512;
 
-        // Root parameters: the model constants, the window constants, 6 SRVs, 10 UAVs (root descriptors: no heaps)
+        // Root parameters: the model constants, the window constants, 6 SRVs, 11 UAVs (root descriptors: no heaps)
         constexpr UINT kSrvCount = 6;
-        constexpr UINT kUavCount = 10;
+        constexpr UINT kUavCount = 11;
         enum RootIndex : UINT
         {
             kRootModel = 0,
@@ -411,12 +411,13 @@ namespace flybrain
         watchCounts_ = CreateBuffer(uint64_t(kMaxSteps) * kWatchStride * 4, D3D12_HEAP_TYPE_DEFAULT, true, D3D12_RESOURCE_STATE_COMMON);
         ring_ = CreateBuffer(uint64_t(ringCapacity_) * 8, D3D12_HEAP_TYPE_DEFAULT, true, D3D12_RESOURCE_STATE_COMMON);
         active_ = CreateBuffer(n * 4, D3D12_HEAP_TYPE_DEFAULT, true, D3D12_RESOURCE_STATE_COMMON);
+        lastSpike_ = CreateBuffer(n * 4, D3D12_HEAP_TYPE_DEFAULT, true, D3D12_RESOURCE_STATE_COMMON);
         model_ = CreateBuffer(256, D3D12_HEAP_TYPE_UPLOAD, false, D3D12_RESOURCE_STATE_GENERIC_READ);
-        if (!state_ || !params_ || !pending_ || !spikeTotals_ || !arrivals_ || !spikeList_ || !counters_ || !watchCounts_ || !ring_ || !active_ || !model_)
+        if (!state_ || !params_ || !pending_ || !spikeTotals_ || !arrivals_ || !spikeList_ || !counters_ || !watchCounts_ || !ring_ || !active_ || !lastSpike_ || !model_)
         {
             return Fail(error, "out of GPU memory (neuron state)");
         }
-        memoryBytes_ = n * (sizeof(GpuNeuronState) + sizeof(GpuNeuronParams) + 4 + 4 + 4 + uint64_t(delaySteps_) * 4) + uint64_t(spikeCapacity_) * 8
+        memoryBytes_ = n * (sizeof(GpuNeuronState) + sizeof(GpuNeuronParams) + 4 + 4 + 4 + 4 + uint64_t(delaySteps_) * 4) + uint64_t(spikeCapacity_) * 8
             + uint64_t(kMaxSteps) * kWatchStride * 4 + uint64_t(ringCapacity_) * 8;
 
         ModelCb cb{};
@@ -544,6 +545,9 @@ namespace flybrain
         UploadTo(pending_.Get(), image.pending.data(), n * 4);
         UploadTo(spikeTotals_.Get(), image.spikeTotals.data(), n * 4);
         UploadTo(arrivals_.Get(), image.arrivals.data(), n * delaySteps_ * 4);
+        // The CPU does not keep the step of the last spike: the GPU starts with "none"
+        const std::vector<uint32_t> never(n, 0xFFFFFFFFu);
+        UploadTo(lastSpike_.Get(), never.data(), n * 4);
     }
 
     void FlyBrainGpu::Download(GpuStateImage& image)
@@ -589,7 +593,7 @@ namespace flybrain
             list_->SetComputeRootShaderResourceView(kRootFirstSrv + k, srvs[k]->GetGPUVirtualAddress());
         }
         ID3D12Resource* uavs[] = { state_.Get(), params_.Get(), pending_.Get(), spikeTotals_.Get(), arrivals_.Get(), spikeList_.Get(),
-            counters_.Get(), watchCounts_.Get(), ring_.Get(), active_.Get() };
+            counters_.Get(), watchCounts_.Get(), ring_.Get(), active_.Get(), lastSpike_.Get() };
         for (UINT k = 0; k < kUavCount; ++k)
         {
             list_->SetComputeRootUnorderedAccessView(kRootFirstUav + k, uavs[k]->GetGPUVirtualAddress());

@@ -332,6 +332,7 @@ namespace flybrain
         {
             ring.ring = gpu_->RingBuffer();
             ring.counters = gpu_->CountersBuffer();
+            ring.lastSpikeStep = gpu_->LastSpikeBuffer();
             ring.capacity = gpu_->RingCapacity();
             ring.fence = gpu_->Fence();
             ring.fenceValue = gpu_->LastSubmittedFenceValue();

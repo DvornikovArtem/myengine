@@ -1,5 +1,6 @@
 #include <myengine/core/AppPaths.h>
 
+#include <string>
 #include <system_error>
 
 #ifndef NOMINMAX
@@ -18,6 +19,12 @@ namespace myengine::core::apppaths
 
     namespace
     {
+        std::wstring& ProductFolder()
+        {
+            static std::wstring name;
+            return name;
+        }
+
         fs::path EnvironmentDirectory(const wchar_t* name)
         {
             wchar_t buffer[MAX_PATH]{};
@@ -28,6 +35,11 @@ namespace myengine::core::apppaths
             }
             return {};
         }
+    }
+
+    void SetProductFolder(const wchar_t* name)
+    {
+        ProductFolder() = name != nullptr ? name : L"";
     }
 
     bool IsShipping()
@@ -50,6 +62,11 @@ namespace myengine::core::apppaths
 
     fs::path UserDataDirectory()
     {
+        if (!ProductFolder().empty())
+        {
+            const fs::path base = EnvironmentDirectory(L"LOCALAPPDATA");
+            return (base.empty() ? ProjectContext::ExecutableDirectory() : base) / ProductFolder();
+        }
 #ifdef MYENGINE_SHIPPING
         const fs::path base = EnvironmentDirectory(L"LOCALAPPDATA");
         return (base.empty() ? ProjectContext::ExecutableDirectory() : base) / L"RocketArena";
