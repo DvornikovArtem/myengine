@@ -84,13 +84,6 @@
       "from": "assets/flybrain/malecns_v1.fbrain",
       "to": "assets/flybrain/malecns_v1.fbrain",
       "ifMissing": "the package has no fly (tools/flybrain/fetch_malecns.ps1 makes the file)"
-    },
-    {
-      "name": "the shared face database (Face ID)",
-      "from": ["assets/faceid/allowed_faces.fdb", "faceid/allowed_faces.fdb"],
-      "to": "faceid/allowed_faces.fdb",
-      "warnIfMissing": false,
-      "ifMissing": "the package has none: the games that have Face ID work in the Local mode"
     }
   ],
 

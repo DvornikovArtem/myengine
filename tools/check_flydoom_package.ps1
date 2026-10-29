@@ -16,7 +16,7 @@
         one colour;
       - every WAD of the package is taken by --iwad and the game plays from it to the first level (-warp 1 1);
       - nothing is created or changed next to the exe, nothing is written to APPDATA;
-      - a deliberate crash (MYENGINE_CRASH_TEST=1) leaves a minidump, a report and the marker in <LOCALAPPDATA>\FlyDoom\crashes.
+      - a deliberate crash (MYENGINE_CRASH_TEST=1) leaves a minidump, a report and the marker in <LOCALAPPDATA>\FlyDoom\crashes, and the next start tells about it once.
     The fly brain is only checked as a file: FlyDoom does not read it yet (the player of the brain is the task N1); when the log says anything about the fly brain, it must
     not be an error. docs/game/packaging.md describes the checks.
 
@@ -127,12 +127,11 @@ function Test-PackageFiles([string]$folder) {
     }
     else { Write-Warning 'the package has no fly brain (assets\flybrain\malecns_v1.fbrain)' }
 
-    $faces = Join-Path $folder 'faceid\allowed_faces.fdb'
-    if (Test-Path $faces) { Write-Step ("the shared face database: {0:N1} KB" -f ((Get-Item $faces).Length / 1KB)) }
-    else { Write-Step 'no shared face database in the package' }
+    # the faces of real people do not go into a game (the decision of the owner): no face database in the package
+    if (Test-Path (Join-Path $folder 'faceid\allowed_faces.fdb')) { Fail 'the package has faceid\allowed_faces.fdb: the games carry no face database' }
 
     $versionText = Read-Text (Join-Path $folder 'version.txt')
-    foreach ($line in @(Get-ChildItem -Path $folder -Recurse -File | Where-Object { $_.FullName -match '\\(wads|faceid)\\' -or $_.FullName -match '\\assets\\(doom|flybrain)\\' })) {
+    foreach ($line in @(Get-ChildItem -Path $folder -Recurse -File | Where-Object { $_.FullName -match '\\wads\\' -or $_.FullName -match '\\assets\\(doom|flybrain)\\' })) {
         $relative = (Get-RelativePath $folder $line.FullName).Replace('\', '/')
         if ($relative -notlike '*.license.txt' -and $versionText.IndexOf("file $relative") -lt 0) { Fail "version.txt does not list the data file $relative" }
     }
@@ -248,8 +247,7 @@ function Test-ExeResources([string]$folder) {
     Write-Step "exe: $($info.ProductName) $($info.ProductVersion), $($info.FileDescription), icon $([FlyDoomResources]::HasIcon($exePath))"
 }
 
-# A deliberate crash at the very start leaves the report and the marker (FlyDoom does not tell the player about the crash at the next start yet: that notice is in the Rocket League
-# game flow, not in the flow of DOOM, so the log line of the next start is not checked)
+# A deliberate crash at the very start leaves the report and the marker; the next start tells the player once (the log line "the previous run crashed") and removes the marker
 function Test-Crash([string]$folder) {
     $appData = Join-Path $work 'appdata-crash'
     $localAppData = Join-Path $work 'localappdata-crash'
@@ -281,7 +279,25 @@ function Test-Crash([string]$folder) {
         if ($reportText.IndexOf('FlyDoom.exe+0x') -lt 0) { Fail '[crash] the report has no place of the crash' }
         Write-Step "[crash] $($dump[0].Name) ($([math]::Round($dump[0].Length / 1KB)) KB) and $($report[0].Name)"
     }
-    if (-not (Test-Path (Join-Path $crashes 'pending.txt'))) { Fail '[crash] no marker of the crash for the next start' }
+    if (-not (Test-Path (Join-Path $crashes 'pending.txt'))) { Fail '[crash] no marker of the crash for the next start'; return }
+
+    # the next start (the same LOCALAPPDATA) says so once: the log line, and the marker is gone
+    $env:APPDATA = $appData; $env:LOCALAPPDATA = $localAppData
+    try {
+        $next = Start-Process -FilePath (Join-Path $folder 'FlyDoom.exe') -ArgumentList @('--exit-after-frames', '120') -WorkingDirectory $workingDirectory -PassThru
+    }
+    finally { $env:APPDATA = $saved.APPDATA; $env:LOCALAPPDATA = $saved.LOCALAPPDATA }
+    if (-not $next.WaitForExit(90000)) { $next.Kill(); Fail '[crash] the start after the crash did not end'; return }
+    if ($next.ExitCode -ne 0) { Fail "[crash] the start after the crash: exit code $($next.ExitCode)" }
+    $log = Join-Path $localAppData 'FlyDoom\logs\myengine.log'
+    if (-not (Test-Path $log)) { Fail '[crash] the start after the crash left no log' }
+    else {
+        $logText = Read-Text $log
+        if ($logText.IndexOf('the previous run crashed', [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "[crash] the start after the crash does not tell about it (no 'the previous run crashed' in the log)" }
+        elseif ($logText.IndexOf($report[0].Name) -lt 0) { Fail "[crash] the line about the crash does not name the report $($report[0].Name)" }
+        else { Write-Step '[crash] the next start told about the crash' }
+    }
+    if (Test-Path (Join-Path $crashes 'pending.txt')) { Fail '[crash] the marker is still there after the game told about the crash' }
 }
 
 if (-not (Test-Path (Join-Path $source 'FlyDoom.exe'))) { throw "$source\FlyDoom.exe not found: run tools\package_game.ps1 -Game flydoom first" }
