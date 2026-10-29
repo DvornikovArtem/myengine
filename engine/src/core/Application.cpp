@@ -75,6 +75,20 @@ namespace myengine::core
             return on;
         }
 
+        // The path in an environment variable (MYENGINE_FACEID_DB, set by --faceid-db), empty when there is none
+        std::filesystem::path EnvironmentPath(const wchar_t* name)
+        {
+            wchar_t* value = nullptr;
+            std::size_t length = 0;
+            std::filesystem::path path;
+            if (_wdupenv_s(&value, &length, name) == 0 && value != nullptr)
+            {
+                path = value;
+                std::free(value);
+            }
+            return path;
+        }
+
         // The editor overlay of the UiManager as the context of the Face ID screens
         faceid::FaceIdUiContext ToFaceIdContext(const ui::UiManager::EditorOverlayContext& context)
         {
@@ -564,7 +578,9 @@ namespace myengine::core
         // frames) and --no-faceid / MYENGINE_NO_FACEID=1 do not ask: tests, CI and the hidden desktop go on as before.
         if (!gameMode_ && !EnvironmentFlag("MYENGINE_NO_FACEID"))
         {
-            faceIdService_ = std::make_unique<faceid::FaceIdService>();
+            faceid::FaceIdService::Options faceIdOptions;
+            faceIdOptions.databaseFile = EnvironmentPath(L"MYENGINE_FACEID_DB");   // --faceid-db <file>: the shared database that is named, not looked for
+            faceIdService_ = std::make_unique<faceid::FaceIdService>(std::move(faceIdOptions));
             if (!faceIdService_->Initialize())
             {
                 logger_.Info("Face ID is off: " + faceIdService_->UnavailableReason());

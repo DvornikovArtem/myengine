@@ -21,6 +21,10 @@
 #include <stb_image.h>
 
 #include <myengine/faceid/FaceAlign.h>
+#include <myengine/faceid/FaceDatabase.h>
+#include <myengine/faceid/FaceIdService.h>
+#include <myengine/faceid/FaceIdTrustedKey.h>
+#include <myengine/faceid/FaceSigner.h>
 #include <myengine/faceid/FaceMatcher.h>
 #include <myengine/faceid/FaceModels.h>
 #include <myengine/faceid/FaceProfileStore.h>
@@ -454,6 +458,472 @@ namespace
         Check(!protector->Unprotect(sealed, opened), "a changed blob is refused");
     }
 
+    // ---- F1: the signer, the shared database, where it is looked for, the modes of the service
+
+    std::vector<std::uint8_t> Bytes(const std::string& text) { return std::vector<std::uint8_t>(text.begin(), text.end()); }
+
+    FaceDatabase MakeDatabase(const int count, const std::string& password = "publisher-pass")
+    {
+        FaceDatabase database;
+        const char* names[] = {"Artem", "Friend", "Teacher", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth"};
+        for (int i = 0; i < count; ++i)
+        {
+            database.faces.push_back({names[i], "2026-10-29", Embeddings(8, 12 * i)});
+        }
+        database.created = "2026-10-29";
+        if (!password.empty())
+        {
+            Check(HashPassword(password, database.password, 2000), "the password hash of the database");
+        }
+        return database;
+    }
+
+    void WriteBytes(const fs::path& file, const std::vector<std::uint8_t>& bytes)
+    {
+        fs::create_directories(file.parent_path());
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    void TestHex()
+    {
+        std::vector<std::uint8_t> bytes;
+        Check(FromHex("00ff10Ab", bytes) && bytes.size() == 4 && bytes[1] == 0xFF && bytes[3] == 0xAB, "hex is read");
+        Check(ToHex(bytes) == "00ff10ab", "hex is written in lower case");
+        Check(!FromHex("", bytes) && !FromHex("abc", bytes) && !FromHex("zz", bytes) && !FromHex("0x00", bytes), "bad hex is refused");
+        Check(BuiltInPublicKey().empty() == (kTrustedPublicKeyHex[0] == '\0'), "the built-in key is read from the header");
+    }
+
+    void TestSigner(const fs::path& directory)
+    {
+        const auto protector = std::make_shared<XorProtector>();
+        const fs::path keyFile = directory / "signer" / "signing.key";
+        std::string error;
+        FaceSigner signer(keyFile, protector);
+        Check(signer.Load(&error) && !signer.HasKey(), "no file is no key, not an error");
+        std::vector<std::uint8_t> signature;
+        Check(!signer.Sign(Bytes("x"), signature, &error), "without a key nothing is signed");
+        Check(signer.Generate(&error) && signer.HasKey() && signer.PublicKey().size() == kPublicKeySize, "a key is made: " + error);
+        Check(fs::exists(keyFile), "the key file is written");
+        Check(!signer.Generate(&error), "a second key is refused (the first would be lost)");
+
+        const std::vector<std::uint8_t> message = Bytes("the faces of the database");
+        Check(signer.Sign(message, signature, &error) && signature.size() == kSignatureSize, "a message is signed");
+        Check(VerifySignature(signer.PublicKey(), message, signature), "the signature fits the public key");
+        std::vector<std::uint8_t> changed = message;
+        changed[3] ^= 1;
+        Check(!VerifySignature(signer.PublicKey(), changed, signature), "a changed message does not fit");
+        std::vector<std::uint8_t> badSignature = signature;
+        badSignature[10] ^= 0x40;
+        Check(!VerifySignature(signer.PublicKey(), message, badSignature), "a changed signature does not fit");
+        badSignature = signature;
+        badSignature.pop_back();
+        Check(!VerifySignature(signer.PublicKey(), message, badSignature), "a short signature does not fit");
+
+        FaceSigner other(directory / "signer" / "other.key", protector);
+        Check(other.Generate(&error) && other.PublicKey() != signer.PublicKey(), "another key is another key");
+        Check(!VerifySignature(other.PublicKey(), message, signature), "another publisher's key does not fit");
+        std::vector<std::uint8_t> notOnCurve(kPublicKeySize, 7);
+        Check(!VerifySignature(notOnCurve, message, signature), "a point that is not on the curve is no key");
+        Check(!VerifySignature({}, message, signature), "no key: nothing fits");
+
+        // the key comes back from the file; the bytes of the file do not hold the private key in plain
+        FaceSigner again(keyFile, protector);
+        Check(again.Load(&error) && again.HasKey() && again.PublicKey() == signer.PublicKey(), "the key is read from its file: " + error);
+        std::vector<std::uint8_t> signedAgain;
+        Check(again.Sign(message, signedAgain, &error) && VerifySignature(signer.PublicKey(), message, signedAgain), "the key that was read signs");
+        FaceSigner unprotectFails(keyFile, std::make_shared<FailingProtector>());
+        Check(!unprotectFails.Load(&error) && !error.empty() && !unprotectFails.HasKey(), "a key of another Windows account is an error with words");
+        Check(fs::exists(keyFile), "and the file is kept");
+        {
+            std::fstream io(keyFile, std::ios::in | std::ios::out | std::ios::binary);
+            io.seekp(2);
+            io.put('\x55');
+        }
+        FaceSigner damaged(keyFile, protector);
+        Check(!damaged.Load(&error) && !damaged.HasKey(), "a damaged key file is an error");
+
+        // the backup
+        const fs::path backup = directory / "signer" / "backup.key";
+        Check(!signer.Export(backup, "short", &error), "the password of a backup needs 8 characters");
+        Check(signer.Export(backup, "backup-password", &error), "the key is exported: " + error);
+        Check(!signer.Export(backup, "backup-password", &error), "a backup does not overwrite a file");
+        {
+            std::ifstream in(backup, std::ios::binary);
+            const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            Check(bytes.size() > 100, "the backup has the key in it");
+        }
+        FaceSigner imported(directory / "signer2" / "signing.key", protector);
+        Check(!imported.Import(backup, "wrong-password", &error) && !imported.HasKey(), "a wrong password does not open the backup");
+        Check(!fs::exists(directory / "signer2" / "signing.key"), "and nothing is written");
+        Check(imported.Import(backup, "backup-password", &error) && imported.PublicKey() == signer.PublicKey(), "the key is imported: " + error);
+        Check(!imported.Import(backup, "backup-password", &error), "a key is not replaced by an import");
+        std::vector<std::uint8_t> signedImported;
+        Check(imported.Sign(message, signedImported, &error) && VerifySignature(signer.PublicKey(), message, signedImported), "the imported key signs the same way");
+        {
+            // a changed byte of the backup: the tag of GCM does not match
+            std::vector<std::uint8_t> bytes;
+            {
+                std::ifstream in(backup, std::ios::binary);
+                bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            }
+            bytes[bytes.size() / 2] ^= 0x01;
+            WriteBytes(directory / "signer" / "changed.key", bytes);
+            FaceSigner third(directory / "signer3" / "signing.key", protector);
+            Check(!third.Import(directory / "signer" / "changed.key", "backup-password", &error) && !third.HasKey(), "a changed backup is refused");
+            Check(!third.Import(directory / "signer" / "missing.key", "backup-password", &error), "a missing backup is an error");
+            WriteBytes(directory / "signer" / "junk.key", std::vector<std::uint8_t>(200, 0x11));
+            Check(!third.Import(directory / "signer" / "junk.key", "backup-password", &error), "junk is not a backup");
+        }
+    }
+
+    void TestDatabaseFile(const fs::path& directory)
+    {
+        const auto protector = std::make_shared<XorProtector>();
+        std::string error;
+        FaceSigner signer(directory / "db" / "signing.key", protector);
+        FaceSigner stranger(directory / "db" / "stranger.key", protector);
+        Check(signer.Generate(&error) && stranger.Generate(&error), "two keys");
+        const std::vector<std::vector<std::uint8_t>> trusted = {signer.PublicKey()};
+
+        const FaceDatabase database = MakeDatabase(3);
+        std::vector<std::uint8_t> file;
+        Check(SignDatabase(database, signer, file, &error), "the database is signed: " + error);
+        const DatabaseCheck ok = CheckDatabase(file, trusted);
+        Check(ok.status == DatabaseStatus::Ok && ok.keyIndex == 0, "a signed database passes: " + ok.message);
+        Check(ok.database.faces.size() == 3 && ok.database.faces[1].name == "Friend" && ok.database.faces[2].date == "2026-10-29" && ok.database.created == "2026-10-29",
+              "the faces come back as they were");
+        Check(Near(Cosine(ok.database.faces[2].embeddings[4], database.faces[2].embeddings[4]), 1.0, 1e-5), "an embedding comes back as it was");
+        Check(ok.database.password.Valid() && VerifyPassword("publisher-pass", ok.database.password) && !VerifyPassword("other", ok.database.password), "the password comes back");
+        Check(ok.database.Profiles().size() == 3 && ok.database.Profiles()[0].name == "Artem", "the faces make the profiles");
+
+        // the embeddings are in the file in plain (the file is protected against a change, not against reading): the name is readable too
+        {
+            const std::string text(file.begin(), file.end());
+            Check(text.find("Teacher") != std::string::npos, "the names are in the file, as the doc says");
+        }
+
+        // without a password
+        {
+            std::vector<std::uint8_t> noPassword;
+            Check(SignDatabase(MakeDatabase(2, ""), signer, noPassword, &error), "a database without a password is signed");
+            const DatabaseCheck check = CheckDatabase(noPassword, trusted);
+            Check(check.status == DatabaseStatus::Ok && !check.database.password.Valid(), "it has no password");
+        }
+
+        // a changed byte anywhere: the header, the body, the signature
+        int tried = 0;
+        for (std::size_t at = 0; at < file.size(); at += (at < 40 || at + 80 > file.size()) ? 1 : 13)
+        {
+            std::vector<std::uint8_t> bad = file;
+            bad[at] ^= 0x10;
+            const DatabaseCheck check = CheckDatabase(bad, trusted);
+            Check(check.status != DatabaseStatus::Ok, "a changed byte at " + std::to_string(at) + " is not accepted");
+            Check(check.message.find("damaged or forged") != std::string::npos, "and the message says so");
+            ++tried;
+        }
+        Check(tried > 200, "many positions were tried");
+
+        // a face that is added by hand to the signed file (the case that matters): the body changes, the signature stays
+        {
+            FaceDatabase bigger = MakeDatabase(4);
+            std::vector<std::uint8_t> biggerFile;
+            Check(SignDatabase(bigger, stranger, biggerFile, &error), "the stranger's own database");
+            const std::vector<std::uint8_t> body = SerializeDatabaseBody(bigger);
+            std::vector<std::uint8_t> spliced = file;   // header and signature of the real one, the body of the bigger one
+            const std::size_t oldBody = spliced.size() - 12 - 4 - kSignatureSize;
+            spliced.erase(spliced.begin() + 12, spliced.begin() + 12 + static_cast<std::ptrdiff_t>(oldBody));
+            spliced.insert(spliced.begin() + 12, body.begin(), body.end());
+            for (int i = 0; i < 4; ++i)
+            {
+                spliced[8 + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(body.size() >> (8 * i));
+            }
+            Check(CheckDatabase(spliced, trusted).status == DatabaseStatus::BadSignature, "a face added to the signed file is rejected");
+            Check(CheckDatabase(biggerFile, trusted).status == DatabaseStatus::BadSignature, "a database signed by a stranger is rejected");
+        }
+
+        Check(CheckDatabase(file, {stranger.PublicKey()}).status == DatabaseStatus::BadSignature, "another publisher's key does not accept it");
+        const DatabaseCheck two = CheckDatabase(file, {stranger.PublicKey(), signer.PublicKey()});
+        Check(two.status == DatabaseStatus::Ok && two.keyIndex == 1, "any of the trusted keys is enough");
+        const DatabaseCheck none = CheckDatabase(file, {});
+        Check(none.status == DatabaseStatus::NoTrustedKey && none.message.find("no key") != std::string::npos, "no key built in: the database is not used");
+
+        std::vector<std::uint8_t> cut(file.begin(), file.begin() + static_cast<std::ptrdiff_t>(file.size() / 2));
+        Check(CheckDatabase(cut, trusted).status == DatabaseStatus::Damaged, "a cut file is damaged");
+        Check(CheckDatabase({}, trusted).status == DatabaseStatus::Damaged, "an empty file is damaged");
+        std::vector<std::uint8_t> longer = file;
+        longer.push_back(0);
+        Check(CheckDatabase(longer, trusted).status == DatabaseStatus::Damaged, "something after the end is not accepted");
+        Check(CheckDatabase(std::vector<std::uint8_t>(500, 0x42), trusted).status == DatabaseStatus::Damaged, "junk is damaged");
+
+        // the rules of the contents are the same on both sides: a database that breaks them is not signed
+        {
+            std::vector<std::uint8_t> out;
+            FaceDatabase empty = MakeDatabase(1);
+            empty.faces.clear();
+            Check(!SignDatabase(empty, signer, out, &error), "a database without faces is not signed");
+            Check(!SignDatabase(MakeDatabase(9), signer, out, &error), "more than eight faces are not signed");
+            FaceDatabase twice = MakeDatabase(2);
+            twice.faces[1].name = twice.faces[0].name;
+            Check(!SignDatabase(twice, signer, out, &error), "a name used twice is not signed");
+            FaceDatabase fewPictures = MakeDatabase(2);
+            fewPictures.faces[0].embeddings.resize(3);
+            Check(!SignDatabase(fewPictures, signer, out, &error), "three pictures are too few");
+            FaceDatabase badDate = MakeDatabase(2);
+            badDate.faces[0].date = "yesterday";
+            Check(!SignDatabase(badDate, signer, out, &error), "a date is YYYY-MM-DD");
+            FaceDatabase nan = MakeDatabase(2);
+            nan.faces[0].embeddings[0][5] = std::nanf("");
+            Check(!SignDatabase(nan, signer, out, &error), "a number that is not a number is not signed");
+            FaceSigner keyless(directory / "db" / "none.key", protector);
+            Check(!SignDatabase(MakeDatabase(2), keyless, out, &error), "no key: nothing is signed");
+        }
+
+        // a correct signature does not make a body that lies safe to read: the parser alone survives anything
+        {
+            const std::vector<std::uint8_t> body = SerializeDatabaseBody(database);
+            std::mt19937 random(7);
+            for (int round = 0; round < 3000; ++round)
+            {
+                std::vector<std::uint8_t> mutated = body;
+                const int changes = 1 + static_cast<int>(random() % 4);
+                for (int i = 0; i < changes; ++i)
+                {
+                    mutated[random() % mutated.size()] = static_cast<std::uint8_t>(random());
+                }
+                if (round % 5 == 0)
+                {
+                    mutated.resize(random() % mutated.size());
+                }
+                FaceDatabase parsed;
+                ParseDatabaseBody(mutated, parsed, nullptr);   // must neither crash nor read outside
+            }
+        }
+
+        // the file on disk
+        const fs::path path = directory / "db" / "allowed_faces.fdb";
+        Check(SaveDatabaseFile(path, file, &error) && fs::exists(path), "the file is written");
+        Check(LoadDatabase(path, trusted).status == DatabaseStatus::Ok, "and read back");
+        Check(LoadDatabase(directory / "db" / "missing.fdb", trusted).status == DatabaseStatus::Unreadable, "a missing file is unreadable");
+    }
+
+    void TestFindDatabase(const fs::path& directory)
+    {
+        const fs::path exe = directory / "find" / "exe";
+        const fs::path named = directory / "find" / "named.fdb";
+        const std::vector<std::uint8_t> bytes = {1, 2, 3};
+        Check(FindDatabase({}, exe).path.empty(), "nothing is there: no database");
+        WriteBytes(exe / "assets" / "faceid" / kDatabaseFileName, bytes);
+        DatabaseLocation found = FindDatabase({}, exe);
+        Check(found.exists && !found.named && found.path == exe / "assets" / "faceid" / kDatabaseFileName, "assets/faceid is the last place");
+        WriteBytes(exe / "faceid" / kDatabaseFileName, bytes);
+        found = FindDatabase({}, exe);
+        Check(found.exists && found.path == exe / "faceid" / kDatabaseFileName, "faceid/ next to the exe comes before assets/");
+        WriteBytes(named, bytes);
+        found = FindDatabase(named, exe);
+        Check(found.exists && found.named && found.path == named, "the named file comes first");
+        found = FindDatabase(directory / "find" / "nothing.fdb", exe);
+        Check(!found.exists && found.named && !found.path.empty(), "a named file that is not there is reported, not replaced by another one");
+        Check(FindDatabase({}, {}).path.empty(), "no folder of the exe and no name: nothing");
+    }
+
+    struct ServiceFixture
+    {
+        fs::path root;
+        std::shared_ptr<XorProtector> protector = std::make_shared<XorProtector>();
+
+        explicit ServiceFixture(const fs::path& base, const std::string& name) : root(base / "service" / name) { fs::create_directories(root / "exe"); }
+
+        FaceIdService::Options Options(const std::string& trustedHex, const fs::path& named = {}) const
+        {
+            FaceIdService::Options options;
+            options.directory = root / "data";
+            options.modelsDirectory = root / "no-models";   // the modes do not need the networks
+            options.protector = protector;
+            options.executableDirectory = root / "exe";
+            options.databaseFile = named;
+            options.overrideTrustedKey = true;
+            options.trustedKeyHex = trustedHex;
+            return options;
+        }
+        fs::path DatabasePath() const { return root / "exe" / "faceid" / kDatabaseFileName; }
+    };
+
+    void TestServiceModes(const fs::path& directory)
+    {
+        std::string error;
+        const auto protector = std::make_shared<XorProtector>();
+        FaceSigner publisher(directory / "svc-keys" / "publisher.key", protector);
+        FaceSigner stranger(directory / "svc-keys" / "stranger.key", protector);
+        Check(publisher.Generate(&error) && stranger.Generate(&error), "keys for the service tests");
+        const std::string trusted = ToHex(publisher.PublicKey());
+
+        // Local: no database
+        {
+            ServiceFixture fixture(directory, "local");
+            FaceIdService service(fixture.Options(trusted));
+            service.Initialize();
+            Check(service.Source() == FaceSource::Local && !service.SharedBlocked() && service.ActiveProfiles().empty(), "no database: the Local mode");
+            Check(!service.PasswordAvailable(), "no profiles, no password");
+            FaceProfile profile = MakeProfile("Mine", 5);
+            Check(service.Store().Add(profile, &error, "local-password"), "a local profile");
+            Check(service.ActiveProfiles().size() == 1 && service.PasswordAvailable() && service.LoginByPassword("local-password") && !service.LoginByPassword("other"),
+                  "the local profile and password are used");
+        }
+
+        // Shared: a signed database decides, the local profiles do not count
+        {
+            ServiceFixture fixture(directory, "shared");
+            std::vector<std::uint8_t> file;
+            Check(SignDatabase(MakeDatabase(3), publisher, file, &error), "a database for the shared mode");
+            WriteBytes(fixture.DatabasePath(), file);
+            {
+                FaceIdService seed(fixture.Options(trusted));
+                seed.Initialize();
+            }
+            FaceProfileStore local(fixture.root / "data" / "profiles.bin", fixture.protector);
+            Check(local.Add(MakeProfile("Intruder", 77), &error, "local-password"), "a local profile that the shared mode must ignore");
+            FaceIdService service(fixture.Options(trusted));
+            service.Initialize();
+            Check(service.Source() == FaceSource::Shared && service.Database().valid && !service.SharedBlocked(), "a signed database: the Shared mode");
+            Check(service.Database().faces == 3 && service.Database().created == "2026-10-29" && service.Database().hasPassword && service.Database().signedByBuiltInKey, "what is known about it");
+            Check(service.ActiveProfiles().size() == 3 && service.ActiveProfiles()[0].name == "Artem", "the faces of the database are in use");
+            Check(std::none_of(service.ActiveProfiles().begin(), service.ActiveProfiles().end(), [](const FaceProfile& p) { return p.name == "Intruder"; }), "the local profile is not");
+            Check(service.PasswordAvailable() && service.LoginByPassword("publisher-pass"), "the password of the publisher works");
+            Check(!service.LoginByPassword("local-password"), "the local password does not");
+            Check(!service.IsPublisher() && service.PublisherKeyNote().empty(), "this computer has no key: it is not a publisher");
+            std::string refused;
+            Check(!service.PublisherSave(fixture.root / "x.fdb", false, "", &refused) && !fs::exists(fixture.root / "x.fdb"), "a computer without a key cannot sign");
+        }
+
+        // Shared, no password in the database: the camera is the only way
+        {
+            ServiceFixture fixture(directory, "nopassword");
+            std::vector<std::uint8_t> file;
+            Check(SignDatabase(MakeDatabase(2, ""), publisher, file, &error), "a database without a password");
+            WriteBytes(fixture.DatabasePath(), file);
+            FaceIdService service(fixture.Options(trusted));
+            service.Initialize();
+            Check(service.Source() == FaceSource::Shared && !service.PasswordAvailable() && !service.LoginByPassword("anything"), "no password in the database: none works");
+        }
+
+        // a changed database closes the door: no face, no password
+        {
+            ServiceFixture fixture(directory, "forged");
+            std::vector<std::uint8_t> file;
+            Check(SignDatabase(MakeDatabase(3), publisher, file, &error), "a database to forge");
+            file[file.size() / 2] ^= 0x04;
+            WriteBytes(fixture.DatabasePath(), file);
+            FaceIdService service(fixture.Options(trusted));
+            service.Initialize();
+            Check(service.Source() == FaceSource::Shared && service.SharedBlocked() && !service.Database().valid, "a forged database blocks");
+            Check(service.Database().error.find("damaged or forged") != std::string::npos, "with the words for the screen");
+            Check(service.ActiveProfiles().empty() && !service.PasswordAvailable() && !service.LoginByPassword("publisher-pass"), "no face and no password is accepted");
+            Check(!service.IsPublisher(), "and the machine is not a publisher");
+        }
+
+        // another publisher's database, a build with no key, a named file that is not there
+        {
+            ServiceFixture fixture(directory, "other");
+            std::vector<std::uint8_t> file;
+            Check(SignDatabase(MakeDatabase(3), stranger, file, &error), "a database of a stranger");
+            WriteBytes(fixture.DatabasePath(), file);
+            {
+                FaceIdService service(fixture.Options(trusted));
+                service.Initialize();
+                Check(service.SharedBlocked() && service.Database().error.find("signed by somebody else") != std::string::npos, "signed by another key: blocked");
+            }
+            {
+                FaceIdService service(fixture.Options(""));
+                service.Initialize();
+                Check(service.SharedBlocked() && service.Database().error.find("no key") != std::string::npos, "a build with no key built in cannot check it: blocked");
+            }
+            {
+                FaceIdService service(fixture.Options(trusted, fixture.root / "named.fdb"));
+                service.Initialize();
+                Check(service.SharedBlocked() && !service.Database().found && service.Database().named && service.Database().error.find("not there") != std::string::npos,
+                      "a named database that is missing: blocked, not replaced by the other one");
+            }
+            {
+                FaceIdService service(fixture.Options(trusted, fixture.DatabasePath()));
+                service.Initialize();
+                Check(service.SharedBlocked(), "the named path leads to the same file: still blocked");
+            }
+        }
+
+        // the publisher: records into the draft, signs, the service uses the file at once; the Local mode on request
+        {
+            ServiceFixture fixture(directory, "publisher");
+            FaceIdService::Options options = fixture.Options(trusted);
+            options.signingKeyFile = directory / "svc-keys" / "publisher.key";
+            FaceIdService service(options);
+            service.Initialize();
+            Check(service.Source() == FaceSource::Local && service.IsPublisher(), "a publisher with no database yet is in the Local mode");
+            Check(service.PublisherKeyNote().find("built into the engine") != std::string::npos && service.PublisherKeyNote().find("NOT") == std::string::npos, "the key is the built-in one");
+            std::string saveError;
+            Check(!service.PublisherSave(fixture.DatabasePath(), false, "", &saveError), "an empty draft is not signed");
+            Check(service.DraftAddFace("Artem", Embeddings(8, 0), &saveError), "a face into the draft: " + saveError);
+            Check(!service.DraftAddFace("Artem", Embeddings(8, 10), &saveError), "a name once");
+            Check(!service.DraftAddFace("Few", Embeddings(2, 10), &saveError), "two pictures are too few");
+            Check(service.DraftAddFace("Friend", Embeddings(8, 30), &saveError) && service.DraftAddFace("Teacher", Embeddings(8, 60), &saveError) && service.DraftDirty(), "three faces");
+            Check(!service.PublisherSave(fixture.DatabasePath(), true, "", &saveError), "the password option needs a password");
+            Check(!service.PublisherSave(fixture.DatabasePath(), true, "short", &saveError), "and a long enough one");
+            Check(service.PublisherSave(fixture.DatabasePath(), true, "publisher-pass", &saveError), "signed and saved: " + saveError);
+            Check(fs::exists(fixture.DatabasePath()) && !service.DraftDirty(), "the file is there, the draft is clean");
+            Check(service.Source() == FaceSource::Shared && service.Database().valid && service.Database().faces == 3, "the service uses the new database at once");
+            Check(service.LoginByPassword("publisher-pass"), "with the password that was put in");
+            Check(service.DraftRemoveFace(1) && service.Draft().faces.size() == 2 && service.DraftDirty(), "a face is removed from the draft");
+            service.DraftDiscard();
+            Check(service.Draft().faces.size() == 3 && !service.DraftDirty(), "discarding brings the signed database back");
+            Check(service.DraftRemoveFace(2), "remove again");
+            Check(service.PublisherSave(fixture.DatabasePath(), true, "", &saveError), "the password in the database is kept when the field is empty: " + saveError);
+            Check(service.Database().faces == 2 && service.LoginByPassword("publisher-pass"), "two faces, the same password");
+            Check(service.PublisherSave(fixture.DatabasePath(), false, "", &saveError) && !service.Database().hasPassword, "the password can be left out");
+
+            // a second computer with only the file and the built-in key
+            ServiceFixture second(directory, "publisher-copy");
+            fs::create_directories(second.DatabasePath().parent_path());
+            fs::copy_file(fixture.DatabasePath(), second.DatabasePath(), fs::copy_options::overwrite_existing);
+            FaceIdService other(second.Options(trusted));
+            other.Initialize();
+            Check(other.Source() == FaceSource::Shared && other.Database().valid && other.ActiveProfiles().size() == 2 && !other.IsPublisher(), "the copied file works on another computer");
+
+            // the Local mode on request of the publisher
+            service.Settings().forceLocal = true;
+            service.ReloadDatabase();
+            Check(service.Source() == FaceSource::Local, "the publisher can switch to the Local mode");
+            other.Settings().forceLocal = true;
+            other.ReloadDatabase();
+            Check(other.Source() == FaceSource::Shared, "a computer that is not a publisher cannot");
+        }
+
+        // a key that is not the built-in one: it does not make a publisher, and what it signs is rejected
+        {
+            ServiceFixture fixture(directory, "wrongkey");
+            FaceIdService::Options options = fixture.Options(trusted);
+            options.signingKeyFile = directory / "svc-keys" / "stranger.key";
+            FaceIdService service(options);
+            service.Initialize();
+            Check(!service.IsPublisher() && service.PublisherKeyNote().find("NOT the one") != std::string::npos, "a key that is not the built-in one is not a publisher");
+        }
+
+        // no key is built in yet: the publisher's own machine trusts its own key (the work goes on before the engine is built again)
+        {
+            ServiceFixture fixture(directory, "bootstrap");
+            FaceIdService::Options options = fixture.Options("");
+            options.signingKeyFile = directory / "svc-keys" / "publisher.key";
+            FaceIdService service(options);
+            service.Initialize();
+            Check(service.IsPublisher() && service.PublisherKeyNote().find("No key is built into the engine") != std::string::npos, "before the key is built in the machine with the key is the publisher");
+            std::string saveError;
+            Check(service.DraftAddFace("Artem", Embeddings(8, 0), &saveError) && service.PublisherSave(fixture.DatabasePath(), false, "", &saveError), "it signs: " + saveError);
+            Check(service.Source() == FaceSource::Shared && service.Database().valid && !service.Database().signedByBuiltInKey, "and uses the database, with a note that no key is built in");
+            FaceIdService nobody(fixture.Options(""));
+            nobody.Initialize();
+            Check(nobody.SharedBlocked(), "another machine with no built-in key rejects the same file");
+        }
+    }
+
     // ---- the real models
 
     fs::path FindUpwards(const fs::path& relative)
@@ -651,7 +1121,12 @@ int main()
         TestSerialize(directory);
         TestPassword();
         TestDpapi();
-        std::cout << "faceid: logic, alignment and profiles ok\n";
+        TestHex();
+        TestSigner(directory);
+        TestDatabaseFile(directory);
+        TestFindDatabase(directory);
+        TestServiceModes(directory);
+        std::cout << "faceid: logic, alignment, profiles, signatures and the shared database ok\n";
 
         const int models = TestModels();
         fs::remove_all(directory, ignored);

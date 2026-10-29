@@ -145,11 +145,13 @@ set(ENGINE_SOURCES
   src/core/FileWatcher.cpp
   src/core/FramePacer.cpp
   src/faceid/FaceAlign.cpp
+  src/faceid/FaceDatabase.cpp
   src/faceid/FaceCamera.cpp
   src/faceid/FaceIdGate.cpp
   src/faceid/FaceIdService.cpp
   src/faceid/FaceMatcher.cpp
   src/faceid/FaceProfileStore.cpp
+  src/faceid/FaceSigner.cpp
   src/core/Logger.cpp
   src/core/ProjectContext.cpp
   src/core/Timer.cpp

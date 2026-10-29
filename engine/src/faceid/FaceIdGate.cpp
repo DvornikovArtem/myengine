@@ -2,6 +2,8 @@
 
 #include <imgui/imgui.h>
 
+#include <filesystem>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -41,6 +43,13 @@ namespace myengine::faceid
             return value.substr(begin, value.find_last_not_of(" \t") - begin + 1);
         }
 
+        std::filesystem::path PathOf(const char* text) { return std::filesystem::u8path(Trimmed(text)); }
+
+        void SetText(char* buffer, const std::size_t size, const std::string& text)
+        {
+            std::snprintf(buffer, size, "%s", text.c_str());
+        }
+
         const char* Capital(const LoginPhase phase)
         {
             switch (phase)
@@ -63,6 +72,19 @@ namespace myengine::faceid
         {
             return;
         }
+        if (service_.Source() == FaceSource::Shared)
+        {
+            // the shared database decides: no offer to record a face here, and a database that did not pass closes the door
+            fromSettings_ = false;
+            if (service_.SharedBlocked())
+            {
+                screen_ = Screen::Rejected;
+                return;
+            }
+            screen_ = Screen::Login;
+            service_.BeginLogin();
+            return;
+        }
         if (service_.Store().Profiles().empty())
         {
             screen_ = Screen::FirstRun;
@@ -73,8 +95,9 @@ namespace myengine::faceid
         service_.BeginLogin();
     }
 
-    void FaceIdGate::StartEnrolFlow()
+    void FaceIdGate::StartEnrolFlow(const bool shared)
     {
+        enrolShared_ = shared;
         consentChecked_ = false;
         detailsError_.clear();
         WipeBuffer(nameBuffer_, sizeof(nameBuffer_));
@@ -88,7 +111,7 @@ namespace myengine::faceid
         service_.Stop();
         WipeBuffer(newPasswordBuffer_, sizeof(newPasswordBuffer_));
         WipeBuffer(repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
-        if (fromSettings_ || service_.Store().Profiles().empty())
+        if (fromSettings_ || service_.ActiveProfiles().empty())
         {
             screen_ = Screen::None;
         }
@@ -180,6 +203,7 @@ namespace myengine::faceid
         case Screen::Capturing: DrawCapturing(context); break;
         case Screen::Saved: DrawSaved(context); break;
         case Screen::Login: DrawLogin(context); break;
+        case Screen::Rejected: DrawRejected(context); break;
         }
         return screen_ != Screen::None;
     }
@@ -209,13 +233,25 @@ namespace myengine::faceid
 
     void FaceIdGate::DrawConsent(const FaceIdUiContext& context)
     {
-        BeginPanel(context, "Add a face: what is stored", 640.0f);
+        BeginPanel(context, enrolShared_ ? "Add a face to the shared database: what is stored" : "Add a face: what is stored", 640.0f);
         ImGui::Spacing();
-        ImGui::TextWrapped("The editor will look at you through the camera and keep a short list of numbers (an embedding) for eight pictures of your face. No picture is saved: the "
-                           "numbers are stored only on this computer, in %%LOCALAPPDATA%%\\myengine\\faceid, encrypted with your Windows account (DPAPI), and are never sent anywhere.");
-        ImGui::TextWrapped("You can delete a face at any time in Window > Face ID: the data is erased from the file at once.");
-        ImGui::Spacing();
-        ImGui::Checkbox("I agree: this is my face or the person has agreed to be recorded", &consentChecked_);
+        if (enrolShared_)
+        {
+            ImGui::TextWrapped("The editor will look at the person through the camera and keep a short list of numbers (an embedding) for eight pictures of the face. No picture is saved. "
+                               "The numbers go into the shared face database: the file allowed_faces.fdb that you sign and give to everybody who gets this engine.");
+            ImGui::TextWrapped("The file is protected against a change, NOT against reading: whoever has it has these numbers. They cannot be turned back into a picture, but they are a "
+                               "biometric template. Record only a person who has agreed, and delete the face from the database when they ask.");
+            ImGui::Spacing();
+            ImGui::Checkbox("The person has agreed to be recorded in a database that is given to other people", &consentChecked_);
+        }
+        else
+        {
+            ImGui::TextWrapped("The editor will look at you through the camera and keep a short list of numbers (an embedding) for eight pictures of your face. No picture is saved: the "
+                               "numbers are stored only on this computer, in %%LOCALAPPDATA%%\\myengine\\faceid, encrypted with your Windows account (DPAPI), and are never sent anywhere.");
+            ImGui::TextWrapped("You can delete a face at any time in Window > Face ID: the data is erased from the file at once.");
+            ImGui::Spacing();
+            ImGui::Checkbox("I agree: this is my face or the person has agreed to be recorded", &consentChecked_);
+        }
         ImGui::Spacing();
         ImGui::BeginDisabled(!consentChecked_);
         if (ImGui::Button("Continue", ImVec2(140.0f, 34.0f)))
@@ -234,7 +270,7 @@ namespace myengine::faceid
 
     void FaceIdGate::DrawDetails(const FaceIdUiContext& context)
     {
-        const bool firstProfile = !service_.Store().HasPassword();
+        const bool firstProfile = !enrolShared_ && !service_.Store().HasPassword();
         BeginPanel(context, "Add a face: who is this", 520.0f);
         ImGui::Spacing();
         ImGui::Text("Name (shown at the login):");
@@ -260,7 +296,8 @@ namespace myengine::faceid
             {
                 detailsError_ = "Type a name (up to 32 characters).";
             }
-            else if (std::any_of(service_.Store().Profiles().begin(), service_.Store().Profiles().end(), [&](const FaceProfile& p) { return p.name == name; }))
+            else if (enrolShared_ ? std::any_of(service_.Draft().faces.begin(), service_.Draft().faces.end(), [&](const SharedFace& f) { return f.name == name; })
+                                  : std::any_of(service_.Store().Profiles().begin(), service_.Store().Profiles().end(), [&](const FaceProfile& p) { return p.name == name; }))
             {
                 detailsError_ = "There is a face with this name already.";
             }
@@ -293,12 +330,21 @@ namespace myengine::faceid
         std::vector<FaceEmbedding> embeddings;
         if (view.enrolReady && service_.TakeEnrolled(embeddings))
         {
-            FaceProfile profile;
-            profile.name = Trimmed(nameBuffer_);
-            profile.embeddings = std::move(embeddings);
             std::string error;
-            savedOk_ = service_.Store().Add(std::move(profile), &error, newPasswordBuffer_);
-            savedText_ = savedOk_ ? "Saved. From now on the editor knows you by your face." : "Not saved: " + error;
+            if (enrolShared_)
+            {
+                savedOk_ = service_.DraftAddFace(Trimmed(nameBuffer_), std::move(embeddings), &error);
+                savedText_ = savedOk_ ? "Added to the draft of the shared database. It is in the file only after \"Sign and save the database\" (Window > Face ID > Publisher)."
+                                      : "Not added: " + error;
+            }
+            else
+            {
+                FaceProfile profile;
+                profile.name = Trimmed(nameBuffer_);
+                profile.embeddings = std::move(embeddings);
+                savedOk_ = service_.Store().Add(std::move(profile), &error, newPasswordBuffer_);
+                savedText_ = savedOk_ ? "Saved. From now on the editor knows you by your face." : "Not saved: " + error;
+            }
             service_.Stop();
             WipeBuffer(newPasswordBuffer_, sizeof(newPasswordBuffer_));
             WipeBuffer(repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
@@ -342,6 +388,31 @@ namespace myengine::faceid
                 LeaveEnrol();
             }
             fromSettings_ = false;
+        }
+        EndPanel();
+    }
+
+    void FaceIdGate::DrawRejected(const FaceIdUiContext& context)
+    {
+        BeginPanel(context, "Face database rejected", 640.0f);
+        ImGui::Spacing();
+        ImGui::TextColored(kBad, "%s", service_.Database().error.c_str());
+        ImGui::Spacing();
+        ImGui::TextWrapped("The editor lets in only the faces of a database that its publisher signed. This one did not pass the check, so no face and no password is accepted until "
+                           "the right allowed_faces.fdb is in place.");
+        if (!service_.Database().path.empty())
+        {
+            ImGui::TextColored(kTextDim, "%s", service_.Database().path.string().c_str());
+        }
+        if (service_.IsPublisher())
+        {
+            ImGui::Spacing();
+            ImGui::TextWrapped("This computer has the publisher key: you can open the editor to repair the database (Window > Face ID > Publisher).");
+            if (ImGui::Button("I am the publisher: open the editor", ImVec2(300.0f, 34.0f)))
+            {
+                screen_ = Screen::None;
+                OpenSettings();
+            }
         }
         EndPanel();
     }
@@ -414,10 +485,17 @@ namespace myengine::faceid
             {
                 ImGui::Dummy(ImVec2(640.0f, 12.0f));
             }
-            if (ImGui::Button("Use the password", ImVec2(180.0f, 32.0f)) || view.phase == LoginPhase::NoCamera)
+            if (service_.PasswordAvailable())
             {
-                passwordMode_ = view.phase != LoginPhase::Granted;
-                passwordError_.clear();
+                if (ImGui::Button("Use the password", ImVec2(180.0f, 32.0f)) || view.phase == LoginPhase::NoCamera)
+                {
+                    passwordMode_ = view.phase != LoginPhase::Granted;
+                    passwordError_.clear();
+                }
+            }
+            else if (view.phase == LoginPhase::NoCamera)
+            {
+                ImGui::TextColored(kBad, "There is no password in this face database: the camera is the only way in.");
             }
         }
         if (passwordMode_)
@@ -474,7 +552,7 @@ namespace myengine::faceid
         {
             return;
         }
-        ImGui::SetNextWindowSize(ImVec2(520.0f, 460.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(560.0f, 640.0f), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin("Face ID", &settingsOpen_))
         {
             ImGui::End();
@@ -499,10 +577,31 @@ namespace myengine::faceid
             ImGui::Separator();
         }
         bool changed = false;
+        const bool shared = service_.Source() == FaceSource::Shared;
+        if (shared)
+        {
+            ImGui::TextColored(kAccent, "Mode: Shared database");
+            ImGui::TextWrapped("Only the faces of the database that its publisher signed get in. Faces cannot be recorded on this computer.");
+        }
+        else
+        {
+            ImGui::TextColored(kAccent, "Mode: Local");
+            ImGui::TextWrapped("The faces of this computer, encrypted with your Windows account. A shared database is used instead when allowed_faces.fdb is found (--faceid-db, "
+                               "faceid\\allowed_faces.fdb next to the exe, assets\\faceid\\allowed_faces.fdb).");
+        }
+        ImGui::Separator();
         changed |= ImGui::Checkbox("Ask for Face ID when the editor starts", &settings.enabled);
         changed |= ImGui::Checkbox("Ask to turn the head (a photo of a face does not turn)", &settings.liveness);
         changed |= ImGui::Checkbox("Ask in the games too (Rocket Arena, FlyDoom)", &settings.games);
         ImGui::TextColored(kTextDim, "The games read this setting; the editor login works already.");
+        if (service_.IsPublisher())
+        {
+            if (ImGui::Checkbox("Use the local faces instead of the shared database (publisher only)", &settings.forceLocal))
+            {
+                service_.SaveSettings();
+                service_.ReloadDatabase();
+            }
+        }
         if (settingsRefreshCameras_)
         {
             cameras_ = FaceCamera::List();
@@ -533,6 +632,43 @@ namespace myengine::faceid
             service_.SaveSettings();
         }
         ImGui::Separator();
+        if (shared)
+        {
+            DrawSettingsShared();
+        }
+        else
+        {
+            DrawSettingsLocal();
+        }
+        ImGui::Separator();
+        DrawPublisher();
+        ImGui::End();
+    }
+
+    void FaceIdGate::DrawSettingsShared()
+    {
+        const DatabaseInfo& info = service_.Database();
+        ImGui::TextColored(kTextDim, "%s", info.path.string().c_str());
+        if (!info.valid)
+        {
+            ImGui::TextColored(kBad, "%s", info.error.c_str());
+            return;
+        }
+        ImGui::Text("Signed %s, %d faces, password: %s", info.created.c_str(), static_cast<int>(info.faces), info.hasPassword ? "yes" : "no");
+        ImGui::TextColored(kTextDim, info.signedByBuiltInKey ? "Signed with the key that is built into the engine." : "Checked with the key of this computer (no key is built into the engine yet).");
+        if (service_.IsPublisher())
+        {
+            ImGui::TextColored(kTextDim, "The faces are edited in the Publisher section below.");
+            return;
+        }
+        for (const SharedFace& face : service_.Draft().faces)
+        {
+            ImGui::Text("%s  (%d pictures, recorded %s)", face.name.c_str(), static_cast<int>(face.embeddings.size()), face.date.c_str());
+        }
+    }
+
+    void FaceIdGate::DrawSettingsLocal()
+    {
         ImGui::Text("Faces (%d of %d)", static_cast<int>(service_.Store().Profiles().size()), static_cast<int>(FaceProfileStore::kMaxProfiles));
         const auto& profiles = service_.Store().Profiles();
         for (std::size_t i = 0; i < profiles.size(); ++i)
@@ -621,6 +757,180 @@ namespace myengine::faceid
         {
             ImGui::TextColored(kTextDim, "%s", settingsMessage_.c_str());
         }
-        ImGui::End();
+    }
+
+    void FaceIdGate::DrawPublisher()
+    {
+        if (!ImGui::CollapsingHeader("Publisher (shared database)", service_.IsPublisher() ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+        {
+            return;
+        }
+        FaceSigner& signer = service_.Signer();
+        const auto say = [&](const bool good, const std::string& text)
+        {
+            publisherMessageGood_ = good;
+            publisherMessage_ = text;
+        };
+        if (!service_.SignerError().empty())
+        {
+            ImGui::TextColored(kBad, "%s", service_.SignerError().c_str());
+        }
+        if (!signer.HasKey())
+        {
+            ImGui::TextWrapped("The publisher records the faces that every copy of the engine lets in and signs them. The key is made once, stays on this computer (encrypted with "
+                               "your Windows account) and never goes to the repository, a package or the log.");
+            if (ImGui::Button("Create the publisher key"))
+            {
+                std::string error;
+                if (signer.Generate(&error))
+                {
+                    service_.ReloadDatabase();
+                    say(true, "The key is made. Copy the public key and put it into the engine, then make a backup of the key.");
+                }
+                else
+                {
+                    say(false, error);
+                }
+            }
+            ImGui::Spacing();
+            ImGui::Text("Or take the key from a backup:");
+            ImGui::InputTextWithHint("##importpath", "the backup file", importPath_, sizeof(importPath_));
+            InputPassword("##importpassword", importPassword_, sizeof(importPassword_));
+            ImGui::SameLine();
+            if (ImGui::Button("Import the key"))
+            {
+                std::string error;
+                if (signer.Import(PathOf(importPath_), importPassword_, &error))
+                {
+                    service_.ReloadDatabase();
+                    say(true, "The key is imported.");
+                }
+                else
+                {
+                    say(false, error);
+                }
+                WipeBuffer(importPassword_, sizeof(importPassword_));
+            }
+        }
+        else
+        {
+            const std::string hex = ToHex(signer.PublicKey());
+            ImGui::Text("Public key (ECDSA P-256):");
+            char hexBuffer[kPublicKeySize * 2 + 8];
+            SetText(hexBuffer, sizeof(hexBuffer), hex);
+            ImGui::InputText("##publickey", hexBuffer, sizeof(hexBuffer), ImGuiInputTextFlags_ReadOnly);
+            if (ImGui::Button("Copy the public key"))
+            {
+                ImGui::SetClipboardText(hex.c_str());
+                say(true, "Copied. Put it into the engine: tools\\faceid\\set_trusted_key.ps1 <the key>, then build again.");
+            }
+            ImGui::TextWrapped("%s", service_.PublisherKeyNote().c_str());
+            ImGui::Spacing();
+            ImGui::Text("Backup of the private key (a file under a password):");
+            ImGui::InputTextWithHint("##exportpath", "a new file, outside the repository", exportPath_, sizeof(exportPath_));
+            InputPassword("##exportpassword", exportPassword_, sizeof(exportPassword_));
+            ImGui::SameLine();
+            if (ImGui::Button("Export the key"))
+            {
+                std::string error;
+                if (signer.Export(PathOf(exportPath_), exportPassword_, &error))
+                {
+                    say(true, "The backup is written. Keep the file and the password apart from the repository.");
+                }
+                else
+                {
+                    say(false, error);
+                }
+                WipeBuffer(exportPassword_, sizeof(exportPassword_));
+            }
+        }
+        if (service_.IsPublisher())
+        {
+            ImGui::Separator();
+            const FaceDatabase& draft = service_.Draft();
+            ImGui::Text("Faces in the shared database (%d of %d)%s", static_cast<int>(draft.faces.size()), static_cast<int>(FaceDatabase::kMaxFaces),
+                        service_.DraftDirty() ? "  - not signed yet" : "");
+            for (std::size_t i = 0; i < draft.faces.size(); ++i)
+            {
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::Text("%s  (%d pictures, recorded %s)", draft.faces[i].name.c_str(), static_cast<int>(draft.faces[i].embeddings.size()), draft.faces[i].date.c_str());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Delete"))
+                {
+                    pendingDraftDelete_ = static_cast<int>(i);
+                    ImGui::OpenPopup("Delete the face from the database?");
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::BeginPopupModal("Delete the face from the database?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                const std::string name = pendingDraftDelete_ >= 0 && pendingDraftDelete_ < static_cast<int>(draft.faces.size())
+                                             ? draft.faces[static_cast<std::size_t>(pendingDraftDelete_)].name
+                                             : std::string();
+                ImGui::Text("\"%s\" leaves the draft. Copies of the engine that already have the old file keep it until you give them the new one.", name.c_str());
+                if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f)))
+                {
+                    service_.DraftRemoveFace(static_cast<std::size_t>(std::max(pendingDraftDelete_, 0)));
+                    pendingDraftDelete_ = -1;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Keep", ImVec2(120.0f, 0.0f)))
+                {
+                    pendingDraftDelete_ = -1;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::BeginDisabled(draft.faces.size() >= FaceDatabase::kMaxFaces);
+            if (ImGui::Button("Record a face into the shared database ..."))
+            {
+                fromSettings_ = true;
+                StartEnrolFlow(true);
+            }
+            ImGui::EndDisabled();
+            ImGui::Spacing();
+            ImGui::Checkbox("Put my password in the database (a hash; everybody gets the same fallback password)", &publisherIncludePassword_);
+            if (publisherIncludePassword_)
+            {
+                InputPassword("##publisherpassword", publisherPassword_, sizeof(publisherPassword_));
+                ImGui::TextColored(kTextDim, draft.password.Valid() ? "Leave it empty to keep the password that is in the database already." : "6 characters or more.");
+            }
+            if (databasePath_[0] == '\0')
+            {
+                const std::filesystem::path suggested =
+                    service_.Database().path.empty() ? ExecutableDirectory() / "faceid" / kDatabaseFileName : service_.Database().path;
+                SetText(databasePath_, sizeof(databasePath_), suggested.u8string());
+            }
+            ImGui::Text("File to write:");
+            ImGui::InputText("##databasepath", databasePath_, sizeof(databasePath_));
+            ImGui::BeginDisabled(draft.faces.empty());
+            if (ImGui::Button("Sign and save the database"))
+            {
+                std::string error;
+                if (service_.PublisherSave(PathOf(databasePath_), publisherIncludePassword_, publisherPassword_, &error))
+                {
+                    say(true, "Signed and saved. This copy uses it now. Give the file to the others: next to the exe in faceid\\, in a package, or assets\\faceid\\ of the repository.");
+                }
+                else
+                {
+                    say(false, error);
+                }
+                WipeBuffer(publisherPassword_, sizeof(publisherPassword_));
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!service_.DraftDirty());
+            if (ImGui::Button("Discard the changes"))
+            {
+                service_.DraftDiscard();
+                say(true, "The draft is the signed database again.");
+            }
+            ImGui::EndDisabled();
+        }
+        if (!publisherMessage_.empty())
+        {
+            ImGui::TextColored(publisherMessageGood_ ? kGood : kBad, "%s", publisherMessage_.c_str());
+        }
     }
 }
