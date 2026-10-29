@@ -15,7 +15,11 @@ namespace myengine::core::apppaths
     // The sources the executable was built from (MYENGINE_SOURCE_DIR); empty in a shipping build
     std::filesystem::path SourceRoot();
 
-    // Per-user folder of settings: %LOCALAPPDATA%\RocketArena (shipping) or %APPDATA%\myengine (development).
+    // Another product of the same code (FlyDoom.exe, docs/game/doom.md) keeps its files in %LOCALAPPDATA%\<name>, shipping or not. Call it first thing in
+    // main, before anything asks for a folder.
+    void SetProductFolder(const wchar_t* name);
+
+    // Per-user folder of settings: %LOCALAPPDATA%\RocketArena (shipping) or %APPDATA%\myengine (development), or %LOCALAPPDATA%\<name> after SetProductFolder.
     // The folder is not created here. Falls back to the executable directory when the variable is not set.
     std::filesystem::path UserDataDirectory();
 

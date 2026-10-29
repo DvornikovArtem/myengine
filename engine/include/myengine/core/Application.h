@@ -36,6 +36,7 @@ namespace myengine::rlui
 
 namespace myengine::game
 {
+    class DoomGameFlow;
     class RlGameFlow;
     struct RlVideoSettings;
 }
@@ -95,6 +96,17 @@ namespace myengine::core
         /// rocket_league.json in Play, the window as the video settings say.
         void SetGameMode(bool enabled);
         bool GameMode() const;
+        /// Before Initialize: FlyDoom (docs/game/doom.md): the classic DOOM is the whole window, instead of the Rocket League game or the editor
+        /// (--game doom, and FlyDoom.exe). It implies the game mode.
+        struct DoomOptions
+        {
+            std::filesystem::path iwad;             // --iwad: the game data; empty: looked for (assets/doom, Steam, Freedoom)
+            std::vector<std::string> args;          // the command line of DOOM itself (--doom-args)
+            bool squarePixels = false;              // --doom-square-pixels: no 4:3 stretch of the 320x200 picture
+            bool music = true;                      // --doom-no-music
+        };
+        void SetDoomMode(bool enabled, const DoomOptions& options = {});
+        bool DoomMode() const;
         /// The video settings of the game: window mode and size, vertical sync, the limit of frames per second, shadows / MSAA / bloom. A --render-settings
         /// request on the command line wins over the quality of the settings.
         void ApplyVideoSettings(const game::RlVideoSettings& video);
@@ -179,6 +191,7 @@ namespace myengine::core
         bool AllWindowsClosed() const;
         void SetInputOwnerWindow(WindowId id);
         void SetCursorVisible(bool visible);
+        void CaptureCursorForGame(bool capture);
         void WarpCursorToWindowCenter(const Window& window);
         // The OS capture is shared by the buttons that are held: it stays until the last one is released
         void AcquireMouseCapture(const Window& window, std::uint32_t button);
@@ -235,6 +248,7 @@ namespace myengine::core
         std::unique_ptr<faceid::FaceIdGate> faceIdGate_;
         std::unique_ptr<rlui::Host> uiGallery_; // MYENGINE_UI_GALLERY: the gallery of the UI kit instead of the editor; after uiManager_: goes first
         std::unique_ptr<UiScript> uiScript_; // MYENGINE_UI_SCRIPT: scripted keys, mouse and screenshots for the tests of the game
+        std::unique_ptr<game::DoomGameFlow> doomFlow_; // FlyDoom: the game mode with DOOM instead of Rocket League; after uiManager_: goes first
         std::unique_ptr<game::RlGameFlow> gameFlow_; // the game mode: the screens of the game (menus, HUD) instead of the editor; after uiManager_: goes first
         std::vector<WindowRuntime> windows_;
         WindowId inputOwnerWindowId_ = 0;
@@ -243,6 +257,12 @@ namespace myengine::core
         bool showProjectBrowser_ = false;
         bool deferredSceneLoad_ = false;
         bool gameMode_ = false;
+        bool doomMode_ = false;
+        DoomOptions doomOptions_;
+        std::string doomTitle_;                     // the title DOOM asked for ("Freedoom: Phase 1")
+        int rawMouseX_ = 0;                         // the raw movement of the mouse since DOOM took it (WM_INPUT)
+        int rawMouseY_ = 0;
+        bool rawMouseRegistered_ = false;
         int fpsLimit_ = 0; // frames per second the main loop is held to, 0: none
         int slowMessageLogs_ = 0; // the slow window messages that were written to the log (a few, to find what holds the loop)
         bool videoApplied_ = false;

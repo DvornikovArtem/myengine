@@ -31,6 +31,8 @@ namespace
         std::filesystem::path projectFile;
         bool startInPlay = false;
         bool gameMode = false;                      // --game: the Rocket League game without the editor
+        bool doomMode = false;                      // --game doom (and FlyDoom.exe): the classic DOOM (docs/game/doom.md)
+        myengine::core::Application::DoomOptions doom;
         bool showProjectBrowser = false;
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
@@ -84,6 +86,22 @@ namespace
             if (argument == L"--game" && !options.gameMode)
             {
                 options.gameMode = true;
+                // --game doom: FlyDoom instead of Rocket Arena
+                if (index + 1 < argumentCount && std::wstring_view(arguments[index + 1]) == L"doom")
+                {
+                    options.doomMode = true;
+                    ++index;
+                }
+                continue;
+            }
+            if (argument == L"--doom-square-pixels")
+            {
+                options.doom.squarePixels = true;
+                continue;
+            }
+            if (argument == L"--doom-no-music")
+            {
+                options.doom.music = false;
                 continue;
             }
             if (argument == L"--faceid-db" && index + 1 < argumentCount)   // the shared face database to use (docs/editor/faceid.md)
@@ -174,12 +192,15 @@ namespace
             const bool isRlClients = argument == L"--rl-clients";
             const bool isRlMode = argument == L"--rl-mode";
             const bool isNetSim = argument == L"--net-sim";
+            // FlyDoom: --iwad <file.wad> names the game data, --doom-args "<the command line of DOOM>" is given to DOOM as it is (-warp 1 1 -skill 3)
+            const bool isIwad = argument == L"--iwad";
+            const bool isDoomArgs = argument == L"--doom-args";
             // The scene passes (docs/render/scene-passes.md): --render-settings shadows=2,msaa=4,bloom=1,instancing=1; --screenshot <file.tga> [--screenshot-frame N]
             const bool isRenderSettings = argument == L"--render-settings";
             const bool isScreenshot = argument == L"--screenshot";
             const bool isScreenshotFrame = argument == L"--screenshot-frame";
             if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
-                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame)
+                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs)
             {
                 valid = false;
                 break;
@@ -198,7 +219,40 @@ namespace
                 break;
             }
 
-            if (isScene && options.scenePath.empty())
+            if (isIwad && options.doom.iwad.empty())
+            {
+                options.doom.iwad = std::wstring(value);
+            }
+            else if (isDoomArgs && options.doom.args.empty())
+            {
+                // split at the spaces; a part in "quotes" keeps its spaces
+                std::string current;
+                bool quoted = false;
+                for (const wchar_t c : value)
+                {
+                    if (c == L'"')
+                    {
+                        quoted = !quoted;
+                    }
+                    else if (c == L' ' && !quoted)
+                    {
+                        if (!current.empty())
+                        {
+                            options.doom.args.push_back(current);
+                            current.clear();
+                        }
+                    }
+                    else
+                    {
+                        current.push_back(static_cast<char>(c));
+                    }
+                }
+                if (!current.empty())
+                {
+                    options.doom.args.push_back(current);
+                }
+            }
+            else if (isScene && options.scenePath.empty())
             {
                 options.scenePath = std::wstring(value);
             }
@@ -352,17 +406,26 @@ namespace
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
 {
+#ifdef MYENGINE_FLYDOOM
+    myengine::core::apppaths::SetProductFolder(L"FlyDoom");   // the files of FlyDoom: %LOCALAPPDATA%\FlyDoom
+#endif
     // A crash leaves a minidump and a short report in <UserData>\crashes; the next start says so (docs/game/packaging.md)
     myengine::core::crash::Install(myengine::core::apppaths::UserDataDirectory() / L"crashes", myengine::core::apppaths::LogDirectory() / L"myengine.log");
     myengine::core::crash::CrashIfRequested();
 
     LaunchOptions options;
+#ifdef MYENGINE_FLYDOOM
+    // FlyDoom.exe is this program with the game fixed to DOOM
+    options.gameMode = true;
+    options.doomMode = true;
+#endif
     if (!ParseArguments(options))
     {
         MessageBoxW(
             nullptr,
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
+            L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
@@ -392,6 +455,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 
     myengine::core::Application app(hInstance);
     app.SetGameMode(options.gameMode);
+    app.SetDoomMode(options.doomMode, options.doom);
     app.SetProjectFile(options.projectFile);
     app.SetShowProjectBrowser(options.showProjectBrowser);
     // The editor window is up while the start map is read: it shows the splash instead of waiting in the dark

@@ -2,7 +2,7 @@
 #include <windows.h>
 
 // id 1: the first icon of the exe is the one the Explorer shows; the window class loads it by this id (Window.cpp)
-1 ICON "RocketArena.ico"
+1 ICON "@MYENGINE_RC_ICON@"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0

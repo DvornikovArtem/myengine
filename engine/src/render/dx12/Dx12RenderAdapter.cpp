@@ -389,6 +389,51 @@ namespace myengine::render::dx12
         RetireResources(std::move(retired));
     }
 
+    bool Dx12RenderAdapter::UpdateTexture(const TextureHandle texture, const TextureData& textureData)
+    {
+        ZoneScoped;
+
+        const auto it = textures_.find(texture.value);
+        if (!texture.IsValid() || texture.value == defaultWhiteTexture_.value || it == textures_.end() || it->second.ownedByRenderTarget)
+        {
+            return false;
+        }
+        constexpr std::size_t kRgba8Channels = 4;
+        if (textureData.width == 0 || textureData.height == 0 || textureData.channels != kRgba8Channels ||
+            textureData.pixelsRgba8.size() != static_cast<std::size_t>(textureData.width) * textureData.height * kRgba8Channels)
+        {
+            logger_.Warning("UpdateTexture failed: invalid texture data");
+            return false;
+        }
+
+        // A new resource under the old descriptor. CreateTextureResource waits for the GPU (the queue is in order), so the frame that may
+        // still read the old picture is finished when the descriptor is written.
+        Microsoft::WRL::ComPtr<ID3D12Resource> updated;
+        if (!CreateTextureResource(textureData, updated))
+        {
+            return false;
+        }
+
+        TextureRecord& record = it->second;
+        RetiredResource retired;
+        retired.resource = std::move(record.textureResource);
+        retired.hasDescriptor = false;
+        record.textureResource = std::move(updated);
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        srvDesc.Texture2D.MipLevels = MipCount(textureData.width, textureData.height);
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = textureSrvHeap_->GetCPUDescriptorHandleForHeapStart();
+        cpuHandle.ptr += static_cast<UINT64>(record.descriptorIndex) * static_cast<UINT64>(textureSrvDescriptorSize_);
+        context_.device->CreateShaderResourceView(record.textureResource.Get(), &srvDesc, cpuHandle);
+
+        RetireResources(std::move(retired));
+        return true;
+    }
+
     ShaderHandle Dx12RenderAdapter::CreateShaderProgram(const ShaderProgramData& shaderProgram)
     {
         const ShaderCompileResult compiled = shaderReflector_->CompileProgram(shaderProgram);
