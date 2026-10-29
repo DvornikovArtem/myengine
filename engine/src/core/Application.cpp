@@ -635,6 +635,8 @@ namespace myengine::core
             }
             services.squarePixels = doomOptions_.squarePixels;
             services.music = doomOptions_.music;
+            services.modes = doomOptions_.modes;
+            services.initialMode = doomOptions_.initialMode;
             doomFlow_ = std::make_unique<game::DoomGameFlow>(services);
             doomFlow_->Install();
         }

@@ -682,3 +682,40 @@ add_executable(myengine_flybrain_bench
 target_link_libraries(myengine_flybrain_bench PRIVATE myengine_flybrain myengine_engine psapi)
 myengine_apply_compiler_options(myengine_flybrain_bench)
 set_property(TARGET myengine_flybrain_bench PROPERTY FOLDER "Tests")
+
+# N1: exploring the connectome for the eyes and the controls of the fly player (manual, not in ctest)
+add_executable(myengine_doomfly_probe
+  doomfly/FlyProbe.cpp)
+
+target_link_libraries(myengine_doomfly_probe PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe)
+set_property(TARGET myengine_doomfly_probe PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe2
+  doomfly/FlyProbe2.cpp)
+target_link_libraries(myengine_doomfly_probe2 PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe2)
+set_property(TARGET myengine_doomfly_probe2 PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe3
+  doomfly/FlyProbe3.cpp)
+target_link_libraries(myengine_doomfly_probe3 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe3)
+set_property(TARGET myengine_doomfly_probe3 PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe4
+  doomfly/FlyProbe4.cpp)
+target_link_libraries(myengine_doomfly_probe4 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe4)
+set_property(TARGET myengine_doomfly_probe4 PROPERTY FOLDER "Tests")
+
+# N1: the fly plays DOOM (game/doomfly, docs/game/flydoom-fly.md): the eyes, the controls, the steering by the picture, damage, a brain that runs away, E1M1.
+# Skipped (exit code 77) without the connectome (tools/flybrain/fetch_malecns.ps1); the game of E1M1 needs a WAD (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad)
+add_executable(myengine_doom_fly_tests
+  doomfly/DoomFlyTests.cpp)
+target_link_libraries(myengine_doom_fly_tests PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+target_compile_definitions(myengine_doom_fly_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+myengine_apply_compiler_options(myengine_doom_fly_tests)
+set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
+set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
