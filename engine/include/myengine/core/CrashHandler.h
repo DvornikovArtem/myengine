@@ -26,6 +26,10 @@ namespace myengine::core::crash
     // The crash of the previous run if it has not been reported yet (the marker is removed: it is told once)
     std::optional<Report> TakePending(const std::filesystem::path& crashDirectory);
 
+    // What the game tells the player after a crash: "The game crashed last time. Send crash-<date>.txt from <folder>". In a shipping build the folder is written
+    // by %LOCALAPPDATA% (the folder of the product, RocketArena or FlyDoom), otherwise it is the real one. `crashDirectory` is the one given to TakePending.
+    std::string PlayerNote(const Report& report, const std::filesystem::path& crashDirectory);
+
     // A library may take the handlers over after Install (SteamAPI_Init installs its own breakpad): called every frame by the screens of the game,
     // it puts ours back as soon as another one is found (one atomic exchange when nothing changed)
     void Reassert();

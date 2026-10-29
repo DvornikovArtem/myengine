@@ -97,7 +97,6 @@ FlyDoom/
   assets/doom/freedoom1.wad    Freedoom Phase 1: пакет играет и без чужих данных
   wads/doom1.wad               shareware DOOM 1.9 (id Software разрешила раздавать свободно) + wads/doom1.wad.license.txt
   assets/flybrain/malecns_v1.fbrain   мозг мухи, 154 МБ (если файл есть на машине сборки)
-  faceid/allowed_faces.fdb     общая база лиц, если она есть на машине сборки
   COPYING, SOURCE.txt, THIRD_PARTY.txt, README.txt, version.txt
   licenses/                    тексты лицензий данных и библиотек
 ```
@@ -108,7 +107,7 @@ FlyDoom/
 
 **GPL.** `FlyDoom.exe` содержит код DOOM, поэтому пакет несёт `COPYING` (GPL v2, из `game/doom/third_party/doomgeneric`) и `SOURCE.txt`: репозиторий, **полный хэш коммита** (`git rev-parse HEAD`), версия, «чисто ли дерево», где лежит код DOOM (`game/doom`) и как собрать то же самое. Если при упаковке в дереве были незакоммиченные изменения, `SOURCE.txt` так и пишет, а скрипт предупреждает: пакет из такого дерева не воспроизводится по названному коммиту. `THIRD_PARTY.txt` перечисляет всё, что в пакете не наше, с лицензиями: doomgeneric и id (GPL v2), модуль OPL Chocolate Doom (GPL), Nuked OPL3 (LGPL 2.1), Freedoom (модифицированная BSD), doom1.wad (лицензия id для shareware), MaleCNS (CC BY 4.0), библиотеки движка.
 
-**База лиц.** Запись `faceid/allowed_faces.fdb` в `files`: если на машине сборки есть `assets/faceid/allowed_faces.fdb` (или `faceid/allowed_faces.fdb`), он кладётся рядом с exe, как требует [../editor/faceid.md](../editor/faceid.md) (файл в `.gitignore`, в репозиторий не попадает никогда); нет файла — пакет без него, без предупреждения. Заметка: shipping-сборка пока без Face ID (он только в редакторе), поэтому файл в пакете лежит заранее, и ничего не читает. Запись нужна в `files` каждой игры, где Face ID когда-нибудь включат; у Rocket Arena её нет, и её пакет не изменился.
+**База лиц в пакет не кладётся** (решение Артёма: лица реальных людей не едут в игры): `check_flydoom_package.ps1` считает ошибкой `faceid/allowed_faces.fdb` в пакете.
 
 **Проверка.** `tools/check_flydoom_package.ps1 [-Frames 400] [-Keep]` (то же, что кнопка Check package) копирует пакет в `%TEMP%\flydoom_clean` и проверяет:
 
@@ -116,7 +115,7 @@ FlyDoom/
 2. иконка и поля exe (`FlyDoom`, версия как в `version.txt`);
 3. запуск из чистой папки без аргументов (`--exit-after-frames`): код 0, рядом с exe ничего не изменилось, лог в `<LOCALAPPDATA>/FlyDoom/logs` без путей репозитория и без `[ERROR]`, строка `DOOM: the game data is ...`, в `APPDATA` ничего, скриншот кадра — картинка из многих цветов, а не чёрный экран;
 4. каждый WAD пакета отдельно через `--iwad` с `-warp 1 1`: игра берёт именно его и доходит до первого уровня (на машине с DOOM из Steam запуск без аргументов может выбрать его, поэтому WAD пакета проверяются по `--iwad`);
-5. падение (`MYENGINE_CRASH_TEST=1`): `.dmp` (больше 10 КБ) и `.txt` (с «access violation», версией и местом `FlyDoom.exe+0x…`) в `crashes` и маркер `pending.txt`. Сообщения «the previous run crashed» при следующем запуске у FlyDoom пока нет: оно живёт в `RlGameFlow`, а не в `DoomGameFlow`, поэтому строку лога следующего запуска проверка не требует.
+5. падение (`MYENGINE_CRASH_TEST=1`): `.dmp` (больше 10 КБ) и `.txt` (с «access violation», версией и местом `FlyDoom.exe+0x…`) в `crashes` и маркер `pending.txt`; следующий запуск пишет в лог «the previous run crashed» с именем отчёта, показывает красную плашку на 12 секунд («The game crashed last time. Send crash-….txt from %LOCALAPPDATA%\FlyDoom\crashes») и снимает маркер.
 
 Мозг мухи проверяется как файл; когда N1 научит игру читать `.fbrain`, к проверке добавится строка лога о загрузке.
 
