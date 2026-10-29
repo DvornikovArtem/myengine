@@ -18,6 +18,11 @@
 // bit-identical for any thread count. A neuron that cannot reach the threshold before its next input sleeps and is
 // brought forward in closed form when the input comes. The others go through a window in blocks of 512, time-major,
 // 4 neurons per AVX2 instruction when the CPU has it.
+//
+// Replicas (N2, the swarm of flies). FlyBrain(connectome, params, replicas) simulates that many independent brains on one
+// CSR: the state is laid out [neuron][replica] ("units", unit = neuron * replicas + replica), and a spike of a unit reaches
+// the units of the same replica only. Every call that takes a neuron takes a unit then (Unit, ForReplica); with one replica
+// the two are the same. The AVX2 lanes of the CPU and the threads of the GPU then run over the flies of a neuron.
 
 #pragma once
 
@@ -123,13 +128,22 @@ namespace flybrain
     class FlyBrain
     {
     public:
-        explicit FlyBrain(std::shared_ptr<const Connectome> connectome, const ModelParams& params = {});
+        explicit FlyBrain(std::shared_ptr<const Connectome> connectome, const ModelParams& params = {}, uint32_t replicas = 1);
         ~FlyBrain();
         FlyBrain(const FlyBrain&) = delete;
         FlyBrain& operator=(const FlyBrain&) = delete;
 
         const Connectome& GetConnectome() const { return *connectome_; }
         const ModelParams& Params() const { return params_; }
+
+        // Independent brains on the same connectome; the units of the simulation are neuron x replica
+        uint32_t Replicas() const { return replicas_; }
+        uint32_t UnitCount() const { return neuronCount_; }
+        uint32_t Unit(uint32_t neuron, uint32_t replica) const { return neuron * replicas_ + replica; }
+        uint32_t NeuronOfUnit(uint32_t unit) const { return unit / replicas_; }
+        uint32_t ReplicaOfUnit(uint32_t unit) const { return unit % replicas_; }
+        // The units of these neurons in one replica
+        Group ForReplica(const Group& neurons, uint32_t replica) const;
 
         // true: windows run as jobs of the engine job system (jobs::Initialize must have been called).
         // false: everything on the calling thread. The result is the same either way
@@ -159,6 +173,13 @@ namespace flybrain
         // Per-neuron drive on top of the stimuli (for inputs that change every frame, such as photoreceptors)
         void SetDrive(uint32_t neuron, float currentMv);
         double Drive(uint32_t neuron) const;
+        // Per-neuron Poisson input on top of the stimuli (an input that changes every frame, such as looming)
+        void SetPoissonRate(uint32_t neuron, float rateHz);
+
+        // Spike totals of chosen units that stay cheap to read on the GPU too (the outputs of a swarm: a copy of a few
+        // values per submission instead of a read back of the whole state). TrackedSpikes is the total at CompletedStep()
+        void Track(const Group& units);
+        uint32_t TrackedSpikes(uint32_t unit) const;
 
         // ---- simulation
         void Advance(uint64_t steps);
@@ -219,6 +240,7 @@ namespace flybrain
         void CatchUp(uint32_t neuron, uint64_t step, double& u, double& g) const;
         void Wake(uint32_t neuron);
         void ApplyStimulus(const Stimulus& stimulus, float sign);
+        void UpdatePoisson(uint32_t neuron);
         void ExpireStimuli();
         uint64_t NextStimulusEnd() const;
         bool CanFire(uint32_t neuron, double u, double g) const;
@@ -230,9 +252,10 @@ namespace flybrain
 
         std::shared_ptr<const Connectome> connectome_;
         ModelParams params_;
+        uint32_t replicas_ = 1;
         bool parallel_ = false;
         bool useAvx2_ = false;
-        uint32_t neuronCount_ = 0;
+        uint32_t neuronCount_ = 0; // units: neurons of the connectome x replicas
         uint32_t delaySteps_ = 18;
         uint32_t refractorySteps_ = 22;
         double thresholdU_ = 7.0; // v_th - v_0
@@ -264,6 +287,8 @@ namespace flybrain
         std::vector<uint8_t> currentStimuli_; // active current stimuli per neuron, to reset the sum to exact 0
         std::vector<uint32_t> poissonThreshold_; // P(event per step) * 2^32
         std::vector<uint8_t> poissonStimuli_;
+        std::vector<double> stimulusPoisson_; // P(event per step) of the rate stimuli
+        std::vector<double> externalPoisson_; // P(event per step) of SetPoissonRate
 
         std::vector<std::unique_ptr<Stimulus>> stimuli_;
         std::vector<std::unique_ptr<Watcher>> watchers_;
@@ -291,6 +316,9 @@ namespace flybrain
         std::vector<uint8_t> gpuDirty_; // per neuron: 1 changed, 2 changed and woken
         std::vector<uint32_t> gpuDirtyList_;
         uint64_t completedStep_ = 0;
+        std::vector<uint32_t> trackedIndex_; // per unit: index into trackedTotals_ + 1, 0 when not tracked
+        std::vector<uint32_t> trackedUnits_;
+        std::vector<uint32_t> trackedTotals_; // GPU: as of completedStep_
         mutable bool gpuStatePulled_ = false;
     };
 }

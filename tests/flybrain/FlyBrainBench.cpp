@@ -266,16 +266,40 @@ int main(int argc, char** argv)
             brain.StimulateRate(connectome->Find(probeType), 150.0f, 500.0f);
         }
         std::vector<double> rateAt;
+        std::vector<uint32_t> atHalf(connectome->NeuronCount(), 0);
         for (int k = 0; k < 10; ++k)
         {
             const uint64_t before = brain.TotalSpikes();
             brain.AdvanceMs(100.0);
             rateAt.push_back(double(brain.TotalSpikes() - before) * 10.0);
+            if (k == 5)
+            {
+                for (uint32_t i = 0; i < connectome->NeuronCount(); ++i)
+                {
+                    atHalf[i] = brain.NeuronSpikeCount(i);
+                }
+            }
         }
         std::printf("probe %s: spikes per second of the whole brain, every 100 ms:", probeType.c_str());
         for (double r : rateAt)
         {
             std::printf(" %.0f", r);
+        }
+        std::printf("\n");
+        // What keeps firing in the last 0.4 s (after the stimulus of a type ended at 0.5 s)
+        std::map<std::string, uint64_t> lateByType;
+        for (uint32_t i = 0; i < connectome->NeuronCount(); ++i)
+        {
+            const uint32_t late = brain.NeuronSpikeCount(i) - atHalf[i];
+            if (late > 0)
+            {
+                lateByType[std::string(connectome->Type(i)) + " (" + ToString(connectome->NeuronSide(i)) + ", " + ToString(connectome->NeuronTransmitter(i)) + ")"] += late;
+            }
+        }
+        std::printf("firing in the last 0.4 s:");
+        for (const auto& [type, count] : lateByType)
+        {
+            std::printf(" %s %llu;", type.c_str(), static_cast<unsigned long long>(count));
         }
         std::printf("\n");
         std::map<std::string, std::pair<uint64_t, uint32_t>> bySuperclass; // spikes, neurons

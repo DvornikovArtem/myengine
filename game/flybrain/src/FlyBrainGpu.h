@@ -91,6 +91,7 @@ namespace flybrain
         uint32_t steps = 0;
         const uint32_t* counts = nullptr;
         uint32_t lostSpikes = 0; // spikes beyond the capacity of the window list (not delivered): must stay 0
+        const uint32_t* trackedTotals = nullptr; // spike totals of the tracked units at the end of the submission
     };
 
     class FlyBrainGpu
@@ -101,7 +102,7 @@ namespace flybrain
 
         // device == nullptr: the backend makes its own device (the fastest hardware adapter, WARP when allowWarp and
         // there is none). nullptr result: error says why (no adapter, no double precision in shaders, no shader)
-        static std::unique_ptr<FlyBrainGpu> Create(ID3D12Device* device, bool allowWarp, const Connectome& connectome,
+        static std::unique_ptr<FlyBrainGpu> Create(ID3D12Device* device, bool allowWarp, const Connectome& connectome, uint32_t replicas,
             const GpuModelConstants& constants, uint32_t ringCapacity, std::string* error);
         ~FlyBrainGpu();
 
@@ -109,6 +110,9 @@ namespace flybrain
         // Waits for the GPU and reads everything back (queries of single neurons, a switch back to the CPU)
         void Download(GpuStateImage& image);
         void DownloadRing(std::vector<uint32_t>& pairs, uint64_t& written);
+
+        // Units whose spike totals every submission copies back (sorted; consecutive units go in one copy)
+        void SetTracked(const std::vector<uint32_t>& units);
 
         // Applied at the start of the next recorded window
         void QueueUpdate(const GpuNeuronUpdate& update);
@@ -137,7 +141,7 @@ namespace flybrain
         struct Slot;
 
         FlyBrainGpu() = default;
-        bool Initialize(ID3D12Device* device, bool allowWarp, const Connectome& connectome, const GpuModelConstants& constants,
+        bool Initialize(ID3D12Device* device, bool allowWarp, const Connectome& connectome, uint32_t replicas, const GpuModelConstants& constants,
             uint32_t ringCapacity, std::string* error);
         bool BeginSubmission();
         void BindAll();
@@ -184,7 +188,10 @@ namespace flybrain
         std::function<void(const GpuCompletedSteps&)> onCompleted_;
         std::vector<GpuNeuronUpdate> queuedUpdates_;
 
-        uint32_t neuronCount_ = 0;
+        uint32_t neuronCount_ = 0; // units
+        uint32_t graphNeurons_ = 0;
+        std::vector<std::pair<uint32_t, uint32_t>> trackedRuns_; // first unit, count
+        uint32_t trackedCount_ = 0;
         uint32_t delaySteps_ = 18;
         uint32_t spikeCapacity_ = 0;
         uint32_t ringCapacity_ = 0;
