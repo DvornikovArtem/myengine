@@ -10,6 +10,8 @@
 
 #include <states/LoadingState.h>
 
+#include <brainview/BrainViewWindow.h>
+
 #include <myengine/config/AppConfig.h>
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
@@ -32,6 +34,7 @@ namespace
         bool startInPlay = false;
         bool gameMode = false;                      // --game: the Rocket League game without the editor
         bool showProjectBrowser = false;
+        bool openFlyBrain = false;                  // --fly-brain: Window > Fly Brain is open at the start
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
         std::uint32_t exitAfterFrames = 0; // 0: run until the window is closed
@@ -84,6 +87,17 @@ namespace
             if (argument == L"--game" && !options.gameMode)
             {
                 options.gameMode = true;
+                continue;
+            }
+            if (argument == L"--fly-brain")   // the 3D fly brain window open at the start (docs/flybrain/brain-view.md)
+            {
+                options.openFlyBrain = true;
+                continue;
+            }
+            if (argument == L"--fbrain" && index + 1 < argumentCount)   // the connectome for it (the default: assets/flybrain/malecns_v1.fbrain)
+            {
+                ++index;
+                _wputenv_s(L"MYENGINE_FBRAIN", std::wstring(arguments[index]).c_str());
                 continue;
             }
             // Steam starts the game of a friend who accepts an invitation with "+connect_lobby <lobby id>": the lobby screens read it from the command line
@@ -350,7 +364,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
     {
         MessageBoxW(
             nullptr,
-            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game]\n"
+            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--fly-brain [--fbrain <file>]]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
@@ -404,8 +418,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 
     app.GetStateMachine().ChangeState(std::make_unique<myengine::appstate::LoadingState>(), app);
 
+    // Window > Fly Brain: the 3D cloud of the connectome with a test stimulus (the module game/brainview); the simulation runs only while the window is open
+    std::unique_ptr<brainview::BrainViewWindow> flyBrainWindow;
+    if (!options.gameMode && app.GetRenderAdapter() != nullptr && app.GetThumbnailService() != nullptr)
+    {
+        flyBrainWindow = std::make_unique<brainview::BrainViewWindow>(*app.GetRenderAdapter(), *app.GetThumbnailService(), app.GetLogger(), std::filesystem::path{});
+        app.AddEditorToolWindow("Fly Brain", [window = flyBrainWindow.get()](bool& open, const double deltaSeconds) { window->Draw(open, deltaSeconds); }, options.openFlyBrain);
+    }
+
     const int exitCode = app.Run();
 
+    flyBrainWindow.reset();   // its GPU objects go back before the renderer shuts down
     app.Shutdown();
     return exitCode;
 }

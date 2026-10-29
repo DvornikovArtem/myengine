@@ -41,7 +41,7 @@ set(APP_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/resources/myengine.manifest")
 set_source_files_properties(${APP_RESOURCES} PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/RocketArena.ico")
 
 add_executable(myengine WIN32 ${APP_HEADERS} ${APP_CPP} ${APP_SHADER_FILES} ${APP_RESOURCES} ${APP_MANIFEST})
-target_link_libraries(myengine PRIVATE myengine_engine myengine_directxtk myengine_directxtex)
+target_link_libraries(myengine PRIVATE myengine_engine myengine_brainview myengine_directxtk myengine_directxtex)
 target_include_directories(myengine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(MYENGINE_SHIPPING)
   # The game for players: RocketArena.exe, without the repository path (docs/game/packaging.md)

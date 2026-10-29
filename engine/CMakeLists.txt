@@ -173,6 +173,7 @@ set(ENGINE_SOURCES
   src/render/MaterialParams.cpp
   src/render/ShaderLayout.cpp
   src/render/ShaderMetadata.cpp
+  src/render/dx12/Dx12CloudPass.cpp
   src/render/dx12/Dx12GpuProfiler.cpp
   src/render/dx12/Dx12GpuProfiler.h
   src/render/dx12/Dx12RenderAdapter.cpp

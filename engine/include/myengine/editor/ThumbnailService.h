@@ -112,6 +112,11 @@ namespace myengine::editor
         bool wireframe = false;                         // the meshes are drawn as wireframe
         std::vector<render::DrawItem> items;
         std::vector<render::DebugLine> lines;           // grid, bounds
+        // A point cloud drawn first (the fly brain, docs/flybrain/brain-view.md): it overwrites the target, the items and lines go over it. The view and
+        // projection of `cloudParams` are its own camera; cloudFlashTimes (one float per point) is copied by the service, so it may change at once.
+        render::PointCloudHandle pointCloud{};
+        render::PointCloudDrawParams cloudParams{};
+        std::vector<float> cloudFlashTimes;
     };
 
     struct ThumbnailServiceConfig

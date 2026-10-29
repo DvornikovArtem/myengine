@@ -199,6 +199,24 @@ namespace myengine::render
             return false;
         }
 
+        // ---- point clouds ----
+        // A cloud of glowing points (the 3D view of the fly brain): the positions go to the GPU now (between frames, like UploadMesh), the flashes with every
+        // DrawPointCloud. Drawn additively with HDR, a bloom and a tone map into the render target that is being rendered; 0: no support.
+        virtual PointCloudHandle CreatePointCloud(const PointCloudData& data)
+        {
+            (void)data;
+            return {};
+        }
+        virtual void DestroyPointCloud(PointCloudHandle cloud) { (void)cloud; }
+        // Inside BeginRenderTarget / EndRenderTarget of the frame's surface. The target is overwritten (the background is in `params`).
+        virtual bool DrawPointCloud(RenderSurfaceHandle surface, PointCloudHandle cloud, const PointCloudDrawParams& params)
+        {
+            (void)surface;
+            (void)cloud;
+            (void)params;
+            return false;
+        }
+
         // ---- GPU diagnostics (capture tools, statistics) ----
         // A named group of commands: a marker that RenderDoc / PIX show as a tree node, and a timed pass of the frame
         // statistics. Inside a frame only; groups nest, EndDebugEvent closes the innermost.

@@ -136,6 +136,12 @@ namespace myengine::core
         std::string CaptureSceneSnapshot() const;
         bool RestoreSceneSnapshot(std::string_view snapshotJson);
 
+        /// A window of another module in the Window menu of the editor (docs/flybrain/brain-view.md): `draw(open, deltaSeconds)` runs every frame inside the ImGui frame,
+        /// also while the window is closed. Call it before Initialize, or after: the menu takes new entries at once.
+        void AddEditorToolWindow(std::string name, std::function<void(bool& open, double deltaSeconds)> draw, bool openAtStart = false);
+        /// The renderer and the live-view service, for what such a window draws (null before Initialize)
+        render::IRenderAdapter* GetRenderAdapter() { return renderAdapter_.get(); }
+        editor::ThumbnailService* GetThumbnailService() { return thumbnailService_.get(); }
         /// The start map is in the world (with SetDeferredSceneLoad it takes a few frames after Run starts).
         bool IsSceneLoaded() const;
         /// The long operations that the editor shows (a window for a map, an indicator in the status bar).
@@ -227,6 +233,7 @@ namespace myengine::core
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;
         std::unique_ptr<editor::ThumbnailService> thumbnailService_; // after the adapter and the resources it uses
+        std::vector<ui::EditorToolWindow> editorToolWindows_; // the windows of other modules (SceneEditorServices::toolWindows); after the adapter: they release GPU objects when they go
         editor::LoadingService loadingService_;
         std::unique_ptr<PendingSceneLoad> pendingSceneLoad_;
         ui::UiManager uiManager_;

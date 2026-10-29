@@ -174,6 +174,15 @@ namespace myengine::core
         Shutdown();
     }
 
+    void Application::AddEditorToolWindow(std::string name, std::function<void(bool& open, double deltaSeconds)> draw, const bool openAtStart)
+    {
+        ui::EditorToolWindow tool;
+        tool.name = std::move(name);
+        tool.open = openAtStart;
+        tool.draw = std::move(draw);
+        editorToolWindows_.push_back(std::move(tool));
+    }
+
     bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& requestedScene, const bool requestedPlay)
     {
         config_ = config;
@@ -385,6 +394,7 @@ namespace myengine::core
         sceneEditorServices.world = &world_;
         sceneEditorServices.resourceManager = resourceManager_.get();
         sceneEditorServices.thumbnails = thumbnailService_.get();
+        sceneEditorServices.toolWindows = &editorToolWindows_;
         sceneEditorServices.logger = &logger_;
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };

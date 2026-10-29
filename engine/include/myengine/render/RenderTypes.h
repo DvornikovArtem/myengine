@@ -238,6 +238,47 @@ namespace myengine::render
         core::Color color{1.0f, 0.3f, 0.2f, 1.0f};
     };
 
+    // A cloud of glowing points that all look alike and flash over time (IRenderAdapter::CreatePointCloud, docs/flybrain/brain-view.md): the positions
+    // go to the GPU once, only one float per point (when it flashed last) goes there every frame
+    struct PointCloudHandle
+    {
+        std::uint32_t value = 0;
+
+        bool IsValid() const
+        {
+            return value != 0;
+        }
+    };
+
+    struct PointCloudData
+    {
+        std::vector<float> positions;          // x, y, z of every point (3 floats each)
+        std::vector<std::uint8_t> colorIndex;  // the row of PointCloudDrawParams::palette of every point (0..15); empty: all 0
+        std::uint32_t Count() const { return static_cast<std::uint32_t>(positions.size() / 3); }
+    };
+
+    // One draw of a cloud into the render target that is being rendered (between BeginRenderTarget and EndRenderTarget)
+    struct PointCloudDrawParams
+    {
+        Matrix4 view = Matrix4::Identity();
+        Matrix4 projection = Matrix4::Identity();
+        const float* flashTimes = nullptr;     // one float per point: the time of its last flash, seconds (any clock, the same as `time`); read during the call
+        float time = 0.0f;                     // now
+        float decaySeconds = 0.15f;            // a flash fades to 1/e in this time
+        float baseBrightness = 0.04f;          // a point at rest (HDR: above 1 glows)
+        float flashBrightness = 5.0f;          // added by a point that flashes just now
+        float baseSizePixels = 1.6f;
+        float flashSizePixels = 3.0f;          // added by a flash, in pixels of the target
+        float referenceDepth = 3.0f;           // distance of the camera at which the point size is as given; nearer ones are bigger
+        float depthRange = 1.5f;               // points this much behind the reference depth are dimmed to a quarter
+        float palette[16][4] = {};             // the colour of each colour index (rgb; a is not used)
+        bool bloom = true;
+        float bloomThreshold = 0.6f;
+        float bloomIntensity = 1.0f;
+        float exposure = 1.0f;                 // the HDR picture goes to the 8 bit target as 1 - exp(-x * exposure)
+        core::Color background{0.0f, 0.0f, 0.0f, 1.0f};
+    };
+
     struct UiVertex
     {
         Float2 position{};

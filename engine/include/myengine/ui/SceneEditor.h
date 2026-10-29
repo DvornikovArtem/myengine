@@ -93,6 +93,15 @@ namespace myengine::ui
         std::vector<Program> programs;
     };
 
+    // A window of another module under Window (the Fly Brain): the menu toggles `open`, `draw` is called every frame inside the ImGui frame of the editor
+    // (also when the window is closed, so that the module can stop what it runs). Added with Application::AddEditorToolWindow.
+    struct EditorToolWindow
+    {
+        std::string name;
+        bool open = false;
+        std::function<void(bool& open, double deltaSeconds)> draw;
+    };
+
     struct SceneEditorServices
     {
         ecs::World* world = nullptr;
@@ -102,6 +111,7 @@ namespace myengine::ui
         editor::ThumbnailService* thumbnails = nullptr; // asset previews (null without a render adapter)
         editor::LoadingService* loading = nullptr;      // the long operations to show (null: none are shown)
         std::function<void()> requestQuit;
+        std::vector<EditorToolWindow>* toolWindows = nullptr; // owned by the Application; entries are only added, never removed
         std::function<bool()> saveScene;
         // Re-read the open map from disk; `done(success)` runs on the main thread when it has been applied
         std::function<void(std::function<void(bool)> done)> loadScene;
@@ -200,6 +210,7 @@ namespace myengine::ui
         void DrawPrefabPanel(AssetViewerTab& tab);
         void DrawThumbnailsDebugWindow(); // Help > Developer > Thumbnails (acceptance tool of the preview service)
         void DrawShaderLayoutsWindow();   // Help > Developer > Shader Layouts (what the reflection reads from the shaders)
+        void DrawToolWindows(core::WindowId windowId);
         void DrawRlTuningWindow();        // Window > RL Tuning: the sliders of the Rocket League numbers (SceneEditorRlTuning.cpp)
         // The loading window of a long operation (SceneEditorLoading.cpp). Also blocks the input while one runs.
         void DrawLoadingUi();
@@ -288,6 +299,7 @@ namespace myengine::ui
         std::string materialEditLabel_;
         std::string materialParamFilter_; // the filter of the parameters (not kept between runs)
         mutable std::unordered_set<std::string> materialWriteFailures_; // materials whose last write failed: the change is in memory only
+        core::WindowId toolWindowOwner_ = 0;   // the editor window that draws the tool windows (the first one that asks), so that they run once per frame
         std::vector<std::string> thumbnailDebugAssets_;
         int thumbnailDebugSize_ = 128;
     };

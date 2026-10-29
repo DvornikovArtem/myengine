@@ -73,6 +73,9 @@ namespace myengine::render::dx12
         void Draw(RenderSurfaceHandle surface, const DrawItem& drawItem) override;
         void DrawInstances(RenderSurfaceHandle surface, const DrawItem& drawItem, const float* instanceData, std::uint32_t instanceCount) override;
         void DrawDebugLines(RenderSurfaceHandle surface, const std::vector<DebugLine>& lines) override;
+        PointCloudHandle CreatePointCloud(const PointCloudData& data) override;
+        void DestroyPointCloud(PointCloudHandle cloud) override;
+        bool DrawPointCloud(RenderSurfaceHandle surface, PointCloudHandle cloud, const PointCloudDrawParams& params) override;
         void DrawUiGeometry(RenderSurfaceHandle surface, const UiDrawData& drawData) override;
         void EndFrame(RenderSurfaceHandle surface) override;
 
@@ -412,6 +415,29 @@ namespace myengine::render::dx12
             D3D12_RESOURCE_STATES colorState = D3D12_RESOURCE_STATE_RENDER_TARGET;
         };
         bool EnsureSceneTargets(const SurfaceData& surface);
+
+        // ---- point clouds (Dx12CloudPass.cpp): the points are drawn additively into an HDR target of the size of the render target, blurred
+        // into a bloom, and composited (tone mapped) into the render target ----
+        struct CloudRecord
+        {
+            Microsoft::WRL::ComPtr<ID3D12Resource> points;   // 16 bytes per point: x, y, z, colour index (float)
+            D3D12_VERTEX_BUFFER_VIEW view{};
+            std::uint32_t count = 0;
+        };
+        struct CloudTargets
+        {
+            std::uint32_t width = 0;
+            std::uint32_t height = 0;
+            Microsoft::WRL::ComPtr<ID3D12Resource> color;     // HDR
+            std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, kBloomLevels> bloomLevels;
+            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap; // 0 colour, 1.. bloom levels
+            UINT srvColor = 0;
+            std::array<UINT, kBloomLevels> srvBloom{};
+            bool bloom = false;
+        };
+        bool BuildCloudPipeline();
+        CloudTargets* EnsureCloudTargets(std::uint32_t renderTargetId, const RenderTargetRecord& target);
+        void RetireCloudTargets(CloudTargets&& targets);
         bool EnsureShadowMap();
         ID3D12PipelineState* GetPipelineVariant(const ShaderRecord& record, const PipelineKey& key);
         void FlushScene();
@@ -497,6 +523,15 @@ namespace myengine::render::dx12
         core::Color sceneClearColor_{0.0f, 0.0f, 0.0f, 1.0f};
         SceneTargets sceneTargets_;
         ShaderRecord postProgram_;             // the fullscreen passes: bloom, composite
+        // What a post pass takes instead of the settings of the scene while a point cloud is composited (< 0: the settings)
+        float postThresholdOverride_ = -1.0f;
+        float postIntensityOverride_ = -1.0f;
+        float postExposure_ = 1.0f;
+        Microsoft::WRL::ComPtr<ID3D12RootSignature> cloudRootSignature_;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> cloudPipeline_;
+        std::unordered_map<std::uint32_t, CloudRecord> clouds_;
+        std::uint32_t nextCloudId_ = 1;
+        std::unordered_map<std::uint32_t, CloudTargets> cloudTargets_;   // by render target id
         Microsoft::WRL::ComPtr<ID3D12Resource> shadowMap_;
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> shadowDsvHeap_;
         UINT shadowSrv_ = 0;

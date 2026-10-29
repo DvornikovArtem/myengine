@@ -1002,6 +1002,12 @@ namespace myengine::editor
                 {
                     continue;
                 }
+                if (view.request.pointCloud.IsValid() && !view.request.cloudFlashTimes.empty())
+                {
+                    render::PointCloudDrawParams cloudParams = view.request.cloudParams;
+                    cloudParams.flashTimes = view.request.cloudFlashTimes.data();
+                    adapter.DrawPointCloud(surface, view.request.pointCloud, cloudParams);
+                }
                 adapter.SetViewProjection(surface, view.request.view, view.request.projection);
                 adapter.SetWireframe(view.request.wireframe);
                 ApplyPreviewLight(adapter, view.request.view);
@@ -1017,6 +1023,8 @@ namespace myengine::editor
                 view.dirty = false;
                 view.request.items.clear();
                 view.request.lines.clear();
+                view.request.pointCloud = {};
+                view.request.cloudFlashTimes.clear();
             }
         }
 

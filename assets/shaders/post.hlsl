@@ -5,10 +5,12 @@
 //   2  upsample (a tent of 4 taps), added into the larger level by the blend state
 //   3  composite: scene + bloom * intensity
 //   4  composite without bloom (the resolved scene)
+//   5  composite with a tone map: 1 - exp(-x * gPostParams.w), the scene + bloom (point clouds, docs/flybrain/brain-view.md)
+//   6  the same without bloom
 
 cbuffer PostCB : register(b0)
 {
-    // x: pass, y: bloom threshold, z: bloom intensity
+    // x: pass, y: bloom threshold, z: bloom intensity, w: exposure (passes 5 and 6)
     float4 gPostParams;
     // xy: the texel of the source texture
     float4 gTexelSize;
@@ -89,6 +91,11 @@ float4 PSMain(VSOutput input) : SV_TARGET
     {
         const float3 bloom = Tap(gBloom, pixelUV);
         return float4(scene + bloom * gPostParams.z, 1.0f);
+    }
+    if (mode == 5 || mode == 6)
+    {
+        const float3 hdr = scene + (mode == 5 ? Tap(gBloom, pixelUV) * gPostParams.z : 0.0f);
+        return float4(1.0f - exp(-max(hdr, 0.0f) * gPostParams.w), 1.0f);
     }
     return float4(scene, 1.0f);
 }
