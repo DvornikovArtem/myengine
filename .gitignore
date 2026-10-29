@@ -71,3 +71,12 @@ external/onnxruntime/
 assets/faceid/models/
 assets/faceid/licenses/
 assets/faceid/test/
+
+# the game data of FlyDoom: Freedoom (tools/doom/fetch_freedoom.ps1) or the WAD of the player; never in git
+assets/doom/*
+!assets/doom/README.txt
+
+# The shared face database (docs/editor/faceid.md, "The shared database"): biometric templates of real people. It never goes to git (decision of the owner):
+# it travels only in the package of a build, as faceid/allowed_faces.fdb next to the exe.
+assets/faceid/allowed_faces.fdb
+faceid/allowed_faces.fdb

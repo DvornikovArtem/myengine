@@ -69,6 +69,14 @@ namespace myengine::render
         virtual MeshHandle UploadMesh(const MeshData& meshData) = 0;
         virtual TextureHandle CreateTexture(const TextureData& textureData) = 0;
         virtual void DestroyTexture(TextureHandle texture) = 0;
+        // Replaces the pixels of a texture (an image that changes every frame: the screen of DOOM) under the same handle. The size may change.
+        // Synchronous like CreateTexture: call it between frames. false: no such texture, or the data is not valid.
+        virtual bool UpdateTexture(TextureHandle texture, const TextureData& textureData)
+        {
+            (void)texture;
+            (void)textureData;
+            return false;
+        }
         virtual ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) = 0;
 
         // ---- shader reflection ----

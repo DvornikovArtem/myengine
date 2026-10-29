@@ -6,9 +6,11 @@
 #pragma once
 
 #include <myengine/faceid/FaceCamera.h>
+#include <myengine/faceid/FaceDatabase.h>
 #include <myengine/faceid/FaceMatcher.h>
 #include <myengine/faceid/FaceModels.h>
 #include <myengine/faceid/FaceProfileStore.h>
+#include <myengine/faceid/FaceSigner.h>
 #include <myengine/faceid/FaceTypes.h>
 
 #include <atomic>
@@ -31,10 +33,32 @@ namespace myengine::faceid
         bool liveness = true;                // "turn your head"
         std::string camera;                  // the name of the camera, empty: the first one
         float threshold = kDefaultThreshold; // the cosine similarity that counts as the same person
+        bool forceLocal = false;             // the publisher's machine only: work with the local profiles although a shared database is there (to try the Local mode)
 
         static std::filesystem::path DefaultFile();
         static FaceIdSettings Load(const std::filesystem::path& file);
         bool Save(const std::filesystem::path& file) const;
+    };
+
+    // Whose faces let a person in: the shared database signed by the publisher (it is there, so it decides), or the profiles of this computer (there is none)
+    enum class FaceSource
+    {
+        Local,
+        Shared
+    };
+
+    // What the service found about the shared database (for the screens)
+    struct DatabaseInfo
+    {
+        std::filesystem::path path;      // where it is, or where it was named to be
+        bool named = false;              // --faceid-db / MYENGINE_FACEID_DB
+        bool found = false;              // the file is there
+        bool valid = false;              // and the signature fits: its faces are in use
+        std::string error;               // the words for the screen when it is found (or named) and not valid
+        std::size_t faces = 0;
+        std::string created;
+        bool hasPassword = false;
+        bool signedByBuiltInKey = false; // false: the key of this machine (the publisher before the key is built into the engine)
     };
 
     enum class FaceIdMode
@@ -91,6 +115,11 @@ namespace myengine::faceid
             std::filesystem::path directory;          // the folder of the profiles and the settings; empty: %LOCALAPPDATA%\myengine\faceid
             std::filesystem::path modelsDirectory;    // empty: FaceModels::DefaultDirectory()
             std::shared_ptr<IDataProtector> protector; // empty: DPAPI
+            std::filesystem::path databaseFile;        // named by --faceid-db; empty: looked for (docs/editor/faceid.md)
+            std::filesystem::path executableDirectory; // empty: the folder of the exe
+            std::filesystem::path signingKeyFile;      // empty: <directory>/signing.key
+            bool overrideTrustedKey = false;           // the tests: the key that databases are checked with instead of the built-in one
+            std::string trustedKeyHex;
         };
 
         FaceIdService();
@@ -109,6 +138,34 @@ namespace myengine::faceid
         FaceIdSettings& Settings() { return settings_; }
         bool SaveSettings() const;
         FaceProfileStore& Store() { return store_; }
+
+        // ---- the shared database (docs/editor/faceid.md, "The shared database")
+        FaceSource Source() const { return source_; }
+        const DatabaseInfo& Database() const { return databaseInfo_; }
+        // Shared mode and the database did not pass: nobody gets in by face or by password until it is repaired (the reason is in Database().error)
+        bool SharedBlocked() const { return source_ == FaceSource::Shared && !databaseInfo_.valid; }
+        // The faces that let a person in now: the database or the local profiles
+        const std::vector<FaceProfile>& ActiveProfiles() const { return source_ == FaceSource::Shared ? sharedProfiles_ : store_.Profiles(); }
+        // Is there a password to type (Shared: the one in the database, if the publisher put it there; Local: the first profile's)
+        bool PasswordAvailable() const;
+        // Looks for the database again and checks it (after the publisher saved one, or a change of the mode)
+        void ReloadDatabase();
+
+        // ---- the publisher: the machine that has the private key (and, when a key is built into the engine, the same one)
+        FaceSigner& Signer() { return signer_; }
+        const std::string& SignerError() const { return signerError_; }
+        bool IsPublisher() const;
+        // The public key of this machine against the one built into the engine, in words ("" without a key)
+        std::string PublisherKeyNote() const;
+        // The faces being prepared for the next signing: the database that is in use, then what the publisher adds and removes
+        const FaceDatabase& Draft() const { return draft_; }
+        bool DraftDirty() const { return draftDirty_; }
+        bool DraftAddFace(const std::string& name, std::vector<FaceEmbedding> embeddings, std::string* error = nullptr);
+        bool DraftRemoveFace(std::size_t index);
+        void DraftDiscard();
+        // Signs the draft with the key of this machine and writes it. `includePassword`: the password of the publisher goes in as a hash (a new one when `password` is not
+        // empty, else the one that is in the draft already). Afterwards the service uses that file at once.
+        bool PublisherSave(const std::filesystem::path& file, bool includePassword, const std::string& password, std::string* error = nullptr);
         float Threshold() const { return settings_.threshold; }
 
         // ---- the commands (from the thread of the UI)
@@ -132,10 +189,21 @@ namespace myengine::faceid
         void ProcessLogin(const FaceImage& frame, double now);
         void ProcessEnroll(const FaceImage& frame, double now);
         void SetLoginPhase(LoginPhase phase, const std::string& text);
+        std::filesystem::path Directory() const;
+        std::vector<std::vector<std::uint8_t>> TrustedKeys() const;
+        bool BuiltInKeyIsEmpty() const;
 
         Options options_;
         FaceIdSettings settings_;
         FaceProfileStore store_;
+        FaceSigner signer_;
+        std::string signerError_;
+        FaceSource source_ = FaceSource::Local;
+        DatabaseInfo databaseInfo_;
+        std::vector<FaceProfile> sharedProfiles_;
+        PasswordHash sharedPassword_;
+        FaceDatabase draft_;
+        bool draftDirty_ = false;
         FaceModels models_;
         FaceCamera camera_;
         bool available_ = false;

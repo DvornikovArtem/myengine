@@ -107,41 +107,6 @@ namespace myengine::faceid
             }
         };
 
-        std::vector<std::uint8_t> RandomBytes(const std::size_t count)
-        {
-            std::vector<std::uint8_t> bytes(count);
-            BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(count), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-            return bytes;
-        }
-
-        bool DerivePbkdf2(const std::string& password, const std::vector<std::uint8_t>& salt, const std::uint32_t iterations, std::vector<std::uint8_t>& out)
-        {
-            BCRYPT_ALG_HANDLE algorithm = nullptr;
-            if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0)
-            {
-                return false;
-            }
-            out.assign(32, 0);
-            const NTSTATUS status = BCryptDeriveKeyPBKDF2(algorithm, reinterpret_cast<PUCHAR>(const_cast<char*>(password.data())), static_cast<ULONG>(password.size()),
-                                                          const_cast<PUCHAR>(salt.data()), static_cast<ULONG>(salt.size()), iterations, out.data(), static_cast<ULONG>(out.size()), 0);
-            BCryptCloseAlgorithmProvider(algorithm, 0);
-            return status >= 0;
-        }
-
-        bool ConstantTimeEqual(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b)
-        {
-            if (a.size() != b.size())
-            {
-                return false;
-            }
-            std::uint8_t difference = 0;
-            for (std::size_t i = 0; i < a.size(); ++i)
-            {
-                difference |= static_cast<std::uint8_t>(a[i] ^ b[i]);
-            }
-            return difference == 0;
-        }
-
         void SetError(std::string* error, const std::string& text)
         {
             if (error != nullptr)
@@ -149,6 +114,41 @@ namespace myengine::faceid
                 *error = text;
             }
         }
+    }
+
+    std::vector<std::uint8_t> RandomBytes(const std::size_t count)
+    {
+        std::vector<std::uint8_t> bytes(count);
+        BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(count), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+        return bytes;
+    }
+
+    bool DerivePbkdf2(const std::string& password, const std::vector<std::uint8_t>& salt, const std::uint32_t iterations, std::vector<std::uint8_t>& out)
+    {
+        BCRYPT_ALG_HANDLE algorithm = nullptr;
+        if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0)
+        {
+            return false;
+        }
+        out.assign(32, 0);
+        const NTSTATUS status = BCryptDeriveKeyPBKDF2(algorithm, reinterpret_cast<PUCHAR>(const_cast<char*>(password.data())), static_cast<ULONG>(password.size()),
+                                                      const_cast<PUCHAR>(salt.data()), static_cast<ULONG>(salt.size()), iterations, out.data(), static_cast<ULONG>(out.size()), 0);
+        BCryptCloseAlgorithmProvider(algorithm, 0);
+        return status >= 0;
+    }
+
+    bool ConstantTimeEqual(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b)
+    {
+        if (a.size() != b.size())
+        {
+            return false;
+        }
+        std::uint8_t difference = 0;
+        for (std::size_t i = 0; i < a.size(); ++i)
+        {
+            difference |= static_cast<std::uint8_t>(a[i] ^ b[i]);
+        }
+        return difference == 0;
     }
 
     std::shared_ptr<IDataProtector> MakeDpapiProtector() { return std::make_shared<DpapiProtector>(); }
