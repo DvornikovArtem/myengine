@@ -24,6 +24,7 @@ namespace myengine::ui
         scriptConsole_ = std::make_unique<ScriptConsole>();
         contentBrowser_ = std::make_unique<ContentBrowser>();
         projectUi_ = std::make_unique<ProjectUiState>();
+        buildPanel_ = std::make_unique<BuildPanelState>();
         if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized())
         {
             // The content folder of the project; maps get their own root when they are outside of it
@@ -190,6 +191,7 @@ namespace myengine::ui
         DrawThumbnailsDebugWindow();
         DrawShaderLayoutsWindow();
         DrawRlTuningWindow();
+        DrawBuildWindow();
     }
 
     // Developer tool: the layouts that the reflection reads from every shader of assets/shaders (resources, constant
@@ -436,6 +438,7 @@ namespace myengine::ui
                 {
                     if (MenuItemIcon(ICON_SLIDERS_HORIZONTAL, "RL Tuning", nullptr, showRlTuning_, true, true, width)) { showRlTuning_ = !showRlTuning_; }
                 }
+                if (MenuItemIcon(ICON_WRENCH, "Build", nullptr, showBuild_, true, true, width)) { showBuild_ = !showBuild_; }
                 if (MenuItemIcon(ICON_SCROLL_TEXT, "Output Log", nullptr, editorState.showScriptConsole, true, true, width)) { editorState.showScriptConsole = !editorState.showScriptConsole; }
                 if (MenuItemIcon(ICON_ACTIVITY, "Statistics", nullptr, editorState.showStatistics, true, true, width)) { editorState.showStatistics = !editorState.showStatistics; }
                 if (MenuItemIcon(ICON_SPARKLES, "Assistant", nullptr, editorState.showAssistant, true, true, width)) { editorState.showAssistant = !editorState.showAssistant; }

@@ -226,6 +226,16 @@ set_property(TARGET myengine_dpi_scale_tests PROPERTY FOLDER "Tests")
 add_test(NAME dpi_scale COMMAND myengine_dpi_scale_tests)
 set_tests_properties(dpi_scale PROPERTIES TIMEOUT 60)
 
+# B0: the model of the Build window of the editor (the manifests of the games, the lines of the script, the state of a run, the runner on a child process)
+add_executable(myengine_build_panel_model_tests
+  core/BuildPanelModelTests.cpp)
+
+target_link_libraries(myengine_build_panel_model_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_build_panel_model_tests)
+set_property(TARGET myengine_build_panel_model_tests PROPERTY FOLDER "Tests")
+add_test(NAME build_panel_model COMMAND myengine_build_panel_model_tests)
+set_tests_properties(build_panel_model PROPERTIES TIMEOUT 120)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
