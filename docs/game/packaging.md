@@ -1,6 +1,6 @@
 # Упаковка игры (G2)
 
-Как собрать `RocketArena.exe` для игрока и положить его с ассетами в папку или zip, который можно «скинуть другу». Архитектурное решение — [rl-online.md](rl-online.md), раздел 8. Скрипты: `tools/package_game.ps1` (сборка и упаковка), `tools/check_package.ps1` (проверка на чистой папке), манифест `tools/package_manifest.json`.
+Как собрать `RocketArena.exe` для игрока и положить его с ассетами в папку или zip, который можно «скинуть другу». Архитектурное решение — [rl-online.md](rl-online.md), раздел 8. Скрипты: `tools/package_game.ps1` (сборка и упаковка), `tools/check_package.ps1` (проверка на чистой папке), манифест игры `games/<id>/game.json` (для Rocket Arena `games/rocketarena/game.json`). То же кнопкой в редакторе: окно Window > Build, [../editor/build-panel.md](../editor/build-panel.md).
 
 ## Быстрый старт
 
@@ -9,13 +9,14 @@ powershell -ExecutionPolicy Bypass -File tools\package_game.ps1      # build-shi
 powershell -ExecutionPolicy Bypass -File tools\check_package.ps1     # запуск из %TEMP%\rocket_clean вне репозитория
 ```
 
-Без ключей скрипт **собирает пакет со Steam**, если нашёл Steamworks SDK (см. «Steam»), а иначе с предупреждением собирает без Steam. Первый запуск конфигурирует `build-shipping/` и собирает только цель `myengine` (около 20 минут, Release без тестов). Версия берётся из `project(myengine VERSION x.y.z)` в корневом `CMakeLists.txt` и больше нигде не пишется: оттуда её читают меню игры, ресурсы exe, отчёт о падении и имя zip (`tools/package_manifest.json` версии не хранит). Дальше сборка инкрементальная. Параметры `package_game.ps1`:
+Без ключей скрипт **собирает пакет со Steam**, если нашёл Steamworks SDK (см. «Steam»), а иначе с предупреждением собирает без Steam. Первый запуск конфигурирует `build-shipping/` и собирает только цель `myengine` (около 20 минут, Release без тестов). Версия берётся из `project(myengine VERSION x.y.z)` в корневом `CMakeLists.txt` и больше нигде не пишется: оттуда её читают меню игры, ресурсы exe, отчёт о падении и имя zip (`games/rocketarena/game.json` версии не хранит). Дальше сборка инкрементальная. Параметры `package_game.ps1`:
 
 | Параметр | Что |
 | --- | --- |
-| `-Config Shipping` (по умолчанию) / `Release` | обе записи — конфигурация Release в CMake |
-| `-Out dist` | куда класть `RocketArena/` и zip |
-| `-BuildDir build-shipping` | папка сборки shipping |
+| `-Game <id>` | какая игра: папка `games/<id>/game.json` (по умолчанию `rocketarena`); неизвестная — остановка со списком известных |
+| `-Config Shipping` (по умолчанию) / `Release` / `RelWithDebInfo` | первые две — конфигурация Release в CMake; `RelWithDebInfo` — тот же shipping-пакет с символами (zip с суффиксом `-rwdi`) |
+| `-Out dist` | куда класть `RocketArena/` и zip: относительно репозитория или полный путь (можно на другом диске) |
+| `-BuildDir build-shipping` | папка сборки shipping: относительно репозитория или полный путь (можно на другом диске); с этим ключом суффиксы `-nosteam` и `-nowwise` не добавляются |
 | `-SkipBuild` | упаковать уже собранный exe |
 | `-NoZip` | без zip |
 | `-SteamSdk <папка SDK>` | где искать Steamworks SDK (иначе см. «Steam»); без ключей Steam включается сам, если SDK найден |
@@ -81,7 +82,7 @@ RocketArena/
 
 ### Манифест ассетов
 
-`tools/package_manifest.json`: список корней (`assets`: файл или папка), `exclude` (маски, сильнее всего), `runtime` (Python), `config` и `project` (то, что скрипт пишет в дистрибутив), `licenses`, `steam`. При `followReferences` скрипт идёт дальше по ссылкам: всё, что названо в взятых `.json` (карты, материалы, `.shader.json`, данные) как путь к `.obj`, `.material.json`, `.shader.json`, `.tga`, `.dds`, `.bmp`, `.png`, `.hlsl`, `.wav`, `.ttf`, относительно репозитория или самого файла, попадает в пакет сам. Поэтому, когда G1 переведёт игровую карту на ассеты `rl2`, старые `assets/*/rl/` и `rl_*.obj` уйдут из дистрибутива без правок манифеста. Ссылка на файл, которого нет, выводится предупреждением. Новый ассет игры достаточно положить в одну из перечисленных папок или назвать в карте.
+`games/<id>/game.json` (для Rocket Arena `games/rocketarena/game.json`; поля `id`, `displayName`, `build`, `options`, `externalData` описаны в [../editor/build-panel.md](../editor/build-panel.md)): список корней (`assets`: файл или папка), `exclude` (маски, сильнее всего), `runtime` (Python), `config` и `project` (то, что скрипт пишет в дистрибутив), `licenses`, `steam`. При `followReferences` скрипт идёт дальше по ссылкам: всё, что названо в взятых `.json` (карты, материалы, `.shader.json`, данные) как путь к `.obj`, `.material.json`, `.shader.json`, `.tga`, `.dds`, `.bmp`, `.png`, `.hlsl`, `.wav`, `.ttf`, относительно репозитория или самого файла, попадает в пакет сам. Поэтому, когда G1 переведёт игровую карту на ассеты `rl2`, старые `assets/*/rl/` и `rl_*.obj` уйдут из дистрибутива без правок манифеста. Ссылка на файл, которого нет, выводится предупреждением. Новый ассет игры достаточно положить в одну из перечисленных папок или назвать в карте.
 
 ## Иконка, версия и ресурсы exe
 
@@ -148,7 +149,7 @@ SDK в репозиторий не кладётся ([steam-setup.md](steam-setu
 
 В пакете с Wwise рядом с exe **нет** ни одной DLL Wwise (библиотеки линкуются статически), а в пакете нет ни `.lib`, ни `.h`, ни другого файла SDK: скрипт проверяет это и останавливается, если такой файл попал в `dist`.
 
-Что кладётся и что нет (раздел `wwise` в `tools/package_manifest.json`):
+Что кладётся и что нет (раздел `wwise` в `games/rocketarena/game.json`):
 
 | Что | С Wwise (по умолчанию) | С `-NoWwise` |
 | --- | --- | --- |
