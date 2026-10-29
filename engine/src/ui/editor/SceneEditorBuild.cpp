@@ -400,7 +400,8 @@ namespace myengine::ui
                 }
                 else
                 {
-                    ImGui::TextWrapped("%s: not found (%s)%s%s", item.name.c_str(), item.check.c_str(), item.fetch.empty() ? "" : "; download it with ", item.fetch.c_str());
+                    ImGui::TextWrapped("%s: not found (%s)%s%s%s", item.name.c_str(), item.check.c_str(), item.optional ? "; the package goes without it" : "",
+                                       item.fetch.empty() ? "" : "; to get it run ", item.fetch.c_str());
                 }
             }
         }

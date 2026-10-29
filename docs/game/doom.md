@@ -28,12 +28,12 @@ DOOM — это движок плюс данные игры (WAD). Данные 
 Места, по порядку:
 
 1. `--iwad <файл>`: то, что назвал игрок, берётся как есть; если файла нет, игра показывает ошибку, а не берёт другой;
-2. `assets/doom/`, `doom/` или сама папка exe;
+2. `assets/doom/`, `wads/`, `doom/` или сама папка exe (`wads/` — куда пакет кладёт shareware `doom1.wad`);
 3. папка WAD игрока `%LOCALAPPDATA%\FlyDoom\wads\` (и `<папка данных игры>\wads`, для `myengine.exe` это `%APPDATA%\myengine\wads`): сюда игрок кладёт свой WAD вне репозитория и вне пакета;
 4. DOOM из библиотеки Steam игрока (реестр `Steam\SteamPath` и `libraryfolders.vdf`: `steamapps/common/Ultimate Doom/rerelease/DOOM.WAD`, `DOOM + DOOM II`, `Doom 2`, `Final Doom`, `Doom 3 BFG Edition` и подпапки `base`);
 5. переменные окружения `DOOMWADDIR` / `DOOMWADPATH` (как у самого DOOM).
 
-Из всего найденного выбирается по рангу: **полная игра** (`DOOM.WAD`, `DOOM2.WAD`, `plutonia.wad`, `tnt.wad`) выше **shareware** (`doom1.wad`, первый эпизод), а он выше **Freedoom**; при равном ранге решает порядок мест. Какой WAD выбран и откуда, пишется в журнал (`DOOM: the game data is ... (from ...)`, остальные найденные — строками `another WAD found`). Shareware `doom1.wad` (v1.9, 4 196 020 байт) — настоящая игра id Software, бесплатная для распространения целиком, но в репозиторий и в пакет для раздачи он не кладётся: пакет несёт Freedoom.
+Из всего найденного выбирается по рангу: **полная игра** (`DOOM.WAD`, `DOOM2.WAD`, `plutonia.wad`, `tnt.wad`) выше **shareware** (`doom1.wad`, первый эпизод), а он выше **Freedoom**; при равном ранге решает порядок мест. Какой WAD выбран и откуда, пишется в журнал (`DOOM: the game data is ... (from ...)`, остальные найденные — строками `another WAD found`). Shareware `doom1.wad` (v1.9, 4 196 020 байт) — настоящая игра id Software, бесплатная для распространения целиком: в репозиторий он не кладётся, а в пакет FlyDoom для друзей едет вместе с текстом лицензии (раздел «Раздать друзьям»).
 
 Остальные найденные файлы остаются в `IwadSearchResult::alternatives` — меню выбора (D1) предложит их. Если ничего не найдено, окно показывает, где искали и что сделать, а `Esc` закрывает игру.
 
@@ -129,9 +129,15 @@ DOOM рисует 320×200 (`DOOMGENERIC_RESX/RESY`) в 32-битный буфе
 - **Несколько игроков в одном процессе.** DOOM умеет `-solo-net` и локальную сетевую игру нескольких игроков в одной программе; их команды тоже проходят через `DG_TicCmdHook`. Режимы «человек против мухи» и «рой» (D1) строятся на этом: игрок консоли — человек, остальные получают команды из `ITicCmdSource`. Ограничение — один DOOM на процесс и одна игра за раз.
 - **Хозяин.** `DoomGame` не знает про окно, DX12 и звук: хозяин ставит `IDoomAudioHost` (звук, музыка) и вызывает `Advance`; поэтому его можно запустить без окна (тесты, обучение мозга быстрее реального времени: `Advance(1.0 / 35)` в цикле без ожидания).
 
+## Раздать друзьям (пакет FlyDoom, D2)
+
+Пакет собирается кнопкой Build & Package в окне Window > Build (игра FlyDoom) или `powershell -ExecutionPolicy Bypass -File tools\package_game.ps1 -Game flydoom`; результат — папка `dist/FlyDoom` и `dist/FlyDoom-<версия>-win64.zip`. Друг распаковывает zip, запускает `FlyDoom.exe` — и играет: в пакете Freedoom, shareware `doom1.wad` (первый эпизод настоящего DOOM; он в `wads/`, игра берёт его раньше Freedoom) и мозг мухи, если файл был на машине сборки. Если у друга DOOM куплен в Steam, игра возьмёт его (полная игра выше shareware), а `FlyDoom.exe --iwad <файл>` выбирает WAD явно. Состав пакета, лицензии (`COPYING`, `SOURCE.txt` с коммитом, `THIRD_PARTY.txt`), проверка на чистой папке и отдельные случаи («нет doom1.wad», «нет мозга») — в [packaging.md](packaging.md), раздел «FlyDoom».
+
+Перед сборкой на машине нужно: `tools/doom/fetch_freedoom.ps1` (скрипт упаковки запустит его сам, если Freedoom нет), shareware `doom1.wad` в `%LOCALAPPDATA%\FlyDoom\wads` (текст лицензии берётся из репозитория: `tools/package_flydoom/doom1.wad.license.txt`) и, для мухи, `assets/flybrain/malecns_v1.fbrain` (`tools/flybrain/fetch_malecns.ps1`). Чего нет, того нет в пакете: скрипт пишет предупреждение, `version.txt` пакета перечисляет файлы, которые в нём есть.
+
 ## Лицензии
 
-- DOOM (doomgeneric, Chocolate Doom): **GNU GPL v2** — исходники игры вместе с нашими правками открыты, `COPYING` лежит в `game/doom/third_party/doomgeneric/`. Пакет FlyDoom, распространяемый кому-то, должен содержать `COPYING` и ссылку на исходники (этот репозиторий, ветка серии FLYDOOM).
+- DOOM (doomgeneric, Chocolate Doom): **GNU GPL v2** — исходники игры вместе с нашими правками открыты, `COPYING` лежит в `game/doom/third_party/doomgeneric/`. Пакет FlyDoom, распространяемый кому-то, содержит `COPYING` и `SOURCE.txt` (репозиторий, хэш коммита сборки, где код DOOM и как собрать то же самое): их кладёт `package_game.ps1`.
 - Nuked OPL3: **GNU LGPL v2.1 или новее**, текст в `game/doom/third_party/opl/COPYING-nuked-opl3.txt`.
 - Freedoom: модифицированная BSD (в `assets/doom/COPYING-freedoom.txt` после скачивания).
 - Оригинальные данные DOOM: собственность владельцев, в репозиторий и в сборку не входят.
