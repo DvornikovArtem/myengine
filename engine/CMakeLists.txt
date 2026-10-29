@@ -26,6 +26,8 @@
   include/myengine/core/Window.h
   include/myengine/editor/EditorCommandHistory.h
   include/myengine/editor/EditorState.h
+  include/myengine/editor/BuildPanelModel.h
+  include/myengine/editor/BuildRunner.h
   include/myengine/editor/LoadingService.h
   include/myengine/editor/MaterialEditorModel.h
   include/myengine/editor/ThumbnailService.h
@@ -143,11 +145,13 @@ set(ENGINE_SOURCES
   src/core/FileWatcher.cpp
   src/core/FramePacer.cpp
   src/faceid/FaceAlign.cpp
+  src/faceid/FaceDatabase.cpp
   src/faceid/FaceCamera.cpp
   src/faceid/FaceIdGate.cpp
   src/faceid/FaceIdService.cpp
   src/faceid/FaceMatcher.cpp
   src/faceid/FaceProfileStore.cpp
+  src/faceid/FaceSigner.cpp
   src/core/Logger.cpp
   src/core/ProjectContext.cpp
   src/core/Timer.cpp
@@ -155,6 +159,8 @@ set(ENGINE_SOURCES
   src/core/UiScript.h
   src/core/Window.cpp
   src/editor/EditorCommandHistory.cpp
+  src/editor/BuildPanelModel.cpp
+  src/editor/BuildRunner.cpp
   src/editor/LoadingService.cpp
   src/editor/MaterialEditorModel.cpp
   src/editor/ThumbnailService.cpp
@@ -246,6 +252,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
   src/ui/editor/SceneEditorProject.cpp
+  src/ui/editor/SceneEditorBuild.cpp
   src/ui/editor/SceneEditorRlTuning.cpp
   src/ui/editor/SceneEditorViewers.cpp
   src/ui/editor/SceneEditorToolbar.cpp

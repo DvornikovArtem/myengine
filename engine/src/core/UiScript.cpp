@@ -104,7 +104,7 @@ namespace myengine::core
             }
             std::string rest;
             std::getline(words, rest);
-            if (command.verb == "note" || command.verb == "shot" || command.verb == "game")
+            if (command.verb == "note" || command.verb == "shot" || command.verb == "game" || command.verb == "editor")
             {
                 const std::size_t start = rest.find_first_not_of(" \t");
                 command.args.push_back(start == std::string::npos ? std::string() : rest.substr(start));
@@ -232,6 +232,10 @@ namespace myengine::core
         else if (c.verb == "game" && sink.game && !c.args.empty())
         {
             sink.game(c.args[0]);
+        }
+        else if (c.verb == "editor" && sink.editor && !c.args.empty())
+        {
+            sink.editor(c.args[0]);
         }
         else if (c.verb == "quit" && sink.quit)
         {

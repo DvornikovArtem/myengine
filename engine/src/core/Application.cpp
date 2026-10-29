@@ -75,6 +75,20 @@ namespace myengine::core
             return on;
         }
 
+        // The path in an environment variable (MYENGINE_FACEID_DB, set by --faceid-db), empty when there is none
+        std::filesystem::path EnvironmentPath(const wchar_t* name)
+        {
+            wchar_t* value = nullptr;
+            std::size_t length = 0;
+            std::filesystem::path path;
+            if (_wdupenv_s(&value, &length, name) == 0 && value != nullptr)
+            {
+                path = value;
+                std::free(value);
+            }
+            return path;
+        }
+
         // The editor overlay of the UiManager as the context of the Face ID screens
         faceid::FaceIdUiContext ToFaceIdContext(const ui::UiManager::EditorOverlayContext& context)
         {
@@ -417,6 +431,7 @@ namespace myengine::core
         sceneEditorServices.logger = &logger_;
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
+        sceneEditorServices.screenshot = [this](const std::string& path) { if (renderAdapter_ != nullptr) { renderAdapter_->RequestScreenshot(path); } };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this](std::function<void(bool)> done) { BeginRevertScene(std::move(done)); };
         sceneEditorServices.openScene = [this](const std::string& scenePath, std::function<void(bool)> done)
@@ -563,7 +578,9 @@ namespace myengine::core
         // frames) and --no-faceid / MYENGINE_NO_FACEID=1 do not ask: tests, CI and the hidden desktop go on as before.
         if (!gameMode_ && !EnvironmentFlag("MYENGINE_NO_FACEID"))
         {
-            faceIdService_ = std::make_unique<faceid::FaceIdService>();
+            faceid::FaceIdService::Options faceIdOptions;
+            faceIdOptions.databaseFile = EnvironmentPath(L"MYENGINE_FACEID_DB");   // --faceid-db <file>: the shared database that is named, not looked for
+            faceIdService_ = std::make_unique<faceid::FaceIdService>(std::move(faceIdOptions));
             if (!faceIdService_->Initialize())
             {
                 logger_.Info("Face ID is off: " + faceIdService_->UnavailableReason());
@@ -726,8 +743,11 @@ namespace myengine::core
             }
             gameFlow_ = std::make_unique<game::RlGameFlow>(services);
             gameFlow_->Install();
+        }
 
-            // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md)
+        // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md); in the editor only the commands `editor ...`,
+        // `shot` and `quit` matter (docs/editor/build-panel.md)
+        {
             char* scriptPath = nullptr;
             std::size_t scriptPathLength = 0;
             if (_dupenv_s(&scriptPath, &scriptPathLength, "MYENGINE_UI_SCRIPT") == 0 && scriptPath != nullptr && *scriptPath != 0)
@@ -745,7 +765,10 @@ namespace myengine::core
                 {
                     uiScript_ = std::move(script);
                     UiScript* raw = uiScript_.get();
-                    gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    if (gameFlow_ != nullptr)
+                    {
+                        gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    }
                     logger_.Info(std::string("UI script: ") + scriptPath);
                 }
             }
@@ -1070,6 +1093,7 @@ namespace myengine::core
                         rlGameSystem_->DebugCommand(command);
                     }
                 };
+                sink.editor = [this](const std::string& command) { logger_.Info("UI script: editor " + command + " -> " + uiManager_.RunEditorCommand(command)); };
                 sink.quit = [this]() { RequestQuit(); };
                 uiScript_->Advance(static_cast<double>(deltaTime), sink);
             }
