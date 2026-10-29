@@ -86,6 +86,12 @@ namespace
                 options.gameMode = true;
                 continue;
             }
+            if (argument == L"--faceid-db" && index + 1 < argumentCount)   // the shared face database to use (docs/editor/faceid.md)
+            {
+                ++index;
+                _wputenv_s(L"MYENGINE_FACEID_DB", std::wstring(arguments[index]).c_str());
+                continue;
+            }
             if (argument == L"--no-faceid")   // the editor starts without the Face ID login (same as MYENGINE_NO_FACEID=1)
             {
                 _putenv_s("MYENGINE_NO_FACEID", "1");
@@ -355,7 +361,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
     {
         MessageBoxW(
             nullptr,
-            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid]\n"
+            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"

@@ -31,6 +31,12 @@ namespace myengine::faceid
     // CryptProtectData / CryptUnprotectData (DPAPI) with a fixed extra secret of the application
     std::shared_ptr<IDataProtector> MakeDpapiProtector();
 
+    // The helpers of the cryptography of Windows (BCrypt) that the signer of the shared database uses too
+    std::vector<std::uint8_t> RandomBytes(std::size_t count);
+    // PBKDF2-HMAC-SHA256, 32 bytes
+    bool DerivePbkdf2(const std::string& password, const std::vector<std::uint8_t>& salt, std::uint32_t iterations, std::vector<std::uint8_t>& out);
+    bool ConstantTimeEqual(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b);
+
     // PBKDF2-HMAC-SHA256 (BCrypt of Windows), a random salt of 16 bytes
     struct PasswordHash
     {
