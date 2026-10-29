@@ -636,3 +636,15 @@ if(MYENGINE_WWISE)
   add_test(NAME audio_wwise_stress COMMAND myengine_wwise_stress_tests)
   set_tests_properties(audio_wwise_stress PROPERTIES TIMEOUT 60)
 endif()
+
+# F0: Face ID without a camera: the decisions, the alignment, the profile file and (when ONNX Runtime and the models are there) YuNet + SFace on two public domain
+# portraits. Exit code 77: no ONNX Runtime, models or portraits (tools/faceid/fetch_models.ps1 -WithTestImage), the test is skipped.
+add_executable(myengine_faceid_tests
+  faceid/FaceIdTests.cpp)
+
+target_link_libraries(myengine_faceid_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_faceid_tests)
+myengine_copy_runtime_assets(myengine_faceid_tests)
+set_property(TARGET myengine_faceid_tests PROPERTY FOLDER "Tests")
+add_test(NAME faceid COMMAND myengine_faceid_tests)
+set_tests_properties(faceid PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)

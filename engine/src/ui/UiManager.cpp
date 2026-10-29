@@ -354,6 +354,7 @@ namespace myengine::ui
         ImFont* bodyFont = nullptr;
         ImFont* monoFont = nullptr;
         render::TextureHandle fontTexture{};
+        render::TextureHandle previewTexture{};   // the picture of the editor overlay (the camera of Face ID), replaced by every upload
         std::vector<render::UiVertex> scratchVertices;
         std::vector<std::uint32_t> scratchIndices;
         std::vector<std::uint32_t> scratchCommandIndices;
@@ -434,6 +435,11 @@ namespace myengine::ui
                 renderAdapter_->DestroyTexture(windowContext->fontTexture);
                 windowContext->fontTexture = {};
             }
+            if (renderAdapter_ != nullptr && windowContext->previewTexture.IsValid())
+            {
+                renderAdapter_->DestroyTexture(windowContext->previewTexture);
+                windowContext->previewTexture = {};
+            }
 
             if (windowContext->imguiContext != nullptr)
             {
@@ -486,6 +492,10 @@ namespace myengine::ui
             if (renderAdapter_ != nullptr && it->second->fontTexture.IsValid())
             {
                 renderAdapter_->DestroyTexture(it->second->fontTexture);
+            }
+            if (renderAdapter_ != nullptr && it->second->previewTexture.IsValid())
+            {
+                renderAdapter_->DestroyTexture(it->second->previewTexture);
             }
 
             if (it->second->imguiContext != nullptr)
@@ -1236,6 +1246,55 @@ namespace myengine::ui
         context.height = static_cast<std::uint32_t>(std::lround(core::dpi::ToLogical(static_cast<float>(windowContext.height), windowContext.uiScale)));
         context.monoFont = windowContext.monoFont;
         context.stateLabel = stateLabel_;
+        EditorOverlayContext overlay;
+        overlay.windowId = windowContext.windowId;
+        overlay.width = static_cast<float>(context.width);
+        overlay.height = static_cast<float>(context.height);
+        overlay.time = ImGui::GetTime();
+        overlay.uploadImage = [this, &windowContext](const int width, const int height, const std::uint8_t* rgb, const bool mirror) -> std::uint64_t
+        {
+            if (renderAdapter_ == nullptr || width <= 0 || height <= 0 || rgb == nullptr)
+            {
+                return 0;
+            }
+            render::TextureData data;
+            data.width = static_cast<std::uint32_t>(width);
+            data.height = static_cast<std::uint32_t>(height);
+            data.channels = 4;
+            data.srgb = true;
+            data.pixelsRgba8.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
+            for (int y = 0; y < height; ++y)
+            {
+                for (int x = 0; x < width; ++x)
+                {
+                    const std::uint8_t* from = rgb + (static_cast<std::size_t>(y) * width + (mirror ? width - 1 - x : x)) * 3u;
+                    std::uint8_t* to = data.pixelsRgba8.data() + (static_cast<std::size_t>(y) * width + x) * 4u;
+                    to[0] = from[0];
+                    to[1] = from[1];
+                    to[2] = from[2];
+                    to[3] = 255;
+                }
+            }
+            const render::TextureHandle texture = renderAdapter_->CreateTexture(data);
+            if (!texture.IsValid())
+            {
+                return 0;
+            }
+            if (windowContext.previewTexture.IsValid())
+            {
+                renderAdapter_->DestroyTexture(windowContext.previewTexture);
+            }
+            windowContext.previewTexture = texture;
+            return static_cast<std::uint64_t>(RenderTextureToImGuiTextureId(texture));
+        };
+        if (editorGate_ && editorGate_(overlay))
+        {
+            return;
+        }
         sceneEditor_.BuildWindowUi(context);
+        if (editorOverlay_)
+        {
+            editorOverlay_(overlay);
+        }
     }
 }

@@ -104,6 +104,7 @@ namespace myengine::ui
         editor::LoadingService* loading = nullptr;      // the long operations to show (null: none are shown)
         std::function<void()> requestQuit;
         std::function<void(const std::string& path)> screenshot; // a screenshot of the next frame (.tga); the commands of the scripted input use it
+        std::function<void()> openFaceId;   // the Face ID window (Window > Face ID); empty without Face ID
         std::function<bool()> saveScene;
         // Re-read the open map from disk; `done(success)` runs on the main thread when it has been applied
         std::function<void(std::function<void(bool)> done)> loadScene;

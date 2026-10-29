@@ -441,6 +441,7 @@ namespace myengine::ui
                 if (MenuItemIcon(ICON_WRENCH, "Build", nullptr, showBuild_, true, true, width)) { showBuild_ = !showBuild_; }
                 if (MenuItemIcon(ICON_SCROLL_TEXT, "Output Log", nullptr, editorState.showScriptConsole, true, true, width)) { editorState.showScriptConsole = !editorState.showScriptConsole; }
                 if (MenuItemIcon(ICON_ACTIVITY, "Statistics", nullptr, editorState.showStatistics, true, true, width)) { editorState.showStatistics = !editorState.showStatistics; }
+                if (services_.openFaceId && MenuItemIcon(ICON_SCAN, "Face ID", nullptr, false, true, false, width)) { services_.openFaceId(); }
                 if (MenuItemIcon(ICON_SPARKLES, "Assistant", nullptr, editorState.showAssistant, true, true, width)) { editorState.showAssistant = !editorState.showAssistant; }
                 ImGui::Separator();
                 if (MenuItemIcon(ICON_LAYOUT_GRID, "Reset Layout", nullptr, false, true, false, width))

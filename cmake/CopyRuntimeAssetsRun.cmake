@@ -3,6 +3,7 @@
 #   SOURCE_DIR   repository root
 #   COPY_ASSETS  ON: copy assets/ and config/
 #   COPY_RUNTIME ON: copy the contents of external/runtime/ (python314.dll, python314.zip)
+#   COPY_ONNXRUNTIME ON: copy onnxruntime.dll of external/onnxruntime/lib (Face ID)
 #
 # file(COPY) skips a file whose copy in the destination has the same timestamp. A rebuild that changed nothing costs
 # about 0.1 s, and a runtime DLL that a running process holds open is not rewritten.
@@ -13,6 +14,10 @@ endif()
 if(COPY_ASSETS)
   file(COPY "${SOURCE_DIR}/assets" DESTINATION "${DST_DIR}")
   file(COPY "${SOURCE_DIR}/config" DESTINATION "${DST_DIR}")
+endif()
+
+if(COPY_ONNXRUNTIME AND EXISTS "${SOURCE_DIR}/external/onnxruntime/lib/onnxruntime.dll")
+  file(COPY "${SOURCE_DIR}/external/onnxruntime/lib/onnxruntime.dll" DESTINATION "${DST_DIR}")
 endif()
 
 if(COPY_RUNTIME)
