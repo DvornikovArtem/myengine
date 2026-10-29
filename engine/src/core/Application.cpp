@@ -416,6 +416,7 @@ namespace myengine::core
         sceneEditorServices.logger = &logger_;
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
+        sceneEditorServices.screenshot = [this](const std::string& path) { if (renderAdapter_ != nullptr) { renderAdapter_->RequestScreenshot(path); } };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this](std::function<void(bool)> done) { BeginRevertScene(std::move(done)); };
         sceneEditorServices.openScene = [this](const std::string& scenePath, std::function<void(bool)> done)
@@ -682,8 +683,11 @@ namespace myengine::core
             }
             gameFlow_ = std::make_unique<game::RlGameFlow>(services);
             gameFlow_->Install();
+        }
 
-            // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md)
+        // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md); in the editor only the commands `editor ...`,
+        // `shot` and `quit` matter (docs/editor/build-panel.md)
+        {
             char* scriptPath = nullptr;
             std::size_t scriptPathLength = 0;
             if (_dupenv_s(&scriptPath, &scriptPathLength, "MYENGINE_UI_SCRIPT") == 0 && scriptPath != nullptr && *scriptPath != 0)
@@ -701,7 +705,10 @@ namespace myengine::core
                 {
                     uiScript_ = std::move(script);
                     UiScript* raw = uiScript_.get();
-                    gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    if (gameFlow_ != nullptr)
+                    {
+                        gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    }
                     logger_.Info(std::string("UI script: ") + scriptPath);
                 }
             }
@@ -1026,6 +1033,7 @@ namespace myengine::core
                         rlGameSystem_->DebugCommand(command);
                     }
                 };
+                sink.editor = [this](const std::string& command) { logger_.Info("UI script: editor " + command + " -> " + uiManager_.RunEditorCommand(command)); };
                 sink.quit = [this]() { RequestQuit(); };
                 uiScript_->Advance(static_cast<double>(deltaTime), sink);
             }

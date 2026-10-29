@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
@@ -24,6 +25,8 @@
 
 #include <myengine/core/Logger.h>
 #include <myengine/core/ServiceLocator.h>
+#include <myengine/editor/BuildPanelModel.h>
+#include <myengine/editor/BuildRunner.h>
 #include <myengine/editor/EditorCommandHistory.h>
 #include <myengine/editor/LoadingService.h>
 #include <myengine/editor/MaterialEditorModel.h>
@@ -683,5 +686,37 @@ namespace myengine::ui
         std::string browserMessage;
 
         std::string pendingOpenProject; // waits for the answer of the unsaved changes prompt
+    };
+
+    // State of the Build window (SceneEditorBuild.cpp): the games, the options of the chosen one, the run that goes on or went last
+    struct BuildPanelState
+    {
+        std::filesystem::path root;                  // the repository (the sources the editor was built from)
+        std::vector<editor::GameEntry> games;
+        bool loaded = false;
+        int selected = 0;
+        editor::BuildOptions options;
+        int configChoice = 0;                        // 0 Release (shipping), 1 RelWithDebInfo
+        int steamChoice = 0;                         // 0 Auto, 1 On, 2 Off
+        int wwiseChoice = 0;                         // 0 Auto, 1 Off
+        editor::BuildSession session;
+        editor::BuildRunner runner;
+        std::chrono::steady_clock::time_point startedAt;
+        std::chrono::steady_clock::time_point endedAt;
+        // what is checked from time to time, not every frame
+        double checkedAt = -100.0;
+        bool targetFound = true;
+        std::vector<bool> dataPresent;
+        std::uint64_t freeBytes = 0;
+        bool packageExists = false;                  // the exe of the package is in the output folder
+        std::uint64_t seenLogVersion = 0;
+        bool autoScroll = true;
+        std::string message;                         // what the buttons last did
+        // the scripted input: what to do when the run ends (UiScript `editor build-finish`)
+        bool finishActions = false;
+        std::string finishShot;
+        double finishQuitAfter = 0.0;
+        double finishedAt = -1.0;                    // ImGui::GetTime() when the run ended and the actions are due
+        bool finishShotTaken = false;
     };
 }
