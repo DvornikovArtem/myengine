@@ -26,6 +26,7 @@
 #include <myengine/resource/ResourceManager.h>
 #include <myengine/scripting/PrefabLibrary.h>
 #include <myengine/scripting/ScriptRuntime.h>
+#include <myengine/game/DoomController.h>
 #include <myengine/state/StateMachine.h>
 #include <myengine/ui/UiManager.h>
 
@@ -104,6 +105,8 @@ namespace myengine::core
             std::vector<std::string> args;          // the command line of DOOM itself (--doom-args)
             bool squarePixels = false;              // --doom-square-pixels: no 4:3 stretch of the 320x200 picture
             bool music = true;                      // --doom-no-music
+            std::vector<game::DoomMode> modes;      // who can play: the human first, then the controllers of the app (the fly, docs/game/flydoom-fly.md)
+            int initialMode = -1;                   // the mode to start with (--fly), -1: a menu asks when there are several
         };
         void SetDoomMode(bool enabled, const DoomOptions& options = {});
         bool DoomMode() const;

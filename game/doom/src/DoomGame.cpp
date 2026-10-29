@@ -417,6 +417,17 @@ namespace doom
         return impl_->frameDrawn;
     }
 
+    bool DoomGame::StepTic()
+    {
+        // the clock goes to the first moment of the next tic, so that DOOM finds exactly one tic to run
+        const double nextTicMs = kClockStartMs + static_cast<double>(impl_->lastDueTic + 1) * 1000.0 / kTicRate;
+        if (impl_->clockMs < nextTicMs)
+        {
+            impl_->clockMs = nextTicMs + 0.001;
+        }
+        return Advance(0.0);
+    }
+
     void DoomGame::Finish(const char* message, const int code)
     {
         finished_ = true;

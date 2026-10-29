@@ -121,6 +121,9 @@ namespace doom
         // frame, as DOOM does). true: a new frame is ready. The clock is virtual, so a test that calls Advance(1.0 / 35) runs
         // exactly one tic each time.
         bool Advance(double deltaSeconds);
+        // Runs exactly one tic of the game, whatever the clock says (a brain that plays DOOM steps the game tic by tic, when it has decided).
+        // true: a new frame is ready.
+        bool StepTic();
 
         // ---- the frame ----
         // 320x200 pixels, 0x00RRGGBB; valid until the next Advance. FrameCount() grows with every frame DOOM drew.

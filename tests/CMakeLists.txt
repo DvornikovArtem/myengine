@@ -659,3 +659,87 @@ myengine_copy_runtime_assets(myengine_faceid_tests)
 set_property(TARGET myengine_faceid_tests PROPERTY FOLDER "Tests")
 add_test(NAME faceid COMMAND myengine_faceid_tests)
 set_tests_properties(faceid PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+# N0 (FlyDoom): the fly brain model on graphs built in code: LIF rate vs analytic, refractoriness, the 1.8 ms delay, Poisson
+# input, spikes of Brian2 (Shiu's equations) one for one, the event-driven simulation vs a step-by-step reference, bit-identical spikes on the job system (docs/flybrain/flybrain.md)
+add_executable(myengine_flybrain_tests
+  flybrain/FlyBrainTests.cpp
+  flybrain/BrianGolden.h
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_tests)
+set_property(TARGET myengine_flybrain_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain COMMAND myengine_flybrain_tests)
+set_tests_properties(flybrain PROPERTIES TIMEOUT 120)
+
+# N0: the same on the real connectome (assets/flybrain/malecns_v1.fbrain, tools/flybrain/fetch_malecns.ps1). Skipped (exit
+# code 77) when the file is not downloaded
+add_executable(myengine_flybrain_connectome_tests
+  flybrain/FlyBrainConnectomeTests.cpp)
+
+target_link_libraries(myengine_flybrain_connectome_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_connectome_tests)
+set_property(TARGET myengine_flybrain_connectome_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_connectome COMMAND myengine_flybrain_connectome_tests)
+set_tests_properties(flybrain_connectome PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N0: speed of the fly brain against real time, 1/2/4/8 threads (manual, not in ctest: minutes)
+add_executable(myengine_flybrain_bench
+  flybrain/FlyBrainBench.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_bench PRIVATE myengine_flybrain myengine_engine psapi)
+myengine_apply_compiler_options(myengine_flybrain_bench)
+set_property(TARGET myengine_flybrain_bench PROPERTY FOLDER "Tests")
+
+# N0b: the GPU backend of the fly brain (DX12 compute, assets/shaders/flybrain.hlsl) against the CPU: the same spikes on a
+# synthetic graph and on the connectome when it is downloaded. Skipped (exit code 77) without a DX12 adapter with doubles
+add_executable(myengine_flybrain_gpu_tests
+  flybrain/FlyBrainGpuTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_gpu_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_gpu_tests)
+myengine_copy_runtime_assets(myengine_flybrain_gpu_tests)
+set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
+set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+
+# N1: exploring the connectome for the eyes and the controls of the fly player (manual, not in ctest)
+add_executable(myengine_doomfly_probe
+  doomfly/FlyProbe.cpp)
+
+target_link_libraries(myengine_doomfly_probe PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe)
+set_property(TARGET myengine_doomfly_probe PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe2
+  doomfly/FlyProbe2.cpp)
+target_link_libraries(myengine_doomfly_probe2 PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe2)
+set_property(TARGET myengine_doomfly_probe2 PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe3
+  doomfly/FlyProbe3.cpp)
+target_link_libraries(myengine_doomfly_probe3 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe3)
+set_property(TARGET myengine_doomfly_probe3 PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe4
+  doomfly/FlyProbe4.cpp)
+target_link_libraries(myengine_doomfly_probe4 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe4)
+set_property(TARGET myengine_doomfly_probe4 PROPERTY FOLDER "Tests")
+
+# N1: the fly plays DOOM (game/doomfly, docs/game/flydoom-fly.md): the eyes, the controls, the steering by the picture, damage, a brain that runs away, E1M1.
+# Skipped (exit code 77) without the connectome (tools/flybrain/fetch_malecns.ps1); the game of E1M1 needs a WAD (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad)
+add_executable(myengine_doom_fly_tests
+  doomfly/DoomFlyTests.cpp)
+target_link_libraries(myengine_doom_fly_tests PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+target_compile_definitions(myengine_doom_fly_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+myengine_apply_compiler_options(myengine_doom_fly_tests)
+set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
+set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)

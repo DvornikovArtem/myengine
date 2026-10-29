@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.24)
 
 project(myengine VERSION 0.1.0 LANGUAGES CXX)
 
@@ -208,6 +208,8 @@ configure_file(cmake/Version.h.in "${CMAKE_BINARY_DIR}/generated/myengine/core/V
 add_subdirectory(engine)
 add_subdirectory(game/rl)
 add_subdirectory(game/doom)
+add_subdirectory(game/flybrain)
+add_subdirectory(game/doomfly)
 add_subdirectory(app)
 
 if(MYENGINE_BUILD_TESTS AND NOT MYENGINE_SHIPPING)
