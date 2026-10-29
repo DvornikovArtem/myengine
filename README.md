@@ -276,7 +276,7 @@ Notes:
 - Root CMake integrates both `DirectXTK` and `DirectXTex`
 - `myengine_engine` links both interfaces publicly
 - `myengine` executable links engine + interfaces
-- Assets, config and the Python runtime are copied next to each executable by one shared target per output folder (see [docs/build-runtime-assets.md](docs/build-runtime-assets.md), in Russian)
+- Assets, config and the Python runtime are copied next to each executable by one shared target per output folder (see [docs/build-runtime-assets.md](docs/build-runtime-assets.md), in Russian); the fly brain connectome (`assets/flybrain/*.fbrain`) is not copied, it is read from the sources
 
 ## 12. Repository Map
 
@@ -286,6 +286,7 @@ Notes:
 - `engine/include/myengine/...` - engine public headers
 - `engine/src/...` - engine implementation
 - `app/src/...` - application entry point and states
+- `game/flybrain/` - the fly brain of FlyDoom: MaleCNS v1.0 connectome (CC BY 4.0, downloaded from the HuggingFace mirror by `tools/flybrain/fetch_malecns.ps1`, not in git) and its LIF simulation on the job system ([docs/flybrain/flybrain.md](docs/flybrain/flybrain.md), in Russian)
 - `assets/shaders/primitive.hlsl` - shader used by renderer
 - `assets/textures/debug.bmp` - sample texture
 - `assets/scenes/scene.json` - serialized scene file

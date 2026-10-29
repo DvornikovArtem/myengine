@@ -60,3 +60,9 @@ external/**/x64/**
 
 # Editor runtime data of a project (assistant chats index, thumbnails)
 Saved/
+
+# The fly brain (tools/flybrain/fetch_malecns.ps1, docs/flybrain/flybrain.md): the converted connectome and its report are
+# downloaded and built locally, never committed
+assets/flybrain/*.fbrain
+assets/flybrain/*.fbrain.partial
+assets/flybrain/*.report.json
