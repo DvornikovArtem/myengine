@@ -70,3 +70,9 @@ assets/faceid/test/
 # the game data of FlyDoom: Freedoom (tools/doom/fetch_freedoom.ps1) or the WAD of the player; never in git
 assets/doom/*
 !assets/doom/README.txt
+
+# The fly brain (tools/flybrain/fetch_malecns.ps1, docs/flybrain/flybrain.md): the converted connectome and its report are
+# downloaded and built locally, never committed
+assets/flybrain/*.fbrain
+assets/flybrain/*.fbrain.partial
+assets/flybrain/*.report.json
