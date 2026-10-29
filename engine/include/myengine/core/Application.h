@@ -19,6 +19,7 @@
 #include <myengine/core/Window.h>
 #include <myengine/ecs/World.h>
 #include <myengine/editor/LoadingService.h>
+#include <myengine/faceid/FaceIdGate.h>
 #include <myengine/input/InputManager.h>
 #include <myengine/render/GpuCapture.h>
 #include <myengine/render/IRenderAdapter.h>
@@ -230,6 +231,8 @@ namespace myengine::core
         editor::LoadingService loadingService_;
         std::unique_ptr<PendingSceneLoad> pendingSceneLoad_;
         ui::UiManager uiManager_;
+        std::unique_ptr<faceid::FaceIdService> faceIdService_; // Face ID of the editor (docs/editor/faceid.md); null with --no-faceid and in the game mode
+        std::unique_ptr<faceid::FaceIdGate> faceIdGate_;
         std::unique_ptr<rlui::Host> uiGallery_; // MYENGINE_UI_GALLERY: the gallery of the UI kit instead of the editor; after uiManager_: goes first
         std::unique_ptr<UiScript> uiScript_; // MYENGINE_UI_SCRIPT: scripted keys, mouse and screenshots for the tests of the game
         std::unique_ptr<game::RlGameFlow> gameFlow_; // the game mode: the screens of the game (menus, HUD) instead of the editor; after uiManager_: goes first

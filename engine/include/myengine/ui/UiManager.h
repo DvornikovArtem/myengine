@@ -63,6 +63,21 @@ namespace myengine::ui
         // The fonts have to be baked again (the window got another size class, the UI scale changed): done at the start of the next Update
         void RequestFontRebuild() { fontRebuild_ = true; }
 
+        // What an overlay of the editor (Face ID) gets with the frame of ImGui of a window, and a way to show a picture of the camera in it
+        struct EditorOverlayContext
+        {
+            core::WindowId windowId = 0;
+            float width = 0.0f;    // the size of the window in the pixels of ImGui
+            float height = 0.0f;
+            double time = 0.0;
+            // A texture of an RGB picture (mirrored when asked) for ImGui::Image; the previous picture of this window is released by the call
+            std::function<std::uint64_t(int width, int height, const std::uint8_t* rgb, bool mirror)> uploadImage;
+        };
+        using EditorOverlayHook = std::function<bool(const EditorOverlayContext&)>;
+        // `gate` is called before the editor is built in every editor window and may cover it (returns true: the editor is not built this frame); `overlay` after it
+        void SetEditorGate(EditorOverlayHook gate) { editorGate_ = std::move(gate); }
+        void SetEditorOverlay(EditorOverlayHook overlay) { editorOverlay_ = std::move(overlay); }
+
         void SetStateLabel(std::string stateLabel);
         bool WantsMouseCapture(core::WindowId windowId) const;
         bool WantsKeyboardCapture(core::WindowId windowId) const;
@@ -79,6 +94,8 @@ namespace myengine::ui
         void RebuildWindowContexts();
 
         GameUiHooks gameUi_;
+        EditorOverlayHook editorGate_;
+        EditorOverlayHook editorOverlay_;
         bool gameUiCaptures_ = false;
         bool fontRebuild_ = false;
         render::IRenderAdapter* renderAdapter_ = nullptr;

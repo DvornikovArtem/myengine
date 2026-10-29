@@ -60,6 +60,34 @@ namespace myengine::core
         // The scene opened without --scene (benchmark.json stays available through --scene for LR1 measurements)
         constexpr char kDefaultScenePath[] = "assets/scenes/coin_guard_demo.json";
 
+        // An environment variable that is set to anything but "" and "0" (MYENGINE_NO_FACEID=1)
+        bool EnvironmentFlag(const char* name)
+        {
+            char* value = nullptr;
+            std::size_t length = 0;
+            bool on = false;
+            if (_dupenv_s(&value, &length, name) == 0 && value != nullptr)
+            {
+                on = value[0] != '\0' && std::string(value) != "0";
+                std::free(value);
+            }
+            return on;
+        }
+
+        // The editor overlay of the UiManager as the context of the Face ID screens
+        faceid::FaceIdUiContext ToFaceIdContext(const ui::UiManager::EditorOverlayContext& context)
+        {
+            faceid::FaceIdUiContext result;
+            result.width = context.width;
+            result.height = context.height;
+            result.time = context.time;
+            result.uploadPreview = [upload = context.uploadImage](const faceid::FaceImage& image, const bool mirror) -> std::uint64_t
+            {
+                return upload ? upload(image.width, image.height, image.rgb.data(), mirror) : 0;
+            };
+            return result;
+        }
+
         // Buttons that hold the OS mouse capture (bits of Application::mouseCaptureButtons_)
         constexpr std::uint32_t kCaptureLeftButton = 1u << 0;
         constexpr std::uint32_t kCaptureRightButton = 1u << 1;
@@ -530,10 +558,37 @@ namespace myengine::core
                 scriptSystem_->ClearRecentErrors();
             }
         };
+        // Face ID (docs/editor/faceid.md): the login that covers the editor until the face (or the password) is known. The editor of an automated run (a script, a limit of
+        // frames) and --no-faceid / MYENGINE_NO_FACEID=1 do not ask: tests, CI and the hidden desktop go on as before.
+        if (!gameMode_ && !EnvironmentFlag("MYENGINE_NO_FACEID"))
+        {
+            faceIdService_ = std::make_unique<faceid::FaceIdService>();
+            if (!faceIdService_->Initialize())
+            {
+                logger_.Info("Face ID is off: " + faceIdService_->UnavailableReason());
+            }
+            faceIdGate_ = std::make_unique<faceid::FaceIdGate>(*faceIdService_);
+            sceneEditorServices.openFaceId = [this]() { faceIdGate_->OpenSettings(); };
+        }
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");
             return false;
+        }
+        if (faceIdGate_ != nullptr)
+        {
+            uiManager_.SetEditorGate([this](const ui::UiManager::EditorOverlayContext& context) { return faceIdGate_->Draw(ToFaceIdContext(context)); });
+            uiManager_.SetEditorOverlay(
+                [this](const ui::UiManager::EditorOverlayContext& context)
+                {
+                    faceIdGate_->DrawSettings(ToFaceIdContext(context));
+                    return false;
+                });
+            const bool automated = exitAfterFrames_ > 0 || EnvironmentFlag("MYENGINE_UI_SCRIPT") || EnvironmentFlag("MYENGINE_UI_GALLERY");
+            if (!automated)
+            {
+                faceIdGate_->Begin();
+            }
         }
 
         // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena; it is added to the world below
@@ -1144,6 +1199,8 @@ namespace myengine::core
         gameFlow_.reset();    // before the UiManager it is hooked into (it saves the settings)
         uiGallery_.reset();
         uiManager_.Shutdown();
+        faceIdGate_.reset();
+        faceIdService_.reset();   // the camera goes off
         audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
         resourceManager_.reset();

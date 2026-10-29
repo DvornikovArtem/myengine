@@ -102,6 +102,7 @@ namespace myengine::ui
         editor::ThumbnailService* thumbnails = nullptr; // asset previews (null without a render adapter)
         editor::LoadingService* loading = nullptr;      // the long operations to show (null: none are shown)
         std::function<void()> requestQuit;
+        std::function<void()> openFaceId;   // the Face ID window (Window > Face ID); empty without Face ID
         std::function<bool()> saveScene;
         // Re-read the open map from disk; `done(success)` runs on the main thread when it has been applied
         std::function<void(std::function<void(bool)> done)> loadScene;
