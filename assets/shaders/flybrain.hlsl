@@ -64,6 +64,8 @@ cbuffer Model : register(b0)
     uint kSeedHash;        // the seed and the high half of the step, mixed as in PoissonDraw
     uint kWatchStride;     // 33: 32 watches and the whole brain
     uint kMaxWindows;      // windows of a submission: Counters[2 + kMaxWindows + window] counts its active neurons
+    uint kReplicas;        // independent brains on the CSR: unit = neuron * kReplicas + replica (kNeuronCount counts units)
+    uint3 kUnused;
 };
 
 cbuffer Window : register(b1)
@@ -352,12 +354,15 @@ void CSDeliver(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
     for (uint s = group.x; s < count; s += gGroupCount)
     {
         const uint2 spike = SpikeList[s];
-        // The spike of step t lands at step t + delay: the same slot, already consumed in this window
+        // The spike of step t lands at step t + delay: the same slot, already consumed in this window. A spike of a
+        // replica reaches the units of that replica only
         const uint slotBase = (spike.y % kDelaySteps) * kNeuronCount;
-        const uint e1 = RowStart[spike.x + 1];
-        for (uint e = RowStart[spike.x] + thread.x; e < e1; e += 64)
+        const uint neuron = spike.x / kReplicas;
+        const uint replica = spike.x - neuron * kReplicas;
+        const uint e1 = RowStart[neuron + 1];
+        for (uint e = RowStart[neuron] + thread.x; e < e1; e += 64)
         {
-            const uint post = Targets[e];
+            const uint post = Targets[e] * kReplicas + replica;
             InterlockedAdd(Arrivals[slotBase + post], WeightOf(e));
             Pending[post] = 1;
         }

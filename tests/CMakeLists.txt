@@ -672,3 +672,24 @@ myengine_copy_runtime_assets(myengine_flybrain_gpu_tests)
 set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
 add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
 set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N2: the brains of the swarm (FlySwarmBrain): replicas = single brains, the batch on the GPU = on the CPU, and with the
+# connectome the cut-out circuit (size, silence, looming -> escape and steering, speed of 32 flies)
+add_executable(myengine_flybrain_swarm_tests
+  flybrain/FlyBrainSwarmTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_swarm_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_swarm_tests)
+myengine_copy_runtime_assets(myengine_flybrain_swarm_tests)
+set_property(TARGET myengine_flybrain_swarm_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_swarm COMMAND myengine_flybrain_swarm_tests)
+set_tests_properties(flybrain_swarm PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N2: cuts the swarm circuit out of MaleCNS into assets/flybrain/swarm_circuit.fbrain (manual)
+add_executable(myengine_flybrain_circuit
+  flybrain/FlyBrainCircuitTool.cpp)
+
+target_link_libraries(myengine_flybrain_circuit PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_circuit)
+set_property(TARGET myengine_flybrain_circuit PROPERTY FOLDER "Tests")

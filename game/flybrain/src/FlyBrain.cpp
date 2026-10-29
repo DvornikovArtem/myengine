@@ -94,12 +94,13 @@ namespace flybrain
         uint32_t steps = 0;
     };
 
-    FlyBrain::FlyBrain(std::shared_ptr<const Connectome> connectome, const ModelParams& params)
+    FlyBrain::FlyBrain(std::shared_ptr<const Connectome> connectome, const ModelParams& params, uint32_t replicas)
         : connectome_(std::move(connectome))
         , params_(params)
+        , replicas_(std::max(1u, replicas))
     {
         assert(connectome_ != nullptr);
-        neuronCount_ = connectome_->NeuronCount();
+        neuronCount_ = connectome_->NeuronCount() * replicas_;
         useAvx2_ = CpuHasAvx2();
 
         const double dt = params_.dtMs;
@@ -140,6 +141,9 @@ namespace flybrain
         currentStimuli_.assign(n, 0);
         poissonThreshold_.assign(n, 0);
         poissonStimuli_.assign(n, 0);
+        stimulusPoisson_.assign(n, 0.0);
+        externalPoisson_.assign(n, 0.0);
+        trackedIndex_.assign(n, 0);
         watchHead_.assign(n, 0);
         watchMask_.assign(n, 0);
 
@@ -275,7 +279,7 @@ namespace flybrain
         constants.seedHash = Mix32(Mix32(Mix32(static_cast<uint32_t>(params_.seed) ^ 0x9E3779B9u) ^ static_cast<uint32_t>(params_.seed >> 32)) ^ 0u);
         constants.powU = powU_;
         constants.powG = powG_;
-        std::unique_ptr<FlyBrainGpu> gpu = FlyBrainGpu::Create(options.device, options.allowWarp, *connectome_, constants,
+        std::unique_ptr<FlyBrainGpu> gpu = FlyBrainGpu::Create(options.device, options.allowWarp, *connectome_, replicas_, constants,
             static_cast<uint32_t>(std::max<size_t>(spikeRing_.size(), 1024)), error);
         if (gpu == nullptr)
         {
@@ -302,6 +306,12 @@ namespace flybrain
         }
         gpu->Upload(image);
         gpu->SetCompletionHandler([this](const GpuCompletedSteps& completed) { OnGpuCompleted(completed); });
+        gpu->SetTracked(trackedUnits_);
+        trackedTotals_.resize(trackedUnits_.size());
+        for (size_t k = 0; k < trackedUnits_.size(); ++k)
+        {
+            trackedTotals_[k] = spikeTotals_[trackedUnits_[k]];
+        }
         gpu_ = std::move(gpu);
         gpuDirty_.assign(n, 0);
         gpuDirtyList_.clear();
@@ -404,6 +414,10 @@ namespace flybrain
             stats_.spikes += row[stride - 1];
         }
         completedStep_ = completed.firstStep + completed.steps;
+        if (completed.trackedTotals != nullptr)
+        {
+            std::copy(completed.trackedTotals, completed.trackedTotals + trackedTotals_.size(), trackedTotals_.begin());
+        }
         // A window list overflow would lose input: it is sized 4 spikes per neuron, never reached in practice
         assert(completed.lostSpikes == 0);
     }
@@ -531,13 +545,10 @@ namespace flybrain
             Wake(neuron);
             if (stimulus.isRate)
             {
-                // Rates of overlapping stimuli add up; the threshold is kept as a probability per step
-                const double current = double(poissonThreshold_[neuron]) / 4294967296.0;
+                // Rates of overlapping stimuli add up as probabilities per step
                 poissonStimuli_[neuron] = static_cast<uint8_t>(poissonStimuli_[neuron] + (sign > 0 ? 1 : -1));
-                const double next = poissonStimuli_[neuron] == 0 ? 0.0 : std::clamp(current + sign * probabilityPerStep, 0.0, 1.0);
-                poissonThreshold_[neuron] = static_cast<uint32_t>(std::min(next * 4294967296.0, 4294967295.0));
-                const bool noRefractory = params_.poissonWithoutRefractory && poissonStimuli_[neuron] != 0;
-                neuronRefractory_[neuron] = static_cast<uint8_t>(noRefractory ? 0 : refractorySteps_);
+                stimulusPoisson_[neuron] = poissonStimuli_[neuron] == 0 ? 0.0 : std::clamp(stimulusPoisson_[neuron] + sign * probabilityPerStep, 0.0, 1.0);
+                UpdatePoisson(neuron);
             }
             else
             {
@@ -610,6 +621,73 @@ namespace flybrain
             }
         }
         return next;
+    }
+
+    void FlyBrain::UpdatePoisson(uint32_t neuron)
+    {
+        const double probability = std::clamp(stimulusPoisson_[neuron] + externalPoisson_[neuron], 0.0, 1.0);
+        poissonThreshold_[neuron] = static_cast<uint32_t>(std::min(probability * 4294967296.0, 4294967295.0));
+        // Shiu: a neuron under Poisson input has no refractory period
+        const bool noRefractory = params_.poissonWithoutRefractory && (poissonStimuli_[neuron] != 0 || externalPoisson_[neuron] > 0.0);
+        neuronRefractory_[neuron] = static_cast<uint8_t>(noRefractory ? 0 : refractorySteps_);
+    }
+
+    void FlyBrain::SetPoissonRate(uint32_t neuron, float rateHz)
+    {
+        const double probability = std::clamp(double(rateHz) * params_.dtMs / 1000.0, 0.0, 1.0);
+        if (externalPoisson_[neuron] == probability)
+        {
+            return;
+        }
+        Wake(neuron);
+        externalPoisson_[neuron] = probability;
+        UpdatePoisson(neuron);
+    }
+
+    Group FlyBrain::ForReplica(const Group& neurons, uint32_t replica) const
+    {
+        Group units;
+        units.neurons.reserve(neurons.neurons.size());
+        for (uint32_t neuron : neurons.neurons)
+        {
+            units.neurons.push_back(Unit(neuron, replica));
+        }
+        return units;
+    }
+
+    void FlyBrain::Track(const Group& units)
+    {
+        for (uint32_t unit : units.neurons)
+        {
+            if (trackedIndex_[unit] == 0)
+            {
+                trackedUnits_.push_back(unit);
+                trackedIndex_[unit] = static_cast<uint32_t>(trackedUnits_.size());
+            }
+        }
+        std::sort(trackedUnits_.begin(), trackedUnits_.end());
+        for (size_t k = 0; k < trackedUnits_.size(); ++k)
+        {
+            trackedIndex_[trackedUnits_[k]] = static_cast<uint32_t>(k + 1);
+        }
+        if (gpu_ != nullptr)
+        {
+            Synchronize();
+            PullGpuState();
+            trackedTotals_.resize(trackedUnits_.size());
+            for (size_t k = 0; k < trackedUnits_.size(); ++k)
+            {
+                trackedTotals_[k] = spikeTotals_[trackedUnits_[k]];
+            }
+            gpu_->SetTracked(trackedUnits_);
+        }
+    }
+
+    uint32_t FlyBrain::TrackedSpikes(uint32_t unit) const
+    {
+        const uint32_t index = trackedIndex_[unit];
+        assert(index != 0 && "Track the unit first");
+        return gpu_ != nullptr ? trackedTotals_[index - 1] : spikeTotals_[unit];
     }
 
     void FlyBrain::SetDrive(uint32_t neuron, float currentMv)
@@ -915,16 +993,20 @@ namespace flybrain
         const uint32_t* targets = c.Targets();
         const int16_t* weights = c.Weights();
         const uint32_t d = delaySteps_;
+        const uint32_t replicas = replicas_;
         uint64_t count = 0;
         for (const SpikeEvent* spike = begin; spike != end; ++spike)
         {
-            // The spike of step s lands at step s + d: the same slot, already consumed in this window
+            // The spike of step s lands at step s + d: the same slot, already consumed in this window. A spike of a
+            // replica reaches the units of that replica only
             int32_t* slot = &arrivals_[(spike->step % d) * size_t(neuronCount_)];
-            const uint32_t e0 = rowStart[spike->neuron];
-            const uint32_t e1 = rowStart[spike->neuron + 1];
+            const uint32_t neuron = spike->neuron / replicas;
+            const uint32_t replica = spike->neuron - neuron * replicas;
+            const uint32_t e0 = rowStart[neuron];
+            const uint32_t e1 = rowStart[neuron + 1];
             for (uint32_t e = e0; e < e1; ++e)
             {
-                const uint32_t post = targets[e];
+                const uint32_t post = targets[e] * replicas + replica;
                 if constexpr (Atomic)
                 {
                     // Integer atomic add (long is 32 bits on Windows); the integration phase reads the ring after jobs::Wait
@@ -1044,7 +1126,7 @@ namespace flybrain
         const uint32_t* rowStart = connectome_->RowStart();
         for (size_t s = 0; s < spikeCount; ++s)
         {
-            const uint32_t neuron = deliverySpikes_[s].neuron;
+            const uint32_t neuron = deliverySpikes_[s].neuron / replicas_;
             spikeEdgePrefix_[s + 1] = spikeEdgePrefix_[s] + (rowStart[neuron + 1] - rowStart[neuron]);
         }
         const uint64_t totalEdges = spikeEdgePrefix_[spikeCount];

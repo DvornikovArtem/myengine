@@ -28,6 +28,8 @@ namespace flybrain
         constexpr uint32_t kMaxWindows = 256;       // windows of one submission (a counter each)
         constexpr uint32_t kMaxSteps = 4096;        // steps of one submission (a row of watch counts each)
         constexpr uint32_t kDeliverGroups = 512;
+        constexpr uint32_t kMaxTracked = 65536;     // tracked units copied back per submission
+        constexpr uint64_t kReadbackTracked = uint64_t(kMaxSteps) * 33 * 4 + 16; // where they go in the readback buffer
 
         // Root parameters: the model constants, the window constants, 6 SRVs, 10 UAVs (root descriptors: no heaps)
         constexpr UINT kSrvCount = 6;
@@ -59,8 +61,10 @@ namespace flybrain
             uint32_t seedHash;
             uint32_t watchStride;
             uint32_t maxWindows;
+            uint32_t replicas;
+            uint32_t unused[3];
         };
-        static_assert(sizeof(ModelCb) == 96);
+        static_assert(sizeof(ModelCb) == 112);
 
         struct WindowConstants
         {
@@ -212,11 +216,11 @@ namespace flybrain
         std::map<std::pair<ID3D12Device*, const Connectome*>, std::weak_ptr<void>> gGraphs;
     }
 
-    std::unique_ptr<FlyBrainGpu> FlyBrainGpu::Create(ID3D12Device* device, bool allowWarp, const Connectome& connectome,
+    std::unique_ptr<FlyBrainGpu> FlyBrainGpu::Create(ID3D12Device* device, bool allowWarp, const Connectome& connectome, uint32_t replicas,
         const GpuModelConstants& constants, uint32_t ringCapacity, std::string* error)
     {
         std::unique_ptr<FlyBrainGpu> gpu(new FlyBrainGpu());
-        if (!gpu->Initialize(device, allowWarp, connectome, constants, ringCapacity, error))
+        if (!gpu->Initialize(device, allowWarp, connectome, replicas, constants, ringCapacity, error))
         {
             return nullptr;
         }
@@ -255,7 +259,7 @@ namespace flybrain
         return buffer;
     }
 
-    bool FlyBrainGpu::Initialize(ID3D12Device* device, bool allowWarp, const Connectome& connectome, const GpuModelConstants& constants,
+    bool FlyBrainGpu::Initialize(ID3D12Device* device, bool allowWarp, const Connectome& connectome, uint32_t replicas, const GpuModelConstants& constants,
         uint32_t ringCapacity, std::string* error)
     {
         if (device != nullptr)
@@ -275,7 +279,8 @@ namespace flybrain
                 return false;
             }
         }
-        neuronCount_ = connectome.NeuronCount();
+        graphNeurons_ = connectome.NeuronCount();
+        neuronCount_ = graphNeurons_ * replicas;
         delaySteps_ = constants.delaySteps;
         spikeCapacity_ = std::max(1024u, neuronCount_ * 4);
         ringCapacity_ = NextPowerOfTwo(std::max(ringCapacity, 1u));
@@ -383,7 +388,7 @@ namespace flybrain
                 return Fail(error, "cannot create a command allocator");
             }
             slot->updates = CreateBuffer(uint64_t(updateCapacity) * sizeof(GpuNeuronUpdate), D3D12_HEAP_TYPE_UPLOAD, false, D3D12_RESOURCE_STATE_GENERIC_READ);
-            slot->readback = CreateBuffer(uint64_t(kMaxSteps) * kWatchStride * 4 + 16, D3D12_HEAP_TYPE_READBACK, false, D3D12_RESOURCE_STATE_COPY_DEST);
+            slot->readback = CreateBuffer(kReadbackTracked + uint64_t(kMaxTracked) * 4, D3D12_HEAP_TYPE_READBACK, false, D3D12_RESOURCE_STATE_COPY_DEST);
             if (slot->updates == nullptr || slot->readback == nullptr)
             {
                 return Fail(error, "out of GPU memory (submission buffers)");
@@ -436,6 +441,7 @@ namespace flybrain
         cb.seedHash = constants.seedHash;
         cb.watchStride = kWatchStride;
         cb.maxWindows = kMaxWindows;
+        cb.replicas = replicas;
         void* mapped = nullptr;
         model_->Map(0, nullptr, &mapped);
         std::memcpy(mapped, &cb, sizeof(cb));
@@ -460,19 +466,20 @@ namespace flybrain
             {
                 auto graph = std::make_shared<SharedGraph>();
                 const uint64_t edges = connectome.EdgeCount();
-                graph->rowStart = CreateBuffer((n + 1) * 4, D3D12_HEAP_TYPE_DEFAULT, false, D3D12_RESOURCE_STATE_COMMON);
+                const uint64_t graphNeurons = graphNeurons_;
+                graph->rowStart = CreateBuffer((graphNeurons + 1) * 4, D3D12_HEAP_TYPE_DEFAULT, false, D3D12_RESOURCE_STATE_COMMON);
                 graph->targets = CreateBuffer(edges * 4, D3D12_HEAP_TYPE_DEFAULT, false, D3D12_RESOURCE_STATE_COMMON);
                 graph->weights = CreateBuffer((edges * 2 + 3) / 4 * 4, D3D12_HEAP_TYPE_DEFAULT, false, D3D12_RESOURCE_STATE_COMMON);
                 if (!graph->rowStart || !graph->targets || !graph->weights)
                 {
                     return Fail(error, "out of GPU memory (connectome)");
                 }
-                UploadTo(graph->rowStart.Get(), connectome.RowStart(), (n + 1) * 4);
+                UploadTo(graph->rowStart.Get(), connectome.RowStart(), (graphNeurons + 1) * 4);
                 UploadTo(graph->targets.Get(), connectome.Targets(), edges * 4);
                 std::vector<int16_t> weights(connectome.Weights(), connectome.Weights() + edges);
                 weights.resize((weights.size() + 1) / 2 * 2, 0);
                 UploadTo(graph->weights.Get(), weights.data(), weights.size() * 2);
-                graph->bytes = (n + 1) * 4 + edges * 4 + weights.size() * 2;
+                graph->bytes = (graphNeurons + 1) * 4 + edges * 4 + weights.size() * 2;
                 gGraphs[key] = graph;
                 graph_ = graph;
             }
@@ -572,6 +579,24 @@ namespace flybrain
         uint32_t head = 0;
         ReadBack(counters_.Get(), &head, 4);
         written = head;
+    }
+
+    void FlyBrainGpu::SetTracked(const std::vector<uint32_t>& units)
+    {
+        // Consecutive units (the flies of one neuron) are one copy
+        trackedRuns_.clear();
+        trackedCount_ = static_cast<uint32_t>(std::min<size_t>(units.size(), kMaxTracked));
+        for (uint32_t k = 0; k < trackedCount_; ++k)
+        {
+            if (!trackedRuns_.empty() && trackedRuns_.back().first + trackedRuns_.back().second == units[k])
+            {
+                ++trackedRuns_.back().second;
+            }
+            else
+            {
+                trackedRuns_.push_back({ units[k], 1u });
+            }
+        }
     }
 
     void FlyBrainGpu::QueueUpdate(const GpuNeuronUpdate& update)
@@ -698,8 +723,15 @@ namespace flybrain
         const D3D12_RESOURCE_BARRIER toCopy[] = {
             CD3DX12_RESOURCE_BARRIER::Transition(watchCounts_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
             CD3DX12_RESOURCE_BARRIER::Transition(counters_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
+            CD3DX12_RESOURCE_BARRIER::Transition(spikeTotals_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
         };
-        list_->ResourceBarrier(2, toCopy);
+        list_->ResourceBarrier(3, toCopy);
+        uint64_t trackedOffset = kReadbackTracked;
+        for (const auto& run : trackedRuns_)
+        {
+            list_->CopyBufferRegion(slot.readback.Get(), trackedOffset, spikeTotals_.Get(), uint64_t(run.first) * 4, uint64_t(run.second) * 4);
+            trackedOffset += uint64_t(run.second) * 4;
+        }
         const uint64_t countBytes = uint64_t(std::max(slot.steps, 1u)) * kWatchStride * 4;
         list_->CopyBufferRegion(slot.readback.Get(), 0, watchCounts_.Get(), 0, countBytes);
         list_->CopyBufferRegion(slot.readback.Get(), uint64_t(kMaxSteps) * kWatchStride * 4, counters_.Get(), 4, 4);
@@ -726,7 +758,7 @@ namespace flybrain
                 fence_->SetEventOnCompletion(slot.fenceValue, fenceEvent_);
                 WaitForSingleObject(fenceEvent_, INFINITE);
             }
-            const uint64_t bytes = uint64_t(kMaxSteps) * kWatchStride * 4 + 4;
+            const uint64_t bytes = kReadbackTracked + uint64_t(trackedCount_) * 4;
             const D3D12_RANGE range{ 0, static_cast<SIZE_T>(bytes) };
             uint8_t* mapped = nullptr;
             slot.readback->Map(0, &range, reinterpret_cast<void**>(&mapped));
@@ -735,6 +767,7 @@ namespace flybrain
             completed.steps = slot.steps;
             completed.counts = reinterpret_cast<const uint32_t*>(mapped);
             std::memcpy(&completed.lostSpikes, mapped + uint64_t(kMaxSteps) * kWatchStride * 4, 4);
+            completed.trackedTotals = trackedCount_ > 0 ? reinterpret_cast<const uint32_t*>(mapped + kReadbackTracked) : nullptr;
             if (onCompleted_ && slot.steps > 0)
             {
                 onCompleted_(completed);
