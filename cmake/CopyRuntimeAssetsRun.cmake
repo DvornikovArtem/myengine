@@ -12,7 +12,8 @@ if(NOT DST_DIR OR NOT SOURCE_DIR)
 endif()
 
 if(COPY_ASSETS)
-  file(COPY "${SOURCE_DIR}/assets" DESTINATION "${DST_DIR}")
+  # The fly brain connectome (160 MB, assets/flybrain/*.fbrain) is read from the sources, not copied next to every executable
+  file(COPY "${SOURCE_DIR}/assets" DESTINATION "${DST_DIR}" PATTERN "*.fbrain" EXCLUDE PATTERN "*.fbrain.partial" EXCLUDE)
   file(COPY "${SOURCE_DIR}/config" DESTINATION "${DST_DIR}")
 endif()
 

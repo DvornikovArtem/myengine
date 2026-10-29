@@ -648,6 +648,38 @@ if(MYENGINE_WWISE)
   set_tests_properties(audio_wwise_stress PROPERTIES TIMEOUT 60)
 endif()
 
+# N0 (FlyDoom): the fly brain model on graphs built in code: LIF rate vs analytic, refractoriness, the 1.8 ms delay, Poisson
+# input, spikes of Brian2 (Shiu's equations) one for one, the event-driven simulation vs a step-by-step reference, bit-identical spikes on the job system (docs/flybrain/flybrain.md)
+add_executable(myengine_flybrain_tests
+  flybrain/FlyBrainTests.cpp
+  flybrain/BrianGolden.h
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_tests)
+set_property(TARGET myengine_flybrain_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain COMMAND myengine_flybrain_tests)
+set_tests_properties(flybrain PROPERTIES TIMEOUT 120)
+
+# N0: the same on the real connectome (assets/flybrain/malecns_v1.fbrain, tools/flybrain/fetch_malecns.ps1). Skipped (exit
+# code 77) when the file is not downloaded
+add_executable(myengine_flybrain_connectome_tests
+  flybrain/FlyBrainConnectomeTests.cpp)
+
+target_link_libraries(myengine_flybrain_connectome_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_connectome_tests)
+set_property(TARGET myengine_flybrain_connectome_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_connectome COMMAND myengine_flybrain_connectome_tests)
+set_tests_properties(flybrain_connectome PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N0: speed of the fly brain against real time, 1/2/4/8 threads (manual, not in ctest: minutes)
+add_executable(myengine_flybrain_bench
+  flybrain/FlyBrainBench.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_bench PRIVATE myengine_flybrain myengine_engine psapi)
+myengine_apply_compiler_options(myengine_flybrain_bench)
+set_property(TARGET myengine_flybrain_bench PROPERTY FOLDER "Tests")
 # F0: Face ID without a camera: the decisions, the alignment, the profile file and (when ONNX Runtime and the models are there) YuNet + SFace on two public domain
 # portraits. Exit code 77: no ONNX Runtime, models or portraits (tools/faceid/fetch_models.ps1 -WithTestImage), the test is skipped.
 add_executable(myengine_faceid_tests
