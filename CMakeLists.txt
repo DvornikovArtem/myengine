@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.24)
 
 project(myengine VERSION 0.1.0 LANGUAGES CXX)
 
@@ -35,6 +35,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerOptions)
 include(CopyRuntimeAssets)
 include(Wwise)
+include(FaceId)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
@@ -207,6 +208,7 @@ configure_file(cmake/Version.h.in "${CMAKE_BINARY_DIR}/generated/myengine/core/V
 add_subdirectory(engine)
 add_subdirectory(game/rl)
 add_subdirectory(game/flybrain)
+add_subdirectory(game/doom)
 add_subdirectory(app)
 
 if(MYENGINE_BUILD_TESTS AND NOT MYENGINE_SHIPPING)

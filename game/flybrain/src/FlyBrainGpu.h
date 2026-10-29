@@ -132,6 +132,7 @@ namespace flybrain
         ID3D12Device* Device() const { return device_.Get(); }
         ID3D12Resource* RingBuffer() const { return ring_.Get(); }
         ID3D12Resource* CountersBuffer() const { return counters_.Get(); }
+        ID3D12Resource* LastSpikeBuffer() const { return lastSpike_.Get(); }
         ID3D12Fence* Fence() const { return fence_.Get(); }
         uint64_t LastSubmittedFenceValue() const { return fenceValue_; }
 
@@ -176,6 +177,7 @@ namespace flybrain
         Microsoft::WRL::ComPtr<ID3D12Resource> watchCounts_;
         Microsoft::WRL::ComPtr<ID3D12Resource> ring_;
         Microsoft::WRL::ComPtr<ID3D12Resource> active_;
+        Microsoft::WRL::ComPtr<ID3D12Resource> lastSpike_;
         Microsoft::WRL::ComPtr<ID3D12Resource> powU_;
         Microsoft::WRL::ComPtr<ID3D12Resource> powG_;
 

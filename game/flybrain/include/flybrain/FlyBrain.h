@@ -69,13 +69,15 @@ namespace flybrain
         bool selfTest = true;           // compare a small network with the CPU before trusting the GPU
     };
 
-    // The ring of the last spikes on the GPU, for a view that draws them without a copy to the CPU. ring: uint2 (neuron,
-    // step) x capacity; counters[0]: spikes written so far (the next index & (capacity - 1)). Both are in COMMON state
-    // between submissions; a graphics queue waits for fence >= fenceValue before reading
+    // The last spikes on the GPU, for a view that draws them without a copy to the CPU. ring: uint2 (neuron, step) x
+    // capacity; counters[0]: spikes written so far (the next index & (capacity - 1)); lastSpikeStep: uint per neuron, the
+    // step of its last spike, 0xFFFFFFFF for none (age = (CompletedStep() - step) * dt). All are in COMMON state between
+    // submissions; a graphics queue waits for fence >= fenceValue before reading
     struct GpuSpikeRing
     {
         ID3D12Resource* ring = nullptr;
         ID3D12Resource* counters = nullptr;
+        ID3D12Resource* lastSpikeStep = nullptr;
         uint32_t capacity = 0;
         ID3D12Fence* fence = nullptr;
         uint64_t fenceValue = 0;

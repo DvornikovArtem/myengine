@@ -23,7 +23,13 @@ function(myengine_copy_runtime_assets target_name)
     set(copy_runtime ON)
   endif()
 
-  if(NOT copy_assets AND NOT copy_runtime)
+  # ONNX Runtime of Face ID (cmake/FaceId.cmake): onnxruntime.dll next to every executable that links the engine
+  set(copy_onnxruntime OFF)
+  if(MYENGINE_FACEID)
+    set(copy_onnxruntime ON)
+  endif()
+
+  if(NOT copy_assets AND NOT copy_runtime AND NOT copy_onnxruntime)
     return()
   endif()
 
@@ -43,6 +49,7 @@ function(myengine_copy_runtime_assets target_name)
         "-DSOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DCOPY_ASSETS=${copy_assets}"
         "-DCOPY_RUNTIME=${copy_runtime}"
+        "-DCOPY_ONNXRUNTIME=${copy_onnxruntime}"
         -P "${CMAKE_SOURCE_DIR}/cmake/CopyRuntimeAssetsRun.cmake"
       COMMENT "Copying runtime assets next to ${target_name}"
       VERBATIM)

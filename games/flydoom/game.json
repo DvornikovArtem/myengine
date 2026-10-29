@@ -1,0 +1,64 @@
+{
+  "id": "flydoom",
+  "displayName": "FlyDoom",
+  "name": "FlyDoom",
+  "exe": "FlyDoom.exe",
+
+  "comment": "A blank: the target of FlyDoom appears with D0 (game/doom). Until then the Build window says that the target was not found. The values below are the plan of the series (.team/doom/plan.md), D0 changes them to what it builds.",
+
+  "build": {
+    "cmakeTarget": "flydoom",
+    "exePath": "app/Release/FlyDoom.exe",
+    "userDataFolder": "FlyDoom",
+    "icon": "",
+    "readme": "tools/package_readme.txt"
+  },
+
+  "options": {
+    "steam": "no",
+    "wwise": "no",
+    "zip": true
+  },
+
+  "externalData": [
+    {
+      "name": "Freedoom (the free data of the game, WAD)",
+      "check": "external/freedoom/freedoom1.wad",
+      "fetch": "tools/fetch_freedoom.ps1"
+    }
+  ],
+
+  "followReferences": false,
+
+  "assets": [
+    "game/doom/assets"
+  ],
+
+  "exclude": [
+    "**/*.pdb"
+  ],
+
+  "runtime": [],
+
+  "config": {
+    "windows": [
+      { "title": "FlyDoom", "width": 1280, "height": 800, "clearColor": [0.0, 0.0, 0.0, 1.0] }
+    ],
+    "startInGame": true
+  },
+
+  "project": {
+    "name": "FlyDoom",
+    "engineVersion": 1,
+    "contentDir": "assets",
+    "mapsDir": "assets/scenes",
+    "defaultMap": ""
+  },
+
+  "licenses": {
+    "notices": "tools/package_licenses",
+    "copy": [
+      { "from": "game/doom/COPYING", "to": "COPYING" }
+    ]
+  }
+}

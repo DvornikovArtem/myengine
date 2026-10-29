@@ -98,6 +98,7 @@ RWStructuredBuffer<uint> Counters : register(u6);    // [0] ring head, [1] lost 
 RWStructuredBuffer<uint> WatchCounts : register(u7); // [step of the submission][kWatchStride]
 RWStructuredBuffer<uint2> Ring : register(u8);       // the last spikes of the brain: neuron, step (BrainView reads it)
 RWStructuredBuffer<uint> Active : register(u9);      // the neurons CSIntegrate steps in this window
+RWStructuredBuffer<uint> LastSpike : register(u10);  // step of the last spike of every neuron, 0xFFFFFFFF: none (BrainView)
 
 groupshared uint gsActiveCount;
 groupshared uint gsActiveBase;
@@ -313,6 +314,7 @@ void CSIntegrate(uint3 id : SV_DispatchThreadID)
                 g = 0.0;
                 refractoryUntil = t + p.refractorySteps;
                 SpikeTotals[i] = SpikeTotals[i] + 1;
+                LastSpike[i] = t;
                 EmitSpike(i, t, p.watchMask);
             }
         }
