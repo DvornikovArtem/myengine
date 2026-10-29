@@ -1,15 +1,19 @@
 // FlyBrainBench.cpp
-// N0 (FlyDoom): how fast the fly brain runs compared with real time. Not part of ctest: it takes minutes.
+// N0, N0b (FlyDoom): how fast the fly brain runs compared with real time. Not part of ctest: it takes minutes.
 //
 //   myengine_flybrain_bench [--fbrain <path> | --synthetic] [--threads 1,2,4,8] [--repeats 3] [--seconds 1] [--warmup 0.2]
-//                           [--scenarios silent,rest,vision20,vision50] [--degree 153] [--probe <type>|rest|vision20]
+//                           [--scenarios silent,rest,vision20,vision50,taste] [--degree 153] [--probe <type>|rest|vision20]
+//                           [--flybrain cpu,gpu] [--flies 1,4]
 //
 // Method of LR1: a warm-up, then N runs, the median. A run is a fresh brain: warm-up of simulated time, then the measured
 // simulated seconds. Speed = simulated time / wall time (1.0 = real time).
 // Scenarios (DOOMFLY baseline): silent - no input; rest - tonic 12 mV into L1/L2/L3/L5 (the lamina is silent without it);
 // vision20 / vision50 - rest plus Poisson input into all R1-R6 at 20 / 50 Hz. On the synthetic graph: 5 % of the neurons
 // get the tonic current, 2 % the Poisson input, --degree sets the mean number of targets. Diagnostic scenario awake: every
-// neuron gets 8 mV and fires (with --degree 0 it measures the neuron step alone).
+// neuron gets 8 mV and fires (with --degree 0 it measures the neuron step alone). taste - rest plus LB3c at 150 Hz: the
+// self-sustained activity of the central brain, the worst case (on the synthetic graph: 0.1 % of the neurons).
+// --flybrain gpu runs the brains on the GPU (N0b); --flies N runs N brains at once, DOOM tick by DOOM tick (28.57 ms), and
+// the speed is that of each of them. On the GPU a run ends with Synchronize: the speed includes waiting for the GPU.
 
 #include <flybrain/Connectome.h>
 #include <flybrain/FlyBrain.h>
@@ -26,6 +30,7 @@
 #include <map>
 #include <cstdio>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -59,6 +64,7 @@ namespace
     {
         Group tonic;
         Group retina;
+        Group taste;
     };
 
     struct Result
@@ -73,37 +79,75 @@ namespace
     };
 
     Result RunOnce(const std::shared_ptr<const Connectome>& connectome, const Inputs& inputs, const std::string& scenario,
-        bool parallel, double warmupSeconds, double seconds)
+        bool parallel, bool gpu, int flies, double warmupSeconds, double seconds, uint64_t* gpuMemory = nullptr)
     {
-        FlyBrain brain(connectome);
-        brain.SetParallel(parallel);
-        brain.SetSpikeRingCapacity(0);
-        if (scenario == "awake")
+        std::vector<std::unique_ptr<FlyBrain>> brains;
+        for (int f = 0; f < flies; ++f)
         {
-            // Diagnostics: every neuron fires tonically (8 mV, ~23 Hz): the cost of a neuron step without sleeping neurons
-            Group all;
-            for (uint32_t i = 0; i < connectome->NeuronCount(); ++i)
+            auto brain = std::make_unique<FlyBrain>(connectome);
+            brain->SetParallel(parallel);
+            brain->SetSpikeRingCapacity(gpu ? 65536 : 0);
+            if (gpu)
             {
-                all.neurons.push_back(i);
+                GpuOptions options;
+                options.selfTest = false;
+                std::string error;
+                if (brain->SetBackend(BackendChoice::Gpu, options, &error) != Backend::Gpu)
+                {
+                    throw std::runtime_error("no GPU backend: " + error);
+                }
             }
-            brain.StimulateCurrent(all, 8.0f);
+            if (scenario == "awake")
+            {
+                // Diagnostics: every neuron fires tonically (8 mV, ~23 Hz): the cost of a neuron step without sleeping neurons
+                Group all;
+                for (uint32_t i = 0; i < connectome->NeuronCount(); ++i)
+                {
+                    all.neurons.push_back(i);
+                }
+                brain->StimulateCurrent(all, 8.0f);
+            }
+            else if (scenario != "silent")
+            {
+                brain->StimulateCurrent(inputs.tonic, 12.0f);
+            }
+            if (scenario == "vision20" || scenario == "vision50")
+            {
+                brain->StimulateRate(inputs.retina, scenario == "vision20" ? 20.0f : 50.0f);
+            }
+            if (scenario == "taste")
+            {
+                brain->StimulateRate(inputs.taste, 150.0f);
+            }
+            brains.push_back(std::move(brain));
         }
-        else if (scenario != "silent")
+        // All the brains tick by tick, as a game with several flies would run them
+        auto advance = [&](double totalSeconds)
         {
-            brain.StimulateCurrent(inputs.tonic, 12.0f);
-        }
-        if (scenario == "vision20" || scenario == "vision50")
+            const double tick = 1000.0 / 35.0;
+            for (double done = 0.0; done < totalSeconds * 1000.0 - 1e-6; done += tick)
+            {
+                for (auto& brain : brains)
+                {
+                    brain->AdvanceMs(std::min(tick, totalSeconds * 1000.0 - done));
+                }
+            }
+            for (auto& brain : brains)
+            {
+                brain->Synchronize();
+            }
+        };
+        advance(warmupSeconds);
+        for (auto& brain : brains)
         {
-            brain.StimulateRate(inputs.retina, scenario == "vision20" ? 20.0f : 50.0f);
+            brain->ResetStats();
         }
-        brain.AdvanceMs(warmupSeconds * 1000.0);
-        brain.ResetStats();
 
         const auto start = std::chrono::steady_clock::now();
-        brain.AdvanceMs(seconds * 1000.0);
+        advance(seconds);
         const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 
-        const BrainStats& stats = brain.Stats();
+        const BrainStats& stats = brains[0]->Stats();
         Result result;
         result.speed = seconds / wall;
         result.spikesPerSecond = double(stats.spikes) / seconds;
@@ -112,6 +156,14 @@ namespace
         result.deliverShare = stats.deliverSeconds / wall;
         result.edgesPerSecond = double(stats.deliveredEdges) / seconds;
         result.updatesPerWindow = stats.windows ? double(stats.neuronWindowUpdates) / double(stats.windows) : 0.0;
+        if (gpuMemory != nullptr)
+        {
+            *gpuMemory = brains[0]->GpuSharedMemoryBytes();
+            for (const auto& brain : brains)
+            {
+                *gpuMemory += brain->GpuMemoryBytes();
+            }
+        }
         return result;
     }
 }
@@ -127,6 +179,8 @@ int main(int argc, char** argv)
     double seconds = 1.0;
     double warmup = 0.2;
     std::string probeType;
+    std::vector<std::string> backends = { "cpu" };
+    std::vector<std::string> fliesList = { "1" };
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -140,6 +194,8 @@ int main(int argc, char** argv)
         else if (arg == "--seconds") seconds = std::stod(next());
         else if (arg == "--warmup") warmup = std::stod(next());
         else if (arg == "--probe") probeType = next();
+        else if (arg == "--flybrain") backends = Split(next());
+        else if (arg == "--flies") fliesList = Split(next());
         else
         {
             std::fprintf(stderr, "unknown argument %s\n", arg.c_str());
@@ -161,6 +217,7 @@ int main(int argc, char** argv)
         {
             if (i % 20 == 0) inputs.tonic.neurons.push_back(i);
             if (i % 50 == 7) inputs.retina.neurons.push_back(i);
+            if (i % 1000 == 11) inputs.taste.neurons.push_back(i);
         }
     }
     else
@@ -178,6 +235,7 @@ int main(int argc, char** argv)
             inputs.tonic.neurons.insert(inputs.tonic.neurons.end(), group.neurons.begin(), group.neurons.end());
         }
         inputs.retina = connectome->Find("R1-R6");
+        inputs.taste = connectome->Find("LB3c");
     }
     const double loadSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - loadStart).count();
 
@@ -238,36 +296,55 @@ int main(int argc, char** argv)
         return 0;
     }
     std::printf("method: warm-up %.2f s simulated, %.2f s measured, median of %d runs\n\n", warmup, seconds, repeats);
-    std::printf("| scenario | threads | x real time (median) | min..max | spikes/s | mean rate, Hz | synapses/s | neurons/window | integrate | deliver |\n");
-    std::printf("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    std::printf("| backend | flies | scenario | threads | x real time (median) | min..max | spikes/s | mean rate, Hz | synapses/s | neurons/window | integrate | deliver |\n");
+    std::printf("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
 
-    for (const std::string& threadText : threads)
+    for (const std::string& backend : backends)
     {
-        const int threadCount = std::max(1, std::stoi(threadText));
-        const bool parallel = threadCount > 1;
-        if (parallel)
+        const bool gpu = backend == "gpu";
+        for (const std::string& fliesText : fliesList)
         {
-            // The main thread runs jobs while it waits, so threadCount - 1 workers make threadCount threads
-            myengine::jobs::Initialize(static_cast<uint32_t>(threadCount - 1));
-        }
-        for (const std::string& scenario : scenarios)
-        {
-            RunOnce(connectome, inputs, scenario, parallel, warmup, std::min(seconds, 0.1)); // warm-up run (caches, page faults)
-            std::vector<Result> results;
-            for (int r = 0; r < repeats; ++r)
+            const int flies = std::max(1, std::stoi(fliesText));
+            // The GPU needs no worker threads: one row with the main thread only
+            const std::vector<std::string> threadRows = gpu ? std::vector<std::string>{ "1" } : threads;
+            for (const std::string& threadText : threadRows)
             {
-                results.push_back(RunOnce(connectome, inputs, scenario, parallel, warmup, seconds));
+                const int threadCount = std::max(1, std::stoi(threadText));
+                const bool parallel = threadCount > 1;
+                if (parallel)
+                {
+                    // The main thread runs jobs while it waits, so threadCount - 1 workers make threadCount threads
+                    myengine::jobs::Initialize(static_cast<uint32_t>(threadCount - 1));
+                }
+                for (const std::string& scenario : scenarios)
+                {
+                    uint64_t gpuMemory = 0;
+                    RunOnce(connectome, inputs, scenario, parallel, gpu, flies, warmup, std::min(seconds, 0.1)); // warm-up run
+                    std::vector<Result> results;
+                    for (int r = 0; r < repeats; ++r)
+                    {
+                        results.push_back(RunOnce(connectome, inputs, scenario, parallel, gpu, flies, warmup, seconds, &gpuMemory));
+                    }
+                    std::sort(results.begin(), results.end(), [](const Result& a, const Result& b) { return a.speed < b.speed; });
+                    const Result& median = results[results.size() / 2];
+                    if (gpu)
+                    {
+                        std::printf("| gpu | %d | %s | - | %.2f | %.2f..%.2f | %.0f | %.3f | - | - | - | - |  GPU memory %.0f MB\n", flies, scenario.c_str(),
+                            median.speed, results.front().speed, results.back().speed, median.spikesPerSecond, median.meanRateHz, gpuMemory / 1048576.0);
+                    }
+                    else
+                    {
+                        std::printf("| cpu | %d | %s | %d | %.2f | %.2f..%.2f | %.0f | %.3f | %.3g | %.0f | %.0f %% | %.0f %% |\n", flies, scenario.c_str(), threadCount,
+                            median.speed, results.front().speed, results.back().speed, median.spikesPerSecond, median.meanRateHz, median.edgesPerSecond,
+                            median.updatesPerWindow, 100.0 * median.integrateShare, 100.0 * median.deliverShare);
+                    }
+                    std::fflush(stdout);
+                }
+                if (parallel)
+                {
+                    myengine::jobs::Shutdown();
+                }
             }
-            std::sort(results.begin(), results.end(), [](const Result& a, const Result& b) { return a.speed < b.speed; });
-            const Result& median = results[results.size() / 2];
-            std::printf("| %s | %d | %.2f | %.2f..%.2f | %.0f | %.3f | %.3g | %.0f | %.0f %% | %.0f %% |\n", scenario.c_str(), threadCount,
-                median.speed, results.front().speed, results.back().speed, median.spikesPerSecond, median.meanRateHz, median.edgesPerSecond,
-                median.updatesPerWindow, 100.0 * median.integrateShare, 100.0 * median.deliverShare);
-            std::fflush(stdout);
-        }
-        if (parallel)
-        {
-            myengine::jobs::Shutdown();
         }
     }
     std::printf("\npeak working set %.0f MB\n", WorkingSetMb());
