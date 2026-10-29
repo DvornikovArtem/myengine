@@ -83,6 +83,7 @@ namespace myengine::faceid
         read("liveness", settings.liveness);
         read("camera", settings.camera);
         read("threshold", settings.threshold);
+        read("forceLocal", settings.forceLocal);
         settings.threshold = std::clamp(settings.threshold, 0.2f, 0.9f);
         return settings;
     }
@@ -97,6 +98,7 @@ namespace myengine::faceid
         root["liveness"] = liveness;
         root["camera"] = camera;
         root["threshold"] = threshold;
+        root["forceLocal"] = forceLocal;
         std::ofstream stream(file, std::ios::trunc);
         stream << root.dump(2) << "\n";
         return static_cast<bool>(stream);
@@ -106,7 +108,9 @@ namespace myengine::faceid
 
     FaceIdService::FaceIdService(Options options)
         : options_(std::move(options)),
-          store_(DirectoryOf(options_) / "profiles.bin", options_.protector != nullptr ? options_.protector : MakeDpapiProtector())
+          store_(DirectoryOf(options_) / "profiles.bin", options_.protector != nullptr ? options_.protector : MakeDpapiProtector()),
+          signer_(options_.signingKeyFile.empty() ? DirectoryOf(options_) / "signing.key" : options_.signingKeyFile,
+                  options_.protector != nullptr ? options_.protector : MakeDpapiProtector())
     {
         view_.target = kEnrolTarget;
         thread_ = std::thread([this]() { Loop(); });
@@ -128,12 +132,20 @@ namespace myengine::faceid
         return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
+    std::filesystem::path FaceIdService::Directory() const { return DirectoryOf(options_); }
+
     bool FaceIdService::Initialize()
     {
         settings_ = FaceIdSettings::Load(DirectoryOf(options_) / "settings.json");
         decider_.SetThreshold(settings_.threshold);
         profilesError_.clear();
-        store_.Load(&profilesError_);
+        signerError_.clear();
+        signer_.Load(&signerError_);
+        ReloadDatabase();
+        if (source_ == FaceSource::Local)
+        {
+            store_.Load(&profilesError_);   // the profiles of this computer matter only when no shared database decides
+        }
         available_ = false;
         if (!FaceModels::Available())
         {
@@ -151,6 +163,259 @@ namespace myengine::faceid
         }
         unavailableReason_.clear();
         available_ = true;
+        return true;
+    }
+
+    std::vector<std::vector<std::uint8_t>> FaceIdService::TrustedKeys() const
+    {
+        std::vector<std::vector<std::uint8_t>> keys;
+        std::vector<std::uint8_t> builtIn;
+        if (options_.overrideTrustedKey)
+        {
+            if (!FromHex(options_.trustedKeyHex, builtIn) || builtIn.size() != kPublicKeySize)
+            {
+                builtIn.clear();
+            }
+        }
+        else
+        {
+            builtIn = BuiltInPublicKey();
+        }
+        if (!builtIn.empty())
+        {
+            keys.push_back(builtIn);
+        }
+        else if (signer_.HasKey())
+        {
+            // no key is built into this engine yet: the machine of the publisher trusts its own key, so the work can go on before the engine is built again
+            keys.push_back(signer_.PublicKey());
+        }
+        return keys;
+    }
+
+    // true when no key is built into the engine (the test's own key counts as built in)
+    bool FaceIdService::BuiltInKeyIsEmpty() const
+    {
+        if (!options_.overrideTrustedKey)
+        {
+            return BuiltInPublicKey().empty();
+        }
+        std::vector<std::uint8_t> key;
+        return !FromHex(options_.trustedKeyHex, key) || key.size() != kPublicKeySize;
+    }
+
+    bool FaceIdService::IsPublisher() const
+    {
+        if (!signer_.HasKey())
+        {
+            return false;
+        }
+        const std::vector<std::vector<std::uint8_t>> keys = TrustedKeys();
+        return !keys.empty() && keys.front() == signer_.PublicKey();
+    }
+
+    std::string FaceIdService::PublisherKeyNote() const
+    {
+        if (!signer_.HasKey())
+        {
+            return {};
+        }
+        const std::vector<std::uint8_t> builtIn = options_.overrideTrustedKey ? std::vector<std::uint8_t>() : BuiltInPublicKey();
+        if (options_.overrideTrustedKey)
+        {
+            std::vector<std::uint8_t> key;
+            if (FromHex(options_.trustedKeyHex, key) && key == signer_.PublicKey())
+            {
+                return "This key is the one built into the engine.";
+            }
+            return options_.trustedKeyHex.empty() ? "No key is built into the engine yet." : "This key is NOT the one built into the engine.";
+        }
+        if (builtIn.empty())
+        {
+            return "No key is built into the engine yet: copy the public key and put it into FaceIdTrustedKey.h (tools\\faceid\\set_trusted_key.ps1), then build again. Until then only this computer accepts the database.";
+        }
+        if (builtIn == signer_.PublicKey())
+        {
+            return "This key is the one built into the engine.";
+        }
+        return "This key is NOT the one built into the engine: databases signed with it are rejected everywhere, also here.";
+    }
+
+    bool FaceIdService::PasswordAvailable() const
+    {
+        if (source_ == FaceSource::Shared)
+        {
+            return databaseInfo_.valid && databaseInfo_.hasPassword;
+        }
+        return store_.HasPassword();
+    }
+
+    void FaceIdService::ReloadDatabase()
+    {
+        databaseInfo_ = DatabaseInfo{};
+        sharedProfiles_.clear();
+        sharedPassword_ = PasswordHash{};
+        const std::filesystem::path exeDirectory = options_.executableDirectory.empty() ? ExecutableDirectory() : options_.executableDirectory;
+        const DatabaseLocation location = FindDatabase(options_.databaseFile, exeDirectory);
+        draft_ = FaceDatabase{};
+        draftDirty_ = false;
+        if (location.path.empty())
+        {
+            source_ = FaceSource::Local;
+            return;
+        }
+        source_ = FaceSource::Shared;
+        databaseInfo_.path = location.path;
+        databaseInfo_.named = location.named;
+        databaseInfo_.found = location.exists;
+        if (!location.exists)
+        {
+            databaseInfo_.error = "The face database that was named is not there: " + location.path.string();
+        }
+        else
+        {
+            const std::vector<std::vector<std::uint8_t>> keys = TrustedKeys();
+            const DatabaseCheck check = LoadDatabase(location.path, keys);
+            if (check.status == DatabaseStatus::Ok)
+            {
+                databaseInfo_.valid = true;
+                databaseInfo_.faces = check.database.faces.size();
+                databaseInfo_.created = check.database.created;
+                databaseInfo_.hasPassword = check.database.password.Valid();
+                databaseInfo_.signedByBuiltInKey = !keys.empty() && !BuiltInKeyIsEmpty();
+                sharedProfiles_ = check.database.Profiles();
+                sharedPassword_ = check.database.password;
+                draft_ = check.database;
+            }
+            else
+            {
+                databaseInfo_.error = check.message;
+            }
+        }
+        if (settings_.forceLocal && IsPublisher())
+        {
+            source_ = FaceSource::Local;   // the publisher tries the Local mode: the database stays where it is
+        }
+    }
+
+    bool FaceIdService::DraftAddFace(const std::string& name, std::vector<FaceEmbedding> embeddings, std::string* error)
+    {
+        const auto fail = [&](const std::string& text)
+        {
+            if (error != nullptr)
+            {
+                *error = text;
+            }
+            return false;
+        };
+        if (draft_.faces.size() >= FaceDatabase::kMaxFaces)
+        {
+            return fail("the database holds " + std::to_string(FaceDatabase::kMaxFaces) + " faces at most");
+        }
+        if (name.empty() || name.size() > FaceProfileStore::kMaxNameBytes)
+        {
+            return fail("the name must be 1 to 32 bytes");
+        }
+        for (const SharedFace& face : draft_.faces)
+        {
+            if (face.name == name)
+            {
+                return fail("there is a face with this name");
+            }
+        }
+        if (embeddings.size() < FaceProfileStore::kMinEmbeddings || embeddings.size() > FaceProfileStore::kMaxEmbeddings)
+        {
+            return fail("a face needs 5 to 10 pictures");
+        }
+        for (FaceEmbedding& embedding : embeddings)
+        {
+            Normalize(embedding);
+        }
+        draft_.faces.push_back({name, TodayText(), std::move(embeddings)});
+        draftDirty_ = true;
+        return true;
+    }
+
+    bool FaceIdService::DraftRemoveFace(const std::size_t index)
+    {
+        if (index >= draft_.faces.size())
+        {
+            return false;
+        }
+        draft_.faces.erase(draft_.faces.begin() + static_cast<std::ptrdiff_t>(index));
+        draftDirty_ = true;
+        return true;
+    }
+
+    void FaceIdService::DraftDiscard()
+    {
+        draft_ = FaceDatabase{};
+        draftDirty_ = false;
+        if (databaseInfo_.valid)
+        {
+            const std::vector<std::vector<std::uint8_t>> keys = TrustedKeys();
+            const DatabaseCheck check = LoadDatabase(databaseInfo_.path, keys);
+            if (check.status == DatabaseStatus::Ok)
+            {
+                draft_ = check.database;
+            }
+        }
+    }
+
+    bool FaceIdService::PublisherSave(const std::filesystem::path& file, const bool includePassword, const std::string& password, std::string* error)
+    {
+        const auto fail = [&](const std::string& text)
+        {
+            if (error != nullptr)
+            {
+                *error = text;
+            }
+            return false;
+        };
+        if (!IsPublisher())
+        {
+            return fail("only the computer with the publisher key signs the database");
+        }
+        if (file.empty())
+        {
+            return fail("type the file to write");
+        }
+        FaceDatabase database = draft_;
+        database.created = TodayText();
+        if (!includePassword)
+        {
+            database.password = PasswordHash{};
+        }
+        else if (!password.empty())
+        {
+            if (password.size() < 6)
+            {
+                return fail("the password needs 6 characters or more");
+            }
+            if (!HashPassword(password, database.password))
+            {
+                return fail("the password could not be hashed");
+            }
+        }
+        else if (!database.password.Valid())
+        {
+            return fail("type the password to put in the database, or switch the option off");
+        }
+        std::vector<std::uint8_t> bytes;
+        if (!SignDatabase(database, signer_, bytes, error))
+        {
+            return false;
+        }
+        if (!SaveDatabaseFile(file, bytes, error))
+        {
+            return false;
+        }
+        // the service uses the file that was just written: named, when the usual places do not lead to it
+        const DatabaseLocation usual = FindDatabase({}, options_.executableDirectory.empty() ? ExecutableDirectory() : options_.executableDirectory);
+        std::error_code ec;
+        const bool sameFile = !usual.path.empty() && usual.exists && std::filesystem::equivalent(usual.path, file, ec);
+        options_.databaseFile = sameFile ? std::filesystem::path() : file;
+        ReloadDatabase();
         return true;
     }
 
@@ -266,7 +531,9 @@ namespace myengine::faceid
         {
             return false;
         }
-        if (store_.HasPassword() && store_.CheckPassword(password))
+        const bool right = source_ == FaceSource::Shared ? (databaseInfo_.valid && databaseInfo_.hasPassword && VerifyPassword(password, sharedPassword_))
+                                                         : (store_.HasPassword() && store_.CheckPassword(password));
+        if (right)
         {
             limiter_.Success();
             view_.phase = LoginPhase::Granted;
@@ -439,14 +706,14 @@ namespace myengine::faceid
                 {
                     return;
                 }
-                const MatchResult match = BestMatch(store_.Profiles(), embedding);
+                const MatchResult match = BestMatch(ActiveProfiles(), embedding);
                 view_.lastScore = match.score;
                 if (match.profile == acceptedProfile_ && match.score >= settings_.threshold * 0.9f)
                 {
                     if (++afterChallengeFrames_ >= 3)
                     {
                         limiter_.Success();
-                        view_.grantedName = store_.Profiles()[static_cast<std::size_t>(acceptedProfile_)].name;
+                        view_.grantedName = ActiveProfiles()[static_cast<std::size_t>(acceptedProfile_)].name;
                         SetLoginPhase(LoginPhase::Granted, "hello, " + view_.grantedName);
                         mode_ = FaceIdMode::Idle;
                     }
@@ -463,7 +730,7 @@ namespace myengine::faceid
         {
             return;
         }
-        const MatchResult match = BestMatch(store_.Profiles(), embedding);
+        const MatchResult match = BestMatch(ActiveProfiles(), embedding);
         view_.lastScore = match.score;
         view_.phase = LoginPhase::Recognising;
         view_.text = "recognising ...";
@@ -486,7 +753,7 @@ namespace myengine::faceid
             else
             {
                 limiter_.Success();
-                view_.grantedName = store_.Profiles()[static_cast<std::size_t>(acceptedProfile_)].name;
+                view_.grantedName = ActiveProfiles()[static_cast<std::size_t>(acceptedProfile_)].name;
                 SetLoginPhase(LoginPhase::Granted, "hello, " + view_.grantedName);
                 mode_ = FaceIdMode::Idle;
             }

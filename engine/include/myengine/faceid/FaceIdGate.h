@@ -45,10 +45,11 @@ namespace myengine::faceid
             Details,
             Capturing,
             Saved,
-            Login
+            Login,
+            Rejected    // Shared mode and the database did not pass the check: nobody gets in by face or password (the publisher can repair it)
         };
 
-        void StartEnrolFlow();
+        void StartEnrolFlow(bool shared = false);
         void LeaveEnrol();
         void DrawLogin(const FaceIdUiContext& context);
         void DrawFirstRun(const FaceIdUiContext& context);
@@ -56,6 +57,10 @@ namespace myengine::faceid
         void DrawDetails(const FaceIdUiContext& context);
         void DrawCapturing(const FaceIdUiContext& context);
         void DrawSaved(const FaceIdUiContext& context);
+        void DrawRejected(const FaceIdUiContext& context);
+        void DrawSettingsLocal();
+        void DrawSettingsShared();
+        void DrawPublisher();
         void DrawPreview(const FaceIdUiContext& context, const FaceIdView& view, float width);
         void BeginPanel(const FaceIdUiContext& context, const char* title, float width);
         void EndPanel();
@@ -81,6 +86,7 @@ namespace myengine::faceid
         char newPasswordBuffer_[64] = {};
         char repeatPasswordBuffer_[64] = {};
         bool consentChecked_ = false;
+        bool enrolShared_ = false;            // the face goes into the draft of the shared database (the publisher), not into the local profiles
         std::string detailsError_;
         std::string savedText_;
         bool savedOk_ = false;
@@ -93,5 +99,17 @@ namespace myengine::faceid
         bool pendingEraseAll_ = false;
         char settingsPassword_[64] = {};
         std::string settingsMessage_;
+
+        // the publisher section of the settings window
+        char databasePath_[520] = {};
+        char exportPath_[520] = {};
+        char exportPassword_[64] = {};
+        char importPath_[520] = {};
+        char importPassword_[64] = {};
+        char publisherPassword_[64] = {};
+        bool publisherIncludePassword_ = false;
+        int pendingDraftDelete_ = -1;
+        std::string publisherMessage_;
+        bool publisherMessageGood_ = false;
     };
 }
