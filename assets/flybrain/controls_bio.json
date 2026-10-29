@@ -1,0 +1,38 @@
+{
+  "name": "Bio",
+  "description": "The descending neurons that the literature gives to steering and walking: the turn is DNa02 (fast) and DNa01 (slow) right minus left, the walk is DNp09 minus MDN (the backward walking neuron), the fire is the proboscis motor neuron MN9. In this model they stay silent under the picture of DOOM (docs/game/flydoom-fly.md has the measurements): with these controls the fly stands still. They answer when something else drives them (the taste input).",
+  "smoothingMs": 100,
+  "turn": {
+    "terms": [
+      { "type": "DNa02", "side": "right", "weight": 1.0 },
+      { "type": "DNa02", "side": "left", "weight": -1.0 },
+      { "type": "DNa01", "side": "right", "weight": 0.5 },
+      { "type": "DNa01", "side": "left", "weight": -0.5 }
+    ],
+    "deadZoneHz": 0.5,
+    "gain": 0.06,
+    "limit": 6.0
+  },
+  "forward": {
+    "terms": [
+      { "type": "DNp09", "side": "any", "weight": 1.0 },
+      { "type": "MDN", "side": "any", "weight": -1.0 }
+    ],
+    "deadZoneHz": 0.5,
+    "gain": 1.0,
+    "limit": 50.0
+  },
+  "fire": {
+    "terms": [
+      { "type": "MN9", "side": "any", "weight": 1.0 }
+    ],
+    "windowMs": 100,
+    "minSpikes": 1,
+    "thresholdHz": 0.0
+  },
+  "use": {
+    "everyTics": 35,
+    "stuckTics": 12,
+    "stuckUnits": 6.0
+  }
+}
