@@ -14,6 +14,8 @@
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
 #include <myengine/core/CrashHandler.h>
+#include <myengine/core/ProjectContext.h>
+#include <doomfly/FlyModes.h>
 #include <myengine/render/dx12/ShaderLayoutDump.h>
 
 // If the WIN32_LEAN_AND_MEAN macro is defined before including windows.h, rarely used parts are excluded from the header to speed up compilation
@@ -33,6 +35,11 @@ namespace
         bool gameMode = false;                      // --game: the Rocket League game without the editor
         bool doomMode = false;                      // --game doom (and FlyDoom.exe): the classic DOOM (docs/game/doom.md)
         myengine::core::Application::DoomOptions doom;
+        bool fly = false;                           // --fly [doomfly|bio]: FlyDoom starts with the fly as the player (docs/game/flydoom-fly.md)
+        bool flyBio = false;
+        bool flyReward = false;                     // --fly-reward
+        std::uint64_t flySeed = 1;                  // --fly-seed N
+        std::filesystem::path fbrain;               // --fbrain <file>: the connectome
         bool showProjectBrowser = false;
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
@@ -92,6 +99,21 @@ namespace
                     options.doomMode = true;
                     ++index;
                 }
+                continue;
+            }
+            if (argument == L"--fly")
+            {
+                options.fly = true;
+                if (index + 1 < argumentCount && (std::wstring_view(arguments[index + 1]) == L"bio" || std::wstring_view(arguments[index + 1]) == L"doomfly"))
+                {
+                    options.flyBio = std::wstring_view(arguments[index + 1]) == L"bio";
+                    ++index;
+                }
+                continue;
+            }
+            if (argument == L"--fly-reward")
+            {
+                options.flyReward = true;
                 continue;
             }
             if (argument == L"--doom-square-pixels")
@@ -194,13 +216,15 @@ namespace
             const bool isNetSim = argument == L"--net-sim";
             // FlyDoom: --iwad <file.wad> names the game data, --doom-args "<the command line of DOOM>" is given to DOOM as it is (-warp 1 1 -skill 3)
             const bool isIwad = argument == L"--iwad";
+            const bool isFbrain = argument == L"--fbrain";
+            const bool isFlySeed = argument == L"--fly-seed";
             const bool isDoomArgs = argument == L"--doom-args";
             // The scene passes (docs/render/scene-passes.md): --render-settings shadows=2,msaa=4,bloom=1,instancing=1; --screenshot <file.tga> [--screenshot-frame N]
             const bool isRenderSettings = argument == L"--render-settings";
             const bool isScreenshot = argument == L"--screenshot";
             const bool isScreenshotFrame = argument == L"--screenshot-frame";
             if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
-                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs)
+                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed)
             {
                 valid = false;
                 break;
@@ -222,6 +246,14 @@ namespace
             if (isIwad && options.doom.iwad.empty())
             {
                 options.doom.iwad = std::wstring(value);
+            }
+            else if (isFbrain && options.fbrain.empty())
+            {
+                options.fbrain = std::wstring(value);
+            }
+            else if (isFlySeed)
+            {
+                options.flySeed = std::wcstoull(std::wstring(value).c_str(), nullptr, 10);
             }
             else if (isDoomArgs && options.doom.args.empty())
             {
@@ -426,6 +458,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
+            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward]  (docs/game/flydoom-fly.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
@@ -455,6 +488,24 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 
     myengine::core::Application app(hInstance);
     app.SetGameMode(options.gameMode);
+    if (options.doomMode)
+    {
+        // who can play: the human, and the fly when the connectome file is there (or the fly was asked for by name: the error says how to get the file)
+        doomfly::FlyModeOptions fly;
+        fly.connectome = options.fbrain;
+        fly.exeDirectory = myengine::core::ProjectContext::ExecutableDirectory();
+#ifdef MYENGINE_SOURCE_DIR
+        fly.sourceDirectory = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
+#endif
+        fly.seed = options.flySeed;
+        fly.reward = options.flyReward;
+        fly.log = [&app](const std::string& text) { app.GetLogger().Info(text); };
+        options.doom.modes = doomfly::MakeModes(fly, options.fly || doomfly::ConnectomeAvailable(fly));
+        if (options.fly)
+        {
+            options.doom.initialMode = options.flyBio ? 2 : 1;
+        }
+    }
     app.SetDoomMode(options.doomMode, options.doom);
     app.SetProjectFile(options.projectFile);
     app.SetShowProjectBrowser(options.showProjectBrowser);
