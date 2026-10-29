@@ -66,3 +66,7 @@ external/onnxruntime/
 assets/faceid/models/
 assets/faceid/licenses/
 assets/faceid/test/
+
+# the game data of FlyDoom: Freedoom (tools/doom/fetch_freedoom.ps1) or the WAD of the player; never in git
+assets/doom/*
+!assets/doom/README.txt

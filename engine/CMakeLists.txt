@@ -80,6 +80,7 @@
   include/myengine/fx/ParticleSystem.h
   include/myengine/game/RlCars.h
   include/myengine/game/RlFeedback.h
+  include/myengine/game/DoomGameFlow.h
   include/myengine/game/RlGameFlow.h
   include/myengine/game/RlGameSettings.h
   include/myengine/game/RlVideoWindowChange.h
@@ -190,6 +191,7 @@ set(ENGINE_SOURCES
   src/audio/XAudio2Backend.cpp
   src/fx/ParticleEffect.cpp
   src/fx/ParticleSystem.cpp
+  src/game/DoomGameFlow.cpp
   src/game/RlCars.cpp
   src/game/RlFeedback.cpp
   src/game/RlGameFlow.cpp
@@ -392,6 +394,8 @@ target_link_libraries(myengine_engine
     TracyClient
     myengine_rl
   PRIVATE
+    # FlyDoom (docs/game/doom.md): the DOOM itself; its types stay inside engine/src/game/DoomGameFlow.cpp
+    myengine_doom
     # pybind11 / Python.h stay inside engine/src/scripting, public headers do not include them
     myengine_python)
 

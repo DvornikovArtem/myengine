@@ -382,6 +382,17 @@ target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
 
+# D0: the classic DOOM of the engine (game/doom) with Freedoom, no window and no sound. Skipped (77) without the WAD:
+# tools/doom/fetch_freedoom.ps1 puts it into assets/doom
+add_executable(myengine_doom_core_tests
+  doom/DoomCoreTests.cpp)
+target_link_libraries(myengine_doom_core_tests PRIVATE myengine_doom)
+target_compile_definitions(myengine_doom_core_tests PRIVATE DOOM_TEST_WAD_DIR="${CMAKE_SOURCE_DIR}/assets/doom")
+myengine_apply_compiler_options(myengine_doom_core_tests)
+set_property(TARGET myengine_doom_core_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_core COMMAND myengine_doom_core_tests)
+set_tests_properties(doom_core PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 # G3: the Rocket League physics (Jolt) without a window
 add_executable(myengine_rl_physics_tests
   rl/RlPhysicsTests.cpp)
