@@ -1,0 +1,1184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WwiseDocument Type="WorkUnit" ID="{E2777E75-EE76-7B73-AA8C-67708CD6272D}" SchemaVersion="133">
+	<Containers>
+		<WorkUnit Name="Default Work Unit" ID="{E2777E75-EE76-7B73-AA8C-67708CD6272D}" PersistMode="Standalone">
+			<ChildrenList>
+				<Sound Name="engine" ID="{55D9D440-2E43-839D-72FE-0E85633DB8F6}" ShortID="1747615710">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsLoopingEnabled" Type="bool" Value="True"/>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-6.021</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_70" ID="{12E41077-666B-782D-F7F5-E5DE076FA960}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="engine_loop" ID="{AE98B8D8-183E-CC48-77AA-75308D97928E}">
+							<Language>SFX</Language>
+							<AudioFile>engine_loop.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2896629050"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="engine_loop" ID="{AE98B8D8-183E-CC48-77AA-75308D97928E}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="boost" ID="{69707FFB-BB26-CCBD-5A34-7EB01D721D19}" ShortID="858945031">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsLoopingEnabled" Type="bool" Value="True"/>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-5.193</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_70" ID="{12E41077-666B-782D-F7F5-E5DE076FA960}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="boost_loop" ID="{A1792DEE-6075-5EAF-3BDF-2F36872EA97E}">
+							<Language>SFX</Language>
+							<AudioFile>boost_loop.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="1024742473"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="boost_loop" ID="{A1792DEE-6075-5EAF-3BDF-2F36872EA97E}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<RandomSequenceContainer Name="ball_hit" ID="{1319DF0B-2A77-E084-AE4A-9449B7C46278}" ShortID="696659745">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>4</Value>
+							</ValueList>
+						</Property>
+						<Property Name="NormalOrShuffle" Type="int16" Value="0"/>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-3</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{CE81D98F-B371-A8AF-56AB-897B61384DAF}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="104"/>
+											<Property Name="Min" Type="Real64" Value="-104"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>8</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-0.915</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_4_100" ID="{A5CBAACB-9FEE-802B-03F6-BE9BE4F34BB3}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<Sound Name="ball_hit_1" ID="{0D5954F8-0EC0-9682-26D5-0184A4171729}" ShortID="3376276220">
+							<ReferenceList>
+								<Reference Name="Conversion">
+									<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+								</Reference>
+								<Reference Name="OutputBus">
+									<ObjectRef Name="Main Audio Bus" ID="{1514A4D8-1DA6-412A-A17E-75CA0C2149F3}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+								</Reference>
+							</ReferenceList>
+							<ChildrenList>
+								<AudioFileSource Name="ball_hit_1" ID="{EA1F4859-A7BD-78BE-0379-8A4B77CA412B}">
+									<Language>SFX</Language>
+									<AudioFile>ball_hit_1.wav</AudioFile>
+									<MediaIDList>
+										<MediaID ID="396258029"/>
+									</MediaIDList>
+								</AudioFileSource>
+							</ChildrenList>
+							<ActiveSourceList>
+								<ActiveSource Name="ball_hit_1" ID="{EA1F4859-A7BD-78BE-0379-8A4B77CA412B}" Platform="Linked"/>
+							</ActiveSourceList>
+						</Sound>
+						<Sound Name="ball_hit_2" ID="{0FCD305B-72E4-2889-4244-760CEE8D6621}" ShortID="1167873229">
+							<ReferenceList>
+								<Reference Name="Conversion">
+									<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+								</Reference>
+								<Reference Name="OutputBus">
+									<ObjectRef Name="Main Audio Bus" ID="{1514A4D8-1DA6-412A-A17E-75CA0C2149F3}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+								</Reference>
+							</ReferenceList>
+							<ChildrenList>
+								<AudioFileSource Name="ball_hit_2" ID="{8559749F-1A33-8358-BA6E-A71D241FE7CB}">
+									<Language>SFX</Language>
+									<AudioFile>ball_hit_2.wav</AudioFile>
+									<MediaIDList>
+										<MediaID ID="360144699"/>
+									</MediaIDList>
+								</AudioFileSource>
+							</ChildrenList>
+							<ActiveSourceList>
+								<ActiveSource Name="ball_hit_2" ID="{8559749F-1A33-8358-BA6E-A71D241FE7CB}" Platform="Linked"/>
+							</ActiveSourceList>
+						</Sound>
+						<Sound Name="ball_hit_3" ID="{06CB2DF7-49A2-12B3-A0C8-A6A363C0F8FB}" ShortID="69378226">
+							<ReferenceList>
+								<Reference Name="Conversion">
+									<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+								</Reference>
+								<Reference Name="OutputBus">
+									<ObjectRef Name="Main Audio Bus" ID="{1514A4D8-1DA6-412A-A17E-75CA0C2149F3}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+								</Reference>
+							</ReferenceList>
+							<ChildrenList>
+								<AudioFileSource Name="ball_hit_3" ID="{00D19E84-D298-C5D0-2D87-650529376FA4}">
+									<Language>SFX</Language>
+									<AudioFile>ball_hit_3.wav</AudioFile>
+									<MediaIDList>
+										<MediaID ID="1787631551"/>
+									</MediaIDList>
+								</AudioFileSource>
+							</ChildrenList>
+							<ActiveSourceList>
+								<ActiveSource Name="ball_hit_3" ID="{00D19E84-D298-C5D0-2D87-650529376FA4}" Platform="Linked"/>
+							</ActiveSourceList>
+						</Sound>
+					</ChildrenList>
+				</RandomSequenceContainer>
+				<Sound Name="ball_bounce" ID="{6BD0F891-7D46-D4D4-342C-5FE68BCA9ED7}" ShortID="3586744831">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>3</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-6</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{89EA6E35-4706-33E8-8C9A-21A4022E2D7B}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="138.8"/>
+											<Property Name="Min" Type="Real64" Value="-138.8"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>4</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-3.098</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_4_90" ID="{D785E321-AA19-B10D-0806-56A4049B1D45}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="ball_bounce" ID="{57C76147-8D84-DD06-546E-06A5A61F877A}">
+							<Language>SFX</Language>
+							<AudioFile>ball_bounce.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="3794273873"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="ball_bounce" ID="{57C76147-8D84-DD06-546E-06A5A61F877A}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="jump" ID="{47E4B5D6-AC8C-EDFF-609C-E0D74D80BC38}" ShortID="3805783754">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-2</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{32EF4977-38C2-ECDB-A616-C9C866C6E8CA}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="86.64"/>
+											<Property Name="Min" Type="Real64" Value="-86.64"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>5</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.938</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_60" ID="{BB3DE493-02D8-EC57-0C85-67129BE8559A}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="jump" ID="{89196C51-F52C-B6A9-54F8-7E6CB0A3CB37}">
+							<Language>SFX</Language>
+							<AudioFile>jump.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="4272727821"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="jump" ID="{89196C51-F52C-B6A9-54F8-7E6CB0A3CB37}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="dodge" ID="{6F11523F-ED99-C466-6049-B989B2DDABF2}" ShortID="3637587636">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-2</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{0D7FD596-7FBF-22B0-5319-DFA5069C8E9F}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="86.64"/>
+											<Property Name="Min" Type="Real64" Value="-86.64"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>5</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.938</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_60" ID="{BB3DE493-02D8-EC57-0C85-67129BE8559A}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="dodge" ID="{84FFCBFF-64A9-9A1F-A323-4BBB312FA8C6}">
+							<Language>SFX</Language>
+							<AudioFile>dodge.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="481909698"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="dodge" ID="{84FFCBFF-64A9-9A1F-A323-4BBB312FA8C6}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="land" ID="{95769C8A-F300-AD20-A043-17BC48E8D74F}" ShortID="3901934335">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-9</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{293C644F-CBD0-4598-2686-B7EC9FFDAE97}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="173.7"/>
+											<Property Name="Min" Type="Real64" Value="-173.7"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>3</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-3.098</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_60" ID="{BB3DE493-02D8-EC57-0C85-67129BE8559A}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="land" ID="{ADBEE766-D6B9-0F40-1531-171E0F0A1AE9}">
+							<Language>SFX</Language>
+							<AudioFile>land.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="3648627959"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="land" ID="{ADBEE766-D6B9-0F40-1531-171E0F0A1AE9}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="pad_small" ID="{476F136C-ECB0-CD60-DC24-7A876CE9D0A7}" ShortID="2591531077">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>4</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-3.098</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_50" ID="{376CB846-14BA-1E98-7D56-21EB00CE7E2B}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="pad_small" ID="{846CA39D-6814-A5AF-757E-85AF65B43392}">
+							<Language>SFX</Language>
+							<AudioFile>pad_small.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2204870071"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="pad_small" ID="{846CA39D-6814-A5AF-757E-85AF65B43392}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="pad_big" ID="{79AD4E77-3928-7BB6-5FDB-FF908C8244EC}" ShortID="126809732">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>4</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>6</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.412</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_4_70" ID="{BA2A63F1-024B-C94C-1EC5-82C26EE0A02F}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="pad_big" ID="{A81C5BE8-4476-6157-2DBD-0738491F2279}">
+							<Language>SFX</Language>
+							<AudioFile>pad_big.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="578039283"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="pad_big" ID="{A81C5BE8-4476-6157-2DBD-0738491F2279}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="demolish" ID="{428C61EA-EA28-2FB0-07FA-33EC94FE51C3}" ShortID="3109039694">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>4</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-2</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{3258BA5C-8880-181D-E92D-DDB24E830850}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="86.64"/>
+											<Property Name="Min" Type="Real64" Value="-86.64"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>12</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_6_120" ID="{0E541DCB-4E55-D324-36FC-9626A0D73F54}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="demolish" ID="{5AB3B6C2-3FE1-1A3A-D0F5-244C0DDE3B5E}">
+							<Language>SFX</Language>
+							<AudioFile>demolish.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="571309558"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="demolish" ID="{5AB3B6C2-3FE1-1A3A-D0F5-244C0DDE3B5E}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="goal_horn" ID="{DF47B921-163C-DC6B-7711-0F957A226269}" ShortID="259591351">
+					<PropertyList>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>1</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>20</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.412</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="goal_horn" ID="{4450C2DD-B6DA-3ED7-2321-5ECF9BF56864}">
+							<Language>SFX</Language>
+							<AudioFile>goal_horn.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="3342591915"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="goal_horn" ID="{4450C2DD-B6DA-3ED7-2321-5ECF9BF56864}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="crowd_roar" ID="{B0173365-CE15-253A-C777-2A573433731E}" ShortID="103861275">
+					<PropertyList>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>1</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>15</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-0.915</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="crowd_roar" ID="{51B4DCF5-2468-F0BC-C1D1-6C4DD48DF853}">
+							<Language>SFX</Language>
+							<AudioFile>crowd_roar.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2095963545"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="crowd_roar" ID="{51B4DCF5-2468-F0BC-C1D1-6C4DD48DF853}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="crowd_ambience" ID="{BDB40D33-4DBC-8E60-0BFD-0BF6C2D05BBD}" ShortID="481695380">
+					<PropertyList>
+						<Property Name="IsLoopingEnabled" Type="bool" Value="True"/>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>2</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-9.119</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="crowd_loop" ID="{96940A91-3F73-EA68-94DC-E6FBEA4BEAB7}">
+							<Language>SFX</Language>
+							<AudioFile>crowd_loop.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="3230223369"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="crowd_loop" ID="{96940A91-3F73-EA68-94DC-E6FBEA4BEAB7}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="countdown_beep" ID="{DE968779-F6E7-177D-22D3-ED36937065C0}" ShortID="1035500605">
+					<PropertyList>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>18</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.938</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="countdown_beep" ID="{B23535A1-631C-053E-D4F3-811CA26E004E}">
+							<Language>SFX</Language>
+							<AudioFile>countdown_beep.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2178167453"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="countdown_beep" ID="{B23535A1-631C-053E-D4F3-811CA26E004E}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="countdown_go" ID="{44CB7B81-2512-9E33-30D9-F19F2874442B}" ShortID="2995514071">
+					<PropertyList>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>18</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.412</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="countdown_go" ID="{6A169C5D-0898-AC4E-8715-01A9B39BC44D}">
+							<Language>SFX</Language>
+							<AudioFile>countdown_go.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="3024070645"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="countdown_go" ID="{6A169C5D-0898-AC4E-8715-01A9B39BC44D}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="ui_click" ID="{C1E3FC6B-F378-0696-8152-D23F62F26C47}" ShortID="3833630617">
+					<PropertyList>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>10</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-3.098</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Ui" ID="{4AED8384-B23D-DB52-4151-3C72A9C4B7FD}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="ui_click" ID="{F2422BA2-767D-1FF8-6DF1-74709FF7DD29}">
+							<Language>SFX</Language>
+							<AudioFile>ui_click.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2016083104"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="ui_click" ID="{F2422BA2-767D-1FF8-6DF1-74709FF7DD29}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="ui_hover" ID="{17926746-E6A8-B7D1-AB74-B6D578D8E053}" ShortID="986357876">
+					<PropertyList>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>2</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>9</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-6.021</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Ui" ID="{4AED8384-B23D-DB52-4151-3C72A9C4B7FD}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="ui_hover" ID="{A9D483CC-1E41-C4F3-9D9F-82ABD3CBF7E7}">
+							<Language>SFX</Language>
+							<AudioFile>ui_hover.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="378427737"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="ui_hover" ID="{A9D483CC-1E41-C4F3-9D9F-82ABD3CBF7E7}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="ui_back" ID="{4FD4BDFE-4E64-4D92-0F33-1B194B31A1AB}" ShortID="2448468810">
+					<PropertyList>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>10</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-3.098</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Ui" ID="{4AED8384-B23D-DB52-4151-3C72A9C4B7FD}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="ui_back" ID="{A181D030-7E48-3A19-A3CD-9AE1528CCCD1}">
+							<Language>SFX</Language>
+							<AudioFile>ui_back.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2264905806"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="ui_back" ID="{A181D030-7E48-3A19-A3CD-9AE1528CCCD1}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="skid" ID="{913476F0-4259-C6E4-7136-F2C8C193002D}" ShortID="2312252779">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsLoopingEnabled" Type="bool" Value="True"/>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>3</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-6.936</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_50" ID="{376CB846-14BA-1E98-7D56-21EB00CE7E2B}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="skid_loop" ID="{3199A910-E4E7-D696-8F2B-2A0A88E0D817}">
+							<Language>SFX</Language>
+							<AudioFile>skid_loop.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2952360263"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="skid_loop" ID="{3199A910-E4E7-D696-8F2B-2A0A88E0D817}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="bump" ID="{00A17396-7436-9320-57E8-452D8B673EB5}" ShortID="1367952864">
+					<PropertyList>
+						<Property Name="3DSpatialization" Type="int16" Value="1"/>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>4</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePositioning" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Pitch" Type="int32">
+							<ValueList>
+								<Value>-9</Value>
+							</ValueList>
+							<ModifierList>
+								<ModifierInfo>
+									<Modifier Name="" ID="{F744BD6D-EE6C-8E8C-E487-78F92BA4E561}">
+										<PropertyList>
+											<Property Name="Enabled" Type="bool" Value="True"/>
+											<Property Name="Max" Type="Real64" Value="173.7"/>
+											<Property Name="Min" Type="Real64" Value="-173.7"/>
+										</PropertyList>
+									</Modifier>
+								</ModifierInfo>
+							</ModifierList>
+						</Property>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>5</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-1.938</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Attenuation">
+							<ObjectRef Name="Att_3_60" ID="{BB3DE493-02D8-EC57-0C85-67129BE8559A}" WorkUnitID="{E98CC789-DE84-998F-6787-15A7A98C8822}"/>
+						</Reference>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="bump" ID="{CE3A75D8-EB53-E673-253D-1967D9F6A02D}">
+							<Language>SFX</Language>
+							<AudioFile>bump.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="3696030566"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="bump" ID="{CE3A75D8-EB53-E673-253D-1967D9F6A02D}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="whistle" ID="{7CEDC94F-D81A-09F7-7E5E-BD436AEDEF30}" ShortID="905174518">
+					<PropertyList>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>1</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>19</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-3.098</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Sfx" ID="{ABED76F8-E35A-DFCE-DCBD-FEA45ED874CE}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="whistle" ID="{FF004E78-1322-027B-54D6-B9DC89E70418}">
+							<Language>SFX</Language>
+							<AudioFile>whistle.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2641617606"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="whistle" ID="{FF004E78-1322-027B-54D6-B9DC89E70418}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+				<Sound Name="menu_music" ID="{963D8258-0162-8519-5E93-AF200BF7DF2A}" ShortID="2747467731">
+					<PropertyList>
+						<Property Name="IsGlobalLimit" Type="int16" Value="1"/>
+						<Property Name="IsLoopingEnabled" Type="bool" Value="True"/>
+						<Property Name="MaxSoundPerInstance" Type="int16">
+							<ValueList>
+								<Value>1</Value>
+							</ValueList>
+						</Property>
+						<Property Name="OverrideOutput" Type="bool" Value="True"/>
+						<Property Name="OverridePriority" Type="bool" Value="True"/>
+						<Property Name="Priority" Type="int16">
+							<ValueList>
+								<Value>30</Value>
+							</ValueList>
+						</Property>
+						<Property Name="UseMaxSoundPerInstance" Type="bool">
+							<ValueList>
+								<Value>True</Value>
+							</ValueList>
+						</Property>
+						<Property Name="Volume" Type="Real64">
+							<ValueList>
+								<Value>-6.021</Value>
+							</ValueList>
+						</Property>
+					</PropertyList>
+					<ReferenceList>
+						<Reference Name="Conversion">
+							<ObjectRef Name="Default Conversion Settings" ID="{A7E4C8BE-65E3-5956-0863-01F62281CAB5}" WorkUnitID="{EF986262-E7D1-CEAE-773F-C283A38A1D98}"/>
+						</Reference>
+						<Reference Name="OutputBus">
+							<ObjectRef Name="Music" ID="{F396CAFA-E7BB-CAA7-6FD6-37A448F8466A}" WorkUnitID="{6C40D0F2-189E-0BC7-D4E1-EF5783330DEA}"/>
+						</Reference>
+					</ReferenceList>
+					<ChildrenList>
+						<AudioFileSource Name="menu_music" ID="{7244526B-38FC-5FFD-9885-EBD207C8F203}">
+							<Language>SFX</Language>
+							<AudioFile>menu_music.wav</AudioFile>
+							<MediaIDList>
+								<MediaID ID="2793324479"/>
+							</MediaIDList>
+						</AudioFileSource>
+					</ChildrenList>
+					<ActiveSourceList>
+						<ActiveSource Name="menu_music" ID="{7244526B-38FC-5FFD-9885-EBD207C8F203}" Platform="Linked"/>
+					</ActiveSourceList>
+				</Sound>
+			</ChildrenList>
+		</WorkUnit>
+	</Containers>
+</WwiseDocument>

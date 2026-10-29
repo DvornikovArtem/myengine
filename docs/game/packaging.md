@@ -21,6 +21,8 @@ powershell -ExecutionPolicy Bypass -File tools\check_package.ps1     # запу�
 | `-SteamSdk <папка SDK>` | где искать Steamworks SDK (иначе см. «Steam»); без ключей Steam включается сам, если SDK найден |
 | `-WithSteam` | Steam обязателен: нет SDK — остановиться (без ключа это только предупреждение) |
 | `-NoSteam` | не искать SDK, собрать без Steam (папка сборки `build-shipping-nosteam/`) |
+| `-NoWwise` | звук на XAudio2, как до Wwise, даже если SDK установлен: WAV вместо банков, папка сборки с суффиксом `-nowwise`, zip `…-nowwise.zip` (ключ уйдёт вместе с XAudio2, см. «Звук: Wwise») |
+| `-WwiseSdk <папка SDK>` | где искать установленный SDK Wwise (папка `SDK` установки; рядом с ней `Licenses`). Иначе `WWISE_SDK_DIR` из кэша папки сборки, затем переменная `WWISESDK`. Нужен для сборки с Wwise и для лицензий кодеков. SDK не найден — предупреждение и пакет с XAudio2, как с `-NoWwise` (см. «Звук: Wwise»); названная здесь папка, где нет SDK, — ошибка |
 | `-CopyZipTo <папка>` | скопировать готовый zip ещё и сюда (папка создаётся) |
 
 ## Shipping-сборка
@@ -67,13 +69,13 @@ RocketArena/
   vcruntime140*.dll, msvcp140*.dll, concrt140.dll, vccorlib140.dll   Visual C++ app-local (из VC\Redist\MSVC\<версия>\x64 Visual Studio)
   config\app.json              окно 1600x900, startScene = rocket_league.json, startInGame = true
   myengine.myproject           проект RocketArena, карта по умолчанию — rocket_league
-  assets\                      сцены, модели, материалы, текстуры, шейдеры (.hlsl: компилируются при запуске), data, audio, fonts, fx
+  assets\                      сцены, модели, материалы, текстуры, шейдеры (.hlsl: компилируются при запуске), data, audio (с Wwise: банки audio/wwise/*.bnk, без WAV), fonts, fx
   licenses\                    лицензии сторонних компонентов
   README.txt, version.txt      README на русском и английском (запуск, управление, игра с другом через Steam, LAN, IP и VPN, брандмауэр, где логи и дампы); версия, коммит, есть ли Steam
   steam_api64.dll, steam_appid.txt   только с -WithSteam
 ```
 
-Не нужны и не кладутся: `d3dcompiler_47.dll`, XAudio2, XInput, универсальный CRT (всё это часть Windows 10 и 11), PDB, кэши `.myemesh` / `.myetex`, тестовые и редакторские ассеты (`stress_5000.json`, демо-сцены, скрипты, префабы, ассистент).
+Не нужны и не кладутся: `d3dcompiler_47.dll`, XAudio2, XInput, DLL и файлы SDK Wwise (библиотеки статические), универсальный CRT (всё это часть Windows 10 и 11), PDB, кэши `.myemesh` / `.myetex`, тестовые и редакторские ассеты (`stress_5000.json`, демо-сцены, скрипты, префабы, ассистент).
 
 **Размер:** папка 42.6 МБ (ассеты 24.5, Python 10.4, exe 5.6, CRT 2), zip 19 МБ при цели ≤ 300 МБ.
 
@@ -131,9 +133,41 @@ SDK в репозиторий не кладётся ([steam-setup.md](steam-setu
 
 Что получает игрок: Steam работает у обоих, если запущен клиент Steam, оба в друзьях и оба запускают игру из папки со `steam_appid.txt` (в Steam пишется «Играет в Spacewar»). Без клиента Steam (или без `steam_appid.txt`) экраны выбора Steam показывают причину («Steam is not available: …»), всё остальное (боты, LAN, IP) работает. Условия распространения SDK подтверждает владелец аккаунта: в zip попадает только `steam_api64.dll` из `redistributable_bin`, ничего другого из SDK.
 
+## Звук: Wwise
+
+По умолчанию пакет собирается с `-DMYENGINE_WWISE=ON`: игра играет через Wwise ([../engine/wwise.md](../engine/wwise.md)), библиотеки SDK линкуются в `RocketArena.exe` статически (конфигурация Release: библиотеки Wwise Release и `AK_OPTIMIZED`, без связи с Wwise Authoring и профайлера). SDK Wwise в репозитории нет, его ставит сам разработчик ([../engine/wwise.md](../engine/wwise.md), раздел «Установка SDK»; шаги Launcher — в корневом README.md, раздел «Wwise SDK»). Поэтому пакет собирается по-разному, в зависимости от того, есть ли SDK на машине (скрипт ищет его в самом начале, до долгой сборки: `-WwiseSdk`, затем `WWISE_SDK_DIR` в кэше папки сборки, затем переменная `WWISESDK`):
+
+| Что на машине | Что делает скрипт |
+| --- | --- |
+| SDK найден, `-NoWwise` не задан | пакет с Wwise (как описано ниже); в консоли строка `Wwise SDK: <папка>` |
+| SDK не найден, `-NoWwise` не задан | заметное предупреждение (чего не нашёл, что собирается без Wwise, куда смотреть: README.md, раздел «Wwise SDK») и пакет с XAudio2, как с `-NoWwise`: WAV вместо банков, папка сборки с суффиксом `-nowwise`, zip `…-nowwise.zip`, `wwise no` в `version.txt` |
+| задан `-NoWwise` | пакет с XAudio2, SDK не ищется и не нужен |
+| `-WwiseSdk <папка>` указывает не на SDK | ошибка: в папке нет `include\AK\SoundEngine\Common\AkSoundEngine.h` |
+
+`check_package.ps1` принимает оба варианта пакета (по `version.txt`). Версия SDK скриптом не проверяется: её проверяет CMake при настройке сборки (другая серия — ошибка, другой выпуск 2025.1 — предупреждение).
+
+В пакете с Wwise рядом с exe **нет** ни одной DLL Wwise (библиотеки линкуются статически), а в пакете нет ни `.lib`, ни `.h`, ни другого файла SDK: скрипт проверяет это и останавливается, если такой файл попал в `dist`.
+
+Что кладётся и что нет (раздел `wwise` в `tools/package_manifest.json`):
+
+| Что | С Wwise (по умолчанию) | С `-NoWwise` |
+| --- | --- | --- |
+| `assets/audio/wwise/Init.bnk`, `RocketArena.bnk` | да (скрипт останавливается, если банка нет: `tools\wwise\build_wwise_project.ps1`) | нет |
+| `assets/audio/*.wav` | нет: `AudioSystem` на Wwise их не открывает (`LoadSound` ничего не делает, звуки лежат в банках) | да |
+| `assets/data/audio_bank.json` | да: по нему движок берёт имена событий и шины | да |
+| `assets/audio/manifest.json` | нет (описание генератора WAV, в игре не читается) | нет |
+| `licenses/` | + `Wwise` в `THIRD_PARTY_NOTICES.txt` (© Audiokinetic, используется по лицензии), `Ogg-Vorbis-Xiph-LICENSE.txt`, `Opus-LICENSE.txt`, `OpusFile-LICENSE.txt` | как раньше |
+| `version.txt` | строка `wwise yes` | `wwise no` |
+
+Декодеры Vorbis и Opus входят в статические библиотеки Wwise, поэтому их лицензии (Xiph.Org, BSD) лежат в `licenses/`; тексты скрипт копирует из папки `Licenses` установленного Wwise (рядом с папкой `SDK`, это файлы `OggLicense.txt`, `OpusLicense.txt`, `OpusFileLicense.txt`), в репозитории их копий нет; строка о Wwise — из `tools/package_licenses_wwise/Wwise-NOTICE.txt`. Строка «XAudio2 and XInput come with Windows» в пакете с Wwise говорит только про XInput.
+
+Папка сборки настроена на одно из двух: без `-BuildDir` у пакета с `-NoWwise` своя папка с суффиксом `-nowwise` (`build-shipping-nosteam-nowwise/`). Явный `-BuildDir`, настроенный с другим значением `MYENGINE_WWISE`, даёт ошибку «use another folder or delete it». `check_package.ps1` по `version.txt` понимает, какой это пакет: у пакета с Wwise он ждёт в логе `Audio: Wwise …` и `Wwise banks from …: N events` (N — число событий `audio_bank.json` из самого пакета, сейчас 22), не ждёт банка XAudio2, считает ошибкой любую строку `WARN`/`ERROR` про банк или Wwise, и проверяет файлы: банки есть, WAV и файлов SDK нет, лицензии кодеков на месте.
+
+**Размер** (пакет без Steam, версия 0.1.0): с Wwise папка 56.1 МБ, zip 22.3 МБ; с `-NoWwise` папка 54.3 МБ, zip 21.4 МБ. Банки Wwise (5.7 МБ, PCM без сжатия) почти равны WAV, которые они заменяют, плюс библиотеки Wwise в exe. Размер банков зависит от настроек сжатия проекта Wwise ([../engine/wwise-project.md](../engine/wwise-project.md)).
+
 ## Лицензии
 
-`licenses/` собирается из `tools/package_licenses/` (`THIRD_PARTY_NOTICES.txt`, `OFL-1.1.txt` для шрифтов Inter и JetBrains Mono) и из лицензий в репозитории (Python, Jolt, FreeType, pybind11, Lucide). Тексты MIT для RocketSim, Dear ImGui, ImGuizmo, nlohmann/json, DirectXTK и DirectXTex приведены в `THIRD_PARTY_NOTICES.txt` общим текстом со ссылками на источники: авторские строки по годам нужно сверить с репозиториями проектов.
+`licenses/` собирается из `tools/package_licenses/` (`THIRD_PARTY_NOTICES.txt`, `OFL-1.1.txt` для шрифтов Inter и JetBrains Mono) и из лицензий в репозитории (Python, Jolt, FreeType, pybind11, Lucide); с Wwise добавляются лицензии кодеков и строка об Audiokinetic (раздел «Звук: Wwise»). Тексты MIT для RocketSim, Dear ImGui, ImGuizmo, nlohmann/json, DirectXTK и DirectXTex приведены в `THIRD_PARTY_NOTICES.txt` общим текстом со ссылками на источники: авторские строки по годам нужно сверить с репозиториями проектов.
 
 ## Ограничения
 

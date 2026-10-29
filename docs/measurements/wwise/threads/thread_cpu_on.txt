@@ -1,0 +1,19 @@
+﻿# on: threads of the process, CPU seconds over a run of 93 s (taken 3 s before the end of the script)
+threads: 49
+sum of the CPU of the threads: 92.75 s
+threads with CPU over 0.2 s: 11
+
+thread  53692  cpu   78,03 s  Running
+thread  53660  cpu    6,28 s  Wait
+thread  13944  cpu    2,59 s  Wait
+thread  54428  cpu    1,38 s  Wait
+thread  54616  cpu    1,13 s  Wait
+thread  48360  cpu    0,97 s  Wait
+thread  50424  cpu    0,66 s  Wait
+thread  53576  cpu    0,42 s  Wait
+thread  11788  cpu    0,34 s  Wait
+thread  32144  cpu    0,30 s  Wait
+thread  53000  cpu    0,27 s  Wait
+thread  36288  cpu    0,16 s  Wait
+thread  34100  cpu    0,13 s  Wait
+thread  52820  cpu    0,05 s  Wait

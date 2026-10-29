@@ -9,6 +9,9 @@
       - nothing is created or changed next to the exe;
       - the log is in <LOCALAPPDATA>\RocketArena\logs and names no path of the repository;
       - the log has no error line;
+      - the sound: with Wwise (version.txt says "wwise yes") the log has "Audio: Wwise", "Wwise banks from ...: N events" (N is the number of the events of
+        audio_bank.json in the package), no line about a bank, and the package has the banks, no WAV file, no file of the SDK and the licenses of the codecs;
+        without Wwise the log has the sound bank of XAudio2;
       - nothing is written to APPDATA;
       - the exe has its icon and its version info (the version of the project, "Rocket Arena");
       - a deliberate crash (MYENGINE_CRASH_TEST=1) leaves a minidump and a report in <LOCALAPPDATA>\RocketArena\crashes, and the next
@@ -53,6 +56,34 @@ function Get-Snapshot([string]$folder) {
         $result[$_.FullName.Substring($prefix.Length)] = '{0}|{1}' -f $_.Length, $_.LastWriteTimeUtc.Ticks
     }
     return $result
+}
+
+# the sound of a package: version.txt says whether it is Wwise
+function Test-WwisePackage([string]$folder) {
+    $versionFile = Join-Path $folder 'version.txt'
+    return (Test-Path $versionFile) -and ([System.IO.File]::ReadAllText($versionFile) -match '(?m)^wwise yes\s*$')
+}
+
+function Get-EventCount([string]$folder) {
+    $bank = Get-Content -Raw -Encoding UTF8 (Join-Path $folder 'assets\data\audio_bank.json') | ConvertFrom-Json
+    return @($bank.events.PSObject.Properties).Count
+}
+
+function Test-WwiseFiles([string]$folder) {
+    foreach ($bank in @('Init.bnk', 'RocketArena.bnk')) {
+        if (-not (Test-Path (Join-Path $folder "assets\audio\wwise\$bank"))) { Fail "no bank assets\audio\wwise\$bank" }
+    }
+    $wavs = @(Get-ChildItem -Path $folder -Recurse -File -Filter '*.wav')
+    if ($wavs.Count -gt 0) { Fail "a Wwise package has WAV files, the first: $($wavs[0].Name)" }
+    $sdk = @(Get-ChildItem -Path $folder -Recurse -File | Where-Object { $_.Extension -in @('.lib', '.h', '.hpp') -or $_.Name -like 'Ak*.dll' -or $_.Name -like 'Wwise*.dll' })
+    if ($sdk.Count -gt 0) { Fail "a file of the Wwise SDK is in the package: $($sdk[0].Name)" }
+    foreach ($name in @('Ogg-Vorbis-Xiph-LICENSE.txt', 'Opus-LICENSE.txt', 'OpusFile-LICENSE.txt', 'THIRD_PARTY_NOTICES.txt')) {
+        if (-not (Test-Path (Join-Path $folder "licenses\$name"))) { Fail "no licenses\$name" }
+    }
+    $notices = Join-Path $folder 'licenses\THIRD_PARTY_NOTICES.txt'
+    if ((Test-Path $notices) -and ([System.IO.File]::ReadAllText($notices).IndexOf('Audiokinetic') -lt 0)) { Fail 'licenses\THIRD_PARTY_NOTICES.txt does not name Audiokinetic' }
+    $size = @(Get-ChildItem -Path (Join-Path $folder 'assets\audio\wwise') -File | Measure-Object Length -Sum)[0].Sum
+    Write-Step ("Wwise: the banks {0:N1} MB, {1} events in audio_bank.json" -f ($size / 1MB), (Get-EventCount $folder))
 }
 
 function Invoke-Run([string]$label, [string]$folder, [string]$expectedError = '', [string[]]$expectedLog = @(), [hashtable]$environment = @{}) {
@@ -115,7 +146,13 @@ function Invoke-Run([string]$label, [string]$folder, [string]$expectedError = ''
         }
         $errors = @($text -split "`n" | Where-Object { $_ -match '\[(ERROR|FATAL)\]' -and ($expectedError -eq '' -or $_ -notmatch $expectedError) })
         if ($errors.Count -gt 0) { Fail "[$label] the log has $($errors.Count) error line(s), the first: $($errors[0].Trim())" }
-        foreach ($expected in (@('Particle effects loaded', 'sound bank') + $expectedLog)) {
+        $wwise = Test-WwisePackage $folder
+        $soundExpected = if ($wwise) { @('Audio: Wwise', 'Wwise banks from', ": $(Get-EventCount $folder) events") } else { @('sound bank') }
+        if ($wwise) {
+            $bankLines = @($text -split "`n" | Where-Object { $_ -match '(bank|Wwise)' -and $_ -match '\[(WARN|WARNING|ERROR|FATAL)\]' })
+            if ($bankLines.Count -gt 0) { Fail "[$label] the log has a warning about the sound: $($bankLines[0].Trim())" }
+        }
+        foreach ($expected in (@('Particle effects loaded') + $soundExpected + $expectedLog)) {
             if ($text.IndexOf($expected, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "[$label] the log has no '$expected'" }
         }
         Write-Step "[$label] log: $log ($([math]::Round((Get-Item $log).Length / 1KB, 1)) KB)"
@@ -240,6 +277,7 @@ Write-Step "Copying the package to $clean"
 Copy-Item -Recurse $source $clean
 
 Test-ExeResources $clean
+if (Test-WwisePackage $clean) { Test-WwiseFiles $clean }
 Invoke-Run 'full' $clean
 Test-Crash $clean
 Test-Steam $clean

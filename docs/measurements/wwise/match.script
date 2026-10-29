@@ -1,0 +1,7 @@
+# on: menu, match 2v2, quit
+4.0 key Enter
+6.0 key Down
+6.4 key Down
+6.8 key Down
+8.0 key Enter
+90 quit

@@ -1,0 +1,13 @@
+﻿{
+    "side":  "on",
+    "tag":  "on_plain_run2",
+    "tracy":  false,
+    "exit":  0,
+    "wallSeconds":  93.5,
+    "cpuSecondsTotal":  90.94,
+    "cpuPercentOfOneCoreInWindow":  99.7,
+    "workingSetMaxMB":  538,
+    "workingSetWindowMeanMB":  515.6,
+    "privateMaxMB":  988.3,
+    "samples":  181
+}

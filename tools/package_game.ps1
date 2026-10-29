@@ -6,6 +6,11 @@
     1. Configures build-shipping/ (MYENGINE_SHIPPING=ON, no tests, Release) and builds the myengine target. With the Steamworks SDK found
        (see -SteamSdk) the exe is built with Steam; without it, with a warning, the package has no Steam.
     2. Collects the assets by tools/package_manifest.json (roots plus everything the scenes, materials and data name).
+       Wwise (the sound engine, docs/engine/wwise.md) is on by default: -DMYENGINE_WWISE=ON, the banks of assets/audio/wwise are in the package,
+       the WAV files of assets/audio are not (Wwise does not open them), and licenses/ has the notice of Wwise and the licenses of its codecs
+       (Ogg, Opus, OpusFile; the license files are copied from the installed SDK of Wwise, see -WwiseSdk). The SDK is not in the repository: when it
+       is not found the script warns and builds the package with the XAudio2 sound (WAV files, no banks), as with -NoWwise; install it
+       (README.md, section "Wwise SDK") to get the package with Wwise.
     3. Puts together dist/RocketArena: exe, python314.dll / python314.zip, the Visual C++ runtime app-local,
        assets, config/app.json (starts the Rocket League map), myengine.myproject, README.txt, licenses/.
     4. Writes dist/RocketArena-<version>-win64-steam.zip (or -nosteam.zip). The version is the one of project(myengine VERSION ...) in the
@@ -27,6 +32,13 @@
     Steam is required: stop if the SDK is not found (without the switch the SDK is looked for, and a missing one is only a warning).
 .PARAMETER NoSteam
     Do not look for the SDK: the package has no Steam (LAN and IP only).
+.PARAMETER NoWwise
+    Build with the XAudio2 sound (MYENGINE_WWISE=OFF) as before Wwise: the WAV files, no banks (build folder with the suffix -nowwise, zip with
+    the suffix -nowwise). Goes away when XAudio2 does.
+.PARAMETER WwiseSdk
+    The folder SDK of the installed Wwise (the one with include\AK and x64_vc180 or x64_vc170; the folder Licenses is next to it). Without it: WWISE_SDK_DIR in the
+    cache of the build folder, then the environment variable WWISESDK (the Audiokinetic Launcher sets it). Used for the build and for the license files of the codecs.
+    Not found: a warning and the package with XAudio2 (as -NoWwise); a folder that is named here and is not an SDK: an error.
 .PARAMETER SteamSdk
     The folder of the unpacked Steamworks SDK (the one with redistributable_bin). Without it: the environment variable STEAMWORKS_SDK_DIR,
     the first line of tools\steam_sdk.txt (a local file), then the folders "sdk" / "steamworks_sdk" next to the repository (up the tree).
@@ -42,7 +54,9 @@ param(
     [switch]$NoZip,
     [switch]$WithSteam,
     [switch]$NoSteam,
+    [switch]$NoWwise,
     [string]$SteamSdk = '',
+    [string]$WwiseSdk = '',
     [string]$CopyZipTo = ''
 )
 
@@ -130,8 +144,54 @@ if (-not $NoSteam) {
     else { Write-Warning 'The Steamworks SDK was not found: the package is built WITHOUT Steam (LAN and IP only). -SteamSdk <folder> or STEAMWORKS_SDK_DIR fixes that; docs/game/steam-setup.md.' }
 }
 $steamTag = if ($useSteam) { 'steam' } else { 'nosteam' }
+$useWwise = -not $NoWwise
+# ---------------------------------------------------------------- Wwise: the SDK is looked for before the long build (the license files of the codecs come from it)
+$wwiseHelp = 'Install Wwise (the exact version is in cmake\Wwise.cmake) in the Audiokinetic Launcher: README.md, section "Wwise SDK", docs/engine/wwise.md; or build the package without Wwise with -NoWwise (XAudio2).'
+function Test-WwiseSdk([string]$folder) {
+    return $folder -and (Test-Path (Join-Path $folder 'include\AK\SoundEngine\Common\AkSoundEngine.h'))
+}
+
+function Find-WwiseSdk {
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+    if ($WwiseSdk) { $candidates.Add($WwiseSdk) }
+    # the cache of the folder that a Wwise package is built in (without the suffix -nowwise)
+    $wwiseBuildDir = if ($PSBoundParameters.ContainsKey('BuildDir') -or $useSteam) { $BuildDir } else { $BuildDir + '-nosteam' }
+    $cacheFile = Join-Path ([System.IO.Path]::GetFullPath((Join-Path $root $wwiseBuildDir))) 'CMakeCache.txt'
+    if (-not $WwiseSdk -and (Test-Path $cacheFile)) {
+        $line = Select-String -Path $cacheFile -Pattern '^WWISE_SDK_DIR:[A-Z]+=(.+)$' | Select-Object -First 1
+        if ($line) { $candidates.Add($line.Matches[0].Groups[1].Value.Trim().Replace('/', '\')) }
+    }
+    $fromEnvironment = [Environment]::GetEnvironmentVariable('WWISESDK')
+    if ($fromEnvironment) { $candidates.Add($fromEnvironment) }
+    foreach ($candidate in $candidates) {
+        $folder = $candidate.TrimEnd('\')
+        if (-not (Test-WwiseSdk $folder) -and (Test-WwiseSdk (Join-Path $folder 'SDK'))) { $folder = Join-Path $folder 'SDK' }
+        if (Test-WwiseSdk $folder) { return [System.IO.Path]::GetFullPath($folder) }
+        if ($WwiseSdk -and $candidate -eq $WwiseSdk) { throw "-WwiseSdk $candidate is not the SDK of Wwise (include\AK\SoundEngine\Common\AkSoundEngine.h is expected). $wwiseHelp" }
+    }
+    return $null
+}
+
+$wwiseSdkFolder = $null
+if ($useWwise) {
+    $wwiseSdkFolder = Find-WwiseSdk
+    if ($wwiseSdkFolder) { Write-Step "Wwise SDK: $wwiseSdkFolder" }
+    else {
+        # the SDK is not in the repository: whoever has not installed it still gets a package, with the XAudio2 sound, as with -NoWwise
+        Write-Warning ("The Wwise SDK was not found (-WwiseSdk is not given, WWISE_SDK_DIR is not in the cache of the build folder, the environment variable WWISESDK is not set): " +
+            "the package is built WITHOUT Wwise, with the XAudio2 sound (the WAV files of assets/audio, no banks), the same as with -NoWwise. " +
+            "To build it with Wwise install the SDK: README.md, section ""Wwise SDK"" (details: docs/engine/wwise.md), then -WwiseSdk <folder SDK> or the variable WWISESDK.")
+        $useWwise = $false
+    }
+}
 # a build folder is configured for one of the two: the second one gets a folder of its own unless -BuildDir says otherwise
-if (-not $PSBoundParameters.ContainsKey('BuildDir') -and -not $useSteam) { $BuildDir = 'build-shipping-nosteam'; $buildPath = [System.IO.Path]::GetFullPath((Join-Path $root $BuildDir)) }
+# (the same for Wwise: -NoWwise has the suffix -nowwise)
+if (-not $PSBoundParameters.ContainsKey('BuildDir')) {
+    if (-not $useSteam) { $BuildDir += '-nosteam' }
+    if (-not $useWwise) { $BuildDir += '-nowwise' }
+    $buildPath = [System.IO.Path]::GetFullPath((Join-Path $root $BuildDir))
+}
+Write-Step "Sound: $(if ($useWwise) { 'Wwise (the banks of assets/audio/wwise)' } else { 'XAudio2 (the WAV files of assets/audio)' })"
 
 # ---------------------------------------------------------------- build
 $exe = Join-Path $buildPath 'app\Release\RocketArena.exe'
@@ -147,7 +207,9 @@ if (-not $SkipBuild) {
     if (-not (Test-Path $cache)) {
         Write-Step "Configuring $BuildDir ($($vs.Generator))"
         $configure = @('-S', $root, '-B', $buildPath, '-G', $vs.Generator, '-A', 'x64',
-            '-DMYENGINE_SHIPPING=ON', '-DMYENGINE_BUILD_TESTS=OFF', '-DMYENGINE_COPY_RUNTIME_ASSETS=OFF')
+            '-DMYENGINE_SHIPPING=ON', '-DMYENGINE_BUILD_TESTS=OFF', '-DMYENGINE_COPY_RUNTIME_ASSETS=OFF',
+            "-DMYENGINE_WWISE=$(if ($useWwise) { 'ON' } else { 'OFF' })")
+        if ($useWwise) { $configure += "-DWWISE_SDK_DIR=$($wwiseSdkFolder.Replace('\', '/'))" }
         if ($useSteam) { $configure += @('-DMYENGINE_STEAM=ON', "-DSTEAMWORKS_SDK_DIR=$($SteamSdk.Replace('\', '/'))") }
         Invoke-Native 'cmake' $configure
     }
@@ -160,6 +222,12 @@ if (-not $SkipBuild) {
     elseif (-not $useSteam -and (Select-String -Path $cache -Pattern '^MYENGINE_STEAM:BOOL=ON' -Quiet)) {
         throw "$BuildDir was configured with MYENGINE_STEAM=ON, and this package is without Steam: use another folder (-BuildDir) or delete it"
     }
+    elseif ($useWwise -and -not (Select-String -Path $cache -Pattern '^MYENGINE_WWISE:BOOL=ON' -Quiet)) {
+        throw "$BuildDir was configured without MYENGINE_WWISE=ON: use another folder (-BuildDir) or delete it (-NoWwise is the build with XAudio2)"
+    }
+    elseif (-not $useWwise -and (Select-String -Path $cache -Pattern '^MYENGINE_WWISE:BOOL=ON' -Quiet)) {
+        throw "$BuildDir was configured with MYENGINE_WWISE=ON, and -NoWwise asks for XAudio2: use another folder (-BuildDir) or delete it"
+    }
     Write-Step 'Building the myengine target (Release)'
     Invoke-Native 'cmake' @('--build', $buildPath, '--config', 'Release', '--target', 'myengine')
 }
@@ -167,6 +235,9 @@ if (-not (Test-Path $exe)) { throw "$exe not found" }
 if ($useSteam -and -not (Select-String -Path (Join-Path $buildPath 'CMakeCache.txt') -Pattern '^MYENGINE_STEAM:BOOL=ON' -Quiet)) {
     throw "$BuildDir was built without MYENGINE_STEAM=ON: the exe has no Steam code, steam_api64.dll next to it would do nothing"
 }
+$wwiseBuilt = Select-String -Path (Join-Path $buildPath 'CMakeCache.txt') -Pattern '^MYENGINE_WWISE:BOOL=ON' -Quiet
+if ($useWwise -and -not $wwiseBuilt) { throw "$BuildDir was built without MYENGINE_WWISE=ON: the exe plays through XAudio2 and the banks would do nothing" }
+if (-not $useWwise -and $wwiseBuilt) { throw "$BuildDir was built with MYENGINE_WWISE=ON: the exe plays through Wwise and the WAV files would do nothing" }
 # the exe says the same version as the project (the resources of the exe: app/resources/RocketArena.rc.in)
 $exeInfo = (Get-Item $exe).VersionInfo
 if ($exeInfo.ProductVersion -notlike "$version*") { throw "The exe says version '$($exeInfo.ProductVersion)', the project says ${version}: reconfigure and rebuild $BuildDir" }
@@ -196,7 +267,9 @@ function ConvertTo-ExcludeRegex([string]$glob) {
     return '^' + $builder.ToString() + '$'
 }
 
-$excludes = @($manifest.exclude | ForEach-Object { [regex]::new((ConvertTo-ExcludeRegex $_), 'IgnoreCase') })
+# the sound: with Wwise the banks and no WAV files, without it the WAV files and no banks (the "wwise" part of the manifest)
+$excludeGlobs = @($manifest.exclude) + @(if ($useWwise) { $manifest.wwise.excludeWith } else { $manifest.wwise.excludeWithout })
+$excludes = @($excludeGlobs | ForEach-Object { [regex]::new((ConvertTo-ExcludeRegex $_), 'IgnoreCase') })
 function Test-Excluded([string]$relative) {
     foreach ($pattern in $excludes) { if ($pattern.IsMatch($relative)) { return $true } }
     return $false
@@ -245,6 +318,13 @@ if ($manifest.followReferences) {
     }
 }
 foreach ($line in $missing) { Write-Warning "Referenced file not found: $line" }
+if ($useWwise) {
+    foreach ($bank in $manifest.wwise.banks) {
+        if (-not $files.Contains($bank)) { throw "The Wwise bank $bank is not in the package: tools\wwise\build_wwise_project.ps1 makes the banks" }
+    }
+    $wavs = @($files | Where-Object { $_ -like '*.wav' })
+    if ($wavs.Count -gt 0) { throw "WAV files are in a Wwise package: $($wavs[0])" }
+}
 Write-Step "$($files.Count) asset files"
 
 # ---------------------------------------------------------------- the folder
@@ -305,9 +385,28 @@ foreach ($license in $manifest.licenses.copy) {
     Copy-Item $source (Join-Path $licenseDir $license.to)
 }
 
+# Wwise: the notice of Audiokinetic and the licenses of the codecs that the libraries of the SDK have in them (Vorbis, Opus: linked statically, so
+# there is no DLL of Wwise to put next to the exe); the license files are copied from the installed SDK. Nothing of the SDK (headers, libraries) goes into the package.
+if ($useWwise) {
+    # the license files of the codecs are not in the repository: they are in the installation of Wwise, in the folder Licenses next to the folder SDK
+    $wwiseLicenses = Join-Path (Split-Path -Parent $wwiseSdkFolder) 'Licenses'
+    foreach ($license in $manifest.wwise.licenses) {
+        $source = Join-Path $wwiseLicenses $license.from
+        if (-not (Test-Path $source)) { throw "License file not found: $source (the folder Licenses of the installed Wwise, next to $wwiseSdkFolder). $wwiseHelp" }
+        Copy-Item $source (Join-Path $licenseDir $license.to)
+    }
+    $notices = Join-Path $licenseDir 'THIRD_PARTY_NOTICES.txt'
+    $noticeText = [System.IO.File]::ReadAllText($notices)
+    $wwiseNotice = [System.IO.File]::ReadAllText((Join-Path $root $manifest.wwise.notice)).TrimEnd()
+    $noticeText = $noticeText.Replace('XAudio2 and XInput come with Windows.', 'XInput comes with Windows.')
+    Write-TextFile $notices ($noticeText.TrimEnd() + "`r`n`r`n" + ($wwiseNotice -replace "`r?`n", "`r`n") + "`r`n") $false
+}
+$sdkFiles = @(Get-ChildItem -Path $dist -Recurse -File | Where-Object { $_.Extension -in @('.lib', '.h', '.hpp', '.pdb', '.tar', '.xz') -or $_.Name -like 'Ak*.dll' -or $_.Name -like 'Wwise*.dll' })
+if ($sdkFiles.Count -gt 0) { throw "Files of an SDK are in the package: $($sdkFiles[0].FullName)" }
+
 $commit = 'unknown'
 try { $commit = (& git -C $root rev-parse --short HEAD 2>$null | Out-String).Trim() } catch { }
-Write-TextFile (Join-Path $dist 'version.txt') ("$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`n") $false
+Write-TextFile (Join-Path $dist 'version.txt') ("$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n") $false
 
 # Steam (only with the SDK; see docs/game/rl-online.md section 7.4)
 if ($useSteam) {
@@ -330,7 +429,7 @@ Get-ChildItem -Path $dist | ForEach-Object {
 }
 
 if (-not $NoZip) {
-    $zip = Join-Path $outDir "$gameName-$version-win64-$steamTag.zip"
+    $zip = Join-Path $outDir "$gameName-$version-win64-$steamTag$(if ($useWwise) { '' } else { '-nowwise' }).zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($dist, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)

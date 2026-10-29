@@ -4,6 +4,10 @@
 // or Windows type is visible here. Without a sound device (or with AudioConfig::useDevice = false) everything works the same:
 // the voices are simulated in time, so the game and the tests run on a machine without sound.
 //
+// With MYENGINE_WWISE=ON (cmake/Wwise.cmake) the same class is implemented on Wwise instead (engine/src/audio/wwise/WwiseAudioSystem.cpp, docs/engine/wwise.md):
+// the events of the bank are the events of the Wwise project, the volume and the pitch of a voice are its game parameters. The calls that have no meaning for
+// Wwise (LoadSound, CreateSound, UnloadSound, GetSoundInfo, Play, GetVoiceGain) do nothing there and say so in the log. The header is the same in both builds.
+//
 // One thread: the game thread calls everything, Update(dt) once per frame.
 
 #pragma once
@@ -92,7 +96,7 @@ namespace myengine::audio
 
         AudioStats GetStats() const;
         std::uint32_t ActiveVoiceCount() const;
-        std::uint32_t VoiceCount() const { return static_cast<std::uint32_t>(voices_.size()); }
+        std::uint32_t VoiceCount() const;
 
     private:
         struct Sound
@@ -159,6 +163,10 @@ namespace myengine::audio
         std::uint64_t startCounter_ = 0;
         std::uint32_t randomState_ = 1;
         AudioStats stats_;
+
+        // The state of the Wwise implementation (defined in WwiseAudioSystem.cpp; empty, and unused, in the XAudio2 build): the same layout in both builds
+        struct WwiseState;
+        std::unique_ptr<WwiseState> wwise_;
     };
 
     // The audio system of the process: Application initializes it (device, sound bank), the scene systems and the game play through it

@@ -1,0 +1,13 @@
+﻿{
+    "side":  "on",
+    "tag":  "on_tracy_run2",
+    "tracy":  true,
+    "exit":  0,
+    "wallSeconds":  93.4,
+    "cpuSecondsTotal":  94.45,
+    "cpuPercentOfOneCoreInWindow":  104.1,
+    "workingSetMaxMB":  546.7,
+    "workingSetWindowMeanMB":  541,
+    "privateMaxMB":  991.8,
+    "samples":  181
+}

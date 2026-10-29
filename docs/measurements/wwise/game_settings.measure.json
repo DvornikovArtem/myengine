@@ -1,0 +1,43 @@
+{
+  "audio": {
+    "effects": 1.0,
+    "master": 0.029999999329447746,
+    "music": 0.6000000238418579
+  },
+  "camera": {
+    "angle": -3.0,
+    "ballCamHold": false,
+    "distanceCm": 270.0,
+    "fov": 110.0,
+    "heightCm": 100.0,
+    "stiffness": 0.44999998807907104,
+    "swivelSpeed": 4.699999809265137,
+    "transitionSpeed": 1.2000000476837158,
+    "wallTilt": 0.0
+  },
+  "car": "fusion",
+  "invertPitch": false,
+  "play": {
+    "botLevel": 1,
+    "hostFillBots": true,
+    "hostPort": 27015,
+    "hostTeamSize": 2,
+    "joinAddress": "",
+    "mode": 2,
+    "playerName": "",
+    "recent": []
+  },
+  "version": 1,
+  "video": {
+    "bloom": true,
+    "fpsLimit": 0,
+    "height": 720,
+    "msaa": 4,
+    "shadows": 2,
+    "showFps": false,
+    "uiScalePercent": 100,
+    "vsync": false,
+    "width": 1280,
+    "windowMode": 0
+  }
+}
