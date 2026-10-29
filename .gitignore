@@ -60,3 +60,9 @@ external/**/x64/**
 
 # Editor runtime data of a project (assistant chats index, thumbnails)
 Saved/
+
+# Face ID: ONNX Runtime and the models (tools/faceid/fetch_models.ps1), the test photos and the profiles never go to the repository
+external/onnxruntime/
+assets/faceid/models/
+assets/faceid/licenses/
+assets/faceid/test/
