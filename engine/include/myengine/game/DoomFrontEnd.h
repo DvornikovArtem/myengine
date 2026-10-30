@@ -34,6 +34,8 @@ namespace myengine::game
         virtual ~IDoomBrainView() = default;
         // `alpha` 0..1: how strongly the picture is drawn (the menu fades it in and out); `quiet`: the brain is at rest, not running a game (the menu: it breathes)
         virtual void Draw(ImDrawList* list, float x, float y, float width, float height, double deltaSeconds, float alpha) = 0;
+        // 0: the main screen (the brain is the hero, right of the buttons), 1: a screen under it (the brain is dimmer and a little farther right, behind the content)
+        virtual void SetNested(float mix) { (void)mix; }
         // Where the brain runs and how it does ("GPU (NVIDIA ...)", "CPU, 0.8x real time"); empty while it loads
         virtual std::string Status() const { return {}; }
         // The connectome is not here, the cloud could not be made ...: a line for the menu; empty when all is well

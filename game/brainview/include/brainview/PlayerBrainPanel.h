@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <brainview/BrainLayout.h>
 #include <brainview/BrainView.h>
 
 #include <flybrain/Connectome.h>
@@ -32,6 +33,7 @@ namespace brainview
             double simSeconds = 0.0;      // when it spiked, on the clock of the brain
         };
         std::shared_ptr<const flybrain::Connectome> connectome;   // the positions of the cloud; the same for the whole game
+        std::vector<BrainGroup> groups;   // the neurons the player is steered by, coloured in the cloud; read until the view is made (the first frame), then left empty
         std::vector<Spike> spikes;        // a brain on the CPU: the spikes since the last look (oldest first)
         double simSecondsNow = 0.0;       // the clock of the brain at this look
         bool gpu = false;                 // a brain on the GPU (the render device): `gpuFlash` is the source of the flashes and `spikes` stay empty
@@ -53,9 +55,10 @@ namespace brainview
         // Once per frame, before the drawing: the brain of this frame (the flashes of the spikes) and the real time of the frame
         void Update(const BrainFeedFrame& frame, double deltaSeconds);
 
-        // The picture in the rect (window pixels) with a small HUD over it. A dark box while the cloud is made, and while the big brain is on.
+        // The picture of the cloud in the rect (window pixels), the whole fly in it. Nothing while the cloud is made and while the big brain is on.
         void DrawPanel(ImDrawList* list, float x, float y, float width, float height);
-        // Tab: the cloud over the whole window; DrawOverlay draws it (after the picture of the game and the panel) while it is on
+        // Tab: the cloud over the whole window (about three quarters of its height); DrawOverlay draws it dimmed over the picture of the game while it is on. The legend
+        // and the texts are the owner's (the flow draws them with the UI kit).
         void ToggleBig() { big_ = !big_; }
         bool Big() const { return big_; }
         void DrawOverlay(ImDrawList* list, float width, float height);
@@ -63,8 +66,7 @@ namespace brainview
         BrainView* View() { return view_.get(); }
 
     private:
-        bool EnsureView(const std::shared_ptr<const flybrain::Connectome>& connectome);
-        void DrawHud(ImDrawList* list, float x, float y, float width, float height, bool big);
+        bool EnsureView(const BrainFeedFrame& frame);
 
         myengine::render::IRenderAdapter* render_;
         myengine::editor::ThumbnailService* thumbnails_;

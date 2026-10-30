@@ -141,18 +141,20 @@ namespace brainview
         }
         shown_ = std::min(1.0f, shown_ + static_cast<float>(deltaSeconds) / 1.5f);
 
-        // the picture: a texture of the live views, a frame behind; not larger than 1600 on a side
-        const float scale = std::min(1.0f, kMaxSide / std::max(width, height));
-        const std::uint32_t pixelsW = std::max(64u, static_cast<std::uint32_t>(width * scale));
+        // the picture: a texture of the live views, a frame behind. The brain is in the right 60 % of the window, whole, with a margin around it; on a screen under the
+        // main one it is a tenth of the window farther right and dimmer, behind the content.
+        const float pictureWidth = width * 0.60f;
+        const float pictureX = x + width * 0.40f + width * 0.10f * nested_;
+        const float scale = std::min(1.0f, kMaxSide / std::max(pictureWidth, height));
+        const std::uint32_t pixelsW = std::max(64u, static_cast<std::uint32_t>(pictureWidth * scale));
         const std::uint32_t pixelsH = std::max(64u, static_cast<std::uint32_t>(height * scale));
+        view_->FitCamera(pictureWidth / std::max(height, 1.0f), 0.10f);
         const myengine::render::TextureHandle texture = view_->Submit(*context_.thumbnails, kViewId, pixelsW, pixelsH);
-        const float strength = std::clamp(alpha, 0.0f, 1.0f) * shown_;
+        const float strength = std::clamp(alpha, 0.0f, 1.0f) * shown_ * (1.0f - 0.55f * nested_);
         if (texture.IsValid() && strength > 0.0f)
         {
-            // the brain sits right of the text of the menu: the picture is moved by a fifth of the window
             list->PushClipRect(ImVec2(x, y), ImVec2(x + width, y + height), true);
-            const float shift = width * 0.17f;
-            list->AddImage(static_cast<ImTextureID>(static_cast<ImU64>(texture.value)), ImVec2(x + shift, y), ImVec2(x + width + shift, y + height), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
+            list->AddImage(static_cast<ImTextureID>(static_cast<ImU64>(texture.value)), ImVec2(pictureX, y), ImVec2(pictureX + pictureWidth, y + height), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
                            IM_COL32(255, 255, 255, static_cast<int>(strength * 255.0f)));
             // scan lines, as on the monitor of a laboratory: a dark line every fourth pixel at a few percent
             const float step = std::max(3.0f, std::floor(height / 270.0f));

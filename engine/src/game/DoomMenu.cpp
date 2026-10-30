@@ -164,6 +164,50 @@ namespace myengine::game
         quitAsked_ = false;
     }
 
+    DoomMenu::PauseResult DoomMenu::DrawPause(Frame& f, const bool canGoBack, const bool allowBack)
+    {
+        f.SetSpace(rlui::Space::Screen);
+        paint::Dim(f, rlui::Color{0.0f, 0.0f, 0.0f, 0.62f});
+        f.SetSpace(rlui::Space::Menu);
+        SideShade(f, 760.0f);
+        f.SetDefaultFocus(HashId("fd/pause-resume"));
+        ScreenTitle(f, "PAUSE", "FLY\nDOOM", {80.0f, 76.0f}, true);
+        PauseResult result = PauseResult::None;
+        Column column({80.0f, 470.0f, style::kMenuButtonWidth, style::kMenuButtonHeight}, style::kMenuButtonStep);
+        if (MenuButton(f, HashId("fd/pause-resume"), column.Next(), "RESUME", Icon::Play))
+        {
+            result = PauseResult::Resume;
+        }
+        if (MenuButton(f, HashId("fd/pause-doom"), column.Next(), "DOOM MENU", Icon::Settings))
+        {
+            result = PauseResult::DoomMenu;
+        }
+        if (canGoBack && MenuButton(f, HashId("fd/pause-lab"), column.Next(), "LABORATORY", Icon::Home))
+        {
+            result = PauseResult::Laboratory;
+        }
+        if (MenuButton(f, HashId("fd/pause-exit"), column.Next(), "EXIT", Icon::Exit))
+        {
+            result = PauseResult::Quit;
+        }
+        if (canGoBack)
+        {
+            paint::Text(f, FontStyle::SemiBold, 20.0f, {84.0f, 900.0f}, style::kTextDim, "LABORATORY starts the program again: DOOM runs once in a process.");
+        }
+        std::vector<Hint> hints = {{Glyph::UpDown, Glyph::PadDpad, "Select"}, {Glyph::Enter, Glyph::PadA, "Confirm"}, {Glyph::Esc, Glyph::PadB, "Resume"}};
+        HintBar(f, Span<Hint>(hints));
+        if (allowBack && f.input().Pressed(Nav::Back) && result == PauseResult::None)
+        {
+            result = PauseResult::Resume;
+        }
+        return result;
+    }
+
+    bool DoomMenu::Nested() const
+    {
+        return screen_ != Screen::Main;
+    }
+
     void DoomMenu::ShowScreen(const std::string_view name)
     {
         screen_ = name == "play" ? Screen::Play : (name == "settings" ? Screen::Settings : (name == "about" ? Screen::About : Screen::Main));
@@ -257,7 +301,11 @@ namespace myengine::game
         }
         if (!model.wadProblem.empty())
         {
-            paint::Text(f, FontStyle::SemiBold, 22.0f, {84.0f, 840.0f}, style::kBad, "No game data found: open PLAY for what to do.");
+            const Rect plate{80.0f, 800.0f, 700.0f, 56.0f};
+            paint::Parallelogram(f, plate, Color::Hex(0x3a2e0c, 0.86f));
+            paint::ParallelogramOutline(f, plate, style::kBoostA.Faded(0.7f), 1.5f);
+            paint::IconGlyph(f, Icon::Info, 24.0f, {plate.x + 36.0f, plate.y + plate.h * 0.5f}, style::kBoostA);
+            paint::Text(f, FontStyle::SemiBold, 20.0f, {plate.x + 62.0f, plate.y + 14.0f}, style::kBoostA, "Game data not found: PLAY shows how to add DOOM or Freedoom");
         }
         else if (!model.brainProblem.empty())
         {
@@ -419,7 +467,7 @@ namespace myengine::game
         SideShade(f, 1500.0f);
         f.SetDefaultFocus(HashId("fd/sfx"));
         ScreenTitle(f, "SETTINGS", "SOUND, MOUSE, WINDOW");
-        float y = 270.0f;
+        float y = 220.0f;
         const float step = 66.0f;
         const auto next = [&]() { const Rect r{80.0f, y, 1100.0f, 58.0f}; y += step; return r; };
         const auto percent = [](const float value) { return Format("%d%%", static_cast<int>(std::lround(value * 100.0f))); };
@@ -440,7 +488,7 @@ namespace myengine::game
             settings.musicOn = value;
         }
         {
-            const float value = SliderRow(f, HashId("fd/mouse"), next(), "Mouse turn", settings.mouseSensitivity * 100.0f, 25.0f, 300.0f, 25.0f, percent(settings.mouseSensitivity)) / 100.0f;
+            const float value = SliderRow(f, HashId("fd/mouse"), next(), "Mouse turn", settings.mouseSensitivity * 100.0f, 50.0f, 150.0f, 10.0f, Format("%.2fx", settings.mouseSensitivity)) / 100.0f;
             changed = changed || value != settings.mouseSensitivity;
             settings.mouseSensitivity = value;
         }
@@ -461,7 +509,7 @@ namespace myengine::game
             changed = changed || value != settings.brainBackdrop;
             settings.brainBackdrop = value;
         }
-        Chip(f, {1850.0f, 60.0f}, "SAVED ON LEAVING", Icon::Check);
+        Chip(f, {1850.0f, 60.0f}, "SAVED AS YOU CHANGE", Icon::Check);
         std::vector<Hint> hints = {{Glyph::UpDown, Glyph::PadDpad, "Select"}, {Glyph::LeftRight, Glyph::PadDpad, "Change"}, {Glyph::Esc, Glyph::PadB, "Back"}};
         HintBar(f, Span<Hint>(hints));
         if (f.input().Pressed(Nav::Back))
@@ -475,7 +523,11 @@ namespace myengine::game
     {
         SideShade(f, 1700.0f);
         ScreenTitle(f, "ABOUT", "WHO MADE THIS");
-        const Rect view{80.0f, 250.0f, 1600.0f, 720.0f};
+        // the text lies on a plate: the cloud behind the screen does not take its contrast
+        const Rect plate{64.0f, 236.0f, 1250.0f, 650.0f};
+        paint::Parallelogram(f, plate, style::kNavy);
+        paint::ParallelogramOutline(f, plate, style::kLine, 1.0f);
+        const Rect view{96.0f, 258.0f, 1150.0f, 608.0f};
         // the lines that are longer than the view go on to the next row
         struct Row
         {
@@ -541,7 +593,7 @@ namespace myengine::game
         {
             Go(f, Screen::Main);
         }
-        std::vector<Hint> hints = {{Glyph::Enter, Glyph::PadA, "Back"}, {Glyph::Esc, Glyph::PadB, "Back"}};
+        std::vector<Hint> hints = {{Glyph::Esc, Glyph::PadB, "Back"}};
         HintBar(f, Span<Hint>(hints));
         if (f.input().Pressed(Nav::Back))
         {

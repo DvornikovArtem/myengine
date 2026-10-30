@@ -512,6 +512,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 #ifdef MYENGINE_SOURCE_DIR
         fly.sourceDirectory = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
 #endif
+#ifndef MYENGINE_FLYDOOM
+        options.doom.relaunchArguments = L"--game doom";
+#endif
         fly.seed = options.flySeed;
         options.doom.choice.backend = options.flybrain;
         options.doom.choice.seed = options.flySeed;

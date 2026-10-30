@@ -52,6 +52,8 @@ namespace myengine::game
         render::IRenderAdapter* render = nullptr;
         audio::AudioSystem* audio = nullptr;                                                     // nullptr: no sound
         std::function<void()> quit;                                                              // the player left the game
+        // "To the laboratory" of the pause menu: DOOM can live once in a process, so the application starts itself again (the menu on the PLAY screen) and quits. Empty: no such button.
+        std::function<void()> backToMenu;
         std::function<std::pair<int, int>()> takeMouseDelta;                                     // the raw movement of the mouse since the last call
         std::function<void(bool)> captureCursor;                                                 // true: hide the cursor and keep it in the window (the mouse turns the player)
         std::function<void(const std::string&)> setTitle;                                        // the title of the window ("Freedoom: Phase 1")

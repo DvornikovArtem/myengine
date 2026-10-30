@@ -5,6 +5,7 @@
 #include <unknwn.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace brainview
@@ -99,6 +100,48 @@ namespace brainview
         activity_.Configure(sizes);
         activity_.Advance(clock_);
         flashCount_ = 0;
+    }
+
+    void BrainView::FitCamera(const float aspect, const float margin)
+    {
+        if (!fitKnown_)
+        {
+            std::vector<float> ys;
+            std::vector<float> radii;
+            const std::size_t count = model_.positions.size() / 3;
+            ys.reserve(count);
+            radii.reserve(count);
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                const float x = model_.positions[3 * i];
+                const float y = model_.positions[3 * i + 1];
+                const float z = model_.positions[3 * i + 2];
+                if (std::abs(x) >= kHiddenDistance * 0.5f || std::abs(y) >= kHiddenDistance * 0.5f || std::abs(z) >= kHiddenDistance * 0.5f)
+                {
+                    continue;   // a neuron without a place is drawn far away: not part of the cloud
+                }
+                ys.push_back(y);
+                radii.push_back(std::sqrt(x * x + z * z));
+            }
+            if (ys.size() > 100)
+            {
+                // the 0.5 % and the 99.5 % of the places: a few stray neurons do not stretch the frame
+                const std::size_t low = ys.size() / 200;
+                const std::size_t high = ys.size() - 1 - low;
+                std::nth_element(ys.begin(), ys.begin() + static_cast<std::ptrdiff_t>(low), ys.end());
+                fitMinY_ = ys[low];
+                std::nth_element(ys.begin(), ys.begin() + static_cast<std::ptrdiff_t>(high), ys.end());
+                fitMaxY_ = ys[high];
+                std::nth_element(radii.begin(), radii.begin() + static_cast<std::ptrdiff_t>(high), radii.end());
+                fitRadius_ = radii[high];
+            }
+            fitKnown_ = true;
+        }
+        const float halfTan = std::tan(camera_.fovY * 0.5f);
+        const float byHeight = (fitMaxY_ - fitMinY_) * (1.0f + 2.0f * margin) * 0.5f / halfTan;
+        const float byWidth = fitRadius_ * (1.0f + 2.0f * margin) / (halfTan * std::max(aspect, 0.1f));
+        camera_.centerY = (fitMinY_ + fitMaxY_) * 0.5f;
+        camera_.distance = std::clamp(std::max(byHeight, byWidth), OrbitCamera::kMinDistance, OrbitCamera::kMaxDistance);
     }
 
     myengine::render::PointCloudDrawParams BrainView::DrawParams(const uint32_t width, const uint32_t height) const

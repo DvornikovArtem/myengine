@@ -5,6 +5,7 @@
 #include <doomfly/FlyControls.h>
 #include <doomfly/FlyPlayer.h>
 
+#include <brainview/BrainLayout.h>
 #include <brainview/PlayerBrainPanel.h>
 
 #include <imgui/imgui.h>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <tuple>
 
 namespace doomfly
 {
@@ -64,6 +66,7 @@ namespace doomfly
                 if (render != nullptr && thumbnails != nullptr)
                 {
                     panel_ = std::make_unique<brainview::PlayerBrainPanel>(render, thumbnails, "fly-brain");
+                    BuildGroups();
                 }
             }
 
@@ -111,9 +114,7 @@ namespace doomfly
             {
                 const FlyStatus status = player_->Status();
                 ImFont* font = ImGui::GetFont();
-                // the cloud of the brain (V1) keeps the lower part of the panel; the text above it is set to what is left
-                const float cloudHeight = panel_ != nullptr ? std::min(width * 0.95f, height * 0.40f) : 0.0f;
-                const float size = std::clamp(std::floor((height - cloudHeight) / 40.0f), 9.0f, 22.0f);
+                const float size = std::clamp(std::floor(height / 40.0f), 11.0f, 22.0f);
                 const float pad = size * 0.8f;
                 const ImU32 text = IM_COL32(225, 225, 225, 255);
                 const ImU32 dim = IM_COL32(140, 140, 150, 255);
@@ -198,22 +199,123 @@ namespace doomfly
                 line(brain, text);
                 std::snprintf(brain, sizeof(brain), "resets %u   runaway %u   hurt %u", status.resets, status.seizures, status.damages);
                 line(brain, status.seizures > 0 ? amber : dim);
+            }
 
-                // the brain in 3D (V1, docs/flybrain/brain-view.md) in what is left of the panel; Tab shows it over the whole window
-                const float room = cloudHeight > 0.0f ? cloudHeight - pad : std::max(0.0f, y + height - cursor - pad);
-                if (room > size * 4.0f)
+            bool DescribePanel(myengine::game::DoomPanelData& out) const override
+            {
+                if (panel_ == nullptr)
                 {
-                    const float top = y + height - pad - room;
-                    if (panel_ != nullptr)
+                    return false;
+                }
+                const FlyStatus status = player_->Status();
+                char text[160];
+                out.title = "FLY PLAYS";
+                out.subtitle = status.controlsName + " neurons";
+                std::snprintf(text, sizeof(text), "%.1fx real time", status.brainSpeed);
+                out.chip = text;
+                out.brainChip = "BRAIN " + status.backend.substr(0, status.backend.find(' '));
+                // the neurons the controls read, by what they do: the colour of a bar is the colour of those neurons in the cloud
+                myengine::game::DoomPanelGroup motor;
+                motor.title = "MOTOR";
+                myengine::game::DoomPanelGroup vision;
+                vision.title = "VISION";
+                for (const Entry& entry : entries_)
+                {
+                    float hz = 0.0f;
+                    for (const RateReading& reading : status.rates)
                     {
-                        panel_->DrawPanel(list, left, top, inner, room);
+                        if (reading.name == entry.name)
+                        {
+                            hz = reading.hz;
+                        }
                     }
-                    else
-                    {
-                        list->AddRect(ImVec2(left, top), ImVec2(left + inner, top + room), IM_COL32(70, 70, 90, 255));
-                    }
+                    myengine::game::DoomPanelBar bar;
+                    bar.label = entry.name;
+                    std::snprintf(text, sizeof(text), "%.0f Hz", hz);
+                    bar.text = text;
+                    bar.value = hz;
+                    bar.limit = 60.0f;
+                    bar.rgb = Rgb(entry.color);
+                    (entry.vision ? vision : motor).bars.push_back(std::move(bar));
+                }
+                myengine::game::DoomPanelGroup action;
+                action.title = "OUTPUT";
+                {
+                    myengine::game::DoomPanelBar turn;
+                    turn.label = "turn";
+                    std::snprintf(text, sizeof(text), "%+.2f deg/tic", status.turnDegrees);
+                    turn.text = text;
+                    turn.value = status.turnDegrees;
+                    turn.limit = 6.0f;
+                    turn.centered = true;
+                    turn.rgb = 0x46e08a;
+                    action.bars.push_back(std::move(turn));
+                    myengine::game::DoomPanelBar forward;
+                    forward.label = "forward";
+                    std::snprintf(text, sizeof(text), "%.0f", std::fabs(status.forwardUnits));
+                    forward.text = text;
+                    forward.value = std::fabs(status.forwardUnits);
+                    forward.limit = 50.0f;
+                    forward.rgb = 0x46e08a;
+                    action.bars.push_back(std::move(forward));
+                    myengine::game::DoomPanelBar fire;
+                    fire.label = "fire";
+                    fire.text = status.fire ? "ON" : "off";
+                    fire.value = status.fire ? 1.0f : 0.0f;
+                    fire.limit = 1.0f;
+                    fire.rgb = Rgb(brainview::kColorFire);
+                    action.bars.push_back(std::move(fire));
+                    myengine::game::DoomPanelBar dopamine;
+                    dopamine.label = "dopamine (pain)";
+                    std::snprintf(text, sizeof(text), "%.1f mV", status.dopamineMv);
+                    dopamine.text = text;
+                    dopamine.value = status.dopamineMv;
+                    dopamine.limit = 4.0f;
+                    dopamine.rgb = Rgb(brainview::kColorDopamine);
+                    action.bars.push_back(std::move(dopamine));
+                }
+                if (!motor.bars.empty())
+                {
+                    out.groups.push_back(std::move(motor));
+                }
+                if (!vision.bars.empty())
+                {
+                    out.groups.push_back(std::move(vision));
+                }
+                out.groups.push_back(std::move(action));
+                // the dim lines at the foot (they are for the one who debugs the brain, not for the player)
+                std::snprintf(text, sizeof(text), "brain %.2fx   game %.2fx   tic %llu", status.brainSpeed, status.gameSpeed, static_cast<unsigned long long>(status.tics));
+                out.debug.push_back(text);
+                std::snprintf(text, sizeof(text), "%.0f k spikes/s   resets %u   runaway %u   hurt %u", status.spikesPerSecond / 1000.0f, status.resets, status.seizures, status.damages);
+                out.debug.push_back(text);
+                if (status.waiting)
+                {
+                    out.debug.push_back("the game waits for the brain");
+                }
+                if (status.reflex)
+                {
+                    out.debug.push_back("a reflex of the legs, not the brain");
+                }
+                // the line of the big brain: the neurons, the spikes, the speed
+                std::string neurons = std::to_string(player_->GetConnectome().NeuronCount());
+                for (std::size_t at = neurons.size(); at > 3; at -= 3)
+                {
+                    neurons.insert(at - 3, " ");
+                }
+                std::snprintf(text, sizeof(text), "%s neurons   %.2f M spikes/s   %.2fx real time", neurons.c_str(), status.spikesPerSecond / 1.0e6f, status.brainSpeed);
+                out.brainLine = text;
+                return true;
+            }
+
+            void DrawBrain(ImDrawList* list, const float x, const float y, const float width, const float height) override
+            {
+                if (panel_ != nullptr)
+                {
+                    panel_->DrawPanel(list, x, y, width, height);
                 }
             }
+
+            bool BigBrainOpen() const override { return panel_ != nullptr && panel_->Big(); }
 
             void ToggleBigBrain() override
             {
@@ -232,6 +334,86 @@ namespace doomfly
             }
 
         private:
+            struct Entry
+            {
+                std::string name;      // as the rates name it: "DNp20 R", "DNpe017"
+                std::uint8_t color = 0;
+                bool vision = false;
+            };
+
+            // The 0xRRGGBB of a colour of the cloud for a bar of the panel: the palette is HDR (the groups glow), the panel wants the colour
+            static std::uint32_t Rgb(const std::uint8_t colorIndex)
+            {
+                float palette[brainview::kPaletteSize][4];
+                brainview::FillPalette(palette);
+                const float* c = palette[colorIndex];
+                const float peak = std::max({c[0], c[1], c[2], 1.0f});
+                auto channel = [&](const float v) { return static_cast<std::uint32_t>(std::clamp(v / peak, 0.0f, 1.0f) * 255.0f + 0.5f); };
+                return (channel(c[0]) << 16) | (channel(c[1]) << 8) | channel(c[2]);
+            }
+
+            // The neurons that the controls read, grouped as the panel lists them, and the groups that colour them in the cloud (with the photoreceptors and the dopamine neurons)
+            void BuildGroups()
+            {
+                const flybrain::Connectome& connectome = player_->GetConnectome();
+                const FlyControls& controls = player_->Controls();
+                auto add = [&](const ControlTerm& term, const std::uint8_t color, const bool vision)
+                {
+                    const std::string name = term.type + (term.side == flybrain::Side::Left ? " L" : term.side == flybrain::Side::Right ? " R" : "");
+                    for (const Entry& entry : entries_)
+                    {
+                        if (entry.name == name)
+                        {
+                            return;
+                        }
+                    }
+                    brainview::BrainGroup group;
+                    group.id = name;
+                    group.label = name;
+                    group.colorIndex = color;
+                    group.neurons = connectome.Find(term.type, term.side).neurons;
+                    if (group.neurons.empty())
+                    {
+                        return;
+                    }
+                    groups_.push_back(std::move(group));
+                    entries_.push_back({name, color, vision});
+                };
+                auto side = [](const ControlTerm& term, const std::uint8_t fallback)
+                {
+                    return term.side == flybrain::Side::Left ? static_cast<std::uint8_t>(brainview::kColorTurnLeft)
+                                                              : term.side == flybrain::Side::Right ? static_cast<std::uint8_t>(brainview::kColorTurnRight) : fallback;
+                };
+                for (const ControlTerm& term : controls.turn.terms)
+                {
+                    add(term, side(term, brainview::kColorTurnLeft), false);
+                }
+                for (const ControlTerm& term : controls.forward.terms)
+                {
+                    add(term, brainview::kColorForward, false);
+                }
+                for (const ControlTerm& term : controls.fire.terms)
+                {
+                    add(term, brainview::kColorFire, false);
+                }
+                for (const ControlTerm& term : controls.fire.spikeTerms)
+                {
+                    add(term, brainview::kColorFire, false);
+                }
+                for (const ControlTerm& term : controls.show)
+                {
+                    add(term, term.type == "LC4" ? brainview::kColorVision : brainview::kColorEyes, true);
+                }
+                for (const auto& [id, label, color, neurons] : {std::make_tuple("dopamine", "Dopamine (pain)", brainview::kColorDopamine, connectome.FindPrefix("PPL1").neurons),
+                                                                 std::make_tuple("eyes", "Eyes (R1-R6)", brainview::kColorEyes, connectome.Find("R1-R6").neurons)})
+                {
+                    if (!neurons.empty())
+                    {
+                        groups_.push_back({id, label, static_cast<std::uint8_t>(color), neurons});
+                    }
+                }
+            }
+
             // What the brain of the player did since the last frame, for the picture of the cloud: the spikes of the last tic on the CPU, or the buffer of the last spike steps
             // of the brain itself on the GPU (it lives on the device of the renderer; the ring of a feed is good until the end of the frame, so it is not kept)
             void UpdateBrainView(const double deltaSeconds)
@@ -254,6 +436,10 @@ namespace doomfly
                 }
                 brainview::BrainFeedFrame frame;
                 frame.connectome = feed.connectome;
+                if (panel_->View() == nullptr)
+                {
+                    frame.groups = groups_;   // until the view is made
+                }
                 frame.simSecondsNow = static_cast<double>(feed.step) * dtSeconds;
                 frame.generation = feed.generation;
                 const FlyStatus status = player_->Status();
@@ -286,6 +472,8 @@ namespace doomfly
 
             std::unique_ptr<FlyPlayer> player_;
             std::unique_ptr<brainview::PlayerBrainPanel> panel_;
+            std::vector<brainview::BrainGroup> groups_;
+            std::vector<Entry> entries_;
             std::uint64_t lastFeedStep_ = ~0ull;
             std::chrono::steady_clock::time_point stepSeen_ = std::chrono::steady_clock::now();
             std::string title_;

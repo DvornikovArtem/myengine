@@ -27,6 +27,7 @@ namespace brainview
 
         void Draw(ImDrawList* list, float x, float y, float width, float height, double deltaSeconds, float alpha) override;
         std::string Status() const override;
+        void SetNested(const float mix) override { nested_ = mix; }
         std::string Problem() const override { return problem_; }
 
         // The connectome file of the game: `--fbrain`, then assets/flybrain/malecns_v1.fbrain next to the exe, then in the sources
@@ -43,6 +44,7 @@ namespace brainview
         bool loadStarted_ = false;
         std::string loadError_;
         std::string problem_;
+        float nested_ = 0.0f;   // 0 main screen, 1 a screen under it
         std::shared_ptr<const flybrain::Connectome> connectome_;
         std::unique_ptr<BrainView> view_;
         std::unique_ptr<BrainRunner> runner_;

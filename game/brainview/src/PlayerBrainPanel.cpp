@@ -1,7 +1,5 @@
 #include <brainview/PlayerBrainPanel.h>
 
-#include <brainview/BrainViewPanel.h>
-
 #include <myengine/editor/ThumbnailService.h>
 #include <myengine/render/IRenderAdapter.h>
 
@@ -13,9 +11,10 @@ namespace brainview
 {
     namespace
     {
-        // The camera: the small panel is nearly square and shows the head, the whole window shows the whole fly
-        constexpr float kPanelDistance = 2.3f;
-        constexpr float kBigDistance = 3.2f;
+        // The room around the cloud, a part of the height of the picture on each side: the panel shows the whole fly with a little air, the big brain a bit less
+        // than three quarters of the window height
+        constexpr float kPanelMargin = 0.08f;
+        constexpr float kBigMargin = 0.17f;
     }
 
     PlayerBrainPanel::PlayerBrainPanel(myengine::render::IRenderAdapter* render, myengine::editor::ThumbnailService* thumbnails, std::string id)
@@ -25,31 +24,30 @@ namespace brainview
 
     PlayerBrainPanel::~PlayerBrainPanel() = default;
 
-    bool PlayerBrainPanel::EnsureView(const std::shared_ptr<const flybrain::Connectome>& connectome)
+    bool PlayerBrainPanel::EnsureView(const BrainFeedFrame& frame)
     {
         if (view_ != nullptr)
         {
             return true;
         }
-        if (failed_ || render_ == nullptr || thumbnails_ == nullptr || connectome == nullptr)
+        if (failed_ || render_ == nullptr || thumbnails_ == nullptr || frame.connectome == nullptr)
         {
             return false;
         }
         auto view = std::make_unique<BrainView>(*render_);
-        if (!view->Create(*connectome))
+        if (!view->Create(*frame.connectome, frame.groups))
         {
             failed_ = true;
             return false;
         }
         view->Camera().autoRotateSpeed = 0.10f;
-        view->Camera().distance = kBigDistance;
         view_ = std::move(view);
         return true;
     }
 
     void PlayerBrainPanel::Update(const BrainFeedFrame& frame, const double deltaSeconds)
     {
-        if (!EnsureView(frame.connectome))
+        if (!EnsureView(frame))
         {
             return;
         }
@@ -67,36 +65,14 @@ namespace brainview
         frame_.brainSpeed = frame.brainSpeed;
     }
 
-    void PlayerBrainPanel::DrawHud(ImDrawList* list, const float x, const float y, const float width, const float height, const bool big)
-    {
-        BrainPanelInfo info;
-        info.title = big ? "FLY BRAIN" : "BRAIN";
-        info.subtitle = big ? "brain on " + (frame_.backend.empty() ? std::string("...") : frame_.backend) + "      Tab: back to the game" : std::string();
-        info.simSeconds = frame_.simSecondsNow;
-        info.realtimeRatio = frame_.brainSpeed;
-        info.spikesPerSecond = frame_.spikesPerSecond;
-        info.showRaster = big && !frame_.gpu;
-        if (big)
-        {
-            DrawBrainHud(list, x, y, x + width, y + height, *view_, info);
-        }
-        else
-        {
-            // the panel of the controller has its own bars next to the cloud: only a line of text over the picture
-            const std::string text = "brain on " + (frame_.backend.empty() ? std::string("...") : frame_.backend);
-            list->AddText(ImVec2(x + 6.0f, y + 4.0f), IM_COL32(150, 170, 205, 255), text.c_str());
-        }
-    }
-
     void PlayerBrainPanel::DrawPanel(ImDrawList* list, const float x, const float y, const float width, const float height)
     {
-        list->AddRectFilled(ImVec2(x, y), ImVec2(x + width, y + height), IM_COL32(4, 7, 14, 255));
         if (view_ == nullptr || big_)
         {
             return;   // the big brain is on: the small picture is not made
         }
         list->PushClipRect(ImVec2(x, y), ImVec2(x + width, y + height), true);
-        view_->Camera().distance = kPanelDistance;
+        view_->FitCamera(width / std::max(height, 1.0f), kPanelMargin);
         const std::uint32_t pixelsW = std::max(64u, static_cast<std::uint32_t>(std::min(width, 1600.0f)));
         const std::uint32_t pixelsH = std::max(64u, static_cast<std::uint32_t>(std::min(height, 1000.0f)));
         const myengine::render::TextureHandle texture = view_->Submit(*thumbnails_, id_ + "-panel", pixelsW, pixelsH);
@@ -104,7 +80,6 @@ namespace brainview
         {
             list->AddImage(static_cast<ImTextureID>(static_cast<ImU64>(texture.value)), ImVec2(x, y), ImVec2(x + width, y + height));
         }
-        DrawHud(list, x, y, width, height, false);
         list->PopClipRect();
     }
 
@@ -117,7 +92,7 @@ namespace brainview
         // DOOM stays visible under it, dimmed
         list->AddRectFilled(ImVec2(0.0f, 0.0f), ImVec2(width, height), IM_COL32(2, 4, 10, 70));
         list->PushClipRect(ImVec2(0.0f, 0.0f), ImVec2(width, height), true);
-        view_->Camera().distance = kBigDistance;
+        view_->FitCamera(width / std::max(height, 1.0f), kBigMargin);
         const std::uint32_t pixelsW = std::max(64u, static_cast<std::uint32_t>(std::min(width, 1600.0f)));
         const std::uint32_t pixelsH = std::max(64u, static_cast<std::uint32_t>(std::min(height, 1000.0f)));
         const myengine::render::TextureHandle texture = view_->Submit(*thumbnails_, id_ + "-big", pixelsW, pixelsH);
@@ -125,7 +100,6 @@ namespace brainview
         {
             list->AddImage(static_cast<ImTextureID>(static_cast<ImU64>(texture.value)), ImVec2(0.0f, 0.0f), ImVec2(width, height), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32(255, 255, 255, 175));
         }
-        DrawHud(list, 0.0f, 0.0f, width, height, true);
         list->PopClipRect();
     }
 }

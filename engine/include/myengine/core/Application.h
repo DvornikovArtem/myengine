@@ -107,6 +107,7 @@ namespace myengine::core
             bool squarePixels = false;              // --doom-square-pixels: no 4:3 stretch of the 320x200 picture
             bool music = true;                      // --doom-no-music
             std::vector<game::DoomMode> modes;      // who can play: the human first, then the controllers of the app (the fly, docs/game/flydoom-fly.md)
+            std::wstring relaunchArguments;         // the command line that starts the game again for "to the laboratory" (FlyDoom.exe: none; myengine.exe: --game doom)
             game::DoomLaunchChoice choice;          // what the mode is made with when there is no menu (--fly-bio: controlSet "bio")
             int initialMode = -1;                   // the mode to start with (--fly), -1: the menu of FlyDoom asks
             bool showMenu = true;                   // false: no menu, the game starts with what the command line says (--iwad, --doom-args, MYENGINE_DOOM_NO_MENU=1)

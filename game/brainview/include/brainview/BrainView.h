@@ -69,6 +69,10 @@ namespace brainview
         void ClearActivity();
         uint64_t FlashCount() const { return flashCount_; }
 
+        // Puts the camera where the whole cloud (the brain and the nerve cord) fits a picture of this aspect (width / height) with a margin around it (a part of the
+        // height: 0.08 leaves 8 % on each side); the cloud turns around its long axis, so the width of the turn is counted too. For the views that are not orbited by hand.
+        void FitCamera(float aspect, float margin = 0.08f);
+
         OrbitCamera& Camera() { return camera_; }
         ViewStyle& Style() { return style_; }
         const std::vector<BrainGroup>& Groups() const { return groups_; }
@@ -100,5 +104,10 @@ namespace brainview
         myengine::render::GpuFlashSource gpuFlash_;
         double clock_ = 0.0;
         uint64_t flashCount_ = 0;
+        // the extent of the cloud for FitCamera (the outliers cut): along the long axis and the radius of the turn
+        bool fitKnown_ = false;
+        float fitMinY_ = -1.0f;
+        float fitMaxY_ = 1.0f;
+        float fitRadius_ = 1.0f;
     };
 }

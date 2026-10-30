@@ -277,9 +277,13 @@ namespace myengine::game
         DoomMenuModel menuModel;
         std::unique_ptr<IDoomBrainView> brain;
         double menuTime = 0.0;
+        float nestedMix = 0.0f;                          // the brain behind the menu steps back on the screens under the main one (0 .. 1)
         float fade = 0.0f;                               // 0 .. 1: the black over the menu while it leaves; the black over the game while it comes (1 .. 0)
         float fadeIn = 0.0f;                             // 1 -> 0 after the game was made
         bool menuBuilt = false;
+        bool labPause = false;                           // the pause of Esc is open: the game stands, the player chooses (docs/game/doom.md)
+        bool escWas = false;                             // Esc was down in the last frame (the edge opens the pause)
+        bool escSwallow = false;                         // Esc was down when the pause opened or closed: DOOM does not get it until it is up
         bool tabHeld = false;                            // the key of the big brain, for the edge
         float mouseRemainder = 0.0f;                     // the part of a unit of the scaled mouse movement that was not sent yet
         std::unique_ptr<DoomAudioHost> audioHost;
@@ -566,6 +570,8 @@ namespace myengine::game
             const float leaving = state == State::Launching ? fade : 0.0f;
             if (brain)
             {
+                nestedMix += ((menu.Nested() ? 1.0f : 0.0f) - nestedMix) * std::min(1.0f, deltaTime * 7.0f);
+                brain->SetNested(nestedMix);
                 brain->Draw(list, 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), static_cast<double>(deltaTime), 1.0f - leaving);
                 menuModel.brainStatus = brain->Status();
                 menuModel.brainProblem = brain->Problem();
@@ -641,6 +647,139 @@ namespace myengine::game
             }
         }
 
+        // The panel of a controller in the style of the menu: the title, the picture of the brain, the bars by group, the dim lines of the debugger at the foot. The panel and the
+        // picture are on the background list of ImGui (pixels), the text and the bars on the list of the kit above it (the Screen space of the kit is in design units: 1080 high).
+        void DrawControllerPanel(rlui::Frame& f, ImDrawList* list, const DoomPanelData& data, const float xPixels, const float yPixels, const float wPixels, const float hPixels)
+        {
+            using namespace rlui;
+            const float px = f.metrics().scale;   // pixels per design unit
+            const float x = xPixels / px;
+            const float y = yPixels / px;
+            const float w = wPixels / px;
+            const float h = hPixels / px;
+            const float pad = 16.0f;
+            list->AddRectFilled(ImVec2(xPixels, yPixels), ImVec2(xPixels + wPixels, yPixels + hPixels), IM_COL32(9, 20, 46, 224));
+            list->AddRectFilled(ImVec2(xPixels, yPixels), ImVec2(xPixels + 2.0f, yPixels + hPixels), IM_COL32(53, 214, 255, 255));
+
+            // the picture of the brain
+            const float cloudWidth = w - 2.0f * pad;
+            const float cloudTop = y + 84.0f;
+            const float cloudHeight = std::min(cloudWidth * 1.15f, h * 0.38f);
+            list->AddRectFilled(ImVec2((x + pad) * px, cloudTop * px), ImVec2((x + pad + cloudWidth) * px, (cloudTop + cloudHeight) * px), IM_COL32(3, 6, 14, 255));
+            controller->DrawBrain(list, (x + pad) * px, cloudTop * px, cloudWidth * px, cloudHeight * px);
+
+            f.SetSpace(Space::Screen);
+            float cursor = y + 10.0f;
+            paint::Text(f, FontStyle::BlackItalic, 30.0f, {x + pad, cursor}, style::kText, data.title);
+            paint::Text(f, FontStyle::Bold, 18.0f, {x + w - pad, cursor + 10.0f}, style::kAccent, data.chip, Align::Right);
+            paint::Text(f, FontStyle::SemiBold, 18.0f, {x + pad, cursor + 42.0f}, style::kTextDim, data.subtitle);
+            if (!data.brainChip.empty())
+            {
+                paint::Text(f, FontStyle::Bold, 15.0f, {x + pad + 8.0f, cloudTop + 6.0f}, style::kAccent.Faded(0.9f), data.brainChip, Align::Left, 0.06f);
+            }
+            cursor = cloudTop + cloudHeight + 14.0f;
+
+            // the bars by group; the rows get what the foot leaves
+            const float footHeight = static_cast<float>(data.debug.size()) * 19.0f + 8.0f;
+            std::size_t rows = 0;
+            for (const DoomPanelGroup& group : data.groups)
+            {
+                rows += group.bars.size();
+            }
+            const float titles = static_cast<float>(data.groups.size()) * 26.0f;
+            const float room = y + h - footHeight - cursor - titles;
+            const float pitch = std::clamp(room / static_cast<float>(std::max<std::size_t>(rows, 1)), 25.0f, 36.0f);
+            for (const DoomPanelGroup& group : data.groups)
+            {
+                paint::Text(f, FontStyle::ExtraBoldItalic, 16.0f, {x + pad, cursor}, style::kTextFaint, group.title, Align::Left, 0.1f);
+                cursor += 26.0f;
+                for (const DoomPanelBar& bar : group.bars)
+                {
+                    if (cursor + pitch > y + h - footHeight)
+                    {
+                        break;
+                    }
+                    const Color color = Color::Hex(bar.rgb);
+                    paint::Text(f, FontStyle::SemiBold, 20.0f, {x + pad, cursor - 2.0f}, style::kText, bar.label);
+                    paint::Text(f, FontStyle::Bold, 20.0f, {x + w - pad, cursor - 2.0f}, style::kText, bar.text, Align::Right);
+                    const float barY = cursor + 24.0f;
+                    const float barHeight = 5.0f;
+                    const float barWidth = w - 2.0f * pad;
+                    paint::FillRect(f, {x + pad, barY, barWidth, barHeight}, Color::Hex(0x1c3466));
+                    const float fraction = std::clamp(bar.value / std::max(bar.limit, 1e-6f), bar.centered ? -1.0f : 0.0f, 1.0f);
+                    if (bar.centered)
+                    {
+                        const float middle = x + pad + barWidth * 0.5f;
+                        const float reach = barWidth * 0.5f * fraction;
+                        paint::FillRect(f, {std::min(middle, middle + reach), barY, std::fabs(reach), barHeight}, color);
+                        paint::FillRect(f, {middle - 0.5f, barY - 3.0f, 1.0f, barHeight + 6.0f}, style::kText);
+                    }
+                    else
+                    {
+                        paint::FillRect(f, {x + pad, barY, barWidth * fraction, barHeight}, color);
+                    }
+                    cursor += pitch;
+                }
+            }
+
+            // the foot: dim lines for the one who debugs the brain
+            float footY = y + h - footHeight + 2.0f;
+            for (const std::string& line : data.debug)
+            {
+                paint::Text(f, FontStyle::SemiBold, 15.0f, {x + pad, footY}, style::kTextFaint, line);
+                footY += 19.0f;
+            }
+            f.SetSpace(Space::Menu);
+        }
+
+        // The big brain: the legend on a plate at the left over the picture of the brain (the panel is hidden), the hint at the foot
+        void DrawBigBrainLegend(rlui::Frame& f, const DoomPanelData& data, const float widthPixels, const float heightPixels)
+        {
+            using namespace rlui;
+            const float px = f.metrics().scale;
+            const float width = widthPixels / px;
+            const float height = heightPixels / px;
+            const float pad = 20.0f;
+            std::vector<const DoomPanelBar*> bars;
+            for (const DoomPanelGroup& group : data.groups)
+            {
+                for (const DoomPanelBar& bar : group.bars)
+                {
+                    if (group.title != "OUTPUT" || bar.label.rfind("dopamine", 0) == 0)
+                    {
+                        bars.push_back(&bar);
+                    }
+                }
+            }
+            const float rowPitch = 34.0f;
+            const Rect plate{24.0f, 24.0f, std::min(width * 0.34f, 560.0f), 132.0f + rowPitch * static_cast<float>(bars.size())};
+            f.SetSpace(Space::Screen);
+            paint::Parallelogram(f, plate, style::kNavy);
+            paint::ParallelogramOutline(f, plate, style::kLine, 1.0f);
+            float cursor = plate.y + 14.0f;
+            const float left = plate.x + pad + paint::Bevel(plate.h) * 0.4f;
+            paint::Text(f, FontStyle::BlackItalic, 34.0f, {left, cursor}, style::kText, "FLY BRAIN");
+            cursor += 50.0f;
+            paint::Text(f, FontStyle::SemiBold, 17.0f, {left, cursor}, style::kTextDim, data.brainLine);
+            cursor += 46.0f;
+            const float inner = plate.w - 2.0f * pad - paint::Bevel(plate.h) * 0.8f;
+            for (const DoomPanelBar* bar : bars)
+            {
+                const Color color = Color::Hex(bar->rgb);
+                paint::FillRect(f, {left, cursor + 6.0f, 14.0f, 14.0f}, color);
+                paint::Text(f, FontStyle::SemiBold, 20.0f, {left + 24.0f, cursor}, style::kText, bar->label);
+                const float barX = left + inner * 0.50f;
+                const float barW = inner * 0.30f;
+                paint::FillRect(f, {barX, cursor + 11.0f, barW, 5.0f}, Color::Hex(0x1c3466));
+                const float fraction = std::clamp(std::fabs(bar->value) / std::max(bar->limit, 1e-6f), 0.0f, 1.0f);
+                paint::FillRect(f, {barX, cursor + 11.0f, barW * fraction, 5.0f}, color);
+                paint::Text(f, FontStyle::Bold, 20.0f, {left + inner, cursor}, style::kText, bar->text, Align::Right);
+                cursor += rowPitch;
+            }
+            paint::Text(f, FontStyle::SemiBold, 20.0f, {width * 0.5f, height - 46.0f}, style::kTextDim, "Tab: back to the game", Align::Center);
+            f.SetSpace(Space::Menu);
+        }
+
         // The keyboard into DOOM: a key that goes down (or up) since the last frame is one event
         void PollKeyboard(const bool active, const bool doomMenu, const bool controlled = false)
         {
@@ -665,6 +804,10 @@ namespace myengine::game
 
             for (const KeyMap& entry : kCommonKeys)
             {
+                if (entry.vk == VK_ESCAPE && escSwallow)
+                {
+                    continue;
+                }
                 send(entry.vk, entry.doomKey);
             }
             if (controlled && !doomMenu)
@@ -861,7 +1004,7 @@ namespace myengine::game
             }
             if (svc.ui != nullptr && state != State::Error)
             {
-                svc.ui->SetGameUiCapturesInput(false);   // the keys and the mouse are the game's
+                svc.ui->SetGameUiCapturesInput(labPause);   // the keys and the mouse are the game's, except in the pause
             }
             if (state == State::Start)
             {
@@ -870,10 +1013,61 @@ namespace myengine::game
                 StartGame();
             }
 
-            if (state == State::Game)
+            if (state == State::Game && labPause)
+            {
+                // the pause: the game stands (nor the keys, the mouse, nor the controller move), the picture and the panel are drawn below
+                CaptureCursor(false);
+                if (svc.takeMouseDelta)
+                {
+                    svc.takeMouseDelta();
+                }
+                const bool escDown = active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+                if (!escDown)
+                {
+                    escSwallow = false;
+                }
+                escWas = escDown;
+            }
+            else if (state == State::Game)
             {
                 const doom::GameInfo before = game->Info();
                 const bool doomMenu = before.menuActive || before.state != doom::GameState::Level;
+                // Esc opens the pause (not when the menu of DOOM is open: there it closes the menu, as in DOOM)
+                const bool escDown = active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+                bool openPause = escDown && !escWas && !before.menuActive;
+                escWas = escDown;
+                if (!escDown)
+                {
+                    escSwallow = false;
+                }
+                for (const ScriptedKey& key : scriptedKeys)
+                {
+                    if (key.frame == flowFrame && key.key == doom::key::kEscape && key.pressed && !before.menuActive)
+                    {
+                        openPause = true;   // the scripted Esc of the tests
+                    }
+                }
+                if (openPause)
+                {
+                    labPause = true;
+                    escSwallow = escDown;
+                    for (std::size_t vk = 0; vk < heldAs.size(); ++vk)
+                    {
+                        if (heldAs[vk] != 0)
+                        {
+                            game->PostKey(heldAs[vk], false);
+                            heldAs[vk] = 0;
+                        }
+                    }
+                    if (mouseButtons != 0)
+                    {
+                        mouseButtons = 0;
+                        game->PostMouse(0, 0, 0);
+                    }
+                    CaptureCursor(false);
+                }
+                else
+                {
                 PollKeyboard(active, doomMenu, controller != nullptr);
                 if (controller != nullptr)
                 {
@@ -965,6 +1159,7 @@ namespace myengine::game
                         }
                     }
                 }
+                }
             }
 
             if (state == State::Game)
@@ -972,7 +1167,8 @@ namespace myengine::game
                 // the largest whole scale that fits; the picture is drawn at the size the window gives, so a window smaller than one scale shrinks it
                 const float viewHeightUnits = svc.squarePixels ? static_cast<float>(doom::kScreenHeight) : static_cast<float>(doom::kScreenHeight * 6 / 5);   // 240: the 4:3 of the monitors of 1993, in whole numbers
                 // a controller has a panel at the right of the picture (the brain of the fly); the human has the whole window
-                const float panelWidth = controller != nullptr ? std::max(240.0f, std::floor(static_cast<float>(width) * 0.26f)) : 0.0f;
+                const float heightFitPicture = std::floor(static_cast<float>(doom::kScreenWidth) * static_cast<float>(height) / viewHeightUnits);
+                const float panelWidth = controller != nullptr ? std::max(240.0f, static_cast<float>(width) - heightFitPicture) : 0.0f;
                 const float pictureWidth = static_cast<float>(width) - panelWidth;
                 const float fit = std::min(pictureWidth / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
                 const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(controller != nullptr ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
@@ -996,8 +1192,52 @@ namespace myengine::game
                 }
                 if (controller != nullptr)
                 {
-                    controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
+                    DoomPanelData data;
+                    const bool described = controller->DescribePanel(data);
+                    const bool big = controller->BigBrainOpen();
+                    if (!described)
+                    {
+                        controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
+                    }
+                    else if (!big)
+                    {
+                        DrawControllerPanel(frame, list, data, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
+                    }
                     controller->DrawOverlay(list, static_cast<float>(width), static_cast<float>(height));
+                    if (described && big)
+                    {
+                        DrawBigBrainLegend(frame, data, static_cast<float>(width), static_cast<float>(height));
+                    }
+                }
+                if (labPause)
+                {
+                    const DoomMenu::PauseResult choice = menu.DrawPause(frame, static_cast<bool>(svc.backToMenu), !escSwallow);
+                    if (choice == DoomMenu::PauseResult::Resume)
+                    {
+                        labPause = false;
+                        escSwallow = escWas;
+                    }
+                    else if (choice == DoomMenu::PauseResult::DoomMenu)
+                    {
+                        labPause = false;
+                        escSwallow = escWas;
+                        game->PostKey(doom::key::kEscape, true);
+                        game->PostKey(doom::key::kEscape, false);
+                    }
+                    else if (choice == DoomMenu::PauseResult::Laboratory)
+                    {
+                        if (svc.backToMenu)
+                        {
+                            svc.backToMenu();
+                        }
+                    }
+                    else if (choice == DoomMenu::PauseResult::Quit)
+                    {
+                        if (svc.quit)
+                        {
+                            svc.quit();
+                        }
+                    }
                 }
                 // the black of the start goes away over half a second
                 if (fadeIn > 0.0f)

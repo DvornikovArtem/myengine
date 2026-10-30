@@ -72,6 +72,20 @@ namespace myengine::game
 
         // The screen that is shown (the flow resets it when the game is left to the menu)
         void Reset();
+        // A screen under the main one (Play, Settings, About): the brain behind it steps back
+        bool Nested() const;
+
+        // The pause over the game (Esc): what the player chose this frame. `canGoBack` false: no "to the laboratory" (the application cannot start itself again);
+        // `allowBack` false: Esc does not resume yet (it is still down from the press that opened the pause).
+        enum class PauseResult : std::uint8_t
+        {
+            None,
+            Resume,
+            DoomMenu,      // the menu of DOOM itself (save, load, options)
+            Laboratory,
+            Quit,
+        };
+        PauseResult DrawPause(rlui::Frame& frame, bool canGoBack, bool allowBack);
 
         // The captures of the menu itself (MYENGINE_DOOM_MENU_SCREEN): opens "play", "settings" or "about" at once; anything else leaves the main screen
         void ShowScreen(std::string_view name);
