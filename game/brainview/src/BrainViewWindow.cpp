@@ -121,7 +121,7 @@ namespace brainview
     {
         state_ = LoadState::Loading;
         error_.clear();
-        const std::string path = path_.string();
+        const std::string path = path_.u8string();   // Connectome::Load reads UTF-8: the ACP string of a path with Russian letters would throw in u8path
         logger_.Info("Fly Brain: loading " + path);
         loading_ = std::async(std::launch::async, [path, this]() -> std::shared_ptr<const flybrain::Connectome>
         {

@@ -151,7 +151,7 @@ function Test-Picture([string]$path, [string]$label) {
 }
 
 # one run of the game: its own LOCALAPPDATA / APPDATA, another working directory. extra: the arguments after --exit-after-frames.
-function Invoke-Run([string]$label, [string]$folder, [string[]]$extra = @(), [string[]]$expectedLog = @(), [switch]$Screenshot) {
+function Invoke-Run([string]$label, [string]$folder, [string[]]$extra = @(), [string[]]$expectedLog = @(), [switch]$Screenshot, [switch]$Menu) {
     $appData = Join-Path $work "appdata-$label"
     $localAppData = Join-Path $work "localappdata-$label"
     $workingDirectory = Join-Path $work "cwd-$label"
@@ -201,7 +201,8 @@ function Invoke-Run([string]$label, [string]$folder, [string[]]$extra = @(), [st
         }
         $errors = @($text -split "`n" | Where-Object { $_ -match '\[(ERROR|FATAL)\]' })
         if ($errors.Count -gt 0) { Fail "[$label] the log has $($errors.Count) error line(s), the first: $($errors[0].Trim())" }
-        foreach ($expected in (@('DOOM: the game data is') + $expectedLog)) {
+        # without arguments FlyDoom stops at its menu: the WAD is chosen when a mode starts, so there is no line about the game data yet (-Menu)
+        foreach ($expected in (@($(if ($Menu) { } else { 'DOOM: the game data is' })) + $expectedLog)) {
             if ($text.IndexOf($expected, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "[$label] the log has no '$expected'" }
         }
         $chosen = @($text -split "`n" | Where-Object { $_ -match 'DOOM: the game data is' })
@@ -314,7 +315,7 @@ Test-ExeResources $clean
 
 # the run as a player starts it: no argument. The Steam copy of the original DOOM of this machine may be chosen instead of the WAD of the package
 # (the registry is not ours to change): the log says which, and the runs below name the WADs of the package by --iwad
-[void](Invoke-Run 'plain' $clean @() @() -Screenshot)
+[void](Invoke-Run 'plain' $clean @() @() -Screenshot -Menu)
 foreach ($wad in @(@{ Name = 'freedoom'; Path = 'assets\doom\freedoom1.wad' }, @{ Name = 'shareware'; Path = 'wads\doom1.wad' })) {
     $wadPath = Join-Path $clean $wad.Path
     if (Test-Path $wadPath) {
