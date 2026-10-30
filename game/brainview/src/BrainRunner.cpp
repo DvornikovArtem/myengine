@@ -35,7 +35,7 @@ namespace brainview
         return "?";
     }
 
-    BrainRunner::BrainRunner(std::shared_ptr<const flybrain::Connectome> connectome) : connectome_(std::move(connectome)) {}
+    BrainRunner::BrainRunner(std::shared_ptr<const flybrain::Connectome> connectome, Options options) : connectome_(std::move(connectome)), options_(std::move(options)) {}
 
     BrainRunner::~BrainRunner()
     {
@@ -82,7 +82,42 @@ namespace brainview
         std::lock_guard<std::mutex> lock(mutex_);
         out.swap(mailbox_);
         mailbox_.clear();
+        groupCounts_.clear();
         simSecondsNow = mailboxSimSeconds_;
+    }
+
+    void BrainRunner::Drain(std::vector<Spike>& out, std::vector<GroupCount>& counts, double& simSecondsNow)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        out.swap(mailbox_);
+        mailbox_.clear();
+        counts.swap(groupCounts_);
+        groupCounts_.clear();
+        simSecondsNow = mailboxSimSeconds_;
+    }
+
+    std::string BrainRunner::BackendText() const
+    {
+        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mutex_));
+        return backendText_;
+    }
+
+    bool BrainRunner::GpuFlash(myengine::render::GpuFlashSource& out) const
+    {
+        if (!onGpu_.load())
+        {
+            return false;
+        }
+        std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mutex_));
+        if (gpuFlash_.buffer == nullptr)
+        {
+            return false;
+        }
+        out = gpuFlash_;
+        // the step was known `since` seconds ago: the flashes go on fading while the brain is between two slices
+        const double since = std::min(std::chrono::duration<double>(std::chrono::steady_clock::now() - gpuFlashTaken_).count(), 0.25);
+        out.stepFraction = static_cast<float>(since / static_cast<double>(out.stepSeconds));
+        return true;
     }
 
     BrainRunner::Stats BrainRunner::GetStats() const
@@ -156,6 +191,33 @@ namespace brainview
         flybrain::FlyBrain brain(connectome_);
         brain.SetParallel(true);
         brain.SetSpikeRingCapacity(kSpikeRing);
+        std::vector<flybrain::WatchId> watches;
+        std::vector<uint64_t> watchTotals;
+        if (options_.backend != flybrain::BackendChoice::Cpu)
+        {
+            flybrain::GpuOptions gpu;
+            gpu.device = static_cast<ID3D12Device*>(options_.renderDevice);
+            std::string error;
+            const flybrain::Backend backend = brain.SetBackend(options_.backend, gpu, &error);
+            onGpu_.store(backend == flybrain::Backend::Gpu);
+            std::lock_guard<std::mutex> lock(mutex_);
+            backendText_ = backend == flybrain::Backend::Gpu ? "GPU" + (brain.GpuAdapterName().empty() ? std::string() : " (" + brain.GpuAdapterName() + ")")
+                                                              : "CPU" + (error.empty() ? std::string() : " (" + error + ")");
+        }
+        else
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            backendText_ = "CPU";
+        }
+        const bool onGpu = onGpu_.load();
+        if (onGpu)
+        {
+            for (const flybrain::Group& group : options_.watchGroups)
+            {
+                watches.push_back(brain.Watch(group, 2000.0f));
+            }
+            watchTotals.assign(watches.size(), 0);
+        }
         const flybrain::Connectome& connectome = *connectome_;
         eyesLeft_ = connectome.Find("R1-R6", flybrain::Side::Left);
         eyesRight_ = connectome.Find("R1-R6", flybrain::Side::Right);
@@ -218,7 +280,7 @@ namespace brainview
             const uint64_t total = brain.TotalSpikes();
             const uint64_t fresh = total - lastTotal;
             lastTotal = total;
-            if (fresh > 0)
+            if (fresh > 0 && !onGpu)
             {
                 brain.RecentSpikes(events, static_cast<uint32_t>(std::min<uint64_t>(fresh, kSpikeRing)));
             }
@@ -238,6 +300,28 @@ namespace brainview
                     mailbox_.push_back({event.neuron, static_cast<double>(event.step) * dtSeconds});
                 }
                 mailboxSimSeconds_ = simNow;
+                if (onGpu)
+                {
+                    // the spikes of this slice, counted per group by the GPU (the counts of a submission arrive a little later: they are what is known now)
+                    const double completed = static_cast<double>(brain.CompletedStep()) * dtSeconds;
+                    for (std::size_t g = 0; g < watches.size(); ++g)
+                    {
+                        const uint64_t totalNow = brain.TotalSpikes(watches[g]);
+                        const uint64_t spikes = totalNow - watchTotals[g];
+                        watchTotals[g] = totalNow;
+                        if (spikes > 0)
+                        {
+                            groupCounts_.push_back({static_cast<uint32_t>(g), static_cast<uint32_t>(std::min<uint64_t>(spikes, 0xFFFFFFFFull)), completed});
+                        }
+                    }
+                    const flybrain::GpuSpikeRing ring = brain.GetGpuSpikeRing();
+                    gpuFlash_.buffer = ring.lastSpikeStep;
+                    gpuFlash_.fence = ring.fence;
+                    gpuFlash_.fenceValue = ring.fenceValue;
+                    gpuFlash_.stepWhole = static_cast<uint32_t>(brain.Step());
+                    gpuFlash_.stepSeconds = static_cast<float>(dtSeconds);
+                    gpuFlashTaken_ = std::chrono::steady_clock::now();
+                }
                 stats_.simSeconds = simNow;
                 stats_.totalSpikes = total;
                 const double wall = std::chrono::duration<double>(now - statsStart).count();

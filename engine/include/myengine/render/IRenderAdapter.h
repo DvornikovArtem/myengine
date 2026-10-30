@@ -241,6 +241,8 @@ namespace myengine::render
             return false;
         }
         virtual std::string GetAdapterName() const { return {}; }
+        // The native device of the renderer (an ID3D12Device* for DX12): the GPU brain is made on it so that the 3D view reads its spikes without a copy. nullptr: none.
+        virtual void* GetNativeDevice() const { return nullptr; }
         // The GPU device was removed (a hang, a page fault, a driver reset): nothing is drawn any more
         virtual bool IsDeviceRemoved() const { return false; }
 

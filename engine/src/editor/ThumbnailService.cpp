@@ -1002,10 +1002,10 @@ namespace myengine::editor
                 {
                     continue;
                 }
-                if (view.request.pointCloud.IsValid() && !view.request.cloudFlashTimes.empty())
+                if (view.request.pointCloud.IsValid() && (!view.request.cloudFlashTimes.empty() || view.request.cloudParams.gpuFlash.buffer != nullptr))
                 {
                     render::PointCloudDrawParams cloudParams = view.request.cloudParams;
-                    cloudParams.flashTimes = view.request.cloudFlashTimes.data();
+                    cloudParams.flashTimes = view.request.cloudFlashTimes.empty() ? nullptr : view.request.cloudFlashTimes.data();
                     adapter.DrawPointCloud(surface, view.request.pointCloud, cloudParams);
                 }
                 adapter.SetViewProjection(surface, view.request.view, view.request.projection);
@@ -1025,6 +1025,7 @@ namespace myengine::editor
                 view.request.lines.clear();
                 view.request.pointCloud = {};
                 view.request.cloudFlashTimes.clear();
+                view.request.keepAlive.reset();
             }
         }
 

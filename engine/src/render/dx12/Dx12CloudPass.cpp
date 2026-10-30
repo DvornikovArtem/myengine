@@ -79,6 +79,7 @@ namespace myengine::render::dx12
             float timing[4];
             float sizes[4];
             float palette[16][4];
+            std::uint32_t gpu[4];   // the step now, the part of a step and the length of a step (floats as bits) for the steps of the GPU brain
         };
         static_assert(sizeof(CloudConstants) % 16 == 0, "a constant buffer is a multiple of 16 bytes");
     }
@@ -93,9 +94,7 @@ namespace myengine::render::dx12
             LogShaderDiagnostics(diagnostics);
             return false;
         }
-        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
-        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
-        for (const bool vertex : {true, false})
+        const auto compile = [&](const bool vertex, const bool gpuSpike, Microsoft::WRL::ComPtr<ID3DBlob>& blob)
         {
             ShaderStageSource request;
             request.sourceName = path.string();
@@ -104,11 +103,23 @@ namespace myengine::render::dx12
             request.entry = vertex ? "VSMain" : "PSMain";
             request.profile = vertex ? "vs_5_0" : "ps_5_0";
             request.stage = vertex ? ShaderStage::Vertex : ShaderStage::Pixel;
-            if (!CompileShaderStage(request, vertex ? vertexShader : pixelShader, diagnostics))
+            if (gpuSpike)
+            {
+                request.defines.emplace_back("GPU_SPIKE", "1");
+            }
+            if (!CompileShaderStage(request, blob, diagnostics))
             {
                 LogShaderDiagnostics(diagnostics);
                 return false;
             }
+            return true;
+        };
+        Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
+        Microsoft::WRL::ComPtr<ID3DBlob> vertexShaderGpu;
+        Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
+        if (!compile(true, false, vertexShader) || !compile(true, true, vertexShaderGpu) || !compile(false, false, pixelShader))
+        {
+            return false;
         }
 
         // One root CBV, b0: the constants of the draw
@@ -130,42 +141,55 @@ namespace myengine::render::dx12
             return false;
         }
 
-        const D3D12_INPUT_ELEMENT_DESC elements[] = {
-            {"CLOUDPOS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
-            {"CLOUDSPIKE", 0, DXGI_FORMAT_R32_FLOAT, 1, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
-        };
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
-        desc.pRootSignature = cloudRootSignature_.Get();
-        desc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
-        desc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
-        D3D12_BLEND_DESC blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-        blend.RenderTarget[0].BlendEnable = TRUE;
-        blend.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
-        blend.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
-        blend.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-        blend.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-        blend.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
-        blend.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-        desc.BlendState = blend;
-        desc.SampleMask = UINT_MAX;
-        desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-        desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        desc.DepthStencilState.DepthEnable = FALSE;
-        desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        desc.InputLayout = {elements, static_cast<UINT>(std::size(elements))};
-        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        desc.NumRenderTargets = 1;
-        desc.RTVFormats[0] = kSceneColorFormat;
-        desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
-        desc.SampleDesc.Count = 1;
-        hr = context_.device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(cloudPipeline_.GetAddressOf()));
-        if (FAILED(hr))
+        const auto makePipeline = [&](const bool gpuSpike, Microsoft::WRL::ComPtr<ID3D12PipelineState>& pipeline)
         {
-            logger_.Error("CreateGraphicsPipelineState (point cloud) failed: " + HrText(hr));
+            const D3D12_INPUT_ELEMENT_DESC elements[] = {
+                {"CLOUDPOS", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+                {"CLOUDSPIKE", 0, gpuSpike ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R32_FLOAT, 1, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+            };
+            const Microsoft::WRL::ComPtr<ID3DBlob>& vs = gpuSpike ? vertexShaderGpu : vertexShader;
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+            desc.pRootSignature = cloudRootSignature_.Get();
+            desc.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+            desc.PS = {pixelShader->GetBufferPointer(), pixelShader->GetBufferSize()};
+            D3D12_BLEND_DESC blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+            blend.RenderTarget[0].BlendEnable = TRUE;
+            blend.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+            blend.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+            blend.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blend.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+            blend.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+            blend.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+            blend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+            desc.BlendState = blend;
+            desc.SampleMask = UINT_MAX;
+            desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+            desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+            desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+            desc.DepthStencilState.DepthEnable = FALSE;
+            desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            desc.InputLayout = {elements, static_cast<UINT>(std::size(elements))};
+            desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+            desc.NumRenderTargets = 1;
+            desc.RTVFormats[0] = kSceneColorFormat;
+            desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+            desc.SampleDesc.Count = 1;
+            const HRESULT result = context_.device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(pipeline.GetAddressOf()));
+            if (FAILED(result))
+            {
+                logger_.Error(std::string("CreateGraphicsPipelineState (point cloud") + (gpuSpike ? ", GPU spikes" : "") + ") failed: " + HrText(result));
+                return false;
+            }
+            return true;
+        };
+        if (!makePipeline(false, cloudPipeline_))
+        {
             cloudRootSignature_.Reset();
             return false;
+        }
+        if (!makePipeline(true, cloudPipelineGpu_))
+        {
+            cloudPipelineGpu_.Reset();   // the clouds still work from the floats of the CPU
         }
         return true;
     }
@@ -350,7 +374,9 @@ namespace myengine::render::dx12
     bool Dx12RenderAdapter::DrawPointCloud(const RenderSurfaceHandle surfaceHandle, const PointCloudHandle cloud, const PointCloudDrawParams& params)
     {
         ZoneScoped;
-        if (cloudPipeline_ == nullptr || postProgram_.pipelineState == nullptr || activeSurface_ == nullptr || activeTarget_ == nullptr || params.flashTimes == nullptr)
+        const bool gpuFlash = params.gpuFlash.buffer != nullptr;
+        if (cloudPipeline_ == nullptr || postProgram_.pipelineState == nullptr || activeSurface_ == nullptr || activeTarget_ == nullptr || (params.flashTimes == nullptr && !gpuFlash) ||
+            (gpuFlash && cloudPipelineGpu_ == nullptr))
         {
             return false;
         }
@@ -385,7 +411,29 @@ namespace myengine::render::dx12
         D3D12_GPU_VIRTUAL_ADDRESS flashAddress = 0;
         D3D12_GPU_VIRTUAL_ADDRESS constantsAddress = 0;
         const UINT64 flashBytes = static_cast<UINT64>(points.count) * sizeof(float);
-        if (!AllocateFrameUploadData(surface->instanceUploadBuffers[backBuffer], params.flashTimes, flashBytes, 16, flashAddress))
+        if (gpuFlash)
+        {
+            // the steps of the last spikes are in a buffer of the GPU brain: the graphics queue waits for the submission that wrote them, and the buffer is the second stream
+            auto* resource = static_cast<ID3D12Resource*>(params.gpuFlash.buffer);
+            if (resource->GetDesc().Width < flashBytes)
+            {
+                return false;   // a buffer for fewer points than the cloud has
+            }
+            flashAddress = resource->GetGPUVirtualAddress();
+            if (params.gpuFlash.fence != nullptr)
+            {
+                context_.commandQueue->Wait(static_cast<ID3D12Fence*>(params.gpuFlash.fence), params.gpuFlash.fenceValue);
+            }
+            // The brain that owns the buffer may be destroyed while this frame is still in flight: the buffer and the fence stay until the frame is done
+            RetiredResource keep;
+            keep.resource = resource;
+            if (params.gpuFlash.fence != nullptr)
+            {
+                keep.objects.push_back(Microsoft::WRL::ComPtr<IUnknown>(static_cast<ID3D12Fence*>(params.gpuFlash.fence)));
+            }
+            RetireResources(std::move(keep));
+        }
+        else if (!AllocateFrameUploadData(surface->instanceUploadBuffers[backBuffer], params.flashTimes, flashBytes, 16, flashAddress))
         {
             return false;
         }
@@ -407,6 +455,9 @@ namespace myengine::render::dx12
         constants.sizes[2] = params.referenceDepth;
         constants.sizes[3] = params.depthRange;
         std::memcpy(constants.palette, params.palette, sizeof(constants.palette));
+        constants.gpu[0] = params.gpuFlash.stepWhole;
+        std::memcpy(&constants.gpu[1], &params.gpuFlash.stepFraction, sizeof(float));
+        std::memcpy(&constants.gpu[2], &params.gpuFlash.stepSeconds, sizeof(float));
         if (!AllocateFrameUploadData(surface->constantUploadBuffers[backBuffer], &constants, sizeof(constants), 256, constantsAddress))
         {
             return false;
@@ -435,8 +486,9 @@ namespace myengine::render::dx12
             const float clear[4] = {params.background.r, params.background.g, params.background.b, params.background.a};
             commandList->ClearRenderTargetView(rtv, clear, 0, nullptr);
             SetRootSignature(cloudRootSignature_.Get());
-            commandList->SetPipelineState(cloudPipeline_.Get());
-            profiler_->NotePipeline(cloudPipeline_.Get());
+            ID3D12PipelineState* pipeline = gpuFlash ? cloudPipelineGpu_.Get() : cloudPipeline_.Get();
+            commandList->SetPipelineState(pipeline);
+            profiler_->NotePipeline(pipeline);
             commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             const D3D12_VERTEX_BUFFER_VIEW views[2] = {points.view, {flashAddress, static_cast<UINT>(flashBytes), sizeof(float)}};
             commandList->IASetVertexBuffers(0, 2, views);

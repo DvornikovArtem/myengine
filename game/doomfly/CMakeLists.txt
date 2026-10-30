@@ -30,6 +30,7 @@ target_link_libraries(myengine_doomfly
     myengine_flybrain
     myengine_doom
   PRIVATE
+    myengine_brainview
     myengine_engine
     myengine_nlohmann_json)
 

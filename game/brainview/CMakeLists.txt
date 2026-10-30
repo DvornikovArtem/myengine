@@ -1,21 +1,27 @@
 set(BRAINVIEW_HEADERS
   include/brainview/BrainActivity.h
   include/brainview/BrainLayout.h
+  include/brainview/BrainPump.h
   include/brainview/BrainRunner.h
   include/brainview/BrainView.h
   include/brainview/BrainViewPanel.h
   include/brainview/BrainViewWindow.h
+  include/brainview/DoomMenuBackdrop.h
   include/brainview/OrbitCamera.h
+  include/brainview/PlayerBrainPanel.h
 )
 
 set(BRAINVIEW_SOURCES
   src/BrainActivity.cpp
   src/BrainLayout.cpp
+  src/BrainPump.cpp
   src/BrainRunner.cpp
   src/BrainView.cpp
   src/BrainViewPanel.cpp
   src/BrainViewWindow.cpp
+  src/DoomMenuBackdrop.cpp
   src/OrbitCamera.cpp
+  src/PlayerBrainPanel.cpp
 )
 
 # The 3D view of the fly brain (docs/flybrain/brain-view.md): the cloud of neurons in their places that flash when they spike, the HUD (groups, raster), the

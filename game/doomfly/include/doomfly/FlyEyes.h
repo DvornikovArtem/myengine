@@ -38,8 +38,15 @@ namespace doomfly
         float halfLuminance = 0.02f;
         float tonicMv = 12.0f;                  // the constant drive of L1, L2, L3, L5
         float lowPassMs = 10.0f;
-        float motionGainMv = 0.0f;              // mV per unit of luminance change (ON positive, OFF negative); 0: no motion channel
-        float motionAverageMs = 100.0f;
+        float motionGainMv = 0.0f;              // (not used: the motion goes through the columns, below)
+        float motionAverageMs = 100.0f;         // the slow average the change of a column is measured against
+        // The motion and the looming (D1): the neurons of the columns that carry the changes of the light, driven by the change of the luminance of their column
+        // against its slow average ((L - slow) / (slow + 0.05), -1..1): the ON cells by a rise, the OFF cells by a fall. T4/T5, LPLC2 and LC4 take it from there.
+        // 0: no motion channel (the eyes of N1: the photoreceptors only).
+        float motionOnGainMv = 12.0f;
+        float motionOffGainMv = 12.0f;
+        std::vector<std::string> motionOnTypes{"Mi1", "Mi4", "Mi9"};
+        std::vector<std::string> motionOffTypes{"Tm1", "Tm2", "Tm4", "Tm9"};
         int boxPixels = 3;                      // the box over which a pixel is averaged
     };
 
@@ -50,6 +57,16 @@ namespace doomfly
         int16_t hex1 = 0;                       // its column
         int16_t hex2 = 0;
         float x = 0.0f;                         // where it looks in the picture, 0..1 of the width, 0..1 of the 3D view height (0 up)
+        float y = 0.0f;
+    };
+
+    // A column of the optic lobe (a place of the visual field of one eye): the columnar neurons (Mi1, Tm3, ... L1) sit in it
+    struct Column
+    {
+        int16_t hex1 = 0;
+        int16_t hex2 = 0;
+        uint8_t eye = 0;
+        float x = 0.0f;                         // where it looks in the picture, like Photoreceptor
         float y = 0.0f;
     };
 
@@ -72,6 +89,23 @@ namespace doomfly
         const EyesConfig& Config() const { return config_; }
         const flybrain::Group& Lamina() const { return lamina_; }
 
+        // The neurons of the motion channel with their columns
+        struct MotionNeuron
+        {
+            uint32_t neuron = 0;
+            int column = 0;
+            bool on = true;
+        };
+        const std::vector<MotionNeuron>& MotionNeurons() const { return motion_; }
+        // The current (mV) of a motion neuron for the change of the luminance of its column
+        float MotionDriveMv(float luminance, float slowLuminance, bool on) const;
+
+        // The columns of both eyes (the distinct columns of L1) and the column of a columnar neuron (-1: none)
+        const std::vector<Column>& Columns() const { return columns_; }
+        int ColumnOf(const flybrain::Connectome& connectome, uint32_t neuron) const;
+        // The luminance (0..1, linear) at each column of the picture
+        void SampleColumns(const uint32_t* frame, int width, int height, std::vector<float>& luminance) const;
+
         // The luminance (0..1, linear) each receptor sees in a frame of 0x00RRGGBB pixels
         void SampleLuminance(const uint32_t* frame, int width, int height, std::vector<float>& luminance) const;
 
@@ -82,6 +116,10 @@ namespace doomfly
         EyesConfig config_;
         std::vector<Photoreceptor> receptors_;
         flybrain::Group lamina_;
+        std::vector<Column> columns_;
+        std::vector<MotionNeuron> motion_;
+        std::vector<int> columnByKey_;          // (eye, hex1, hex2) -> index
         EyesInfo info_;
+        float SampleAt(const uint32_t* frame, int width, int height, float x, float y) const;
     };
 }

@@ -76,10 +76,12 @@ namespace doomfly
             return true;
         };
         if (!resolve(config_.controls.turn.terms, turnGroups_, "turn") || !resolve(config_.controls.forward.terms, forwardGroups_, "forward") ||
-            !resolve(config_.controls.fire.terms, fireGroups_, "fire"))
+            !resolve(config_.controls.fire.terms, fireGroups_, "fire") || !resolve(config_.controls.fire.spikeTerms, spikeGroups_, "fire (spikes)") ||
+            !resolve(config_.controls.show, showGroups_, "show"))
         {
             return false;
         }
+        central_ = connectome.FindSuperclass("cb_intrinsic");
         dopamine_ = connectome.Find("PPL101");
         if (dopamine_.Empty())
         {
@@ -108,10 +110,32 @@ namespace doomfly
 
     void FlyPlayer::MakeBrain()
     {
+        if (brain_)
+        {
+            // not destroyed on this thread: a view may be drawing the ring of its spikes (see BrainFeedSnapshot)
+            std::lock_guard<std::mutex> lock(mutex_);
+            retired_.push_back(std::move(brain_));
+        }
         flybrain::ModelParams params;
         params.seed = config_.seed;
         brain_ = std::make_unique<flybrain::FlyBrain>(config_.connectome, params);
         brain_->SetParallel(config_.parallel);
+        {
+            flybrain::GpuOptions options;
+            options.device = static_cast<ID3D12Device*>(config_.renderDevice);
+            std::string error;
+            const flybrain::Backend backend = brain_->SetBackend(config_.backend, options, &error);
+            const std::string text = backend == flybrain::Backend::Gpu ? (config_.renderDevice != nullptr ? std::string("GPU (render device)") : "GPU (" + brain_->GpuAdapterName() + ")") : "CPU (job system)";
+            if (text != backendText_)
+            {
+                backendText_ = text;
+                if (config_.log)
+                {
+                    config_.log("fly: the brain runs on the " + text + (backend == flybrain::Backend::Cpu && config_.backend != flybrain::BackendChoice::Cpu ? "; the GPU was not taken: " + error : std::string()));
+                }
+            }
+        }
+        ++generation_;
         brain_->StimulateCurrent(eyes_.Lamina(), config_.eyes.tonicMv);
         auto watch = [&](std::vector<Group>& groups)
         {
@@ -123,6 +147,11 @@ namespace doomfly
         watch(turnGroups_);
         watch(forwardGroups_);
         watch(fireGroups_);
+        watch(spikeGroups_);
+        watch(showGroups_);
+        centralWatch_ = central_.Empty() ? 0 : brain_->Watch(central_, 500.0f);
+        slowColumn_.clear();
+        lastMotionDrive_.assign(eyes_.MotionNeurons().size(), -1.0f);
         filtered_.clear();
         slow_.clear();
         lastDrive_.assign(eyes_.Receptors().size(), -1.0f);
@@ -185,6 +214,30 @@ namespace doomfly
             filtered_ = input.luminance;   // the first picture: no transient from darkness
             slow_ = input.luminance;
         }
+        // the motion channel: the columns' changes of the light drive the cells that carry them (once a tic: the picture is the same for the whole tic)
+        if (!input.columnLuminance.empty() && (config_.eyes.motionOnGainMv > 0.0f || config_.eyes.motionOffGainMv > 0.0f))
+        {
+            if (slowColumn_.size() != input.columnLuminance.size())
+            {
+                slowColumn_ = input.columnLuminance;
+            }
+            const std::vector<FlyEyes::MotionNeuron>& motion = eyes_.MotionNeurons();
+            for (size_t i = 0; i < motion.size(); ++i)
+            {
+                const size_t c = static_cast<size_t>(motion[i].column);
+                const float drive = eyes_.MotionDriveMv(input.columnLuminance[c], slowColumn_[c], motion[i].on);
+                if (std::fabs(drive - lastMotionDrive_[i]) > 0.05f)
+                {
+                    lastMotionDrive_[i] = drive;
+                    brain_->SetDrive(motion[i].neuron, drive);
+                }
+            }
+            const float slowAlphaTic = 1.0f - std::exp(-static_cast<float>(kTicMs) / std::max(config_.eyes.motionAverageMs, 1.0f));
+            for (size_t c = 0; c < slowColumn_.size(); ++c)
+            {
+                slowColumn_[c] += (input.columnLuminance[c] - slowColumn_[c]) * slowAlphaTic;
+            }
+        }
         const int substeps = std::max(1, config_.substeps);
         const double subMs = kTicMs / substeps;
         const float alpha = 1.0f - std::exp(-static_cast<float>(subMs) / std::max(config_.eyes.lowPassMs, 0.1f));
@@ -204,6 +257,8 @@ namespace doomfly
             }
             brain_->AdvanceMs(subMs);
         }
+        // On the GPU the windows are only sent: wait for them, so that what the controls read is the end of this tic and not "whatever has come back" (the same game every time)
+        brain_->Synchronize();
 
         // what the controls read
         const float window = config_.controls.smoothingMs;
@@ -219,14 +274,14 @@ namespace doomfly
         result.turnHz = sum(turnGroups_);
         result.forwardHz = sum(forwardGroups_);
         result.fireHz = sum(fireGroups_);
-        for (const Group& group : fireGroups_)
+        for (const Group& group : spikeGroups_)
         {
             if (config_.controls.fire.minSpikes > 0 && brain_->SpikeCount(group.watch, config_.controls.fire.windowMs) >= config_.controls.fire.minSpikes)
             {
                 result.fireSpikes = true;
             }
         }
-        for (const std::vector<Group>* groups : {&turnGroups_, &forwardGroups_, &fireGroups_})
+        for (const std::vector<Group>* groups : {&turnGroups_, &forwardGroups_, &fireGroups_, &spikeGroups_, &showGroups_})
         {
             for (const Group& group : *groups)
             {
@@ -242,7 +297,8 @@ namespace doomfly
         const uint64_t total = brain_->TotalSpikes();
         result.spikesPerSecond = static_cast<float>(static_cast<double>(total - lastSpikes_) / (kTicMs / 1000.0));
         lastSpikes_ = total;
-        if (result.spikesPerSecond > config_.seizureSpikesPerSecond)
+        result.centralSpikesPerSecond = centralWatch_ != 0 ? static_cast<float>(static_cast<double>(brain_->SpikeCount(centralWatch_, static_cast<float>(kTicMs))) / (kTicMs / 1000.0)) : 0.0f;
+        if (result.centralSpikesPerSecond > config_.seizureSpikesPerSecond)
         {
             overSeizureMs_ += kTicMs;
         }
@@ -259,6 +315,12 @@ namespace doomfly
             result.reset = true;
             MakeBrain();
         }
+        result.feed.connectome = config_.connectome;
+        result.feed.spikes = result.snapshot.spikes;
+        result.feed.step = result.snapshot.step;
+        result.feed.backend = brain_->GetBackend();
+        result.feed.ring = brain_->GetGpuSpikeRing();
+        result.feed.generation = generation_;
         result.wallSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
         result.valid = true;
         return result;
@@ -332,6 +394,7 @@ namespace doomfly
         const doom::GameInfo info = game.Info();
         const doom::PlayerState player = game.Player(info.consolePlayer);
         eyes_.SampleLuminance(game.Pixels(), doom::kScreenWidth, doom::kScreenHeight, input.luminance);
+        eyes_.SampleColumns(game.Pixels(), doom::kScreenWidth, doom::kScreenHeight, input.columnLuminance);
         lastLuminance_ = input.luminance;
 
         if (player.inGame)
@@ -482,10 +545,13 @@ namespace doomfly
         status_.forwardUnits = forwardUnits;
         status_.fire = fire;
         status_.use = use;
+        status_.reflex = reflexLeft_ > 0 || use;
         status_.spikesPerSecond = result.spikesPerSecond;
+        status_.centralSpikesPerSecond = result.centralSpikesPerSecond;
         status_.dopamineMv = result.dopamineMv;
         status_.rates = result.rates;
         snapshot_ = result.snapshot;
+        feed_ = result.feed;
         const double speed = result.wallSeconds > 1e-6 ? kTicSeconds / result.wallSeconds : 0.0;
         speedSmoothed_ = speedSmoothed_ == 0.0 ? speed : speedSmoothed_ * 0.9 + speed * 0.1;
     }
@@ -498,6 +564,22 @@ namespace doomfly
         fire = result.fireSpikes || (controls.fire.thresholdHz > 0.0f && result.fireHz >= controls.fire.thresholdHz);
     }
 
+    FlyStatus FlyPlayer::EvaluateSequenceForTest(const std::function<void(int, std::vector<uint32_t>&)>& makeFrame, const int tics, std::vector<FlyStatus>* perTic)
+    {
+        FlyStatus last;
+        std::vector<uint32_t> frame(static_cast<size_t>(doom::kScreenWidth) * doom::kScreenHeight);
+        for (int tic = 0; tic < tics; ++tic)
+        {
+            makeFrame(tic, frame);
+            last = EvaluateFrameForTest(frame.data(), 1, false);
+            if (perTic != nullptr)
+            {
+                perTic->push_back(last);
+            }
+        }
+        return last;
+    }
+
     FlyStatus FlyPlayer::EvaluateFrameForTest(const uint32_t* frame, const int tics, const bool damageAtFirst)
     {
         FlyStatus last;
@@ -505,6 +587,7 @@ namespace doomfly
         {
             TickInput input;
             eyes_.SampleLuminance(frame, doom::kScreenWidth, doom::kScreenHeight, input.luminance);
+            eyes_.SampleColumns(frame, doom::kScreenWidth, doom::kScreenHeight, input.columnLuminance);
             lastLuminance_ = input.luminance;
             input.damage = damageAtFirst && tic == 0;
             input.reset = needReset_;
@@ -528,9 +611,11 @@ namespace doomfly
             status_.forwardHz = result.forwardHz;
             status_.fireHz = result.fireHz;
             status_.spikesPerSecond = result.spikesPerSecond;
+            status_.centralSpikesPerSecond = result.centralSpikesPerSecond;
             status_.dopamineMv = result.dopamineMv;
             status_.rates = result.rates;
             snapshot_ = result.snapshot;
+            feed_ = result.feed;
             ++tics_;
             last = Status();
         }
@@ -571,6 +656,14 @@ namespace doomfly
         sinceSubmit_ = std::min(sinceSubmit_ + wallSeconds, 4.0 * kTicSeconds);
         wallSinceTic_ += wallSeconds;
         bool frame = false;
+        {
+            // the brains that were made again: the thread of the game has taken the feed of the new one by now
+            std::vector<std::unique_ptr<flybrain::FlyBrain>> retired;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                retired.swap(retired_);
+            }
+        }
         auto submitIfDue = [&]()
         {
             if (!pending_ && (!config_.pace || sinceSubmit_ >= kTicSeconds))
@@ -605,6 +698,7 @@ namespace doomfly
         status.seizures = seizures_;
         status.damages = damages_;
         status.controlsName = config_.controls.name;
+        status.backend = backendText_;
         return status;
     }
 

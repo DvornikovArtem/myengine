@@ -10,7 +10,10 @@
 #include <flybrain/Connectome.h>
 #include <flybrain/FlyBrain.h>
 
+#include <myengine/render/RenderTypes.h>
+
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -49,7 +52,21 @@ namespace brainview
             uint32_t awakeNeurons = 0;
         };
 
-        explicit BrainRunner(std::shared_ptr<const flybrain::Connectome> connectome);
+        struct Options
+        {
+            flybrain::BackendChoice backend = flybrain::BackendChoice::Cpu;
+            void* renderDevice = nullptr;              // the ID3D12Device* of the renderer: a brain on it can be drawn without a copy (IRenderAdapter::GetNativeDevice)
+            std::vector<flybrain::Group> watchGroups;  // the groups of the HUD: on the GPU their spikes are counted per slice (there are no spike events to read without waiting)
+        };
+        // The spikes of a group in one slice of the simulation (the GPU backend: RecentSpikes would wait for the GPU)
+        struct GroupCount
+        {
+            uint32_t group;
+            uint32_t count;
+            double simSeconds;
+        };
+
+        explicit BrainRunner(std::shared_ptr<const flybrain::Connectome> connectome, Options options = {});
         ~BrainRunner();
         BrainRunner(const BrainRunner&) = delete;
         BrainRunner& operator=(const BrainRunner&) = delete;
@@ -71,6 +88,13 @@ namespace brainview
 
         // The spikes since the last Drain, oldest first, and the simulated time at the end of them. Stops growing at 4 million: the oldest are dropped.
         void Drain(std::vector<Spike>& out, double& simSecondsNow);
+        // The same, and the counts of the watched groups since the last Drain (filled on the GPU backend only: there `out` stays empty)
+        void Drain(std::vector<Spike>& out, std::vector<GroupCount>& counts, double& simSecondsNow);
+        // Where the brain runs (known once the thread has made it) and why not on the GPU when it was asked for
+        bool OnGpu() const { return onGpu_.load(); }
+        std::string BackendText() const;
+        // The buffer of the last spikes of a GPU brain for the 3D view, with the step now (and a part of a step for the wall time since it was taken); false on the CPU
+        bool GpuFlash(myengine::render::GpuFlashSource& out) const;
         // Groups of the connectome the thread can talk about without a lock (read only)
         const flybrain::Connectome& GetConnectome() const { return *connectome_; }
         Stats GetStats() const;
@@ -81,6 +105,12 @@ namespace brainview
         void UpdatePreset(flybrain::FlyBrain& brain, double simSeconds);
 
         std::shared_ptr<const flybrain::Connectome> connectome_;
+        Options options_;
+        std::atomic<bool> onGpu_{false};
+        std::string backendText_;                    // guarded by mutex_
+        myengine::render::GpuFlashSource gpuFlash_;  // guarded by mutex_: the last slice
+        std::chrono::steady_clock::time_point gpuFlashTaken_{};
+        std::vector<GroupCount> groupCounts_;        // guarded by mutex_
         std::thread thread_;
         std::atomic<bool> running_{false};
         std::atomic<bool> quit_{false};

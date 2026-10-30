@@ -61,6 +61,10 @@ namespace brainview
 
         // The neuron spiked `ageSeconds` ago (0: just now); the group it belongs to counts it too
         void Flash(uint32_t neuron, double ageSeconds);
+        // The flashes come from a buffer of the GPU brain (the steps of the last spikes, no copy to the CPU) until it is cleared with a default source. Call it every
+        // frame before Submit / Render: the step and the fence change. The buffer must belong to the device of the renderer.
+        void SetGpuFlash(const myengine::render::GpuFlashSource& source) { gpuFlash_ = source; }
+        bool UsesGpuFlash() const { return gpuFlash_.buffer != nullptr; }
         // Forgets the flashes and the activity (a new run)
         void ClearActivity();
         uint64_t FlashCount() const { return flashCount_; }
@@ -93,6 +97,7 @@ namespace brainview
         GroupActivity activity_;
         OrbitCamera camera_;
         ViewStyle style_;
+        myengine::render::GpuFlashSource gpuFlash_;
         double clock_ = 0.0;
         uint64_t flashCount_ = 0;
     };

@@ -1,5 +1,6 @@
 #include <brainview/BrainViewWindow.h>
 
+#include <brainview/BrainPump.h>
 #include <brainview/BrainViewPanel.h>
 
 #include <myengine/core/AppPaths.h>
@@ -59,6 +60,51 @@ namespace brainview
     {
         const std::string text = path_.generic_u8string();
         std::snprintf(pathBuffer_, sizeof(pathBuffer_), "%s", text.c_str());
+        char* backend = nullptr;
+        std::size_t backendLength = 0;
+        if (_dupenv_s(&backend, &backendLength, "MYENGINE_FLYBRAIN_BACKEND") == 0 && backend != nullptr)
+        {
+            flybrain::BackendChoice choice = flybrain::BackendChoice::Auto;
+            if (flybrain::ParseBackendChoice(backend, choice))
+            {
+                backend_ = choice == flybrain::BackendChoice::Auto ? 0 : (choice == flybrain::BackendChoice::Gpu ? 1 : 2);
+            }
+            std::free(backend);
+        }
+    }
+
+    void BrainViewWindow::StartRunner()
+    {
+        BrainRunner::Options options;
+        options.backend = backend_ == 0 ? flybrain::BackendChoice::Auto : (backend_ == 1 ? flybrain::BackendChoice::Gpu : flybrain::BackendChoice::Cpu);
+        options.renderDevice = adapter_.GetNativeDevice();
+        for (const BrainGroup& group : view_->Groups())
+        {
+            flybrain::Group members;
+            members.neurons = group.neurons;
+            options.watchGroups.push_back(std::move(members));
+        }
+        runner_ = std::make_unique<BrainRunner>(connectome_, std::move(options));
+        // MYENGINE_FLYBRAIN_PRESET=rest|vision|taste|pain|everything|silence picks the first stimulus (automated runs, the evidence of the task)
+        char* preset = nullptr;
+        std::size_t presetLength = 0;
+        if (_dupenv_s(&preset, &presetLength, "MYENGINE_FLYBRAIN_PRESET") == 0 && preset != nullptr)
+        {
+            const std::string name = preset;
+            std::free(preset);
+            for (int i = 0; i <= static_cast<int>(StimulusPreset::Everything); ++i)
+            {
+                std::string lower = ToString(static_cast<StimulusPreset>(i));
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (lower == name)
+                {
+                    runner_->SetPreset(static_cast<StimulusPreset>(i));
+                }
+            }
+        }
+        runner_->Start();
+        view_->SetGpuFlash({});
+        statsAge_ = 10.0;
     }
 
     BrainViewWindow::~BrainViewWindow()
@@ -128,6 +174,23 @@ namespace brainview
             ImGui::EndCombo();
         }
         ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f);
+        {
+            static const char* const kBackends[] = {"Auto", "GPU", "CPU"};
+            if (ImGui::BeginCombo("Brain on", kBackends[backend_]))
+            {
+                for (int i = 0; i < 3; ++i)
+                {
+                    if (ImGui::Selectable(kBackends[i], i == backend_) && i != backend_)
+                    {
+                        backend_ = i;
+                        restartRunner_ = true;   // a new run on the other backend
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        }
+        ImGui::SameLine();
         bool paused = runner.Paused();
         if (ImGui::Checkbox("Pause", &paused))
         {
@@ -192,40 +255,22 @@ namespace brainview
         {
             FinishLoading();
         }
+        if (state_ == LoadState::Ready && runner_ != nullptr && restartRunner_)
+        {
+            runner_->Stop();
+            runner_.reset();
+            view_->ClearActivity();
+            restartRunner_ = false;
+        }
         if (state_ == LoadState::Ready && runner_ == nullptr)
         {
-            runner_ = std::make_unique<BrainRunner>(connectome_);
-            // MYENGINE_FLYBRAIN_PRESET=rest|vision|taste|pain|everything|silence picks the first stimulus (automated runs, the evidence of the task)
-            char* preset = nullptr;
-            std::size_t presetLength = 0;
-            if (_dupenv_s(&preset, &presetLength, "MYENGINE_FLYBRAIN_PRESET") == 0 && preset != nullptr)
-            {
-                const std::string name = preset;
-                std::free(preset);
-                for (int i = 0; i <= static_cast<int>(StimulusPreset::Everything); ++i)
-                {
-                    std::string lower = ToString(static_cast<StimulusPreset>(i));
-                    std::transform(lower.begin(), lower.end(), lower.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                    if (lower == name)
-                    {
-                        runner_->SetPreset(static_cast<StimulusPreset>(i));
-                    }
-                }
-            }
-            runner_->Start();
-            statsAge_ = 10.0;
+            StartRunner();
         }
 
         // the spikes of the brain into the view, before the picture of this frame is described
         if (state_ == LoadState::Ready && runner_ != nullptr)
         {
-            view_->Advance(deltaSeconds);
-            double simNow = 0.0;
-            runner_->Drain(spikeScratch_, simNow);
-            for (const BrainRunner::Spike& spike : spikeScratch_)
-            {
-                view_->Flash(spike.neuron, simNow - spike.simSeconds);
-            }
+            PumpBrain(*runner_, *view_, deltaSeconds, pump_);
             statsAge_ += deltaSeconds;
             if (statsAge_ >= 0.25)
             {
@@ -280,7 +325,7 @@ namespace brainview
             const myengine::render::TextureHandle texture =
                 view_->Submit(thumbnails_, kViewId, static_cast<uint32_t>(available.x), static_cast<uint32_t>(available.y));
             BrainPanelInfo info;
-            info.subtitle = connectome_ != nullptr ? "MaleCNS v1.0 (CC BY 4.0), LIF model of Shiu et al. 2024" : "";
+            info.subtitle = connectome_ != nullptr ? "MaleCNS v1.0 (CC BY 4.0), LIF model of Shiu et al. 2024, brain on " + runner_->BackendText() : "";
             info.simSeconds = stats_.simSeconds;
             info.realtimeRatio = stats_.realtimeRatio;
             info.spikesPerSecond = stats_.spikesPerSecond;

@@ -113,10 +113,13 @@ namespace myengine::editor
         std::vector<render::DrawItem> items;
         std::vector<render::DebugLine> lines;           // grid, bounds
         // A point cloud drawn first (the fly brain, docs/flybrain/brain-view.md): it overwrites the target, the items and lines go over it. The view and
-        // projection of `cloudParams` are its own camera; cloudFlashTimes (one float per point) is copied by the service, so it may change at once.
+        // projection of `cloudParams` are its own camera; cloudFlashTimes (one float per point) is copied by the service, so it may change at once. With
+        // cloudParams.gpuFlash set the flashes come from a buffer of the GPU brain instead (cloudFlashTimes stays empty).
         render::PointCloudHandle pointCloud{};
         render::PointCloudDrawParams cloudParams{};
         std::vector<float> cloudFlashTimes;
+        // Whatever the request needs alive until the service has drawn it (the buffer and the fence of a GPU brain that may be destroyed in between): dropped after the draw
+        std::shared_ptr<void> keepAlive;
     };
 
     struct ThumbnailServiceConfig

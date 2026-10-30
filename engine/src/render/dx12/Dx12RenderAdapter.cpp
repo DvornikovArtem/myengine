@@ -2343,6 +2343,7 @@ namespace myengine::render::dx12
         clouds_.clear();
         cloudTargets_.clear();
         cloudPipeline_.Reset();
+        cloudPipelineGpu_.Reset();
         cloudRootSignature_.Reset();
         shadowMap_.Reset();
         shadowDsvHeap_.Reset();

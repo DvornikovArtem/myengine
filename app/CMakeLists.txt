@@ -68,7 +68,7 @@ configure_file(resources/FlyDoom.ico "${CMAKE_CURRENT_BINARY_DIR}/FlyDoom.ico" C
 set(FLYDOOM_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/FlyDoom.rc")
 set_source_files_properties(${FLYDOOM_RESOURCES} PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/FlyDoom.ico")
 add_executable(FlyDoom WIN32 ${APP_HEADERS} ${APP_CPP} ${APP_SHADER_FILES} ${FLYDOOM_RESOURCES} ${APP_MANIFEST})
-target_link_libraries(FlyDoom PRIVATE myengine_engine myengine_doomfly myengine_directxtk myengine_directxtex)
+target_link_libraries(FlyDoom PRIVATE myengine_engine myengine_doomfly myengine_brainview myengine_directxtk myengine_directxtex)
 target_include_directories(FlyDoom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(FlyDoom PRIVATE MYENGINE_FLYDOOM=1)
 if(MYENGINE_SHIPPING)

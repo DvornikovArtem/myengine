@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <brainview/BrainPump.h>
 #include <brainview/BrainRunner.h>
 #include <brainview/BrainView.h>
 
@@ -54,6 +55,7 @@ namespace brainview
             Ready,
             Failed
         };
+        void StartRunner();
         void StartLoading();
         void FinishLoading();
         void DrawToolbar();
@@ -71,11 +73,13 @@ namespace brainview
         std::shared_ptr<const flybrain::Connectome> connectome_;
         std::unique_ptr<BrainView> view_;
         std::unique_ptr<BrainRunner> runner_;
+        int backend_ = 0;                 // the combo: 0 Auto, 1 GPU, 2 CPU (MYENGINE_FLYBRAIN_BACKEND=auto|gpu|cpu sets the first one)
+        bool restartRunner_ = false;
+        BrainPumpScratch pump_;
         bool wasOpen_ = false;
         bool showHud_ = true;
         bool showRaster_ = true;
         bool showLook_ = false;
-        std::vector<BrainRunner::Spike> spikeScratch_;
         BrainRunner::Stats stats_;
         double statsAge_ = 10.0;
     };

@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <string>
 
+struct ImDrawList;
+
 namespace brainview
 {
     struct BrainPanelInfo
@@ -27,6 +29,10 @@ namespace brainview
     // Draws the texture (an ImGui texture id, 0: a dark box with the text only) at width x height pixels at the cursor of the current ImGui window, moves the cursor
     // past it and draws the HUD over it.
     void DrawBrainViewPanel(BrainView& view, std::uint64_t texture, float width, float height, const BrainPanelInfo& info);
+
+    // Only the HUD (the title, the bars of the groups, the raster) as draw commands in the rect: for a caller that has no ImGui window (the panel of the game draws on
+    // the background list)
+    void DrawBrainHud(ImDrawList* list, float left, float top, float right, float bottom, BrainView& view, const BrainPanelInfo& info);
 
     // The size of the bars and the raster, for the callers that lay out around them
     constexpr float kHudBarWidth = 150.0f;

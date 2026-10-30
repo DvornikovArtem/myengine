@@ -88,6 +88,33 @@ namespace brainview
         ++g.total;
     }
 
+    void GroupActivity::RecordCount(const std::size_t group, const double time, const uint32_t count)
+    {
+        if (group >= groups_.size() || count == 0)
+        {
+            return;
+        }
+        const std::int64_t bin = BinOf(time);
+        if (!started_ || bin > currentBin_ || bin <= currentBin_ - kBinCount)
+        {
+            return;
+        }
+        Group& g = groups_[group];
+        const std::size_t slot = static_cast<std::size_t>(((bin % kBinCount) + kBinCount) % kBinCount);
+        const auto add = [](uint16_t& cell, const uint32_t amount)
+        {
+            cell = static_cast<uint16_t>(std::min<uint32_t>(65535u, static_cast<uint32_t>(cell) + amount));
+        };
+        add(g.counts[slot], count);
+        const uint32_t each = count / g.rows;
+        const uint32_t rest = count % g.rows;
+        for (uint32_t row = 0; row < g.rows; ++row)
+        {
+            add(g.cells[static_cast<std::size_t>(row) * kBinCount + slot], each + (row < rest ? 1u : 0u));
+        }
+        g.total += count;
+    }
+
     void GroupActivity::Advance(const double now)
     {
         const std::int64_t bin = BinOf(now);

@@ -106,6 +106,7 @@ namespace myengine::render::dx12
         void SetRenderTargetLabel(const std::string& label) override { pendingTargetLabel_ = label; }
         bool GetLastFrameStats(GpuFrameStats& out, bool waitForGpu) override;
         std::string GetAdapterName() const override { return adapterName_; }
+        void* GetNativeDevice() const override { return context_.device.Get(); }
         bool IsDeviceRemoved() const override { return deviceRemovedLogged_; }
 
         void Shutdown() override;
@@ -530,6 +531,7 @@ namespace myengine::render::dx12
         float postExposure_ = 1.0f;
         Microsoft::WRL::ComPtr<ID3D12RootSignature> cloudRootSignature_;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> cloudPipeline_;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> cloudPipelineGpu_;   // the same with the step of the last spike (uint) as the second stream
         std::unordered_map<std::uint32_t, CloudRecord> clouds_;
         std::uint32_t nextCloudId_ = 1;
         std::unordered_map<std::uint32_t, CloudTargets> cloudTargets_;   // by render target id

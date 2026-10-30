@@ -21,6 +21,9 @@
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 
+#include <d3d12.h>
+#include <wrl/client.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -451,6 +454,26 @@ namespace
             sum += cell;
         }
         Check(sum == 0, "a long gap clears everything");
+        // the counts of a group without the neurons (the GPU brain counts per group): they fill the rows evenly and the rate follows them
+        activity.Configure({100});
+        activity.Advance(20.0);
+        activity.Advance(20.25);
+        activity.RecordCount(0, 20.2, 480);      // 480 spikes in a bin of 10 ms: 100 neurons, 48 rows
+        activity.Advance(20.35);
+        Check(activity.TotalSpikes(0) == 480, "the counts are in the total");
+        std::vector<uint16_t> countedRaster;
+        activity.Raster(0, countedRaster);
+        std::uint32_t countedSum = 0;
+        std::uint16_t countedMax = 0;
+        for (const uint16_t cell : countedRaster)
+        {
+            countedSum += cell;
+            countedMax = std::max(countedMax, cell);
+        }
+        Check(countedSum == 480 && countedMax == 10, "480 spikes are 10 in each of the 48 rows");
+        Check(Near(activity.RateHz(0, 0.2), 480.0 / (0.2 * 100.0), 3.0), "and the rate is the count over the neurons and the time");
+        activity.RecordCount(0, 99.0, 5);          // the future: not counted
+        Check(activity.TotalSpikes(0) == 480, "a count of the future is not taken");
         // a group of size zero and an unknown group do not crash
         activity.Configure({0});
         activity.Advance(1.0);
@@ -774,6 +797,108 @@ namespace
         Check(farEdge.Sum() < ringColour.Sum() * 0.5, "a camera that is farther away sees the ring smaller: the edge is dark");
         // a point behind the camera (a camera inside the cloud) must not crash or smear the picture
         draw(flashTimes, 10.0f, true, 0.5f, pixels);
+
+        // the flashes from a buffer of the GPU brain (the step of the last spike of every point, 0xFFFFFFFF never): the same picture as from the floats
+        {
+            Microsoft::WRL::ComPtr<ID3D12Resource> steps;
+            D3D12_HEAP_PROPERTIES heap{};
+            heap.Type = D3D12_HEAP_TYPE_UPLOAD;
+            D3D12_RESOURCE_DESC desc{};
+            desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            desc.Width = static_cast<UINT64>(count) * sizeof(std::uint32_t);
+            desc.Height = 1;
+            desc.DepthOrArraySize = 1;
+            desc.MipLevels = 1;
+            desc.SampleDesc.Count = 1;
+            desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            Check(SUCCEEDED(adapter.GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(steps.GetAddressOf()))),
+                  "a buffer of steps");
+            std::uint32_t* mapped = nullptr;
+            Check(SUCCEEDED(steps->Map(0, nullptr, reinterpret_cast<void**>(&mapped))), "map the steps");
+            const std::uint32_t flashStep = 5000;
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                mapped[i] = i < patch ? flashStep : 0xFFFFFFFFu;   // the patch flashed at step 5000, the ring never
+            }
+            const auto drawGpu = [&](const std::uint32_t stepNow, const float fraction, std::vector<std::uint8_t>& out)
+            {
+                render::PointCloudDrawParams params;
+                OrbitCamera camera;
+                camera.distance = 3.0f;
+                camera.pitch = 0.0f;
+                camera.yaw = 0.0f;
+                camera.Matrices(1.0f, params.view, params.projection);
+                params.decaySeconds = 0.15f;
+                params.baseBrightness = 0.0f;
+                params.flashBrightness = 0.04f;
+                params.baseSizePixels = 2.0f;
+                params.flashSizePixels = 4.0f;
+                params.referenceDepth = 3.0f;
+                FillPalette(params.palette);
+                params.bloom = true;
+                params.bloomThreshold = 0.15f;
+                params.bloomIntensity = 1.0f;
+                params.gpuFlash.buffer = steps.Get();
+                params.gpuFlash.stepWhole = stepNow;
+                params.gpuFlash.stepFraction = fraction;
+                params.gpuFlash.stepSeconds = 0.001f;   // 1 ms a step
+                Check(adapter.BeginFrame(surface, myengine::core::Color{0.0f, 0.0f, 0.0f, 1.0f}), "BeginFrame");
+                Check(adapter.BeginRenderTarget(target, myengine::core::Color{0.0f, 0.0f, 0.0f, 0.0f}), "BeginRenderTarget");
+                Check(adapter.DrawPointCloud(surface, cloud, params), "DrawPointCloud from a buffer of the GPU");
+                adapter.EndRenderTarget(target);
+                adapter.EndFrame(surface);
+                Check(adapter.ReadRenderTargetPixels(target, out), "the pixels");
+            };
+            // just flashed: the same as the floats at age 0 (the earlier picture had the whole patch at time 10 = now)
+            std::vector<std::uint8_t> fromSteps;
+            std::vector<std::uint8_t> reference;
+            std::vector<float> patchOnly(count, SpikeFlashes::kNever);
+            for (std::uint32_t i = 0; i < patch; ++i)
+            {
+                patchOnly[i] = 10.0f;
+            }
+            draw(patchOnly, 10.0f, true, 3.0f, reference);
+            drawGpu(flashStep, 0.0f, fromSteps);
+            const Rgb gpuCentre = MeanOf(fromSteps, kSize, kSize / 2 - 6, kSize / 2 - 6, kSize / 2 + 6, kSize / 2 + 6);
+            const Rgb refCentre = MeanOf(reference, kSize, kSize / 2 - 6, kSize / 2 - 6, kSize / 2 + 6, kSize / 2 + 6);
+            Check(Near(gpuCentre.Sum(), refCentre.Sum(), refCentre.Sum() * 0.03 + 2.0), "the picture from the steps of the GPU is the picture from the floats (" + std::to_string(gpuCentre.Sum()) + " against " +
+                                                                                           std::to_string(refCentre.Sum()) + ")");
+            Check(MeanOf(fromSteps, kSize, kSize - 24, kSize / 2 - 4, kSize - 8, kSize / 2 + 4).Sum() < 2.0, "points that never spiked are dark");
+            // 150 steps (0.15 s = one decay time) later it is dimmer, as the floats at age 0.15
+            std::vector<std::uint8_t> older;
+            drawGpu(flashStep + 150, 0.0f, older);
+            std::vector<std::uint8_t> olderReference;
+            draw(patchOnly, 10.15f, true, 3.0f, olderReference);
+            const Rgb gpuOlder = MeanOf(older, kSize, kSize / 2 - 6, kSize / 2 - 6, kSize / 2 + 6, kSize / 2 + 6);
+            const Rgb refOlder = MeanOf(olderReference, kSize, kSize / 2 - 6, kSize / 2 - 6, kSize / 2 + 6, kSize / 2 + 6);
+            Check(gpuOlder.Sum() < gpuCentre.Sum() * 0.9 && Near(gpuOlder.Sum(), refOlder.Sum(), refOlder.Sum() * 0.05 + 2.0), "the age in steps fades the flash as the age in seconds does");
+            // the fraction of a step moves the age: 150.0 + 100 steps = 250 ms
+            std::vector<std::uint8_t> fraction;
+            drawGpu(flashStep + 100, 50.0f, fraction);
+            const Rgb gpuFraction = MeanOf(fraction, kSize, kSize / 2 - 6, kSize / 2 - 6, kSize / 2 + 6, kSize / 2 + 6);
+            Check(Near(gpuFraction.Sum(), gpuOlder.Sum(), gpuOlder.Sum() * 0.02 + 1.0), "100 steps and half a hundred more are the same age as 150 steps");
+            // a step that is not yet known (newer than 'now') is age 0, not a flash in the future
+            std::vector<std::uint8_t> future;
+            drawGpu(flashStep - 500, 0.0f, future);
+            Check(MeanOf(future, kSize, kSize / 2 - 6, kSize / 2 - 6, kSize / 2 + 6, kSize / 2 + 6).Sum() > refCentre.Sum() * 0.9, "a spike newer than the clock counts as just now");
+            // a buffer that is too small for the cloud is refused, not read past its end
+            {
+                render::PointCloudDrawParams params;
+                params.gpuFlash.buffer = steps.Get();
+                Microsoft::WRL::ComPtr<ID3D12Resource> tiny;
+                D3D12_RESOURCE_DESC tinyDesc = desc;
+                tinyDesc.Width = 64;
+                Check(SUCCEEDED(adapter.GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &tinyDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(tiny.GetAddressOf()))),
+                      "a small buffer");
+                params.gpuFlash.buffer = tiny.Get();
+                Check(adapter.BeginFrame(surface, myengine::core::Color{0, 0, 0, 1}), "BeginFrame");
+                Check(adapter.BeginRenderTarget(target, myengine::core::Color{0, 0, 0, 0}), "BeginRenderTarget");
+                Check(!adapter.DrawPointCloud(surface, cloud, params), "a buffer too small for the cloud is refused");
+                adapter.EndRenderTarget(target);
+                adapter.EndFrame(surface);
+            }
+            steps->Unmap(0, nullptr);
+        }
 
         // the size of the target changes: the HDR targets are rebuilt, nothing leaks
         for (int round = 0; round < 6; ++round)

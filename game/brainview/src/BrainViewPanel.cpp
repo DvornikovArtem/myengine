@@ -66,11 +66,17 @@ namespace brainview
         {
             draw->AddRectFilled(origin, end, Rgba(0.02f, 0.03f, 0.05f, 1.0f));
         }
+        DrawBrainHud(draw, origin.x, origin.y, end.x, end.y, view, info);
+    }
+
+    void DrawBrainHud(ImDrawList* draw, const float left0, const float top0, const float right0, const float bottom0, BrainView& view, const BrainPanelInfo& info)
+    {
         if (!info.showHud)
         {
             return;
         }
-
+        const ImVec2 origin(left0, top0);
+        const ImVec2 end(right0, bottom0);
         draw->PushClipRect(origin, end, true);
         const float margin = 12.0f;
         char line[160];

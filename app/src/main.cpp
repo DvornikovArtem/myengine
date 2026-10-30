@@ -11,6 +11,7 @@
 #include <states/LoadingState.h>
 
 #include <brainview/BrainViewWindow.h>
+#include <brainview/DoomMenuBackdrop.h>
 
 #include <myengine/config/AppConfig.h>
 #include <myengine/core/AppPaths.h>
@@ -42,6 +43,7 @@ namespace
         bool flyReward = false;                     // --fly-reward
         std::uint64_t flySeed = 1;                  // --fly-seed N
         std::filesystem::path fbrain;               // --fbrain <file>: the connectome
+        std::string flybrain = "auto";              // --flybrain auto|cpu|gpu: where the brain of the fly runs
         bool showProjectBrowser = false;
         bool openFlyBrain = false;                  // --fly-brain: Window > Fly Brain is open at the start
         DWORD waitForPid = 0;
@@ -226,13 +228,14 @@ namespace
             const bool isIwad = argument == L"--iwad";
             const bool isFbrain = argument == L"--fbrain";
             const bool isFlySeed = argument == L"--fly-seed";
+            const bool isFlybrain = argument == L"--flybrain";
             const bool isDoomArgs = argument == L"--doom-args";
             // The scene passes (docs/render/scene-passes.md): --render-settings shadows=2,msaa=4,bloom=1,instancing=1; --screenshot <file.tga> [--screenshot-frame N]
             const bool isRenderSettings = argument == L"--render-settings";
             const bool isScreenshot = argument == L"--screenshot";
             const bool isScreenshotFrame = argument == L"--screenshot-frame";
             if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
-                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed)
+                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed && !isFlybrain)
             {
                 valid = false;
                 break;
@@ -258,6 +261,10 @@ namespace
             else if (isFbrain && options.fbrain.empty())
             {
                 options.fbrain = std::wstring(value);
+            }
+            else if (isFlybrain)
+            {
+                options.flybrain = Narrow(value);
             }
             else if (isFlySeed)
             {
@@ -466,7 +473,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>] [--fly-brain [--fbrain <file>]]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
-            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward]  (docs/game/flydoom-fly.md)\n"
+            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward] [--flybrain auto|cpu|gpu]  (docs/game/flydoom-fly.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
@@ -506,12 +513,29 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
         fly.sourceDirectory = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
 #endif
         fly.seed = options.flySeed;
+        options.doom.choice.backend = options.flybrain;
+        options.doom.choice.seed = options.flySeed;
         fly.reward = options.flyReward;
         fly.log = [&app](const std::string& text) { app.GetLogger().Info(text); };
+        fly.renderDevice = [&app]() { return app.RenderDevice(); };
         options.doom.modes = doomfly::MakeModes(fly, options.fly || doomfly::ConnectomeAvailable(fly));
         if (options.fly)
         {
-            options.doom.initialMode = options.flyBio ? 2 : 1;
+            options.doom.initialMode = 1;
+            options.doom.choice.controlSet = options.flyBio ? "bio" : "doomfly";
+        }
+        // The laboratory (docs/game/doom.md): the menu with the brain behind it asks what to play, unless the command line already said (--iwad, --doom-args, --fly) or the
+        // environment asks for no menu (the scripts and the captures of the game itself: MYENGINE_DOOM_NO_MENU=1)
+        {
+            char* noMenu = nullptr;
+            std::size_t noMenuLength = 0;
+            const bool noMenuEnvironment = _dupenv_s(&noMenu, &noMenuLength, "MYENGINE_DOOM_NO_MENU") == 0 && noMenu != nullptr && noMenu[0] != '\0' && std::string_view(noMenu) != "0";
+            std::free(noMenu);
+            options.doom.showMenu = options.doom.iwad.empty() && options.doom.args.empty() && !options.fly && !noMenuEnvironment;
+            options.doom.makeBrainView = [explicitPath = options.fbrain, exeDirectory = fly.exeDirectory, sourceDirectory = fly.sourceDirectory](const myengine::game::DoomBrainViewContext& context)
+            {
+                return std::make_unique<brainview::DoomMenuBackdrop>(context, brainview::DoomMenuBackdrop::FindConnectome(explicitPath, exeDirectory, sourceDirectory));
+            };
         }
     }
     app.SetDoomMode(options.doomMode, options.doom);

@@ -48,6 +48,8 @@ namespace brainview
         void Configure(const std::vector<uint32_t>& groupSizes);
         // A spike of the neuron `index` (its position in the group) of `group` at `time`
         void Record(std::size_t group, uint32_t index, double time);
+        // `count` spikes of the group at `time`, without saying which neurons (the GPU brain counts them per group): spread over the rows evenly
+        void RecordCount(std::size_t group, double time, uint32_t count);
         // Moves the window to `now`: the bins that fall out are cleared
         void Advance(double now);
 

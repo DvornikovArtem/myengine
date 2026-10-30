@@ -82,7 +82,9 @@
   include/myengine/fx/ParticleSystem.h
   include/myengine/game/RlCars.h
   include/myengine/game/RlFeedback.h
+  include/myengine/game/DoomFrontEnd.h
   include/myengine/game/DoomGameFlow.h
+  include/myengine/game/DoomLevels.h
   include/myengine/game/RlGameFlow.h
   include/myengine/game/RlGameSettings.h
   include/myengine/game/RlVideoWindowChange.h
@@ -199,6 +201,9 @@ set(ENGINE_SOURCES
   src/fx/ParticleEffect.cpp
   src/fx/ParticleSystem.cpp
   src/game/DoomGameFlow.cpp
+  src/game/DoomMenu.cpp
+  src/game/DoomMenu.h
+  src/game/DoomSettings.cpp
   src/game/RlCars.cpp
   src/game/RlFeedback.cpp
   src/game/RlGameFlow.cpp

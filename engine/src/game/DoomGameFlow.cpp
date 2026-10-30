@@ -22,9 +22,14 @@
 
 #include <doom/DoomGame.h>
 
+#include "DoomMenu.h"
+
 #include <myengine/audio/AudioSystem.h>
+#include <myengine/game/RlGameSettings.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/ui/UiManager.h>
+#include <myengine/ui/rl/RlUiHost.h>
+#include <myengine/ui/rl/RlUiPaint.h>
 
 namespace myengine::game
 {
@@ -251,7 +256,8 @@ namespace myengine::game
         enum class State : std::uint8_t
         {
             Start,
-            Choose,
+            Menu,        // the laboratory: the menu over the brain
+            Launching,   // the player pressed START: the menu fades out, then the game is made
             Game,
             Error,
             Finished,
@@ -260,8 +266,22 @@ namespace myengine::game
         std::string message;                             // what the error screen says
         std::unique_ptr<IDoomController> controller;     // nullptr: the human plays
         int chosenMode = 0;
-        bool modeAsked = false;
-        std::array<bool, 10> chooseHeld{};               // the digit keys of the menu of the modes, for the edge
+        DoomLaunchChoice launchChoice;                   // what the menu asked for the mode
+        std::vector<std::string> warpArguments;          // "-warp 1 3 -skill 4" of the menu
+        std::filesystem::path chosenIwad;                // the WAD of the menu (empty: the search decides)
+        bool useChoice = false;                          // the mode was chosen in the menu (its `make` gets the choice)
+        // the laboratory
+        rlui::Host host;
+        DoomMenu menu;
+        DoomSettings settings;
+        DoomMenuModel menuModel;
+        std::unique_ptr<IDoomBrainView> brain;
+        double menuTime = 0.0;
+        float fade = 0.0f;                               // 0 .. 1: the black over the menu while it leaves; the black over the game while it comes (1 .. 0)
+        float fadeIn = 0.0f;                             // 1 -> 0 after the game was made
+        bool menuBuilt = false;
+        bool tabHeld = false;                            // the key of the big brain, for the edge
+        float mouseRemainder = 0.0f;                     // the part of a unit of the scaled mouse movement that was not sent yet
         std::unique_ptr<DoomAudioHost> audioHost;
         std::unique_ptr<doom::DoomGame> game;
         core::WindowId mainWindow = 0;
@@ -298,7 +318,7 @@ namespace myengine::game
             std::free(text);
             static const std::map<std::string, int> names = {
                 {"esc", doom::key::kEscape}, {"enter", doom::key::kEnter}, {"up", doom::key::kUp},     {"down", doom::key::kDown}, {"left", doom::key::kLeft},
-                {"right", doom::key::kRight}, {"fire", doom::key::kFire},   {"use", doom::key::kUse},   {"y", 'y'},               {"n", 'n'}};
+                {"right", doom::key::kRight}, {"fire", doom::key::kFire},   {"use", doom::key::kUse},   {"y", 'y'},               {"n", 'n'},               {"tab", doom::key::kTab}};
             std::size_t begin = 0;
             while (begin < list.size())
             {
@@ -345,15 +365,16 @@ namespace myengine::game
                 return;
             }
             std::error_code fileError;
-            if (!svc.iwad.empty() && !std::filesystem::is_regular_file(svc.iwad, fileError))
+            const std::filesystem::path wadArgument = !chosenIwad.empty() ? chosenIwad : svc.iwad;
+            if (!wadArgument.empty() && !std::filesystem::is_regular_file(wadArgument, fileError))
             {
                 // the player named a file: another one is not taken instead
-                message = "The game data named by --iwad is not found:\n" + svc.iwad.string();
+                message = "The game data named by --iwad is not found:\n" + wadArgument.string();
                 state = State::Error;
                 Log("DOOM: " + message);
                 return;
             }
-            const doom::IwadSearchResult found = doom::FindIwad(svc.iwad, svc.exeDirectory, svc.wadDirectories);
+            const doom::IwadSearchResult found = doom::FindIwad(wadArgument, svc.exeDirectory, svc.wadDirectories);
             if (found.path.empty())
             {
                 message = doom::NoIwadMessage(found);
@@ -371,7 +392,13 @@ namespace myengine::game
             config.iwad = found.path;
             config.dataDirectory = svc.dataDirectory;
             config.extraArgs = svc.doomArgs;
-            config.music = svc.music;
+            config.extraArgs.insert(config.extraArgs.end(), warpArguments.begin(), warpArguments.end());
+            if (chosenMode >= 0 && chosenMode < static_cast<int>(svc.modes.size()))
+            {
+                const std::vector<std::string>& modeArgs = svc.modes[static_cast<std::size_t>(chosenMode)].doomArgs;
+                config.extraArgs.insert(config.extraArgs.end(), modeArgs.begin(), modeArgs.end());
+            }
+            config.music = svc.music && settings.musicOn;
             if (svc.audio != nullptr)
             {
                 audioHost = std::make_unique<DoomAudioHost>(*svc.audio, svc.log);
@@ -391,58 +418,231 @@ namespace myengine::game
             if (chosenMode >= 0 && chosenMode < static_cast<int>(svc.modes.size()) && svc.modes[static_cast<std::size_t>(chosenMode)].make)
             {
                 std::string controllerError;
-                controller = svc.modes[static_cast<std::size_t>(chosenMode)].make(controllerError);
+                const DoomMode& mode = svc.modes[static_cast<std::size_t>(chosenMode)];
+                DoomLaunchChoice choice = launchChoice;
+                choice.render = svc.render;
+                choice.thumbnails = svc.thumbnails;
+                controller = mode.make(choice, controllerError);
                 if (!controller)
                 {
-                    message = svc.modes[static_cast<std::size_t>(chosenMode)].name + " did not start:\n" + controllerError;
+                    message = mode.title + " did not start:\n" + controllerError;
                     state = State::Error;
                     Log("DOOM: " + message);
                     return;
                 }
-                Log("DOOM: " + svc.modes[static_cast<std::size_t>(chosenMode)].name);
+                Log("DOOM: " + mode.title);
             }
         }
 
-        // The menu in front of the game: which player plays. Digit keys, Esc leaves.
-        void DrawChoose(ImDrawList* list, const std::uint32_t width, const std::uint32_t height, const bool active)
+        // ---- the laboratory ----
+
+        // The five modes of FlyDoom as the menu shows them. The modes the application gave are told by their id.
+        void BuildMenuModel()
         {
-            const float size = std::max(16.0f, std::floor(static_cast<float>(height) / 30.0f));
-            ImFont* font = ImGui::GetFont();
-            float y = static_cast<float>(height) * 0.2f;
-            const float x = static_cast<float>(width) * 0.1f;
-            list->AddText(font, size * 2.2f, ImVec2(x, y), IM_COL32(230, 70, 50, 255), "FlyDoom");
-            y += size * 3.4f;
-            for (std::size_t i = 0; i < svc.modes.size() && i < 9; ++i)
+            menuModel = {};
+            struct Slot
             {
-                const std::string line = std::to_string(i + 1) + "  " + svc.modes[i].name;
-                list->AddText(font, size * 1.3f, ImVec2(x, y), IM_COL32(235, 235, 235, 255), line.c_str());
-                y += size * 2.0f;
-            }
-            y += size;
-            list->AddText(font, size, ImVec2(x, y), IM_COL32(150, 150, 150, 255), "press the number, Esc - exit");
-            if (!active)
+                const char* id;
+                const char* title;
+                const char* caption;
+                const char* description;
+            };
+            static const Slot slots[] = {
+                {"human", "HUMAN", "Classic DOOM", "You play DOOM with the keyboard and the mouse."},
+                {"fly", "FLY PLAYS", "A brain plays", "The picture goes through the eyes into a fly brain; its descending neurons steer. The game waits for the brain."},
+                {"human-vs-fly", "HUMAN VS FLY", "Deathmatch", "You against a fly in one game."},
+                {"fly-vs-fly", "FLY VS FLY", "Spectator", "Two flies fight, you watch their brains."},
+                {"swarm", "SWARM", "Monsters are flies", "Every monster is a fly with a small brain."},
+            };
+            for (const Slot& slot : slots)
             {
-                return;
-            }
-            for (int digit = 1; digit <= 9 && digit <= static_cast<int>(svc.modes.size()); ++digit)
-            {
-                const bool down = (GetAsyncKeyState('0' + digit) & 0x8000) != 0 || (GetAsyncKeyState(VK_NUMPAD0 + digit) & 0x8000) != 0;
-                if (down && !chooseHeld[static_cast<std::size_t>(digit)])
+                DoomMenuModel::Mode mode;
+                mode.id = slot.id;
+                mode.title = slot.title;
+                mode.caption = slot.caption;
+                mode.description = slot.description;
+                mode.reason = "SOON";
+                for (std::size_t i = 0; i < svc.modes.size(); ++i)
                 {
-                    chosenMode = digit - 1;
-                    state = State::Start;
-                    StartGame();
+                    const DoomMode& entry = svc.modes[i];
+                    if (entry.id != slot.id)
+                    {
+                        continue;
+                    }
+                    mode.modeIndex = static_cast<int>(i);
+                    mode.available = entry.available;
+                    mode.reason = entry.unavailableReason.empty() ? "SOON" : entry.unavailableReason;
+                    if (!entry.description.empty())
+                    {
+                        mode.description = entry.description;
+                    }
+                    break;
                 }
-                chooseHeld[static_cast<std::size_t>(digit)] = down;
+                menuModel.modes.push_back(std::move(mode));
             }
-            if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 && svc.quit)
+            for (const DoomMenuModel::Mode& mode : menuModel.modes)
             {
-                svc.quit();
+                menuModel.flyAvailable = menuModel.flyAvailable || (mode.id == "fly" && mode.available);
+            }
+            // the game data: the best one first, then the others that were found
+            const doom::IwadSearchResult found = doom::FindIwad(svc.iwad, svc.exeDirectory, svc.wadDirectories);
+            if (found.path.empty())
+            {
+                menuModel.wadProblem = doom::NoIwadMessage(found);
+            }
+            else
+            {
+                DoomWadEntry best;
+                best.path = found.path;
+                best.label = WadLabel(found.path, found.isFreedoom);
+                best.levels = LevelsOfWad(found.path);
+                menuModel.wads.push_back(std::move(best));
+                for (const std::filesystem::path& other : found.alternatives)
+                {
+                    DoomWadEntry entry;
+                    entry.path = other;
+                    entry.label = WadLabel(other, false);
+                    entry.levels = LevelsOfWad(other);
+                    menuModel.wads.push_back(std::move(entry));
+                }
+            }
+            menuBuilt = true;
+        }
+
+        // The volume, the music and the scale of the UI of the settings; the window mode only when it changed
+        void ApplySettings(const bool windowToo)
+        {
+            settings.Clamp();
+            if (svc.audio != nullptr)
+            {
+                svc.audio->SetBusVolume(audio::Bus::Sfx, settings.sfxVolume);
+                svc.audio->SetBusVolume(audio::Bus::Music, settings.musicVolume);
+                svc.audio->SetBusMuted(audio::Bus::Music, !settings.musicOn);
+            }
+            host.SetUiScale(static_cast<float>(settings.uiScalePercent) / 100.0f);
+            if (windowToo && svc.applyVideo)
+            {
+                RlVideoSettings video;
+                video.windowMode = settings.windowMode;
+                const std::pair<std::uint32_t, std::uint32_t> size = svc.windowSize ? svc.windowSize() : std::pair<std::uint32_t, std::uint32_t>{1600u, 900u};
+                video.width = static_cast<int>(size.first);
+                video.height = static_cast<int>(size.second);
+                svc.applyVideo(video);
+            }
+        }
+
+        void SaveSettings() const
+        {
+            if (!svc.settingsFile.empty())
+            {
+                settings.Save(svc.settingsFile);
+            }
+        }
+
+        // The menu over the brain. The first frames also make the brain view (the connectome is read on its own thread).
+        void DrawMenu(rlui::Frame& f, ImDrawList* list, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
+        {
+            if (svc.ui != nullptr)
+            {
+                svc.ui->SetGameUiCapturesInput(true);
+            }
+            if (!menuBuilt)
+            {
+                BuildMenuModel();
+            }
+            menuTime += static_cast<double>(deltaTime);
+            if (!brain && svc.makeBrainView && settings.brainBackdrop)
+            {
+                DoomBrainViewContext context;
+                context.render = svc.render;
+                context.thumbnails = svc.thumbnails;
+                context.log = svc.log;
+                brain = svc.makeBrainView(context);
+            }
+            if (brain && !settings.brainBackdrop)
+            {
+                brain.reset();
+            }
+            const float leaving = state == State::Launching ? fade : 0.0f;
+            if (brain)
+            {
+                brain->Draw(list, 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), static_cast<double>(deltaTime), 1.0f - leaving);
+                menuModel.brainStatus = brain->Status();
+                menuModel.brainProblem = brain->Problem();
+            }
+            else
+            {
+                f.SetSpace(rlui::Space::Screen);
+                rlui::paint::MenuBackdrop(f);
+                f.SetSpace(rlui::Space::Menu);
+                menuModel.brainStatus.clear();
+                menuModel.brainProblem.clear();
+            }
+
+            if (state == State::Menu)
+            {
+                DoomStartRequest request;
+                bool changed = false;
+                const DoomSettings before = settings;
+                const DoomMenu::Result result = menu.Draw(f, settings, menuModel, menuTime, request, changed);
+                if (changed)
+                {
+                    ApplySettings(settings.windowMode != before.windowMode);
+                    SaveSettings();
+                }
+                if (result == DoomMenu::Result::Quit)
+                {
+                    SaveSettings();
+                    if (svc.quit)
+                    {
+                        svc.quit();
+                    }
+                }
+                else if (result == DoomMenu::Result::Start)
+                {
+                    // the mode of the menu: the index in the list of the application
+                    chosenMode = 0;
+                    useChoice = false;
+                    for (const DoomMenuModel::Mode& mode : menuModel.modes)
+                    {
+                        if (mode.id == request.modeId && mode.modeIndex >= 0)
+                        {
+                            chosenMode = mode.modeIndex;
+                            useChoice = true;
+                        }
+                    }
+                    launchChoice = request.choice;
+                    warpArguments = request.doomArgs;
+                    chosenIwad = request.iwad;
+                    SaveSettings();
+                    state = State::Launching;
+                    fade = 0.0f;
+                }
+            }
+            else
+            {
+                // the menu leaves: the black comes over it (and over the brain), then the game is made
+                f.SetSpace(rlui::Space::Screen);
+                rlui::paint::Dim(f, rlui::Color{0.0f, 0.0f, 0.0f, std::clamp(fade, 0.0f, 1.0f)});
+                f.SetSpace(rlui::Space::Menu);
+                fade += deltaTime / 0.45f;
+                if (fade >= 1.0f)
+                {
+                    const float size = std::max(18.0f, std::floor(static_cast<float>(height) / 32.0f));
+                    list->AddText(ImGui::GetFont(), size, ImVec2(static_cast<float>(width) * 0.5f - size * 3.0f, static_cast<float>(height) * 0.5f), IM_COL32(150, 170, 200, 255), "starting ...");
+                    if (fade >= 1.15f)
+                    {
+                        brain.reset();   // the brain of the menu goes: the game has its own
+                        state = State::Start;
+                        fadeIn = 1.0f;
+                        StartGame();
+                    }
+                }
             }
         }
 
         // The keyboard into DOOM: a key that goes down (or up) since the last frame is one event
-        void PollKeyboard(const bool active, const bool menu, const bool controlled = false)
+        void PollKeyboard(const bool active, const bool doomMenu, const bool controlled = false)
         {
             BYTE keys[256] = {};
             const bool haveKeys = active && GetKeyboardState(keys) != FALSE;
@@ -467,11 +667,11 @@ namespace myengine::game
             {
                 send(entry.vk, entry.doomKey);
             }
-            if (controlled && !menu)
+            if (controlled && !doomMenu)
             {
                 // the controller plays: the keyboard only reaches the menu of DOOM (and the keys above), not the game
             }
-            else if (menu)
+            else if (doomMenu)
             {
                 for (const KeyMap& entry : kMenuKeys)
                 {
@@ -619,7 +819,9 @@ namespace myengine::game
             list->AddText(font, size, ImVec2(x, y), IM_COL32(150, 150, 150, 255), "Esc - exit");
         }
 
-        void Build(const core::WindowId windowId, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
+        bool menuAsked = false;
+
+        void Build(rlui::Frame& frame, const core::WindowId windowId, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
         {
             ImDrawList* list = ImGui::GetBackgroundDrawList();
             list->AddRectFilled(ImVec2(0, 0), ImVec2(static_cast<float>(width), static_cast<float>(height)), IM_COL32(0, 0, 0, 255));
@@ -633,19 +835,33 @@ namespace myengine::game
             }
             const bool active = ProcessIsForeground();
 
-            if (state == State::Start && svc.modes.size() > 1 && svc.initialMode < 0 && !modeAsked)
+            if (state == State::Start && !menuAsked && svc.showMenu && svc.initialMode < 0)
             {
-                modeAsked = true;
-                state = State::Choose;
+                menuAsked = true;
+                state = State::Menu;
+                {
+                    char* screen = nullptr;
+                    std::size_t screenLength = 0;
+                    if (_dupenv_s(&screen, &screenLength, "MYENGINE_DOOM_MENU_SCREEN") == 0 && screen != nullptr)
+                    {
+                        menu.ShowScreen(screen);
+                        std::free(screen);
+                    }
+                }
             }
             else if (state == State::Start && svc.initialMode >= 0)
             {
                 chosenMode = std::min(svc.initialMode, static_cast<int>(svc.modes.size()) - 1);
+                launchChoice = svc.choice;
             }
-            if (state == State::Choose)
+            if (state == State::Menu || state == State::Launching)
             {
-                DrawChoose(list, width, height, active);
+                DrawMenu(frame, list, width, height, deltaTime);
                 return;
+            }
+            if (svc.ui != nullptr && state != State::Error)
+            {
+                svc.ui->SetGameUiCapturesInput(false);   // the keys and the mouse are the game's
             }
             if (state == State::Start)
             {
@@ -657,13 +873,34 @@ namespace myengine::game
             if (state == State::Game)
             {
                 const doom::GameInfo before = game->Info();
-                const bool menu = before.menuActive || before.state != doom::GameState::Level;
-                PollKeyboard(active, menu, controller != nullptr);
+                const bool doomMenu = before.menuActive || before.state != doom::GameState::Level;
+                PollKeyboard(active, doomMenu, controller != nullptr);
+                if (controller != nullptr)
+                {
+                    // Tab is free when a controller plays (the map of DOOM is the human's): it shows the big brain
+                    const bool tab = active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
+                    if (tab && !tabHeld)
+                    {
+                        controller->ToggleBigBrain();
+                    }
+                    tabHeld = tab;
+                }
                 for (const ScriptedKey& key : scriptedKeys)
                 {
                     if (key.frame == flowFrame)
                     {
-                        game->PostKey(key.key, key.pressed);
+                        if (key.key == doom::key::kTab && controller != nullptr)
+                        {
+                            // the scripted Tab of a controller: the big brain, as the real key does
+                            if (key.pressed)
+                            {
+                                controller->ToggleBigBrain();
+                            }
+                        }
+                        else
+                        {
+                            game->PostKey(key.key, key.pressed);
+                        }
                     }
                 }
                 ++flowFrame;
@@ -679,7 +916,9 @@ namespace myengine::game
                               (GetAsyncKeyState(VK_MBUTTON) & 0x8000 ? 4 : 0);
                     if (svc.takeMouseDelta)
                     {
-                        dx = svc.takeMouseDelta().first;
+                        const float scaled = static_cast<float>(svc.takeMouseDelta().first) * settings.mouseSensitivity + mouseRemainder;
+                        dx = static_cast<int>(std::trunc(scaled));
+                        mouseRemainder = scaled - static_cast<float>(dx);
                     }
                 }
                 else if (svc.takeMouseDelta)
@@ -758,6 +997,13 @@ namespace myengine::game
                 if (controller != nullptr)
                 {
                     controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
+                    controller->DrawOverlay(list, static_cast<float>(width), static_cast<float>(height));
+                }
+                // the black of the start goes away over half a second
+                if (fadeIn > 0.0f)
+                {
+                    list->AddRectFilled(ImVec2(0.0f, 0.0f), ImVec2(static_cast<float>(width), static_cast<float>(height)), IM_COL32(0, 0, 0, static_cast<int>(std::clamp(fadeIn, 0.0f, 1.0f) * 255.0f)));
+                    fadeIn = std::max(0.0f, fadeIn - deltaTime / 0.5f);
                 }
             }
             else if (state == State::Error)
@@ -790,20 +1036,33 @@ namespace myengine::game
         impl_->controller.reset();
         impl_->game.reset();
         impl_->audioHost.reset();
+        impl_->brain.reset();
+        impl_->SaveSettings();
+        impl_->host.Uninstall();
+    }
+
+    void DoomGameFlow::SetRawInputHook(std::function<void(rlui::RawInput&)> hook)
+    {
+        impl_->host.SetRawInputHook(std::move(hook));
     }
 
     void DoomGameFlow::Install()
     {
-        ui::GameUiHooks hooks;
-        hooks.bakeFonts = [](ImFontAtlas& atlas, std::uint32_t, std::uint32_t) { atlas.AddFontDefault(); };
         Impl* impl = impl_.get();
-        hooks.build = [impl](const core::WindowId windowId, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
+        // the settings of the player, then the host of the UI kit (Exo 2 and the plates of Rocket Arena): the menu is drawn with it, the game with the draw list of ImGui
+        if (!impl->svc.settingsFile.empty())
         {
-            impl->Build(windowId, width, height, deltaTime);
-        };
-        impl_->svc.ui->SetGameUi(std::move(hooks));
-        // the keys and the mouse are the game's (the UI kit does not take them)
-        impl_->svc.ui->SetGameUiCapturesInput(false);
+            impl->settings.Load(impl->svc.settingsFile);
+        }
+        rlui::HostConfig config;
+        config.uiScale = static_cast<float>(impl->settings.uiScalePercent) / 100.0f;
+        impl->host.Install(*impl_->svc.ui, config);
+        impl->host.SetScreen([impl](rlui::Frame& frame)
+                             {
+                                 const rlui::Vec2 window = frame.metrics().window;
+                                 impl->Build(frame, 1, static_cast<std::uint32_t>(window.x), static_cast<std::uint32_t>(window.y), frame.DeltaTime());
+                             });
+        impl->ApplySettings(impl->settings.windowMode != 0);
     }
 
     const char* DoomGameFlow::StateName() const
@@ -811,7 +1070,8 @@ namespace myengine::game
         switch (impl_->state)
         {
             case Impl::State::Start: return "start";
-            case Impl::State::Choose: return "choose";
+            case Impl::State::Menu: return "menu";
+            case Impl::State::Launching: return "launching";
             case Impl::State::Game: return "game";
             case Impl::State::Error: return "error";
             case Impl::State::Finished: return "finished";

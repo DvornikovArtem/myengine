@@ -2,6 +2,8 @@
 
 #include <myengine/editor/ThumbnailService.h>
 
+#include <unknwn.h>
+
 #include <algorithm>
 #include <cstring>
 
@@ -103,7 +105,8 @@ namespace brainview
     {
         myengine::render::PointCloudDrawParams params;
         camera_.Matrices(static_cast<float>(width) / static_cast<float>(std::max(height, 1u)), params.view, params.projection);
-        params.flashTimes = flashes_.Times();
+        params.flashTimes = gpuFlash_.buffer != nullptr ? nullptr : flashes_.Times();
+        params.gpuFlash = gpuFlash_;
         params.time = flashes_.Now();
         params.decaySeconds = style_.decaySeconds;
         params.baseBrightness = style_.baseBrightness;
@@ -132,6 +135,40 @@ namespace brainview
         return drawn;
     }
 
+    namespace
+    {
+        // The references on the buffer and the fence of a GPU brain, held by a request of the live view until it is drawn: the brain may be destroyed in between
+        struct GpuFlashHold
+        {
+            IUnknown* buffer = nullptr;
+            IUnknown* fence = nullptr;
+            GpuFlashHold(IUnknown* bufferIn, IUnknown* fenceIn) : buffer(bufferIn), fence(fenceIn)
+            {
+                if (buffer != nullptr)
+                {
+                    buffer->AddRef();
+                }
+                if (fence != nullptr)
+                {
+                    fence->AddRef();
+                }
+            }
+            GpuFlashHold(const GpuFlashHold&) = delete;
+            GpuFlashHold& operator=(const GpuFlashHold&) = delete;
+            ~GpuFlashHold()
+            {
+                if (fence != nullptr)
+                {
+                    fence->Release();
+                }
+                if (buffer != nullptr)
+                {
+                    buffer->Release();
+                }
+            }
+        };
+    }
+
     myengine::render::TextureHandle BrainView::Submit(myengine::editor::ThumbnailService& service, const std::string& id, const uint32_t width, const uint32_t height)
     {
         if (!cloud_.IsValid())
@@ -147,7 +184,14 @@ namespace brainview
         request.cloudParams = DrawParams(width, height);
         request.view = request.cloudParams.view;
         request.projection = request.cloudParams.projection;
-        request.cloudFlashTimes.assign(flashes_.Times(), flashes_.Times() + flashes_.Count());
+        if (gpuFlash_.buffer == nullptr)
+        {
+            request.cloudFlashTimes.assign(flashes_.Times(), flashes_.Times() + flashes_.Count());
+        }
+        else
+        {
+            request.keepAlive = std::make_shared<GpuFlashHold>(static_cast<IUnknown*>(gpuFlash_.buffer), static_cast<IUnknown*>(gpuFlash_.fence));
+        }
         request.cloudParams.flashTimes = nullptr;   // the service points it at its own copy
         return service.SubmitLiveView(std::move(request));
     }

@@ -664,6 +664,14 @@ namespace myengine::core
             services.music = doomOptions_.music;
             services.modes = doomOptions_.modes;
             services.initialMode = doomOptions_.initialMode;
+            services.choice = doomOptions_.choice;
+            // the laboratory: the menu, the brain behind it, the window mode of its settings, the file that keeps them
+            services.showMenu = doomOptions_.showMenu;
+            services.thumbnails = thumbnailService_.get();
+            services.makeBrainView = doomOptions_.makeBrainView;
+            services.applyVideo = [this](const game::RlVideoSettings& video) { ApplyVideoSettings(video); };
+            services.windowSize = [this]() { return GetWindowSize(); };
+            services.settingsFile = apppaths::UserDataDirectory() / L"settings.json";
             doomFlow_ = std::make_unique<game::DoomGameFlow>(services);
             doomFlow_->Install();
         }
@@ -778,6 +786,10 @@ namespace myengine::core
                     if (gameFlow_ != nullptr)
                     {
                         gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    }
+                    if (doomFlow_ != nullptr)
+                    {
+                        doomFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
                     }
                     logger_.Info(std::string("UI script: ") + scriptPath);
                 }
@@ -1351,6 +1363,12 @@ namespace myengine::core
     bool Application::DoomMode() const
     {
         return doomMode_;
+    }
+
+    void* Application::RenderDevice() const
+    {
+        const auto* dx12 = dynamic_cast<const render::dx12::Dx12RenderAdapter*>(renderAdapter_.get());
+        return dx12 != nullptr ? static_cast<void*>(dx12->GetDevice()) : nullptr;
     }
 
     // DOOM turns with the mouse: the cursor is hidden and kept in the window (the movement itself comes as raw input, WM_INPUT)

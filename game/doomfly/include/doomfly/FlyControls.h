@@ -6,7 +6,7 @@
 // A channel is a weighted sum of the mean firing rates (Hz per neuron, over `smoothingMs`) of groups of neurons: a type and a side.
 //   turn     degrees of turn per tic  = clamp(gain * (sum - offset - dead zone), +-limit); a positive sum turns to the right
 //   forward  DOOM units of walking    = clamp(gain * (sum - offset - dead zone), +-limit)
-//   fire     the weapon fires when the neurons fired at least `minSpikes` times in the last `windowMs` (or their rate is above thresholdHz)
+//   fire     the weapon fires when the sum of the rates of `terms` is above thresholdHz, or one of `spikeTerms` fired at least `minSpikes` times in `windowMs`
 //   unstick  (optional reflex, not of the brain) the turn away from a wall that the fly has pushed against for a long time
 //   use      one press of the use button every `everyTics` while the player pushes forward and does not move (stuck at a door); on the
 //            intermission screens (they wait for a key) the controller presses fire
@@ -40,10 +40,10 @@ namespace doomfly
 
     struct FireChannel
     {
-        std::vector<ControlTerm> terms;
+        std::vector<ControlTerm> terms;         // the weapon fires when the sum of their mean rates (Hz) is above thresholdHz (0: not used)
+        std::vector<ControlTerm> spikeTerms;    // ... or when one of these neurons has fired at least minSpikes times in the last windowMs (a giant fiber: a single spike is a shot)
         float windowMs = 100.0f;
         uint32_t minSpikes = 1;
-        // the mean rate of the neurons (Hz) above which the weapon fires, when a single spike means little (0: use minSpikes only)
         float thresholdHz = 0.0f;
     };
 
@@ -74,6 +74,7 @@ namespace doomfly
         FireChannel fire;
         UseChannel use;
         UnstickReflex unstick;
+        std::vector<ControlTerm> show;          // neurons that only the panel and the tests read (the looming neurons LC4, LPLC2, the giant fiber): not part of the controls
 
         // Reads a controls file. false and `error` when the file is missing or wrong. Side: "left", "right", "any"
         static bool Load(const std::filesystem::path& path, FlyControls& out, std::string& error);
