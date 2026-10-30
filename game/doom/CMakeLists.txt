@@ -22,7 +22,7 @@ target_compile_definitions(myengine_doomgeneric
   PRIVATE
     _CRT_SECURE_NO_WARNINGS
     _CRT_NONSTDC_NO_WARNINGS)
-target_sources(myengine_doomgeneric PRIVATE src/DoomBridge.c src/DoomSound.c src/DoomBridge.h)
+target_sources(myengine_doomgeneric PRIVATE src/DoomBridge.c src/DoomSound.c src/DoomBridge.h src/DoomSwarm.c src/DoomSwarmC.h)
 target_include_directories(myengine_doomgeneric PRIVATE src)
 
 # The music: the OPL module of Chocolate Doom (GPL v2) over Nuked OPL3 (LGPL v2.1), both in third_party/opl, driven offline by src/opl_render.c
@@ -48,11 +48,13 @@ set(DOOM_HEADERS
   include/doom/DoomAudio.h
   include/doom/DoomGame.h
   include/doom/DoomKeys.h
+  include/doom/DoomSwarm.h
   src/DoomMusic.h
 )
 set(DOOM_SOURCES
   src/DoomGame.cpp
   src/DoomMusic.cpp
+  src/DoomSwarmAssets.cpp
   src/DoomWad.cpp
 )
 

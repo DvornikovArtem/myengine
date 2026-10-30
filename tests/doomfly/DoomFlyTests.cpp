@@ -151,11 +151,16 @@ namespace
         return connectome;
     }
 
-    std::unique_ptr<doomfly::FlyPlayer> MakePlayer(const std::shared_ptr<const flybrain::Connectome>& connectome, const char* controls, const std::uint64_t seed = 1)
+    std::unique_ptr<doomfly::FlyPlayer> MakePlayer(const std::shared_ptr<const flybrain::Connectome>& connectome, const char* controls, const std::uint64_t seed = 1,
+                                                       const std::function<void(doomfly::FlyPlayerConfig&)>& tweak = nullptr)
     {
         doomfly::FlyPlayerConfig config;
         config.connectome = connectome;
         config.seed = seed;
+        if (tweak)
+        {
+            tweak(config);
+        }
         wchar_t motion[32] = {};
         if (GetEnvironmentVariableW(L"FLYDOOM_TEST_MOTION", motion, 32) > 0)
         {
@@ -484,6 +489,114 @@ namespace
     }
 
     // E1M1, the fly plays for a few seconds
+    // Two brains in one game (Fly vs Fly): "-deathmatch -players 2", the brain of player 0 and the brain of player 1, each sees through its own eyes, one tic of the game
+    // when both have answered
+    int ScenarioDuel(const fs::path& wad, const int tics)
+    {
+        myengine::jobs::Initialize();
+        auto connectome = LoadBrain();
+        if (!connectome)
+        {
+            return 1;
+        }
+        doom::DoomConfig config;
+        config.iwad = wad;
+        config.dataDirectory = fs::temp_directory_path() / "myengine_doom_fly_test";
+        config.extraArgs = {"-warp", "1", "1", "-skill", "3", "-nomusic", "-nomonsters", "-deathmatch", "-players", "2"};
+        std::string error;
+        auto game = doom::DoomGame::Create(config, error);
+        if (!game)
+        {
+            std::printf("  DOOM: %s\n", error.c_str());
+            return 1;
+        }
+        for (int i = 0; i < 10; ++i)
+        {
+            game->StepTic();
+        }
+        auto first = MakePlayer(connectome, "controls_doomfly.json", 1, [](doomfly::FlyPlayerConfig& c) { c.playerIndex = 0; c.ownView = true; c.pace = false; });
+        auto second = MakePlayer(connectome, "controls_doomfly.json", 1001, [](doomfly::FlyPlayerConfig& c) { c.playerIndex = 1; c.ownView = true; c.drivesScreens = false; c.pace = false; });
+        if (!first || !second)
+        {
+            return 1;
+        }
+        struct Source final : doom::ITicCmdSource
+        {
+            doomfly::FlyPlayer* a;
+            doomfly::FlyPlayer* b;
+            void BuildTicCmd(int player, doom::TicCmd& cmd) override
+            {
+                if (player == 0) cmd = a->Command();
+                if (player == 1) cmd = b->Command();
+            }
+        } source;
+        source.a = first.get();
+        source.b = second.get();
+        game->SetTicCmdSource(&source);
+        const doom::PlayerState a0 = game->Player(0);
+        const doom::PlayerState b0 = game->Player(1);
+        std::uint64_t hashA = 1469598103934665603ull, hashB = hashA;
+        int waits = 0;
+        const auto begin = std::chrono::steady_clock::now();
+        for (int tic = 0; tic < tics; ++tic)
+        {
+            first->Begin(*game, 1.0 / 35.0);
+            second->Begin(*game, 1.0 / 35.0);
+            int guard = 0;
+            while (!(first->Poll(*game) & second->Poll(*game)))
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                ++waits;
+                if (++guard > 20000)
+                {
+                    std::printf("  a brain did not answer in 20 s\n");
+                    return 1;
+                }
+            }
+            game->StepTic();
+            doom::TicCmd c0, c1;
+            game->GetTicCmd(0, c0);
+            game->GetTicCmd(1, c1);
+            hashA = (hashA ^ static_cast<std::uint8_t>(c0.forwardMove)) * 1099511628211ull;
+            hashA = (hashA ^ static_cast<std::uint16_t>(c0.angleTurn)) * 1099511628211ull;
+            hashB = (hashB ^ static_cast<std::uint8_t>(c1.forwardMove)) * 1099511628211ull;
+            hashB = (hashB ^ static_cast<std::uint16_t>(c1.angleTurn)) * 1099511628211ull;
+            first->EndTic(*game);
+            second->EndTic(*game);
+        }
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+        const doom::PlayerState a1 = game->Player(0);
+        const doom::PlayerState b1 = game->Player(1);
+        Result("tics_a", static_cast<double>(first->Status().tics));
+        Result("tics_b", static_cast<double>(second->Status().tics));
+        Result("moved_a", std::hypot(a1.x - a0.x, a1.y - a0.y));
+        Result("moved_b", std::hypot(b1.x - b0.x, b1.y - b0.y));
+        Result("apart", std::hypot(a1.x - b1.x, a1.y - b1.y));
+        Result("hash_a", [&] { char text[32]; std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(hashA)); return std::string(text); }());
+        Result("hash_b", [&] { char text[32]; std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(hashB)); return std::string(text); }());
+        Result("eyes_a", first->EyesPicture().size() == static_cast<size_t>(doom::kScreenWidth) * doom::kScreenHeight ? "1" : "0");
+        Result("eyes_b", second->EyesPicture().size() == static_cast<size_t>(doom::kScreenWidth) * doom::kScreenHeight ? "1" : "0");
+        Result("eyes_differ", first->EyesPicture() != second->EyesPicture() ? "1" : "0");
+        Result("speed", 1.0 / 35.0 * tics / seconds);
+        Result("waits", waits);
+        // the round is over: the level again, both players born again
+        game->RestartLevel();
+        for (int i = 0; i < 4; ++i)
+        {
+            game->StepTic();
+        }
+        Result("again_in0", game->Player(0).inGame ? "1" : "0");
+        Result("again_in1", game->Player(1).inGame ? "1" : "0");
+        Result("again_health", std::min(game->Player(0).health, game->Player(1).health));
+        Result("again_frags", game->Player(0).frags + game->Player(1).frags);
+        game->SetTicCmdSource(nullptr);
+        first.reset();
+        second.reset();
+        game.reset();
+        myengine::jobs::Shutdown();
+        return 0;
+    }
+
     int ScenarioPlay(const fs::path& wad, const std::uint64_t seed, const int tics)
     {
         myengine::jobs::Initialize();
@@ -785,6 +898,25 @@ namespace
             std::printf("  seed 1 and seed 1: %s, %s; seed 2: %s\n", Str(playA, "cmd_hash").c_str(), Str(playB, "cmd_hash").c_str(), Str(playC, "cmd_hash").c_str());
         }
 
+        if (!wad.empty())
+        {
+            // 8. two brains in one game
+            const ChildResult duel = RunChild(exe, "--scenario duel --tics 100");
+            CHECK(duel.exitCode == 0);
+            std::printf("  duel, 100 tics: both played %.0f / %.0f tics, walked %.0f / %.0f units, apart %.0f, brains %.2fx real time\n", Num(duel, "tics_a"), Num(duel, "tics_b"),
+                        Num(duel, "moved_a"), Num(duel, "moved_b"), Num(duel, "apart"), Num(duel, "speed"));
+            CHECK(Num(duel, "tics_a") == 100.0 && Num(duel, "tics_b") == 100.0);
+            CHECK(Num(duel, "moved_a") > 5.0);
+            CHECK(Num(duel, "moved_b") > 5.0);
+            CHECK(Num(duel, "apart") > 30.0);
+            CHECK(Str(duel, "eyes_a") == "1" && Str(duel, "eyes_b") == "1");
+            CHECK(Str(duel, "eyes_differ") == "1");
+            CHECK(!Str(duel, "hash_a").empty() && Str(duel, "hash_a") != Str(duel, "hash_b"));
+            CHECK(Str(duel, "again_in0") == "1" && Str(duel, "again_in1") == "1");
+            CHECK(Num(duel, "again_health") == 100.0);
+            CHECK(Num(duel, "again_frags") == 0.0);
+        }
+
         std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "doom_fly OK" : "doom_fly FAILED", g_checks, g_failures);
         return g_failures == 0 ? 0 : 1;
     }
@@ -835,6 +967,11 @@ int main(int argc, char** argv)
         if (scenario == "damage") return ScenarioDamage();
         if (scenario == "loom") return ScenarioLoom();
         if (scenario == "seizure") return ScenarioSeizure();
+        if (scenario == "duel")
+        {
+            const fs::path wad = FindWad();
+            return wad.empty() ? 77 : ScenarioDuel(wad, tics);
+        }
         if (scenario == "play")
         {
             const fs::path wad = FindWad();

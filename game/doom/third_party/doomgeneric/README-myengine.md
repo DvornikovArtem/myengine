@@ -27,4 +27,7 @@ All the changes are marked with the word `myengine` in a comment, and are small:
 | `g_game.c` | `G_Ticker` calls `DG_TicCmdHook` for every player in the game, after the command is built (not while a demo plays) |
 | `m_config.c` | `-configdir <dir>`: the folder of `default.cfg` and of the saves (the default was the current folder) |
 | `i_sound.c` | no `#include <SDL_mixer.h>` (no SDL here) |
+| `w_wad.c`, `w_wad.h` | `W_RenameLumps` and `W_InsertMemoryLumps`: lumps that live in memory (the sprites and the sound of the flies of the swarm), put into the lump table before `R_Init`; `-file` cannot do it with the shareware WAD |
+| `d_main.c`, `doomgeneric.h` | `DG_AfterIwad()` is called after the WAD files are loaded (the host adds its lumps; `game/doom/src/DoomSwarm.c`) |
+| `sounds.h`, `sounds.c` | `sfx_flybz`, the buzz of a fly of the swarm |
 | `doomtype.h` | `PACKED_STRUCT` for MSVC (the music code of Chocolate Doom, `third_party/opl`, packs its structs with it) |

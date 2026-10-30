@@ -48,6 +48,12 @@ void DG_Exit(int code, const char* message);
 
 // myengine: the command of player `player` for this tic, after DOOM has built it from the keyboard and the mouse (or read it from the
 // network). The hook may change it. NULL (the default): nothing changes. Not called while a demo plays.
+// myengine: called by D_DoomMain once the WAD files are loaded and before the sprites are scanned (R_Init): the host may add lumps in memory with
+// W_InsertMemoryLumps (the swarm of flies, game/doom/src/DoomSwarm.c).
+void DG_AfterIwad(void);
+// myengine: how many players live in this process (-players N, 1..4): the console player and the ones that DG_TicCmdHook commands
+extern int dg_players;
+
 extern void (*DG_TicCmdHook)(int player, signed char* forwardmove, signed char* sidemove, short* angleturn, unsigned char* buttons);
 
 #ifdef __cplusplus

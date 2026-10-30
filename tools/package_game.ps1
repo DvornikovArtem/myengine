@@ -17,6 +17,9 @@
     4. Writes dist/RocketArena-<version>-win64-steam.zip (or -nosteam.zip). The version is the one of project(myengine VERSION ...) in the
        root CMakeLists.txt, the same as in the exe resources and in the menu.
     Nothing but the exe is taken from the build folder: no PDB, no tests, no editor-only files.
+    A game may also name the data that is not in git (the manifest parts "externalData": a missing one with a "fetch" script is downloaded first; "files": a
+    file of the repository or of the machine goes to a place of the package, optional ones with a warning; "licenses.generated": texts with the commit and the
+    version in them), see docs/game/packaging.md.
     docs/game/packaging.md describes the package and tools/check_package.ps1 checks it on a clean folder.
     The progress is also written for a program (the Build window of the editor, docs/editor/build-panel.md): the lines "##progress <0-100> <stage>"
     and, at the end, "##result ok <the folder of the package>" (and "##zip <the zip>") or "##result fail <what went wrong>"; the exit code is 0 or 1.
@@ -82,6 +85,8 @@ $buildPath = Get-FullFolder $BuildDir
 # a failure is also a line for the program that reads the output (the Build window); the exit code is 1
 trap { Write-Host "##result fail $($_.Exception.Message)"; exit 1 }
 function Write-Progress-Line([int]$percent, [string]$stage) { Write-Host "##progress $percent $stage" }
+# a warning as a line of text that does not depend on the language of Windows (Write-Warning prints a translated word on a Russian Windows): the Build window finds "WARNING:"
+function Write-Warning([string]$Message) { Write-Host "WARNING: $Message" }
 Write-Progress-Line 1 'manifest'
 
 $manifestPath = Join-Path $root "games\$Game\game.json"
@@ -101,6 +106,12 @@ function Get-Option([string]$name) {
     $value = Get-Part (Get-Part $manifest 'options') $name
     if ($value) { return $value }
     return 'optional'
+}
+# a list of the manifest as an array (nothing: an empty one)
+function Get-List($object, [string]$name) {
+    $value = Get-Part $object $name
+    if ($null -eq $value) { return @() }
+    return @($value)
 }
 $cmakeTarget = Get-Part (Get-Part $manifest 'build') 'cmakeTarget'
 if (-not $cmakeTarget) { $cmakeTarget = 'myengine' }
@@ -237,6 +248,29 @@ if (-not $PSBoundParameters.ContainsKey('BuildDir')) {
     $buildPath = Get-FullFolder $BuildDir
 }
 Write-Step "Sound: $(if ($useWwise) { 'Wwise (the banks of assets/audio/wwise)' } else { 'XAudio2 (the WAV files of assets/audio)' })"
+
+# ---------------------------------------------------------------- the data that is not in git (the manifest part externalData)
+# %NAME% in a path is an environment variable (%LOCALAPPDATA%); a relative path is relative to the repository. A missing item with a "fetch" script is made by it
+# before the build ("autoFetch": false: not by the packing, the script is for hand, it downloads gigabytes); "optional": a missing one does not stop the packing
+function Resolve-DataPath([string]$path) {
+    $expanded = [System.Environment]::ExpandEnvironmentVariables($path).Replace('/', '\')
+    if ([System.IO.Path]::IsPathRooted($expanded)) { return $expanded }
+    return Join-Path $root $expanded
+}
+Write-Progress-Line 6 'data'
+foreach ($item in (Get-List $manifest 'externalData')) {
+    $checkPath = Resolve-DataPath $item.check
+    $optional = [bool](Get-Part $item 'optional')
+    $fetch = Get-Part $item 'fetch'
+    if (-not (Test-Path $checkPath) -and $fetch -and (Get-Part $item 'autoFetch') -ne $false) {
+        Write-Step "$($item.name) is not there, running $fetch"
+        try { Invoke-Native 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root $fetch)) }
+        catch { if (-not $optional) { throw }; Write-Warning "$fetch failed: $($_.Exception.Message)" }
+    }
+    if (Test-Path $checkPath) { Write-Step "$($item.name): $checkPath" }
+    elseif ($optional) { Write-Step "$($item.name) is not found ($($item.check)): the package goes without it (the warning is where the files are put in)" }
+    else { throw "$($item.name) is not found ($($item.check))$(if ($fetch) { ": $fetch makes it" })" }
+}
 
 # ---------------------------------------------------------------- build
 Write-Progress-Line 8 'configure'
@@ -406,6 +440,40 @@ foreach ($relative in ($files | Sort-Object)) {
     Copy-Item (Join-Path $root $relative) $target
 }
 
+# The files that are not assets (the manifest part "files"): the game data and files of the machine, each to its place in the package. "from" is a path or a
+# list of them (the first one that is there is taken; %NAME% is an environment variable); "required" stops the packing when none is there, otherwise a warning
+# ("warnIfMissing": false makes it a plain line); "md5" says which file is meant; "requires" puts the file only when another file of the list was put.
+$placed = New-Object 'System.Collections.Generic.List[string]'
+foreach ($entry in (Get-List $manifest 'files')) {
+    $label = Get-Part $entry 'name'
+    if (-not $label) { $label = $entry.to }
+    $required = Get-Part $entry 'requires'
+    if ($required -and -not $placed.Contains($required)) { continue }
+    $sourceFile = $null
+    $tried = @(Get-List $entry 'from')
+    foreach ($candidate in $tried) {
+        $path = Resolve-DataPath $candidate
+        if (Test-Path $path -PathType Leaf) { $sourceFile = $path; break }
+    }
+    if ($null -eq $sourceFile) {
+        $message = "$label is not found ($($tried -join ', '))"
+        if (Get-Part $entry 'required') { throw $message }
+        $hint = Get-Part $entry 'ifMissing'
+        if ($hint) { $message += ": $hint" }
+        if ((Get-Part $entry 'warnIfMissing') -eq $false) { Write-Step $message } else { Write-Warning $message }
+        continue
+    }
+    $md5 = Get-Part $entry 'md5'
+    if ($md5 -and (Get-FileHash -Algorithm MD5 -LiteralPath $sourceFile).Hash -ne $md5.ToUpper()) {
+        throw "$sourceFile is not the file that the manifest means by '$label' (md5 $md5): it would go into the package under a wrong name"
+    }
+    $target = Join-Path $dist $entry.to.Replace('/', '\')
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+    Copy-Item -LiteralPath $sourceFile $target
+    $placed.Add($entry.to)
+    Write-Step ('{0}: {1} ({2:N1} MB, from {3})' -f $label, $entry.to, ((Get-Item -LiteralPath $target).Length / 1MB), $sourceFile)
+}
+
 # The Visual C++ runtime app-local (VC\Redist\MSVC\<version>\x64\Microsoft.VC*.CRT): the redistributable folder of Visual Studio
 if ($null -eq $vs) { $vs = Find-VisualStudio }
 $redistRoot = Join-Path $vs.Path 'VC\Redist\MSVC'
@@ -432,10 +500,15 @@ Write-TextFile (Join-Path $dist 'README.txt') $readme $true
 $licenseDir = Join-Path $dist 'licenses'
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
 Copy-Item (Join-Path (Join-Path $root $manifest.licenses.notices) '*') $licenseDir
-foreach ($license in $manifest.licenses.copy) {
-    $source = Join-Path $root $license.from
-    if (-not (Test-Path $source)) { throw "License file not found: $($license.from)" }
-    Copy-Item $source (Join-Path $licenseDir $license.to)
+# a license of the manifest goes to licenses/; "root": true puts it next to the exe (COPYING, THIRD_PARTY.txt); "optional": true: not there is a warning
+foreach ($license in (Get-List $manifest.licenses 'copy')) {
+    $source = Resolve-DataPath $license.from
+    if (-not (Test-Path $source)) {
+        if (Get-Part $license 'optional') { Write-Warning "License file not found: $($license.from)"; continue }
+        throw "License file not found: $($license.from)"
+    }
+    $licenseTarget = if (Get-Part $license 'root') { $dist } else { $licenseDir }
+    Copy-Item $source (Join-Path $licenseTarget $license.to)
 }
 
 # Wwise: the notice of Audiokinetic and the licenses of the codecs that the libraries of the SDK have in them (Vorbis, Opus: linked statically, so
@@ -458,8 +531,27 @@ $sdkFiles = @(Get-ChildItem -Path $dist -Recurse -File | Where-Object { $_.Exten
 if ($sdkFiles.Count -gt 0) { throw "Files of an SDK are in the package: $($sdkFiles[0].FullName)" }
 
 $commit = 'unknown'
-try { $commit = (& git -C $root rev-parse --short HEAD 2>$null | Out-String).Trim() } catch { }
-Write-TextFile (Join-Path $dist 'version.txt') ("$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n") $false
+$commitFull = 'unknown'
+$treeState = 'the sources are exactly this commit'
+try {
+    $commit = (& git -C $root rev-parse --short HEAD 2>$null | Out-String).Trim()
+    $commitFull = (& git -C $root rev-parse HEAD 2>$null | Out-String).Trim()
+    $changes = @(& git -C $root status --porcelain 2>$null)
+    if ($changes.Count -gt 0) { $treeState = "the sources had $($changes.Count) uncommitted change(s) when this package was built: they are not in the commit" }
+} catch { }
+$versionText = "$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n"
+foreach ($placedFile in $placed) { $versionText += "file $placedFile`r`n" }
+Write-TextFile (Join-Path $dist 'version.txt') $versionText $false
+
+# The texts of the manifest part licenses.generated: a template of the repository with {VERSION}, {COMMIT}, {COMMIT_FULL}, {TREE} filled in (SOURCE.txt of a GPL game)
+foreach ($generated in (Get-List $manifest.licenses 'generated')) {
+    $template = [System.IO.File]::ReadAllText((Join-Path $root $generated.template))
+    $text = $template.Replace('{VERSION}', $version).Replace('{COMMIT_FULL}', $commitFull).Replace('{COMMIT}', $commit).Replace('{TREE}', $treeState)
+    $text = $text -replace "`r?`n", "`r`n"
+    $generatedTarget = if (Get-Part $generated 'root') { $dist } else { $licenseDir }
+    Write-TextFile (Join-Path $generatedTarget $generated.to) $text $true
+    if ($template.Contains('{COMMIT') -and $treeState -notlike 'the sources are exactly*') { Write-Warning "$($generated.to) names the commit $commit, but $treeState" }
+}
 
 # Steam (only with the SDK; see docs/game/rl-online.md section 7.4)
 if ($useSteam) {
@@ -485,7 +577,9 @@ Get-ChildItem -Path $dist | ForEach-Object {
 $zipPath = ''
 if (-not $NoZip) {
     Write-Progress-Line 96 'zip'
-    $zip = Join-Path $outDir "$gameName-$version-win64-$steamTag$(if ($useWwise) { '' } else { '-nowwise' })$(if ($buildConfig -eq 'RelWithDebInfo') { '-rwdi' } else { '' }).zip"
+    $zipSteamTag = if ((Get-Option 'steam') -eq 'no') { '' } else { "-$steamTag" }
+    $zipWwiseTag = if ((Get-Option 'wwise') -eq 'no' -or $useWwise) { '' } else { '-nowwise' }
+    $zip = Join-Path $outDir "$gameName-$version-win64$zipSteamTag$zipWwiseTag$(if ($buildConfig -eq 'RelWithDebInfo') { '-rwdi' } else { '' }).zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($dist, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)

@@ -83,22 +83,28 @@ namespace brainview
         list->PopClipRect();
     }
 
-    void PlayerBrainPanel::DrawOverlay(ImDrawList* list, const float width, const float height)
+    void PlayerBrainPanel::DrawOverlay(ImDrawList* list, const float width, const float height, const int count, const int slot)
     {
         if (!big_ || view_ == nullptr)
         {
             return;
         }
+        const float each = width / static_cast<float>(std::max(count, 1));
+        const float left = each * static_cast<float>(slot);
         // DOOM stays visible under it, dimmed
-        list->AddRectFilled(ImVec2(0.0f, 0.0f), ImVec2(width, height), IM_COL32(2, 4, 10, 70));
-        list->PushClipRect(ImVec2(0.0f, 0.0f), ImVec2(width, height), true);
-        view_->FitCamera(width / std::max(height, 1.0f), kBigMargin);
-        const std::uint32_t pixelsW = std::max(64u, static_cast<std::uint32_t>(std::min(width, 1600.0f)));
+        if (slot == 0)
+        {
+            list->AddRectFilled(ImVec2(0.0f, 0.0f), ImVec2(width, height), IM_COL32(2, 4, 10, 70));
+        }
+        list->PushClipRect(ImVec2(left, 0.0f), ImVec2(left + each, height), true);
+        view_->FitCamera(each / std::max(height, 1.0f), kBigMargin);
+        const std::uint32_t pixelsW = std::max(64u, static_cast<std::uint32_t>(std::min(each, 1600.0f)));
         const std::uint32_t pixelsH = std::max(64u, static_cast<std::uint32_t>(std::min(height, 1000.0f)));
         const myengine::render::TextureHandle texture = view_->Submit(*thumbnails_, id_ + "-big", pixelsW, pixelsH);
         if (texture.IsValid())
         {
-            list->AddImage(static_cast<ImTextureID>(static_cast<ImU64>(texture.value)), ImVec2(0.0f, 0.0f), ImVec2(width, height), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32(255, 255, 255, 175));
+            // the picture is black where there is no neuron: it is added to the dimmed game, not laid over it
+            list->AddImage(static_cast<ImTextureID>(static_cast<ImU64>(texture.value)), ImVec2(left, 0.0f), ImVec2(left + each, height), ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32(255, 255, 255, 175));
         }
         list->PopClipRect();
     }

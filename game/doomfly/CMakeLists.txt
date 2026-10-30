@@ -3,6 +3,7 @@ set(DOOMFLY_HEADERS
   include/doomfly/FlyEyes.h
   include/doomfly/FlyModes.h
   include/doomfly/FlyPlayer.h
+  include/doomfly/FlySwarm.h
 )
 
 set(DOOMFLY_SOURCES
@@ -10,6 +11,7 @@ set(DOOMFLY_SOURCES
   src/FlyEyes.cpp
   src/FlyModes.cpp
   src/FlyPlayer.cpp
+  src/FlySwarm.cpp
 )
 
 # The fly that plays DOOM (docs/game/flydoom-fly.md): the eyes (the frame to the photoreceptors), the controls (descending neurons to the tic command),

@@ -61,6 +61,17 @@ namespace myengine::game
         std::vector<std::string> debug;         // dim lines at the foot: the speed, the tics, the resets
     };
 
+    // A second picture next to the one of the game: the view of another player through his eyes (Human vs Fly: the eyes of the fly; Fly vs Fly: the second fly)
+    struct SecondaryView
+    {
+        int width = 0;
+        int height = 0;
+        std::vector<std::uint32_t> pixels;      // width * height, 0x00RRGGBB
+        std::uint64_t serial = 0;               // grows when the pixels changed
+        std::string mainLabel;                  // the caption of the picture of the game ("YOU", "FLY 1")
+        std::string label;                      // the caption of this picture ("FLY'S EYES", "FLY 2")
+    };
+
     class IDoomController
     {
     public:
@@ -100,6 +111,15 @@ namespace myengine::game
         }
         // The big brain is on: the flow hides the panel and draws the legend over the picture of the brain
         virtual bool BigBrainOpen() const { return false; }
+
+        // The keyboard and the mouse play the console player although a controller runs the game (Human vs Fly: the human against the fly)
+        virtual bool HumanPlays() const { return false; }
+
+        // false: the controller has no panel at the right of the picture and the game takes the whole window (the swarm: the human plays, the HUD is DrawOverlay)
+        virtual bool HasPanel() const { return true; }
+
+        // The second picture next to the game's (nullptr: none). Valid until the next Advance.
+        virtual const SecondaryView* Secondary() const { return nullptr; }
 
         // The short text for the title of the window and the log ("Fly plays (Bio), brain speed 0.92x")
         virtual std::string Status() const { return {}; }

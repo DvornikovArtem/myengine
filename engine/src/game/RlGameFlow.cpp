@@ -548,11 +548,11 @@ namespace myengine::game
             {
                 // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
                 crashChecked = true;
-                if (const auto report = core::crash::TakePending(core::apppaths::UserDataDirectory() / L"crashes"))
+                const std::filesystem::path crashDirectory = core::apppaths::UserDataDirectory() / L"crashes";
+                if (const auto report = core::crash::TakePending(crashDirectory))
                 {
                     Log("the previous run crashed: " + report->summary + "; the report is " + report->text.generic_u8string());
-                    const std::string folder = core::apppaths::IsShipping() ? std::string("%LOCALAPPDATA%\\RocketArena\\crashes") : report->text.parent_path().generic_u8string();
-                    f.ShowToast("The game crashed last time. Send " + report->text.filename().generic_u8string() + " from " + folder, style::kBad, 12.0f);
+                    f.ShowToast(core::crash::PlayerNote(*report, crashDirectory), style::kBad, 12.0f);
                 }
             }
             if (carMissingToast)

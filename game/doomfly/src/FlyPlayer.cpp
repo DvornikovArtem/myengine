@@ -392,9 +392,20 @@ namespace doomfly
     {
         TickInput input;
         const doom::GameInfo info = game.Info();
-        const doom::PlayerState player = game.Player(info.consolePlayer);
-        eyes_.SampleLuminance(game.Pixels(), doom::kScreenWidth, doom::kScreenHeight, input.luminance);
-        eyes_.SampleColumns(game.Pixels(), doom::kScreenWidth, doom::kScreenHeight, input.columnLuminance);
+        const int index = PlayerIndex(game);
+        const doom::PlayerState player = game.Player(index);
+        const std::uint32_t* picture = game.Pixels();
+        if ((index != info.consolePlayer || config_.ownView) && game.RenderEyes(index, eyesBuffer_))
+        {
+            picture = eyesBuffer_.pixels.data();
+            eyesPicture_ = eyesBuffer_.pixels;
+        }
+        else if (picture != nullptr)
+        {
+            eyesPicture_.assign(picture, picture + doom::kScreenWidth * doom::kScreenHeight);
+        }
+        eyes_.SampleLuminance(picture, doom::kScreenWidth, doom::kScreenHeight, input.luminance);
+        eyes_.SampleColumns(picture, doom::kScreenWidth, doom::kScreenHeight, input.columnLuminance);
         lastLuminance_ = input.luminance;
 
         if (player.inGame)
@@ -429,7 +440,7 @@ namespace doomfly
     void FlyPlayer::ApplyResult(doom::DoomGame& game, const TickResult& result)
     {
         const doom::GameInfo info = game.Info();
-        const doom::PlayerState player = game.Player(info.consolePlayer);
+        const doom::PlayerState player = game.Player(PlayerIndex(game));
         if (result.seizure)
         {
             ++seizures_;
@@ -465,6 +476,12 @@ namespace doomfly
                 use = true;
                 useCooldown_ = controls.use.everyTics;
             }
+            // dead in a deathmatch: the use button brings the player back (the fly has nothing in the brain for that)
+            if (player.health <= 0)
+            {
+                use = true;
+                fire = false;
+            }
 
             // the reflex of the legs: pushing against a wall for a long time
             if (pushing && notMoving)
@@ -496,7 +513,10 @@ namespace doomfly
         }
 
         // the screens that wait for a key: the title, the intermission, the finale (the player of DOOM has no keyboard)
-        if (!inLevel && info.state != doom::GameState::Level)
+        if (!config_.drivesScreens)
+        {
+        }
+        else if (!inLevel && info.state != doom::GameState::Level)
         {
             if (screenCooldown_ > 0)
             {
@@ -537,6 +557,7 @@ namespace doomfly
         cmd.angleTurn = static_cast<std::int16_t>(std::lround(std::clamp(-turnDegrees * unitsPerDegree, -32000.0f, 32000.0f)));   // DOOM turns left with a positive angle
         cmd.buttons = static_cast<std::uint8_t>((fire ? doom::kButtonAttack : 0) | (use ? doom::kButtonUse : 0));
         command_ = cmd;
+        commandReady_ = true;
 
         status_.turnHz = result.turnHz;
         status_.forwardHz = result.forwardHz;
@@ -634,7 +655,7 @@ namespace doomfly
 
     void FlyPlayer::BuildTicCmd(const int player, doom::TicCmd& cmd)
     {
-        if (player == 0)
+        if (player == (config_.playerIndex >= 0 ? config_.playerIndex : 0))
         {
             cmd = command_;
         }
@@ -647,15 +668,15 @@ namespace doomfly
         WaitResult(result, true);
         ApplyResult(game, result);
         const bool frame = game.StepTic();
+        commandReady_ = false;
         ++tics_;
         return frame;
     }
 
-    bool FlyPlayer::Pump(doom::DoomGame& game, const double wallSeconds)
+    void FlyPlayer::Begin(doom::DoomGame& game, const double wallSeconds)
     {
         sinceSubmit_ = std::min(sinceSubmit_ + wallSeconds, 4.0 * kTicSeconds);
         wallSinceTic_ += wallSeconds;
-        bool frame = false;
         {
             // the brains that were made again: the thread of the game has taken the feed of the new one by now
             std::vector<std::unique_ptr<flybrain::FlyBrain>> retired;
@@ -664,26 +685,46 @@ namespace doomfly
                 retired.swap(retired_);
             }
         }
-        auto submitIfDue = [&]()
+        if (!pending_ && !commandReady_ && (!config_.pace || sinceSubmit_ >= kTicSeconds))
         {
-            if (!pending_ && (!config_.pace || sinceSubmit_ >= kTicSeconds))
-            {
-                Submit(SampleInput(game));
-                sinceSubmit_ = std::max(0.0, sinceSubmit_ - kTicSeconds);
-            }
-        };
-        submitIfDue();
+            Submit(SampleInput(game));
+            sinceSubmit_ = std::max(0.0, sinceSubmit_ - kTicSeconds);
+        }
+    }
+
+    bool FlyPlayer::Poll(doom::DoomGame& game)
+    {
         TickResult result;
         if (pending_ && WaitResult(result, false))
         {
             ApplyResult(game, result);
-            frame = game.StepTic();
-            ++tics_;
-            ticIntervalSmoothed_ = ticIntervalSmoothed_ == 0.0 ? wallSinceTic_ : ticIntervalSmoothed_ * 0.9 + wallSinceTic_ * 0.1;
-            wallSinceTic_ = 0.0;
-            submitIfDue();
         }
         waiting_ = pending_;
+        return commandReady_;
+    }
+
+    void FlyPlayer::EndTic(doom::DoomGame& game)
+    {
+        commandReady_ = false;
+        ++tics_;
+        ticIntervalSmoothed_ = ticIntervalSmoothed_ == 0.0 ? wallSinceTic_ : ticIntervalSmoothed_ * 0.9 + wallSinceTic_ * 0.1;
+        wallSinceTic_ = 0.0;
+        if (!pending_ && (!config_.pace || sinceSubmit_ >= kTicSeconds))
+        {
+            Submit(SampleInput(game));
+            sinceSubmit_ = std::max(0.0, sinceSubmit_ - kTicSeconds);
+        }
+    }
+
+    bool FlyPlayer::Pump(doom::DoomGame& game, const double wallSeconds)
+    {
+        Begin(game, wallSeconds);
+        bool frame = false;
+        if (Poll(game))
+        {
+            frame = game.StepTic();
+            EndTic(game);
+        }
         return frame;
     }
 

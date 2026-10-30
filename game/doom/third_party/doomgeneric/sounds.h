@@ -221,6 +221,7 @@ typedef enum
     sfx_skesit,
     sfx_skeatk,
     sfx_radio,
+    sfx_flybz,   // myengine: the buzz of a fly of the swarm (the lump DSFLYBZ is made by game/doom/src/DoomSwarmAssets.cpp)
     NUMSFX
 } sfxenum_t;
 

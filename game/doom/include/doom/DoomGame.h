@@ -49,6 +49,8 @@ namespace doom
         int kills = 0;
         int items = 0;
         int secrets = 0;
+        int frags = 0;                          // deathmatch: kills of the others minus suicides
+        int deaths = 0;                         // deathmatch: how many times the others killed this player
     };
 
     enum class GameState : std::uint8_t
@@ -133,8 +135,15 @@ namespace doom
         std::uint64_t FrameHash() const;
         // The title DOOM wants for the window ("DOOM Shareware", "Freedoom: Phase 1")
         const std::string& WindowTitle() const { return windowTitle_; }
-        // The view of `player` in a buffer of the host. Today only the console player (D0); the other players are D1's job.
+        // The view of `player` in a buffer of the host: the console player is what DOOM drew (with the status bar), any other player of the game
+        // ("-players N") is rendered through his eyes by an extra render pass (3D view only, the status bar is black). false: no such player or no level.
+        // Call it on the game's thread between tics.
         bool RenderView(int player, ViewBuffer& out);
+        // The 3D view of any player of the game (the console player too) drawn by the extra render pass: no status bar (those rows are black), the same
+        // picture for each player, so that two brains see the same way. false: no such player or no level.
+        bool RenderEyes(int player, ViewBuffer& out);
+        // Loads the level again at the next tic: all the players are born again, the frags are zero (a deathmatch round is over)
+        void RestartLevel();
 
         // ---- input ----
         // A key by the codes of DoomKeys.h (or the lower case ASCII of a letter, a digit, a symbol)
@@ -176,7 +185,7 @@ namespace doom
     {
         None,
         Argument,       // --iwad
-        NextToExe,      // assets/doom/ or doom/ next to the exe (Freedoom from tools/doom/fetch_freedoom.ps1, or a WAD the player put there)
+        NextToExe,      // assets/doom/, wads/ (the shareware WAD of the package) or doom/ next to the exe (Freedoom from tools/doom/fetch_freedoom.ps1, or a WAD the player put there)
         UserFolder,     // %LOCALAPPDATA%\FlyDoom\wads (the WAD files of the player, outside the repository and the package)
         Steam,          // the DOOM of the Steam library of the player
         Environment,    // DOOMWADDIR / DOOMWADPATH of DOOM
@@ -191,7 +200,7 @@ namespace doom
         std::vector<std::string> tried;        // for the message "no WAD found": where it was looked for
     };
 
-    // The places: the argument; assets/doom or doom next to the exe; the folders of the user (userDirectories: %LOCALAPPDATA%\FlyDoom\wads ...); the DOOM
+    // The places: the argument; assets/doom, wads or doom next to the exe; the folders of the user (userDirectories: %LOCALAPPDATA%\FlyDoom\wads ...); the DOOM
     // of the Steam library; DOOMWADDIR. Among the WAD files found the full game (DOOM.WAD, DOOM2.WAD, plutonia, tnt) comes before the shareware doom1.wad,
     // and that before Freedoom; with the same rank the order of the places says. What --iwad names is taken whatever it is. exeDirectory is where
     // FlyDoom.exe lies. An empty path in the result: nothing found.

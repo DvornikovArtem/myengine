@@ -61,7 +61,8 @@ namespace brainview
         // and the texts are the owner's (the flow draws them with the UI kit).
         void ToggleBig() { big_ = !big_; }
         bool Big() const { return big_; }
-        void DrawOverlay(ImDrawList* list, float width, float height);
+        // `count` brains share the window side by side, this one is the `slot`-th; the dimming of the game is drawn once, by the first
+        void DrawOverlay(ImDrawList* list, float width, float height, int count = 1, int slot = 0);
 
         BrainView* View() { return view_.get(); }
 

@@ -3,6 +3,7 @@
 // DoomGame over doomgeneric: the callbacks DG_* that the platform part of the port must give, a virtual clock, the queue of keys.
 
 #include <doom/DoomGame.h>
+#include <doom/DoomSwarm.h>
 
 #include <algorithm>
 #include <cmath>
@@ -341,6 +342,14 @@ namespace doom
         for (const std::string& arg : config.extraArgs)
         {
             argStrings.push_back(arg);
+            if (arg == swarm::kStartArgument)
+            {
+                // the swarm of flies (D1c): the sprites and the buzz of a fly take the place of those of the Lost Soul; DOOM puts them in after the WADs are loaded
+                if (!swarm::PrepareAssets(config.iwad, error))
+                {
+                    return nullptr;
+                }
+            }
         }
         argv.clear();
         for (std::string& arg : argStrings)
@@ -459,15 +468,32 @@ namespace doom
 
     bool DoomGame::RenderView(const int player, ViewBuffer& out)
     {
-        // The console player is what DOOM draws; the other players need their own render pass (task D1)
-        if (player != Info().consolePlayer || Pixels() == nullptr)
+        if (Pixels() == nullptr)
         {
             return false;
         }
         out.width = kScreenWidth;
         out.height = kScreenHeight;
-        out.pixels.assign(Pixels(), Pixels() + kScreenWidth * kScreenHeight);
-        return true;
+        if (player == Info().consolePlayer)
+        {
+            out.pixels.assign(Pixels(), Pixels() + kScreenWidth * kScreenHeight);
+            return true;
+        }
+        out.pixels.resize(static_cast<size_t>(kScreenWidth) * kScreenHeight);
+        return dgb_RenderPlayerView(player, out.pixels.data()) != 0;
+    }
+
+    void DoomGame::RestartLevel()
+    {
+        dgb_RestartLevel();
+    }
+
+    bool DoomGame::RenderEyes(const int player, ViewBuffer& out)
+    {
+        out.width = kScreenWidth;
+        out.height = kScreenHeight;
+        out.pixels.resize(static_cast<size_t>(kScreenWidth) * kScreenHeight);
+        return dgb_RenderPlayerView(player, out.pixels.data()) != 0;
     }
 
     void DoomGame::PostKey(const int key, const bool pressed)
@@ -534,6 +560,8 @@ namespace doom
         state.kills = raw.kills;
         state.items = raw.items;
         state.secrets = raw.secrets;
+        state.frags = raw.frags;
+        state.deaths = raw.deaths;
         return state;
     }
 }

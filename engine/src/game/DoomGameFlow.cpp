@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -26,6 +27,8 @@
 
 #include <myengine/audio/AudioSystem.h>
 #include <myengine/game/RlGameSettings.h>
+#include <myengine/core/AppPaths.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/ui/UiManager.h>
 #include <myengine/ui/rl/RlUiHost.h>
@@ -264,6 +267,9 @@ namespace myengine::game
         } state = State::Start;
 
         std::string message;                             // what the error screen says
+        bool crashChecked = false;                       // the report of a crash of the previous run is looked for once, on the first frame of the window
+        std::string crashNote;                           // what the banner says about it (core::crash::PlayerNote); empty: no banner
+        float crashNoteLeft = 0.0f;                      // seconds the banner stays
         std::unique_ptr<IDoomController> controller;     // nullptr: the human plays
         int chosenMode = 0;
         DoomLaunchChoice launchChoice;                   // what the menu asked for the mode
@@ -302,6 +308,11 @@ namespace myengine::game
         std::uint64_t uploadedFrame = 0;
         std::uint32_t uploadedScale = 0;
         std::vector<std::uint8_t> rgba;
+        render::TextureHandle secondTexture;     // the second picture of the controller (SecondaryView)
+        std::uint32_t secondWidth = 0;
+        std::uint32_t secondHeight = 0;
+        std::uint64_t secondSerial = ~0ull;
+        std::uint32_t secondScale = 0;
         std::string title;
 
         // MYENGINE_DOOM_KEYS="60:esc,64:-esc,90:down": keys pressed (and released with "-") at a frame of the flow, for the captures and the tests
@@ -745,19 +756,31 @@ namespace myengine::game
             const float width = widthPixels / px;
             const float height = heightPixels / px;
             const float pad = 20.0f;
+            // the rows of the legend: the bars of the groups of neurons, and for each player of a duel (a group that is none of the three of a single brain) all of its bars
+            // under its name
             std::vector<const DoomPanelBar*> bars;
+            std::vector<const std::string*> headings;   // parallel to `bars`: the name of the player before its first bar, else null
             for (const DoomPanelGroup& group : data.groups)
             {
+                const bool single = group.title == "MOTOR" || group.title == "VISION" || group.title == "OUTPUT";
+                bool first = true;
                 for (const DoomPanelBar& bar : group.bars)
                 {
-                    if (group.title != "OUTPUT" || bar.label.rfind("dopamine", 0) == 0)
+                    if (!single || group.title != "OUTPUT" || bar.label.rfind("dopamine", 0) == 0)
                     {
                         bars.push_back(&bar);
+                        headings.push_back(!single && first ? &group.title : nullptr);
+                        first = false;
                     }
                 }
             }
+            float headingRows = 0.0f;
+            for (const std::string* heading : headings)
+            {
+                headingRows += heading != nullptr ? 1.0f : 0.0f;
+            }
             const float rowPitch = 34.0f;
-            const Rect plate{24.0f, 24.0f, std::min(width * 0.34f, 560.0f), 132.0f + rowPitch * static_cast<float>(bars.size())};
+            const Rect plate{24.0f, 24.0f, std::min(width * 0.34f, 560.0f), 132.0f + rowPitch * (static_cast<float>(bars.size()) + headingRows)};
             f.SetSpace(Space::Screen);
             paint::Parallelogram(f, plate, style::kNavy);
             paint::ParallelogramOutline(f, plate, style::kLine, 1.0f);
@@ -768,8 +791,14 @@ namespace myengine::game
             paint::Text(f, FontStyle::SemiBold, 17.0f, {left, cursor}, style::kTextDim, data.brainLine);
             cursor += 46.0f;
             const float inner = plate.w - 2.0f * pad - paint::Bevel(plate.h) * 0.8f;
-            for (const DoomPanelBar* bar : bars)
+            for (std::size_t row = 0; row < bars.size(); ++row)
             {
+                const DoomPanelBar* bar = bars[row];
+                if (headings[row] != nullptr)
+                {
+                    paint::Text(f, FontStyle::ExtraBoldItalic, 16.0f, {left, cursor + 4.0f}, style::kTextFaint, *headings[row], Align::Left, 0.1f);
+                    cursor += rowPitch;
+                }
                 const Color color = Color::Hex(bar->rgb);
                 paint::FillRect(f, {left, cursor + 6.0f, 14.0f, 14.0f}, color);
                 paint::Text(f, FontStyle::SemiBold, 20.0f, {left + 24.0f, cursor}, style::kText, bar->label);
@@ -879,12 +908,20 @@ namespace myengine::game
         // The 320x200 frame as the pixels of the texture: an integer scale (so that the pixels stay square blocks, no blur), stretched to 4:3 when asked
         void UploadFrame(const std::uint32_t scale, const bool stretch)
         {
+            if (UploadPixels(game->Pixels(), scale, stretch, texture, textureWidth, textureHeight))
+            {
+                uploadedFrame = game->FrameCount();
+                uploadedScale = scale;
+            }
+        }
+
+        bool UploadPixels(const std::uint32_t* source, const std::uint32_t scale, const bool stretch, render::TextureHandle& target, std::uint32_t& targetWidth, std::uint32_t& targetHeight)
+        {
             const std::uint32_t outW = doom::kScreenWidth * scale;
             const std::uint32_t outH = (stretch ? doom::kScreenHeight * 6u / 5u : doom::kScreenHeight) * scale;
-            const std::uint32_t* source = game->Pixels();
             if (source == nullptr)
             {
-                return;
+                return false;
             }
             rgba.resize(static_cast<std::size_t>(outW) * outH * 4u);
             std::vector<std::uint32_t> rowMap(outH);
@@ -924,22 +961,21 @@ namespace myengine::game
             data.channels = 4;
             data.srgb = false;
             data.pixelsRgba8 = rgba;
-            if (texture.IsValid() && textureWidth == outW && textureHeight == outH)
+            if (target.IsValid() && targetWidth == outW && targetHeight == outH)
             {
-                svc.render->UpdateTexture(texture, data);
+                svc.render->UpdateTexture(target, data);
             }
             else
             {
-                if (texture.IsValid())
+                if (target.IsValid())
                 {
-                    svc.render->DestroyTexture(texture);
+                    svc.render->DestroyTexture(target);
                 }
-                texture = svc.render->CreateTexture(data);
-                textureWidth = outW;
-                textureHeight = outH;
+                target = svc.render->CreateTexture(data);
+                targetWidth = outW;
+                targetHeight = outH;
             }
-            uploadedFrame = game->FrameCount();
-            uploadedScale = scale;
+            return true;
         }
 
         void DrawMessage(ImDrawList* list, const std::uint32_t width, const std::uint32_t height)
@@ -967,6 +1003,27 @@ namespace myengine::game
             list->AddText(font, size, ImVec2(x, y), IM_COL32(150, 150, 150, 255), "Esc - exit");
         }
 
+        // The banner about the crash of the previous run: over everything, 12 seconds, the last one fades
+        void DrawCrashNote(const std::uint32_t width, const std::uint32_t height, const float deltaTime)
+        {
+            if (crashNoteLeft <= 0.0f)
+            {
+                return;
+            }
+            crashNoteLeft -= deltaTime;
+            const float size = std::max(14.0f, std::floor(static_cast<float>(height) / 36.0f));
+            ImFont* font = ImGui::GetFont();
+            ImDrawList* list = ImGui::GetForegroundDrawList();
+            const float alpha = std::min(1.0f, std::max(0.0f, crashNoteLeft));
+            const float margin = size * 0.8f;
+            const float maxWidth = static_cast<float>(width) - 2.0f * margin;
+            const ImVec2 text = font->CalcTextSizeA(size, FLT_MAX, maxWidth, crashNote.c_str());
+            const ImVec2 corner(margin, margin);
+            const ImVec2 end(margin + text.x + 2.0f * size, margin + text.y + size);
+            list->AddRectFilled(corner, end, IM_COL32(120, 20, 20, static_cast<int>(235.0f * alpha)), size * 0.3f);
+            list->AddText(font, size, ImVec2(corner.x + size, corner.y + size * 0.5f), IM_COL32(255, 235, 235, static_cast<int>(255.0f * alpha)), crashNote.c_str(), nullptr, maxWidth);
+        }
+
         bool menuAsked = false;
 
         void Build(rlui::Frame& frame, const core::WindowId windowId, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
@@ -982,6 +1039,20 @@ namespace myengine::game
                 return;
             }
             const bool active = ProcessIsForeground();
+
+            if (!crashChecked)
+            {
+                // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
+                crashChecked = true;
+                const std::filesystem::path crashDirectory = core::apppaths::UserDataDirectory() / L"crashes";
+                if (const auto report = core::crash::TakePending(crashDirectory))
+                {
+                    Log("the previous run crashed: " + report->summary + "; the report is " + report->text.generic_u8string());
+                    crashNote = core::crash::PlayerNote(*report, crashDirectory);
+                    crashNoteLeft = 12.0f;
+                }
+            }
+            DrawCrashNote(width, height, deltaTime);
 
             if (state == State::Start && !menuAsked && svc.showMenu && svc.initialMode < 0)
             {
@@ -1073,8 +1144,9 @@ namespace myengine::game
                 }
                 else
                 {
-                PollKeyboard(active, doomMenu, controller != nullptr);
-                if (controller != nullptr)
+                const bool humanPlays = controller == nullptr || controller->HumanPlays();
+                PollKeyboard(active, doomMenu, !humanPlays);
+                if (controller != nullptr && !humanPlays)
                 {
                     // Tab is free when a controller plays (the map of DOOM is the human's): it shows the big brain
                     const bool tab = scriptedRaw ? rawTab : (active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0);
@@ -1105,7 +1177,7 @@ namespace myengine::game
                 ++flowFrame;
 
                 // the mouse: the left button fires, the movement turns; the cursor is the game's only while the level plays
-                const bool playing = controller == nullptr && active && !before.menuActive && !before.paused && before.state == doom::GameState::Level;
+                const bool playing = humanPlays && active && !before.menuActive && !before.paused && before.state == doom::GameState::Level;
                 CaptureCursor(playing);
                 int buttons = 0;
                 int dx = 0;
@@ -1173,11 +1245,15 @@ namespace myengine::game
                 const float viewHeightUnits = svc.squarePixels ? static_cast<float>(doom::kScreenHeight) : static_cast<float>(doom::kScreenHeight * 6 / 5);   // 240: the 4:3 of the monitors of 1993, in whole numbers
                 // a controller has a panel at the right of the picture (the brain of the fly); the human has the whole window
                 const float heightFitPicture = std::floor(static_cast<float>(doom::kScreenWidth) * static_cast<float>(height) / viewHeightUnits);
-                const bool bigBrain = controller != nullptr && controller->BigBrainOpen();   // the whole window is the brain's: DOOM is centred under it, no strip of the panel
-                const float panelWidth = (controller != nullptr && !bigBrain) ? std::max(240.0f, static_cast<float>(width) - heightFitPicture) : 0.0f;
+                const bool panelled = controller != nullptr && controller->HasPanel();   // the swarm leaves the whole window to the game
+                const bool bigBrain = panelled && controller->BigBrainOpen();             // the whole window is the brain's: DOOM is centred under it, no strip of the panel
+                const float panelWidth = (panelled && !bigBrain) ? std::max(240.0f, static_cast<float>(width) - heightFitPicture) : 0.0f;
                 const float pictureWidth = static_cast<float>(width) - panelWidth;
-                const float fit = std::min(pictureWidth / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
-                const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(controller != nullptr ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
+                // a second picture (the eyes of the fly) shares the place of the picture: two views side by side
+                const SecondaryView* second = controller != nullptr ? controller->Secondary() : nullptr;
+                const float viewsAcross = second != nullptr ? 2.0f : 1.0f;
+                const float fit = std::min(pictureWidth / viewsAcross / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
+                const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(panelled ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
                 if (uploadedScale != scale)
                 {
                     Log("DOOM: the picture is drawn at x" + std::to_string(scale) + " in a window of " + std::to_string(width) + "x" + std::to_string(height));
@@ -1186,26 +1262,58 @@ namespace myengine::game
                 {
                     UploadFrame(scale, !svc.squarePixels);
                 }
+                if (second != nullptr && second->width == doom::kScreenWidth && second->height == doom::kScreenHeight &&
+                    (!secondTexture.IsValid() || secondSerial != second->serial || secondScale != scale))
+                {
+                    if (UploadPixels(second->pixels.data(), scale, !svc.squarePixels, secondTexture, secondWidth, secondHeight))
+                    {
+                        secondSerial = second->serial;
+                        secondScale = scale;
+                    }
+                }
                 if (texture.IsValid())
                 {
                     // an integer factor on the screen when it fits, so that the sharp pixels of the texture stay sharp
-                    const float whole = (fit >= 1.0f && controller == nullptr) ? std::floor(fit) : fit;   // with a panel the picture fills the rest of the window
+                    const float whole = (fit >= 1.0f && !panelled) ? std::floor(fit) : fit;   // with a panel the picture fills the rest of the window
                     const float finalW = doom::kScreenWidth * whole;
                     const float finalH = viewHeightUnits * whole;
-                    const float left = std::floor((pictureWidth - finalW) * 0.5f);
+                    const float cell = pictureWidth / viewsAcross;
+                    const float left = std::floor((cell - finalW) * 0.5f);
                     const float top = std::floor((static_cast<float>(height) - finalH) * 0.5f);
                     list->AddImage(static_cast<ImTextureID>(texture.value), ImVec2(left, top), ImVec2(left + finalW, top + finalH));
+                    const float captionSize = std::clamp(std::floor(finalH / 14.0f), 11.0f, 26.0f);
+                    auto caption = [&](const std::string& text, const float x0, const ImU32 color)
+                    {
+                        if (text.empty())
+                        {
+                            return;
+                        }
+                        ImFont* font = ImGui::GetFont();
+                        const ImVec2 box = font->CalcTextSizeA(captionSize, 1.0e9f, 0.0f, text.c_str());
+                        list->AddRectFilled(ImVec2(x0 + 6.0f, top + 6.0f), ImVec2(x0 + 6.0f + box.x + 12.0f, top + 6.0f + box.y + 6.0f), IM_COL32(0, 0, 0, 170));
+                        list->AddText(font, captionSize, ImVec2(x0 + 12.0f, top + 9.0f), color, text.c_str());
+                    };
+                    if (second != nullptr)
+                    {
+                        caption(second->mainLabel, left, IM_COL32(120, 220, 140, 255));
+                        if (secondTexture.IsValid())
+                        {
+                            const float left2 = cell + left;
+                            list->AddImage(static_cast<ImTextureID>(secondTexture.value), ImVec2(left2, top), ImVec2(left2 + finalW, top + finalH));
+                            caption(second->label, left2, IM_COL32(240, 170, 80, 255));
+                        }
+                    }
                 }
                 if (controller != nullptr)
                 {
                     DoomPanelData data;
-                    const bool described = controller->DescribePanel(data);
-                    const bool big = controller->BigBrainOpen();
-                    if (!described)
+                    const bool described = panelled && controller->DescribePanel(data);
+                    const bool big = panelled && controller->BigBrainOpen();
+                    if (panelled && !described)
                     {
                         controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
                     }
-                    else if (!big)
+                    else if (described && !big)
                     {
                         DrawControllerPanel(frame, list, data, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
                     }
@@ -1277,6 +1385,10 @@ namespace myengine::game
         if (impl_->texture.IsValid() && impl_->svc.render != nullptr)
         {
             impl_->svc.render->DestroyTexture(impl_->texture);
+        }
+        if (impl_->secondTexture.IsValid() && impl_->svc.render != nullptr)
+        {
+            impl_->svc.render->DestroyTexture(impl_->secondTexture);
         }
         // the controller first (it uses the game), then the game (it still talks to the audio host), then the host
         impl_->controller.reset();

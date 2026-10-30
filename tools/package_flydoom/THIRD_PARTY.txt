@@ -1,0 +1,101 @@
+FlyDoom: third-party software and data
+======================================
+
+FlyDoom is the classic DOOM running on the educational engine myengine (ITMO, a course on game engine architecture). This file lists what is in this
+package that is not ours, under which license, and where to read the license. The full text of a license that is not repeated here is in the
+folder licenses. The source code of FlyDoom: SOURCE.txt.
+
+1. The game itself: free software under the GPL
+-----------------------------------------------
+
+Component                          License             Holder                                   Text
+---------------------------------  ------------------  ---------------------------------------  ------------------------------
+DOOM source (doomgeneric port)     GNU GPL v2          id Software; the doomgeneric authors     COPYING
+Music module of Chocolate Doom     GNU GPL v2 or later Chocolate Doom authors                   COPYING
+Nuked OPL3 (the FM chip emulator)  GNU LGPL v2.1+      Nuke.YKT                                 licenses\COPYING-nuked-opl3.txt
+
+FlyDoom.exe contains these, so it is distributed under the GPL v2 as a whole; SOURCE.txt tells where its source code is.
+
+2. The game data (WAD files)
+----------------------------
+
+File (folder)                      License                                                    Text
+---------------------------------  ---------------------------------------------------------  ----------------------------------
+doom1.wad (wads)                   DOOM shareware 1.9, (c) 1994 id Software: freely           wads\doom1.wad.license.txt
+                                   distributable (the statement of John Carmack of 1999)
+freedoom1.wad (assets\doom)        Freedoom Phase 1 0.13.0, a modified BSD license            licenses\Freedoom-COPYING.txt,
+                                   (c) 2001-2024 Contributors to the Freedoom project         licenses\Freedoom-CREDITS.txt
+
+A package may go without doom1.wad (version.txt lists the files that were put in it). The WAD of the full DOOM is never part of the package: it is
+the player's own; FlyDoom finds the Steam copy by itself or takes it from --iwad (README.txt).
+
+3. The fly brain (the file assets\flybrain\malecns_v1.fbrain, when it is in the package)
+--------------------------------------------------------------------------------
+
+The wiring diagram of the brain of a male fruit fly: the MaleCNS v1.0 connectome (Janelia FlyEM, University of Cambridge, MRC LMB, Google Research).
+  Berg S. et al. (2026) Sexual dimorphism in the complete Drosophila male central nervous system connectome.
+  Cell 189(18):5504-5526.e15, doi:10.1016/j.cell.2026.08.015
+  Release: https://male-cns.janelia.org/download/ ; the copy that was read: the mirror https://huggingface.co/QuixiAI/MaleCNS (Hartford E. 2026, doi:10.57967/hf/10410)
+License: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changed by us: the traced neurons and their connections were taken from the release and written to a compact binary file (.fbrain); the weight of a
+connection is the number of synaptic contacts times the sign of the neurotransmitter of the sending neuron; the annotations are reduced to type, class,
+side, transmitter, position and the column of the optic lobe. The same notice is inside the file (the section ATTRIB). The file assets\flybrain\swarm_circuit.fbrain (the enemy flies of the mode Swarm) is a small piece of it (1,660 neurons on the paths of looming to the descending
+neurons), cut out by us with the same attribution inside the file. The signs follow DOOMFLY
+(https://github.com/nftechie/doomfly, MIT license, Alex Wormuth).
+
+4. The engine myengine and the libraries in it
+-----------------------------------------------
+
+Component                       License         Holder                              Text
+------------------------------  --------------  ----------------------------------  ------------------------------
+Jolt Physics                    MIT             Jorrit Rouwe                        JoltPhysics-MIT-LICENSE.txt
+RocketSim (car model, tuning)   MIT             ZealanL                             MIT text below
+Python 3.14 (embedded)          PSF License     Python Software Foundation          Python-PSF-LICENSE.txt
+pybind11                        BSD-3-Clause    Wenzel Jakob and contributors       pybind11-BSD-LICENSE.txt
+FreeType                        FreeType (FTL)  The FreeType Project                FreeType-FTL.txt
+Dear ImGui, ImGuizmo            MIT             Omar Cornut; Cedric Guillemet       MIT text below
+nlohmann/json                   MIT             Niels Lohmann                       MIT text below
+DirectX Tool Kit, DirectXTex    MIT             Microsoft Corporation               MIT text below
+stb_image                       MIT / public    Sean Barrett                        end of stb_image.h (public domain)
+Exo 2 (the font of the game UI) SIL OFL 1.1     The Exo 2 Project Authors            Exo2-OFL.txt
+Inter, JetBrains Mono (fonts)   SIL OFL 1.1     The Inter Project Authors;          OFL-1.1.txt
+                                                The JetBrains Mono Project Authors
+Lucide (icons)                  ISC             Lucide Contributors                 Lucide-ISC-LICENSE.txt
+
+The Microsoft Visual C++ runtime (vcruntime140*.dll, msvcp140*.dll) is redistributed app-local under the Visual Studio
+redistribution terms. d3dcompiler_47.dll, XAudio2 and XInput come with Windows.
+
+Sources
+-------
+Jolt Physics        https://github.com/jrouwe/JoltPhysics
+RocketSim           https://github.com/ZealanL/RocketSim
+Python              https://www.python.org
+pybind11            https://github.com/pybind/pybind11
+FreeType            https://freetype.org
+Dear ImGui          https://github.com/ocornut/imgui
+ImGuizmo            https://github.com/CedricGuillemet/ImGuizmo
+nlohmann/json       https://github.com/nlohmann/json
+DirectX Tool Kit    https://github.com/microsoft/DirectXTK12
+DirectXTex          https://github.com/microsoft/DirectXTex
+stb                 https://github.com/nothings/stb
+Exo 2               https://github.com/googlefonts/Exo-2.0
+Inter               https://github.com/rsms/inter
+JetBrains Mono      https://github.com/JetBrains/JetBrainsMono
+Lucide              https://lucide.dev
+
+MIT License (RocketSim, Dear ImGui, ImGuizmo, nlohmann/json, DirectX Tool Kit, DirectXTex)
+-------------------------------------------------------------------------------------------
+Copyright (c) the holders named above; see the sources of each project for the years.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

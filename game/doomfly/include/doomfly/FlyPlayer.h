@@ -56,6 +56,11 @@ namespace doomfly
         float seizureSpikesPerSecond = 6.0e5f;
         float seizureMs = 300.0f;
         bool pace = true;                       // Pump does not run the game faster than 35 tics a second
+        // Several players in one game (Human vs Fly, Fly vs Fly: DOOM's "-players N"): the player this brain is and where its eyes look. The picture of a player that is
+        // not the console player always comes from the extra render pass; `ownView` makes the console player's brain use it too (two brains see the same way).
+        int playerIndex = -1;                   // -1: the console player of the game
+        bool ownView = false;
+        bool drivesScreens = true;              // presses the keys of the title, the intermission and the menu (one brain of a game does)
     };
 
     struct RateReading
@@ -141,8 +146,18 @@ namespace doomfly
         FlyStatus EvaluateSequenceForTest(const std::function<void(int, std::vector<uint32_t>&)>& makeFrame, int tics, std::vector<FlyStatus>* perTic = nullptr);
         // For the tests: the luminance per photoreceptor of the last tick
         std::vector<float> LastLuminance() const;
-        // doom::ITicCmdSource: the command of the console player is the last one the brain gave
+        // doom::ITicCmdSource: the command of the player is the last one the brain gave
         void BuildTicCmd(int player, doom::TicCmd& cmd) override;
+
+        // The pieces of Pump, for several brains that play one game (FlyDuel): Begin counts the time and sends the picture to the brain when it is time, Poll takes the
+        // answer of the brain (true: the command is ready), the host runs ONE tic of the game when all the brains are ready, then EndTic of each.
+        void Begin(doom::DoomGame& game, double wallSeconds);
+        bool Poll(doom::DoomGame& game);
+        void EndTic(doom::DoomGame& game);
+        const doom::TicCmd& Command() const { return command_; }
+        int PlayerIndex(const doom::DoomGame& game) const { return config_.playerIndex >= 0 ? config_.playerIndex : game.Info().consolePlayer; }
+        // The picture the brain sees now (320x200, 0x00RRGGBB); for a second view next to the game
+        const std::vector<std::uint32_t>& EyesPicture() const { return eyesPicture_; }
 
     private:
         explicit FlyPlayer(const FlyPlayerConfig& config);
@@ -252,5 +267,8 @@ namespace doomfly
         BrainSnapshot snapshot_;
         BrainFeedSnapshot feed_;
         std::vector<float> lastLuminance_;
+        std::vector<std::uint32_t> eyesPicture_;
+        doom::ViewBuffer eyesBuffer_;
+        bool commandReady_ = false;
     };
 }
