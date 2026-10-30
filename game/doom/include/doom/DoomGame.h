@@ -151,7 +151,8 @@ namespace doom
         // ---- input ----
         // A key by the codes of DoomKeys.h (or the lower case ASCII of a letter, a digit, a symbol)
         void PostKey(int key, bool pressed);
-        // The mouse: the buttons held (bit 0 left, 1 right, 2 middle) and the movement since the last call
+        // The mouse: the buttons held (bit 0 left, 1 right, 2 middle) and the movement since the last call. The movement of all the calls between two tics adds up
+        // and reaches DOOM as one event at the next tic (the host may call at the frame rate).
         void PostMouse(int buttons, int deltaX, int deltaY);
         // nullptr: DOOM builds the commands of all players itself
         void SetTicCmdSource(ITicCmdSource* source);
