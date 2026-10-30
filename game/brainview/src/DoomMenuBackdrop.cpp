@@ -80,7 +80,7 @@ namespace brainview
                 loading_ = std::async(std::launch::async, [this]() -> std::shared_ptr<const flybrain::Connectome>
                 {
                     std::string error;
-                    auto connectome = flybrain::Connectome::Load(path_.string(), &error);
+                    auto connectome = flybrain::Connectome::Load(path_.u8string(), &error);   // UTF-8, as Load reads it (a path with Russian letters)
                     loadError_ = connectome != nullptr ? std::string() : error;
                     return connectome;
                 });

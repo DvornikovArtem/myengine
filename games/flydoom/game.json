@@ -46,6 +46,9 @@
 
   "assets": [
     "assets/scenes/flydoom.json",
+    "assets/flybrain/controls_doomfly.json",
+    "assets/flybrain/controls_bio.json",
+    "assets/flybrain/controls_learn.json",
     "assets/shaders",
     "assets/fonts"
   ],
