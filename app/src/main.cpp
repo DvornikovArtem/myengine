@@ -37,9 +37,11 @@ namespace
         myengine::core::Application::DoomOptions doom;
         bool fly = false;                           // --fly [doomfly|bio]: FlyDoom starts with the fly as the player (docs/game/flydoom-fly.md)
         bool flyBio = false;
+        std::string flyMode;                        // --fly-mode human|fly|human-vs-fly|fly-vs-fly: starts this mode without the menu
         bool flyReward = false;                     // --fly-reward
         std::uint64_t flySeed = 1;                  // --fly-seed N
         std::filesystem::path fbrain;               // --fbrain <file>: the connectome
+        std::string flybrain = "auto";              // --flybrain auto|cpu|gpu: where the brain of the fly runs
         bool showProjectBrowser = false;
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
@@ -218,13 +220,15 @@ namespace
             const bool isIwad = argument == L"--iwad";
             const bool isFbrain = argument == L"--fbrain";
             const bool isFlySeed = argument == L"--fly-seed";
+            const bool isFlybrain = argument == L"--flybrain";
+            const bool isFlyMode = argument == L"--fly-mode";
             const bool isDoomArgs = argument == L"--doom-args";
             // The scene passes (docs/render/scene-passes.md): --render-settings shadows=2,msaa=4,bloom=1,instancing=1; --screenshot <file.tga> [--screenshot-frame N]
             const bool isRenderSettings = argument == L"--render-settings";
             const bool isScreenshot = argument == L"--screenshot";
             const bool isScreenshotFrame = argument == L"--screenshot-frame";
             if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
-                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed)
+                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed && !isFlybrain && !isFlyMode)
             {
                 valid = false;
                 break;
@@ -250,6 +254,14 @@ namespace
             else if (isFbrain && options.fbrain.empty())
             {
                 options.fbrain = std::wstring(value);
+            }
+            else if (isFlybrain)
+            {
+                options.flybrain = Narrow(value);
+            }
+            else if (isFlyMode)
+            {
+                options.flyMode = Narrow(value);
             }
             else if (isFlySeed)
             {
@@ -458,7 +470,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
-            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward]  (docs/game/flydoom-fly.md)\n"
+            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward] [--flybrain auto|cpu|gpu] [--fly-mode human-vs-fly|fly-vs-fly]  (docs/game/flydoom-fly.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
@@ -498,12 +510,27 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
         fly.sourceDirectory = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
 #endif
         fly.seed = options.flySeed;
+        options.doom.choice.backend = options.flybrain;
+        options.doom.choice.seed = options.flySeed;
         fly.reward = options.flyReward;
         fly.log = [&app](const std::string& text) { app.GetLogger().Info(text); };
+        fly.renderDevice = [&app]() { return app.RenderDevice(); };
         options.doom.modes = doomfly::MakeModes(fly, options.fly || doomfly::ConnectomeAvailable(fly));
-        if (options.fly)
+        if (!options.flyMode.empty())
         {
-            options.doom.initialMode = options.flyBio ? 2 : 1;
+            for (std::size_t i = 0; i < options.doom.modes.size(); ++i)
+            {
+                if (options.doom.modes[i].id == options.flyMode)
+                {
+                    options.doom.initialMode = static_cast<int>(i);
+                }
+            }
+            options.doom.choice.controlSet = options.flyBio ? "bio" : "doomfly";
+        }
+        else if (options.fly)
+        {
+            options.doom.initialMode = 1;
+            options.doom.choice.controlSet = options.flyBio ? "bio" : "doomfly";
         }
     }
     app.SetDoomMode(options.doomMode, options.doom);

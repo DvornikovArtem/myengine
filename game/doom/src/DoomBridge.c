@@ -13,8 +13,14 @@
 
 #include "d_event.h"
 #include "d_loop.h"
+#include "d_main.h"
 #include "d_player.h"
 #include "doomstat.h"
+#include "i_video.h"
+#include "r_main.h"
+#include "tables.h"
+#include "w_wad.h"
+#include "z_zone.h"
 
 #include "DoomBridge.h"
 
@@ -126,6 +132,77 @@ int dgb_GetPlayer(int player, dgb_player* out)
     out->kills = p->killcount;
     out->items = p->itemcount;
     out->secrets = p->secretcount;
+    {
+        int other;
+        for (other = 0; other < MAXPLAYERS; ++other)
+        {
+            if (other == player)
+            {
+                out->frags -= players[player].frags[other];
+            }
+            else
+            {
+                out->frags += players[player].frags[other];
+                out->deaths += players[other].frags[player];
+            }
+        }
+    }
+    return 1;
+}
+
+void dgb_RestartLevel(void)
+{
+    int i;
+    if (gamestate != GS_LEVEL && gamestate != GS_INTERMISSION && gamestate != GS_FINALE)
+    {
+        return;
+    }
+    for (i = 0; i < MAXPLAYERS; ++i)
+    {
+        if (playeringame[i])
+        {
+            players[i].playerstate = PST_REBORN;
+        }
+    }
+    gameaction = ga_loadlevel;
+}
+
+int dgb_RenderPlayerView(int player, unsigned int* out)
+{
+    static const byte* palette = NULL;
+    int saved;
+    int x;
+    int y;
+    int rows;
+
+    if (player < 0 || player >= MAXPLAYERS || !playeringame[player] || players[player].mo == NULL || gamestate != GS_LEVEL || I_VideoBuffer == NULL)
+    {
+        return 0;
+    }
+    if (palette == NULL)
+    {
+        palette = (const byte*)W_CacheLumpName("PLAYPAL", PU_STATIC);
+    }
+
+    /* the picture of the console player is in I_VideoBuffer: the next D_Display draws it again, the frame the host got (DG_ScreenBuffer) is a copy */
+    saved = displayplayer;
+    displayplayer = player;
+    R_RenderPlayerView(&players[player]);
+    displayplayer = saved;
+
+    rows = SCREENHEIGHT - 32;   /* above the status bar */
+    memset(out, 0, sizeof(unsigned int) * SCREENWIDTH * SCREENHEIGHT);
+    for (y = 0; y < rows; ++y)
+    {
+        for (x = 0; x < SCREENWIDTH; ++x)
+        {
+            const int index = I_VideoBuffer[y * SCREENWIDTH + x];
+            const unsigned int r = gammatable[usegamma][palette[index * 3 + 0]];
+            const unsigned int g = gammatable[usegamma][palette[index * 3 + 1]];
+            const unsigned int b = gammatable[usegamma][palette[index * 3 + 2]];
+            out[y * SCREENWIDTH + x] = (r << 16) | (g << 8) | b;
+        }
+    }
     return 1;
 }
 
