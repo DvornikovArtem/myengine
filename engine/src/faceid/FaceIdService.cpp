@@ -1,6 +1,7 @@
 #include <myengine/faceid/FaceIdService.h>
 
 #include <myengine/faceid/FaceAlign.h>
+#include <myengine/faceid/FacePhotos.h>
 
 #include <nlohmann/json.hpp>
 
@@ -24,6 +25,8 @@ namespace myengine::faceid
         // the poses of the eight faces: 0 straight, -1 the nose to the left of the camera picture (the person turns to their right), +1 the other way
         constexpr int kEnrolPoses[kEnrolTarget] = {0, 0, -1, -1, 1, 1, 0, 0};
         constexpr float kMinFaceWidth = 90.0f;       // login: a face narrower than this (in a 640 x 480 picture) is "come closer"
+        // after photos the camera adds the turned faces first (a photo is mostly straight), then straight ones
+        constexpr int kAfterPhotosPoses[kEnrolTarget - 1] = {-1, 1, 0, 0, 0, 0, 0};
         constexpr float kMinEnrolFaceWidth = 120.0f;
         constexpr float kMinSharpness = 30.0f;       // enrol: the variance of the Laplacian of the aligned face
         constexpr float kTurnedYaw = 0.20f;
@@ -32,6 +35,11 @@ namespace myengine::faceid
         std::filesystem::path DirectoryOf(const FaceIdService::Options& options)
         {
             return options.directory.empty() ? FaceProfileStore::DefaultFile().parent_path() : options.directory;
+        }
+
+        int EnrolPose(const int index, const int target)
+        {
+            return target == kEnrolTarget ? kEnrolPoses[std::clamp(index, 0, kEnrolTarget - 1)] : kAfterPhotosPoses[std::clamp(index, 0, kEnrolTarget - 2)];
         }
 
         const FaceDetection* Largest(const std::vector<FaceDetection>& faces)
@@ -455,7 +463,7 @@ namespace myengine::faceid
             mode_ = FaceIdMode::Enroll;
             view_ = FaceIdView{};
             view_.mode = FaceIdMode::Enroll;
-            view_.target = kEnrolTarget;
+            view_.target = std::max(1, CameraFacesAfter(photos_.size()));
             enrolled_.clear();
             stableFrames_ = 0;
             lastCapture_ = 0.0;
@@ -516,10 +524,193 @@ namespace myengine::faceid
         {
             return false;
         }
-        embeddings = enrolled_;
+        embeddings.clear();
+        for (const PhotoFace& photo : photos_)
+        {
+            embeddings.push_back(photo.embedding);
+        }
+        photos_.clear();
+        embeddings.insert(embeddings.end(), enrolled_.begin(), enrolled_.end());
         enrolled_.clear();
         view_.enrolReady = false;
         view_.captured = 0;
+        return true;
+    }
+
+    int FaceIdService::CameraFacesAfter(const std::size_t photos)
+    {
+        if (photos == 0)
+        {
+            return kEnrolTarget;
+        }
+        if (photos >= FaceProfileStore::kMaxEmbeddings)
+        {
+            return 0;
+        }
+        return std::clamp(kEnrolTarget - static_cast<int>(photos), 1, static_cast<int>(FaceProfileStore::kMaxEmbeddings - photos));
+    }
+
+    std::vector<PhotoReport> FaceIdService::AddPhotos(const std::vector<std::filesystem::path>& files)
+    {
+        std::vector<PhotoReport> reports(files.size());
+        bool idle = true;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            idle = mode_ == FaceIdMode::Idle;
+        }
+
+        // 1. each photo on its own: a picture with one good face
+        struct Candidate
+        {
+            std::size_t report = 0;
+            PhotoResult result;
+        };
+        std::vector<Candidate> candidates;
+        std::size_t room = FaceProfileStore::kMaxEmbeddings > photos_.size() ? FaceProfileStore::kMaxEmbeddings - photos_.size() : 0;
+        for (std::size_t i = 0; i < files.size(); ++i)
+        {
+            PhotoReport& report = reports[i];
+            report.file = files[i].filename().u8string();
+            if (!available_ || !idle)
+            {
+                report.message = "Face ID is busy or not available";
+                continue;
+            }
+            if (room == 0)
+            {
+                report.message = "not read: " + std::to_string(FaceProfileStore::kMaxEmbeddings) + " photos are the most for one face";
+                continue;
+            }
+            FaceImage picture;
+            if (!LoadPhoto(files[i], picture, report.message))
+            {
+                continue;
+            }
+            PhotoResult result = ExaminePhoto(models_, picture);
+            if (!result.accepted)
+            {
+                report.message = result.reason;
+                continue;
+            }
+            // the same picture twice
+            const std::string* twin = nullptr;
+            for (const PhotoFace& other : photos_)
+            {
+                if (Cosine(result.embedding, other.embedding) > kPhotoDuplicate)
+                {
+                    twin = &other.file;
+                }
+            }
+            for (const Candidate& other : candidates)
+            {
+                if (twin == nullptr && Cosine(result.embedding, other.result.embedding) > kPhotoDuplicate)
+                {
+                    twin = &reports[other.report].file;
+                }
+            }
+            if (twin != nullptr)
+            {
+                report.message = "the same picture as " + *twin;
+                continue;
+            }
+            candidates.push_back({i, std::move(result)});
+            --room;
+        }
+
+        // 2. the photos of one face are of one person: a photo joins when it looks like another one (a chain of "looks like" counts); the people that were chosen before form the
+        // first group, and without them the biggest group of this batch is the person (the first of equals). A stranger among the photos is a slip of the file, not a deception.
+        const std::size_t before = photos_.size();
+        std::vector<int> group(before + candidates.size());
+        for (std::size_t i = 0; i < group.size(); ++i)
+        {
+            group[i] = static_cast<int>(i);
+        }
+        const auto embeddingAt = [&](const std::size_t index) -> const FaceEmbedding&
+        { return index < before ? photos_[index].embedding : candidates[index - before].result.embedding; };
+        const auto find = [&](int node)
+        {
+            while (group[static_cast<std::size_t>(node)] != node)
+            {
+                node = group[static_cast<std::size_t>(node)] = group[static_cast<std::size_t>(group[static_cast<std::size_t>(node)])];
+            }
+            return node;
+        };
+        for (std::size_t i = 1; i < before; ++i)
+        {
+            group[static_cast<std::size_t>(find(static_cast<int>(i)))] = find(0);
+        }
+        for (std::size_t i = 0; i < group.size(); ++i)
+        {
+            for (std::size_t j = i + 1; j < group.size(); ++j)
+            {
+                if (Cosine(embeddingAt(i), embeddingAt(j)) >= kPhotoSamePerson)
+                {
+                    group[static_cast<std::size_t>(find(static_cast<int>(j)))] = find(static_cast<int>(i));
+                }
+            }
+        }
+        int chosen = -1;
+        if (before > 0)
+        {
+            chosen = find(0);
+        }
+        else
+        {
+            std::size_t biggest = 0;
+            for (std::size_t i = 0; i < group.size(); ++i)
+            {
+                const int root = find(static_cast<int>(i));
+                std::size_t count = 0;
+                for (std::size_t j = 0; j < group.size(); ++j)
+                {
+                    if (find(static_cast<int>(j)) == root)
+                    {
+                        ++count;
+                    }
+                }
+                if (count > biggest)
+                {
+                    biggest = count;
+                    chosen = root;
+                }
+            }
+        }
+        for (std::size_t i = 0; i < candidates.size(); ++i)
+        {
+            Candidate& candidate = candidates[i];
+            PhotoReport& report = reports[candidate.report];
+            if (find(static_cast<int>(before + i)) != chosen)
+            {
+                report.message = "this does not look like the person in the other photos";
+                continue;
+            }
+            photos_.push_back({report.file, candidate.result.embedding, candidate.result.mirrored});
+            report.accepted = true;
+            report.message = "face found (" + std::to_string(static_cast<int>(std::lround(candidate.result.faceWidth))) + " px wide)";
+        }
+        return reports;
+    }
+
+    bool FaceIdService::TakePhotoFaces(std::vector<FaceEmbedding>& embeddings, std::string* error)
+    {
+        if (photos_.empty())
+        {
+            if (error != nullptr)
+            {
+                *error = "no photo with a face was added";
+            }
+            return false;
+        }
+        embeddings.clear();
+        for (const PhotoFace& photo : photos_)
+        {
+            embeddings.push_back(photo.embedding);
+        }
+        for (std::size_t i = 0; embeddings.size() < FaceProfileStore::kMinEmbeddings && i < photos_.size(); ++i)
+        {
+            embeddings.push_back(photos_[i].mirrored);
+        }
+        photos_.clear();
         return true;
     }
 
@@ -778,7 +969,7 @@ namespace myengine::faceid
         int pose = 0;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            pose = kEnrolPoses[std::clamp(view_.captured, 0, kEnrolTarget - 1)];
+            pose = EnrolPose(view_.captured, view_.target);
         }
         const auto setPrompt = [this](const std::string& text, const FaceDetection* face)
         {
@@ -845,7 +1036,7 @@ namespace myengine::faceid
         view_.captured = static_cast<int>(enrolled_.size());
         lastCapture_ = now;
         stableFrames_ = 0;
-        if (view_.captured >= kEnrolTarget)
+        if (view_.captured >= view_.target)
         {
             view_.enrolReady = true;
             view_.text = "done";

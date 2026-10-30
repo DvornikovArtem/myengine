@@ -27,6 +27,7 @@
 #include <myengine/faceid/FaceSigner.h>
 #include <myengine/faceid/FaceMatcher.h>
 #include <myengine/faceid/FaceModels.h>
+#include <myengine/faceid/FacePhotos.h>
 #include <myengine/faceid/FaceProfileStore.h>
 #include <myengine/faceid/FaceTypes.h>
 
@@ -1099,6 +1100,339 @@ namespace
         std::cout << "faceid: models ok, same person " << Cosine(embeddingA, again) << ", other person " << other << "\n";
         return 0;
     }
+
+    // ---- faces from photos (F2): the NASA portraits of two men, in other years and other light (tools/faceid/fetch_models.ps1 -WithTestImage)
+
+    FaceImage Blurred(const FaceImage& image, const int radius)
+    {
+        FaceImage result = image;
+        for (int y = 0; y < image.height; ++y)
+        {
+            for (int x = 0; x < image.width; ++x)
+            {
+                for (int c = 0; c < 3; ++c)
+                {
+                    int sum = 0;
+                    int count = 0;
+                    for (int dy = -radius; dy <= radius; ++dy)
+                    {
+                        for (int dx = -radius; dx <= radius; ++dx)
+                        {
+                            const int xx = x + dx;
+                            const int yy = y + dy;
+                            if (xx >= 0 && yy >= 0 && xx < image.width && yy < image.height)
+                            {
+                                sum += image.rgb[(static_cast<std::size_t>(yy) * image.width + xx) * 3 + c];
+                                ++count;
+                            }
+                        }
+                    }
+                    result.rgb[(static_cast<std::size_t>(y) * image.width + x) * 3 + c] = static_cast<std::uint8_t>(sum / count);
+                }
+            }
+        }
+        return result;
+    }
+
+    // Two pictures next to each other (the same height)
+    FaceImage SideBySide(const FaceImage& left, const FaceImage& right)
+    {
+        FaceImage result;
+        result.width = left.width + right.width;
+        result.height = std::max(left.height, right.height);
+        result.rgb.assign(static_cast<std::size_t>(result.width) * result.height * 3u, 0);
+        for (int y = 0; y < left.height; ++y)
+        {
+            std::copy_n(left.rgb.begin() + static_cast<std::ptrdiff_t>(y) * left.width * 3, static_cast<std::ptrdiff_t>(left.width) * 3, result.rgb.begin() + static_cast<std::ptrdiff_t>(y) * result.width * 3);
+        }
+        for (int y = 0; y < right.height; ++y)
+        {
+            std::copy_n(right.rgb.begin() + static_cast<std::ptrdiff_t>(y) * right.width * 3, static_cast<std::ptrdiff_t>(right.width) * 3,
+                        result.rgb.begin() + (static_cast<std::ptrdiff_t>(y) * result.width + left.width) * 3);
+        }
+        return result;
+    }
+
+    // 0: passed, 77: skipped (no ONNX Runtime, no models, no photos)
+    int TestPhotos(const fs::path& directory)
+    {
+        if (!FaceModels::Available())
+        {
+            return 77;
+        }
+        const fs::path modelsDirectory = FindUpwards("assets/faceid/models");
+        const fs::path photoDirectory = FindUpwards("assets/faceid/test/photos");
+        if (modelsDirectory.empty() || photoDirectory.empty() || !fs::exists(photoDirectory / "armstrong1.jpg") || !fs::exists(photoDirectory / "aldrin1.jpg"))
+        {
+            std::cout << "faceid: SKIP the photos (assets/faceid/test/photos is not there: tools/faceid/fetch_models.ps1 -WithTestImage)\n";
+            return 77;
+        }
+        FaceModels models;
+        std::string error;
+        Check(models.Load(modelsDirectory, error), "the models load for the photos: " + error);
+
+        // what the files say when they are not pictures
+        {
+            FaceImage image;
+            std::string reason;
+            const fs::path text = directory / "not_a_picture.jpg";
+            WriteBytes(text, std::vector<std::uint8_t>{'h', 'e', 'l', 'l', 'o'});
+            Check(!LoadPhoto(text, image, reason) && reason.find("jpg or png") != std::string::npos, "a text file is not a photo: " + reason);
+            Check(!LoadPhoto(directory / "missing.jpg", image, reason) && reason.find("cannot be read") != std::string::npos, "a missing file: " + reason);
+            Check(LoadPhoto(photoDirectory / "armstrong1.jpg", image, reason) && image.width > 100, "a jpg is read");
+        }
+
+        // every portrait: what is found in it
+        struct Entry
+        {
+            std::string name;
+            char person;
+            PhotoResult result;
+        };
+        std::vector<Entry> entries;
+        for (const char person : {'a', 'b'})
+        {
+            const std::string prefix = person == 'a' ? "armstrong" : "aldrin";
+            for (int i = 1; i <= 6; ++i)
+            {
+                const fs::path file = photoDirectory / (prefix + std::to_string(i) + ".jpg");
+                FaceImage image;
+                std::string reason;
+                if (!fs::exists(file))
+                {
+                    continue;
+                }
+                Check(LoadPhoto(file, image, reason), "the photo " + file.filename().string() + " is read: " + reason);
+                Entry entry{file.filename().string(), person, ExaminePhoto(models, image)};
+                std::cout << "faceid: photo " << entry.name << " " << (entry.result.accepted ? "accepted" : "refused: " + entry.result.reason) << " width " << entry.result.faceWidth
+                          << " sharpness " << entry.result.sharpness << " yaw " << entry.result.yaw << "\n";
+                entries.push_back(std::move(entry));
+            }
+        }
+        std::vector<const Entry*> armstrong;
+        std::vector<const Entry*> aldrin;
+        for (const Entry& entry : entries)
+        {
+            if (entry.result.accepted)
+            {
+                (entry.person == 'a' ? armstrong : aldrin).push_back(&entry);
+            }
+        }
+        Check(armstrong.size() >= 3 && aldrin.size() >= 2, "enough of the portraits pass the checks to compare people");
+
+        // the same man in other years is above the threshold, the other man is below it
+        float lowestSame = 1.0f;
+        float highestOther = -1.0f;
+        for (const Entry& one : entries)
+        {
+            for (const Entry& two : entries)
+            {
+                if (&one >= &two || !one.result.accepted || !two.result.accepted)
+                {
+                    continue;
+                }
+                const float cosine = Cosine(one.result.embedding, two.result.embedding);
+                std::cout << "faceid: " << one.name << " ~ " << two.name << " " << cosine << "\n";
+                if (one.person == two.person)
+                {
+                    lowestSame = std::min(lowestSame, cosine);
+                }
+                else
+                {
+                    highestOther = std::max(highestOther, cosine);
+                }
+            }
+        }
+        std::cout << "faceid: photos: the lowest same-person similarity " << lowestSame << ", the highest between two people " << highestOther << "\n";
+        Check(highestOther < kDefaultThreshold, "two different people are below the threshold on the photos (" + std::to_string(highestOther) + ")");
+        Check(highestOther < kPhotoSamePerson, "two different people never look like one person to the photo check (" + std::to_string(highestOther) + ")");
+        // every photo has a look-alike among the others of the same man, except the one in a helmet with a visor (the face behind glass)
+        int lonely = 0;
+        for (const Entry& one : entries)
+        {
+            float best = -1.0f;
+            for (const Entry& two : entries)
+            {
+                if (&one != &two && one.person == two.person && one.result.accepted && two.result.accepted)
+                {
+                    best = std::max(best, Cosine(one.result.embedding, two.result.embedding));
+                }
+            }
+            lonely += best < kPhotoSamePerson ? 1 : 0;
+        }
+        Check(lonely <= 1, "a photo of the same man is taken for another only when his face is behind a visor (" + std::to_string(lonely) + ")");
+
+        // the whole way: a profile from photos of one man (the others are held out), the held-out photo of him is known, the photos of the other man are not
+        {
+            FaceProfile profile;
+            profile.name = "FromPhotos";
+            const Entry* heldOut = armstrong.back();
+            for (const Entry* entry : armstrong)
+            {
+                if (entry != heldOut && profile.embeddings.size() < 4)
+                {
+                    profile.embeddings.push_back(entry->result.embedding);
+                }
+            }
+            const std::vector<FaceProfile> profiles = {profile};
+            const MatchResult same = BestMatch(profiles, heldOut->result.embedding);
+            std::cout << "faceid: a profile of " << profile.embeddings.size() << " photos knows the held-out one with " << same.score << "\n";
+            Check(same.score >= kDefaultThreshold, "a profile made of photos knows another photo of the man (" + std::to_string(same.score) + ")");
+            for (const Entry* entry : aldrin)
+            {
+                const MatchResult other = BestMatch(profiles, entry->result.embedding);
+                Check(other.score < kDefaultThreshold, "a profile made of photos does not know the other man (" + entry->name + " " + std::to_string(other.score) + ")");
+            }
+        }
+
+        // the mirrored face is the same person
+        for (const Entry* entry : armstrong)
+        {
+            const float mirrored = Cosine(entry->result.embedding, entry->result.mirrored);
+            Check(mirrored > kDefaultThreshold + 0.1f, "the mirrored face of " + entry->name + " is the same person (" + std::to_string(mirrored) + ")");
+        }
+
+        // what a photo is refused for
+        FaceImage portrait;
+        std::string reason;
+        Check(LoadPhoto(photoDirectory / "armstrong1.jpg", portrait, reason), "the portrait for the refusals");
+        Check(ExaminePhoto(models, portrait).accepted, "the portrait itself is accepted");
+        {
+            FaceImage grey;
+            grey.width = 640;
+            grey.height = 480;
+            grey.rgb.assign(640u * 480u * 3u, 120);
+            const PhotoResult none = ExaminePhoto(models, grey);
+            Check(!none.accepted && none.reason.find("no face") != std::string::npos, "a grey picture: no face (" + none.reason + ")");
+        }
+        {
+            const PhotoResult small = ExaminePhoto(models, ShrinkImage(portrait, 4));
+            Check(!small.accepted && (small.reason.find("too small") != std::string::npos || small.reason.find("no face") != std::string::npos), "a small picture is refused: " + small.reason);
+        }
+        {
+            const PhotoResult blurred = ExaminePhoto(models, Blurred(portrait, 6));
+            Check(!blurred.accepted, "a blurred picture is refused: " + blurred.reason);
+        }
+        {
+            FaceImage other;
+            Check(LoadPhoto(photoDirectory / "aldrin1.jpg", other, reason), "the second portrait");
+            const PhotoResult two = ExaminePhoto(models, SideBySide(portrait, other));
+            std::cout << "faceid: two portraits in one photo: " << two.reason << "\n";
+            Check(!two.accepted && two.reason.find("faces found") != std::string::npos, "two faces in one photo are refused: " + two.reason);
+        }
+        {
+            // a photo that a phone took sideways: the face is found after the turn, and it is the same face
+            FaceImage sideways = portrait;
+            sideways = RotateClockwise(sideways);
+            const PhotoResult turned = ExaminePhoto(models, sideways);
+            Check(turned.accepted, "a photo that lies on its side is turned and read: " + turned.reason);
+            const PhotoResult upright = ExaminePhoto(models, portrait);
+            Check(Cosine(turned.embedding, upright.embedding) > 0.9f, "the face of the turned photo is the same face (" + std::to_string(Cosine(turned.embedding, upright.embedding)) + ", width " + std::to_string(turned.faceWidth) + " against " + std::to_string(upright.faceWidth) + ")");
+        }
+        {
+            // a big photo is shrunk before the search: the face is the same
+            FaceImage big;
+            big.width = portrait.width * 4;
+            big.height = portrait.height * 4;
+            big.rgb.resize(static_cast<std::size_t>(big.width) * big.height * 3u);
+            for (int y = 0; y < big.height; ++y)
+            {
+                for (int x = 0; x < big.width; ++x)
+                {
+                    std::copy_n(portrait.rgb.begin() + (static_cast<std::ptrdiff_t>(y / 4) * portrait.width + x / 4) * 3, 3, big.rgb.begin() + (static_cast<std::ptrdiff_t>(y) * big.width + x) * 3);
+                }
+            }
+            const PhotoResult large = ExaminePhoto(models, big);
+            Check(large.accepted && large.faceWidth > 4.0f * kPhotoMinFaceWidth, "a photo four times larger is accepted: " + large.reason);
+        }
+
+        // the service: photos in, a profile out
+        {
+            ServiceFixture fixture(directory, "photos");
+            FaceIdService::Options options = fixture.Options("");
+            options.modelsDirectory = modelsDirectory;
+            FaceIdService service(options);
+            Check(service.Initialize() && service.Available(), "the service with the models");
+            const auto file = [&](const std::string& name) { return photoDirectory / name; };
+
+            Check(FaceIdService::CameraFacesAfter(0) == 8 && FaceIdService::CameraFacesAfter(3) == 5 && FaceIdService::CameraFacesAfter(7) == 1 &&
+                      FaceIdService::CameraFacesAfter(9) == 1 && FaceIdService::CameraFacesAfter(10) == 0,
+                  "how many faces the camera adds to the photos");
+
+            std::vector<PhotoReport> reports = service.AddPhotos({file("armstrong1.jpg"), file("armstrong3.jpg"), file("armstrong4.jpg"), file("aldrin1.jpg"), file("armstrong1.jpg"), directory / "not_a_picture.jpg"});
+            for (const PhotoReport& report : reports)
+            {
+                std::cout << "faceid: service: " << report.file << " " << (report.accepted ? "ok" : "refused") << ": " << report.message << "\n";
+            }
+            Check(reports.size() == 6, "a report for each file");
+            Check(reports[0].accepted && reports[1].accepted && reports[2].accepted, "three photos of the man are accepted");
+            Check(!reports[3].accepted && reports[3].message.find("does not look like") != std::string::npos, "a photo of another man is refused: " + reports[3].message);
+            Check(!reports[4].accepted && reports[4].message.find("the same picture as armstrong1.jpg") != std::string::npos, "the same photo twice is refused: " + reports[4].message);
+            Check(!reports[5].accepted && reports[5].message.find("jpg or png") != std::string::npos, "a file that is not a photo: " + reports[5].message);
+            Check(service.PhotoCount() == 3 && FaceIdService::CameraFacesAfter(service.PhotoCount()) == 5, "three photos are in the list");
+
+            std::vector<FaceEmbedding> embeddings;
+            Check(service.TakePhotoFaces(embeddings, &error) && embeddings.size() == FaceProfileStore::kMinEmbeddings && service.PhotoCount() == 0,
+                  "three photos make five faces (two of them mirrored) and the list is empty again");
+            FaceProfile profile;
+            profile.name = "Photos";
+            profile.embeddings = embeddings;
+            Check(service.Store().Add(std::move(profile), &error, "photo-password"), "a profile from photos is stored: " + error);
+            Check(service.ActiveProfiles().size() == 1, "and is in use");
+            FaceImage held;
+            Check(LoadPhoto(file("armstrong5.jpg"), held, reason), "a photo that was not in the profile");
+            const PhotoResult heldResult = ExaminePhoto(models, held);
+            if (heldResult.accepted)
+            {
+                Check(BestMatch(service.ActiveProfiles(), heldResult.embedding).score >= kDefaultThreshold, "the profile from photos knows another photo of the man");
+            }
+            std::string empty;
+            Check(!service.TakePhotoFaces(embeddings, &empty) && !empty.empty(), "no photos: nothing to take");
+
+            // the limit of ten, and the clearing
+            std::vector<fs::path> many(12, file("armstrong1.jpg"));
+            many[1] = file("armstrong3.jpg");
+            many[2] = file("armstrong4.jpg");
+            many[3] = file("armstrong5.jpg");
+            many[4] = file("armstrong6.jpg");
+            many[5] = file("armstrong2.jpg");
+            service.ClearPhotos();
+            reports = service.AddPhotos(many);
+            Check(service.PhotoCount() <= FaceProfileStore::kMaxEmbeddings, "no more than ten photos are kept");
+            service.ClearPhotos();
+            Check(service.PhotoCount() == 0, "the list is cleared");
+
+            // the shared draft takes a face made of photos as well
+            service.ClearPhotos();
+            service.AddPhotos({file("aldrin1.jpg"), file("aldrin2.jpg"), file("aldrin4.jpg")});
+            if (service.PhotoCount() >= 3)
+            {
+                Check(service.TakePhotoFaces(embeddings, &error) && service.DraftAddFace("Aldrin", embeddings, &error), "a face from photos goes into the draft of the shared database: " + error);
+            }
+        }
+        // the batch decides who the person is: the biggest group wins, a photo behind a visor and a stranger are refused wherever they stand in the list
+        {
+            ServiceFixture fixture(directory, "photos-batch");
+            FaceIdService::Options options = fixture.Options("");
+            options.modelsDirectory = modelsDirectory;
+            FaceIdService service(options);
+            Check(service.Initialize(), "the service for the batch");
+            const auto file = [&](const std::string& name) { return photoDirectory / name; };
+            std::vector<PhotoReport> reports = service.AddPhotos({file("aldrin3.jpg"), file("aldrin1.jpg"), file("armstrong1.jpg"), file("aldrin2.jpg"), file("aldrin5.jpg")});
+            Check(reports.size() == 5 && !reports[0].accepted && reports[1].accepted && !reports[2].accepted && reports[3].accepted && reports[4].accepted,
+                  "the visor and the other man are refused, the three photos of the person stay (the first of the list is not the anchor)");
+            Check(service.PhotoCount() == 3, "three photos are in the list");
+            // a later batch is held to the people that are in the list already
+            reports = service.AddPhotos({file("armstrong3.jpg"), file("aldrin4.jpg")});
+            Check(!reports[0].accepted && reports[1].accepted, "a later photo must look like the earlier ones");
+            service.ClearPhotos();
+            // two people, one photo each: the first stays
+            reports = service.AddPhotos({file("armstrong1.jpg"), file("aldrin1.jpg")});
+            Check(reports[0].accepted && !reports[1].accepted, "of two different people the first is kept");
+        }
+        std::cout << "faceid: photos ok\n";
+        return 0;
+    }
 }
 
 int main()
@@ -1128,7 +1462,11 @@ int main()
         TestServiceModes(directory);
         std::cout << "faceid: logic, alignment, profiles, signatures and the shared database ok\n";
 
-        const int models = TestModels();
+        int models = TestModels();
+        if (models == 0)
+        {
+            models = TestPhotos(directory);
+        }
         fs::remove_all(directory, ignored);
         if (models == 0)
         {

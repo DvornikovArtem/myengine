@@ -152,6 +152,7 @@ set(ENGINE_SOURCES
   src/faceid/FaceIdGate.cpp
   src/faceid/FaceIdService.cpp
   src/faceid/FaceMatcher.cpp
+  src/faceid/FacePhotos.cpp
   src/faceid/FaceProfileStore.cpp
   src/faceid/FaceSigner.cpp
   src/core/Logger.cpp

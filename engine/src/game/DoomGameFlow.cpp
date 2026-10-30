@@ -326,8 +326,41 @@ namespace myengine::game
         std::vector<ScriptedKey> scriptedKeys;
         std::uint64_t flowFrame = 0;
 
+        // MYENGINE_DOOM_MOUSE="60:400,61:-250": the raw movement of the mouse (the units of WM_INPUT) at a frame of the flow, as if the hand moved it; the angle
+        // of the player after each one goes to the log. For the tests on the hidden desktop, where no real mouse moves.
+        std::vector<std::pair<std::uint64_t, int>> scriptedMouse;
+        bool scriptedMouseLog = false;
+        double scriptedMouseAngle = -1000.0;
+        std::uint64_t scriptedMouseLast = 0;
+
+        void LoadScriptedMouse()
+        {
+            char* text = nullptr;
+            std::size_t length = 0;
+            if (_dupenv_s(&text, &length, "MYENGINE_DOOM_MOUSE") != 0 || text == nullptr)
+            {
+                return;
+            }
+            const std::string list(text);
+            std::free(text);
+            std::size_t begin = 0;
+            while (begin < list.size())
+            {
+                std::size_t end = list.find(',', begin);
+                end = end == std::string::npos ? list.size() : end;
+                const std::string item = list.substr(begin, end - begin);
+                begin = end + 1;
+                const std::size_t colon = item.find(':');
+                if (colon != std::string::npos)
+                {
+                    scriptedMouse.emplace_back(std::strtoull(item.c_str(), nullptr, 10), std::atoi(item.c_str() + colon + 1));
+                }
+            }
+        }
+
         void LoadScriptedKeys()
         {
+            LoadScriptedMouse();
             char* text = nullptr;
             std::size_t length = 0;
             if (_dupenv_s(&text, &length, "MYENGINE_DOOM_KEYS") != 0 || text == nullptr)
@@ -1182,16 +1215,25 @@ namespace myengine::game
                 CaptureCursor(playing);
                 int buttons = 0;
                 int dx = 0;
-                if (playing)
+                // the script of the mouse works without the focus too (the hidden desktop has no foreground window of the process)
+                if (playing || (!scriptedMouse.empty() && humanPlays && !before.menuActive && !before.paused && before.state == doom::GameState::Level))
                 {
                     buttons = (GetAsyncKeyState(VK_LBUTTON) & 0x8000 ? 1 : 0) | (GetAsyncKeyState(VK_RBUTTON) & 0x8000 ? 2 : 0) |
                               (GetAsyncKeyState(VK_MBUTTON) & 0x8000 ? 4 : 0);
-                    if (svc.takeMouseDelta)
+                    // every bit of the movement goes to DOOM: the frames come faster than the tics, and DOOM adds up what came before the next tic
+                    int raw = svc.takeMouseDelta ? svc.takeMouseDelta().first : 0;
+                    for (const auto& move : scriptedMouse)
                     {
-                        const float scaled = static_cast<float>(svc.takeMouseDelta().first) * settings.mouseSensitivity + mouseRemainder;
-                        dx = static_cast<int>(std::trunc(scaled));
-                        mouseRemainder = scaled - static_cast<float>(dx);
+                        if (move.first + 1 == flowFrame)   // flowFrame has moved on above: the frame of the script is the one that just ran
+                        {
+                            raw += move.second;
+                            scriptedMouseLog = true;
+                            scriptedMouseLast = flowFrame;
+                        }
                     }
+                    const float scaled = static_cast<float>(raw) * settings.mouseSensitivity + mouseRemainder;
+                    dx = static_cast<int>(std::trunc(scaled));
+                    mouseRemainder = scaled - static_cast<float>(dx);
                 }
                 else if (svc.takeMouseDelta)
                 {
@@ -1210,6 +1252,15 @@ namespace myengine::game
                 else
                 {
                     game->Advance(std::min(static_cast<double>(deltaTime), kMaxFrameSeconds));
+                }
+                if (scriptedMouseLog && flowFrame < scriptedMouseLast + 120)
+                {
+                    const double angle = game->Player(game->Info().consolePlayer).angleDegrees;
+                    if (angle != scriptedMouseAngle)
+                    {
+                        scriptedMouseAngle = angle;
+                        Log("DOOM mouse script: frame " + std::to_string(flowFrame) + ", angle " + std::to_string(angle) + " degrees");
+                    }
                 }
                 if (game->WindowTitle() != title)
                 {

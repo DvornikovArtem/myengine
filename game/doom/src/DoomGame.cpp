@@ -47,6 +47,12 @@ namespace doom
         double clockMs = kClockStartMs;              // fractions of a millisecond are kept
         long long lastDueTic = 0;
         std::deque<KeyEvent> keys;
+        // The mouse: DOOM keeps only the last mouse event before a tic (mousex is assigned) and its queue holds 64 events, while the host posts at the frame
+        // rate. So the movement is added up here and goes to DOOM as one event when a tic is due.
+        bool mouseDirty = false;
+        int mouseButtons = 0;
+        int mouseDx = 0;
+        int mouseDy = 0;
         bool frameDrawn = false;
         ITicCmdSource* ticCmdSource = nullptr;
 
@@ -413,6 +419,13 @@ namespace doom
         }
         impl_->lastDueTic = dueTic;
 
+        if (impl_->mouseDirty)
+        {
+            dgb_PostMouse(impl_->mouseButtons, impl_->mouseDx, impl_->mouseDy);
+            impl_->mouseDirty = false;
+            impl_->mouseDx = 0;
+            impl_->mouseDy = 0;
+        }
         impl_->frameDrawn = false;
         if (dgb_Tick() != 0)
         {
@@ -508,7 +521,10 @@ namespace doom
     {
         if (!finished_)
         {
-            dgb_PostMouse(buttons, deltaX, deltaY);
+            impl_->mouseButtons = buttons;
+            impl_->mouseDx += deltaX;
+            impl_->mouseDy += deltaY;
+            impl_->mouseDirty = true;
         }
     }
 
