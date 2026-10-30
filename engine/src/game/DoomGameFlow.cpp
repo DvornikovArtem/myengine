@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -23,6 +24,8 @@
 #include <doom/DoomGame.h>
 
 #include <myengine/audio/AudioSystem.h>
+#include <myengine/core/AppPaths.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/ui/UiManager.h>
 
@@ -251,12 +254,20 @@ namespace myengine::game
         enum class State : std::uint8_t
         {
             Start,
+            Choose,
             Game,
             Error,
             Finished,
         } state = State::Start;
 
         std::string message;                             // what the error screen says
+        bool crashChecked = false;                       // the report of a crash of the previous run is looked for once, on the first frame of the window
+        std::string crashNote;                           // what the banner says about it (core::crash::PlayerNote); empty: no banner
+        float crashNoteLeft = 0.0f;                      // seconds the banner stays
+        std::unique_ptr<IDoomController> controller;     // nullptr: the human plays
+        int chosenMode = 0;
+        bool modeAsked = false;
+        std::array<bool, 10> chooseHeld{};               // the digit keys of the menu of the modes, for the edge
         std::unique_ptr<DoomAudioHost> audioHost;
         std::unique_ptr<doom::DoomGame> game;
         core::WindowId mainWindow = 0;
@@ -383,10 +394,61 @@ namespace myengine::game
             }
             state = State::Game;
             LoadScriptedKeys();
+            if (chosenMode >= 0 && chosenMode < static_cast<int>(svc.modes.size()) && svc.modes[static_cast<std::size_t>(chosenMode)].make)
+            {
+                std::string controllerError;
+                controller = svc.modes[static_cast<std::size_t>(chosenMode)].make(controllerError);
+                if (!controller)
+                {
+                    message = svc.modes[static_cast<std::size_t>(chosenMode)].name + " did not start:\n" + controllerError;
+                    state = State::Error;
+                    Log("DOOM: " + message);
+                    return;
+                }
+                Log("DOOM: " + svc.modes[static_cast<std::size_t>(chosenMode)].name);
+            }
+        }
+
+        // The menu in front of the game: which player plays. Digit keys, Esc leaves.
+        void DrawChoose(ImDrawList* list, const std::uint32_t width, const std::uint32_t height, const bool active)
+        {
+            const float size = std::max(16.0f, std::floor(static_cast<float>(height) / 30.0f));
+            ImFont* font = ImGui::GetFont();
+            float y = static_cast<float>(height) * 0.2f;
+            const float x = static_cast<float>(width) * 0.1f;
+            list->AddText(font, size * 2.2f, ImVec2(x, y), IM_COL32(230, 70, 50, 255), "FlyDoom");
+            y += size * 3.4f;
+            for (std::size_t i = 0; i < svc.modes.size() && i < 9; ++i)
+            {
+                const std::string line = std::to_string(i + 1) + "  " + svc.modes[i].name;
+                list->AddText(font, size * 1.3f, ImVec2(x, y), IM_COL32(235, 235, 235, 255), line.c_str());
+                y += size * 2.0f;
+            }
+            y += size;
+            list->AddText(font, size, ImVec2(x, y), IM_COL32(150, 150, 150, 255), "press the number, Esc - exit");
+            if (!active)
+            {
+                return;
+            }
+            for (int digit = 1; digit <= 9 && digit <= static_cast<int>(svc.modes.size()); ++digit)
+            {
+                const bool down = (GetAsyncKeyState('0' + digit) & 0x8000) != 0 || (GetAsyncKeyState(VK_NUMPAD0 + digit) & 0x8000) != 0;
+                if (down && !chooseHeld[static_cast<std::size_t>(digit)])
+                {
+                    chosenMode = digit - 1;
+                    state = State::Start;
+                    StartGame();
+                }
+                chooseHeld[static_cast<std::size_t>(digit)] = down;
+            }
+            if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0 && svc.quit)
+            {
+                svc.quit();
+            }
         }
 
         // The keyboard into DOOM: a key that goes down (or up) since the last frame is one event
-        void PollKeyboard(const bool active, const bool menu)
+        void PollKeyboard(const bool active, const bool menu, const bool controlled = false)
         {
             BYTE keys[256] = {};
             const bool haveKeys = active && GetKeyboardState(keys) != FALSE;
@@ -411,7 +473,11 @@ namespace myengine::game
             {
                 send(entry.vk, entry.doomKey);
             }
-            if (menu)
+            if (controlled && !menu)
+            {
+                // the controller plays: the keyboard only reaches the menu of DOOM (and the keys above), not the game
+            }
+            else if (menu)
             {
                 for (const KeyMap& entry : kMenuKeys)
                 {
@@ -559,6 +625,27 @@ namespace myengine::game
             list->AddText(font, size, ImVec2(x, y), IM_COL32(150, 150, 150, 255), "Esc - exit");
         }
 
+        // The banner about the crash of the previous run: over everything, 12 seconds, the last one fades
+        void DrawCrashNote(const std::uint32_t width, const std::uint32_t height, const float deltaTime)
+        {
+            if (crashNoteLeft <= 0.0f)
+            {
+                return;
+            }
+            crashNoteLeft -= deltaTime;
+            const float size = std::max(14.0f, std::floor(static_cast<float>(height) / 36.0f));
+            ImFont* font = ImGui::GetFont();
+            ImDrawList* list = ImGui::GetForegroundDrawList();
+            const float alpha = std::min(1.0f, std::max(0.0f, crashNoteLeft));
+            const float margin = size * 0.8f;
+            const float maxWidth = static_cast<float>(width) - 2.0f * margin;
+            const ImVec2 text = font->CalcTextSizeA(size, FLT_MAX, maxWidth, crashNote.c_str());
+            const ImVec2 corner(margin, margin);
+            const ImVec2 end(margin + text.x + 2.0f * size, margin + text.y + size);
+            list->AddRectFilled(corner, end, IM_COL32(120, 20, 20, static_cast<int>(235.0f * alpha)), size * 0.3f);
+            list->AddText(font, size, ImVec2(corner.x + size, corner.y + size * 0.5f), IM_COL32(255, 235, 235, static_cast<int>(255.0f * alpha)), crashNote.c_str(), nullptr, maxWidth);
+        }
+
         void Build(const core::WindowId windowId, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
         {
             ImDrawList* list = ImGui::GetBackgroundDrawList();
@@ -573,6 +660,34 @@ namespace myengine::game
             }
             const bool active = ProcessIsForeground();
 
+            if (!crashChecked)
+            {
+                // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
+                crashChecked = true;
+                const std::filesystem::path crashDirectory = core::apppaths::UserDataDirectory() / L"crashes";
+                if (const auto report = core::crash::TakePending(crashDirectory))
+                {
+                    Log("the previous run crashed: " + report->summary + "; the report is " + report->text.generic_u8string());
+                    crashNote = core::crash::PlayerNote(*report, crashDirectory);
+                    crashNoteLeft = 12.0f;
+                }
+            }
+            DrawCrashNote(width, height, deltaTime);
+
+            if (state == State::Start && svc.modes.size() > 1 && svc.initialMode < 0 && !modeAsked)
+            {
+                modeAsked = true;
+                state = State::Choose;
+            }
+            else if (state == State::Start && svc.initialMode >= 0)
+            {
+                chosenMode = std::min(svc.initialMode, static_cast<int>(svc.modes.size()) - 1);
+            }
+            if (state == State::Choose)
+            {
+                DrawChoose(list, width, height, active);
+                return;
+            }
             if (state == State::Start)
             {
                 Log("DOOM: the window is " + std::to_string(width) + "x" + std::to_string(height) + ", ImGui " + std::to_string(ImGui::GetIO().DisplaySize.x) + "x" +
@@ -584,7 +699,7 @@ namespace myengine::game
             {
                 const doom::GameInfo before = game->Info();
                 const bool menu = before.menuActive || before.state != doom::GameState::Level;
-                PollKeyboard(active, menu);
+                PollKeyboard(active, menu, controller != nullptr);
                 for (const ScriptedKey& key : scriptedKeys)
                 {
                     if (key.frame == flowFrame)
@@ -595,7 +710,7 @@ namespace myengine::game
                 ++flowFrame;
 
                 // the mouse: the left button fires, the movement turns; the cursor is the game's only while the level plays
-                const bool playing = active && !before.menuActive && !before.paused && before.state == doom::GameState::Level;
+                const bool playing = controller == nullptr && active && !before.menuActive && !before.paused && before.state == doom::GameState::Level;
                 CaptureCursor(playing);
                 int buttons = 0;
                 int dx = 0;
@@ -618,7 +733,14 @@ namespace myengine::game
                     game->PostMouse(buttons, dx, 0);
                 }
 
-                game->Advance(std::min(static_cast<double>(deltaTime), kMaxFrameSeconds));
+                if (controller != nullptr)
+                {
+                    controller->Advance(*game, std::min(static_cast<double>(deltaTime), kMaxFrameSeconds));
+                }
+                else
+                {
+                    game->Advance(std::min(static_cast<double>(deltaTime), kMaxFrameSeconds));
+                }
                 if (game->WindowTitle() != title)
                 {
                     title = game->WindowTitle();
@@ -651,8 +773,11 @@ namespace myengine::game
             {
                 // the largest whole scale that fits; the picture is drawn at the size the window gives, so a window smaller than one scale shrinks it
                 const float viewHeightUnits = svc.squarePixels ? static_cast<float>(doom::kScreenHeight) : static_cast<float>(doom::kScreenHeight * 6 / 5);   // 240: the 4:3 of the monitors of 1993, in whole numbers
-                const float fit = std::min(static_cast<float>(width) / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
-                const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::floor(fit)), 1u, 4u);
+                // a controller has a panel at the right of the picture (the brain of the fly); the human has the whole window
+                const float panelWidth = controller != nullptr ? std::max(240.0f, std::floor(static_cast<float>(width) * 0.26f)) : 0.0f;
+                const float pictureWidth = static_cast<float>(width) - panelWidth;
+                const float fit = std::min(pictureWidth / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
+                const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(controller != nullptr ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
                 if (uploadedScale != scale)
                 {
                     Log("DOOM: the picture is drawn at x" + std::to_string(scale) + " in a window of " + std::to_string(width) + "x" + std::to_string(height));
@@ -664,12 +789,16 @@ namespace myengine::game
                 if (texture.IsValid())
                 {
                     // an integer factor on the screen when it fits, so that the sharp pixels of the texture stay sharp
-                    const float whole = fit >= 1.0f ? std::floor(fit) : fit;
+                    const float whole = (fit >= 1.0f && controller == nullptr) ? std::floor(fit) : fit;   // with a panel the picture fills the rest of the window
                     const float finalW = doom::kScreenWidth * whole;
                     const float finalH = viewHeightUnits * whole;
-                    const float left = std::floor((static_cast<float>(width) - finalW) * 0.5f);
+                    const float left = std::floor((pictureWidth - finalW) * 0.5f);
                     const float top = std::floor((static_cast<float>(height) - finalH) * 0.5f);
                     list->AddImage(static_cast<ImTextureID>(texture.value), ImVec2(left, top), ImVec2(left + finalW, top + finalH));
+                }
+                if (controller != nullptr)
+                {
+                    controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
                 }
             }
             else if (state == State::Error)
@@ -698,7 +827,8 @@ namespace myengine::game
         {
             impl_->svc.render->DestroyTexture(impl_->texture);
         }
-        // the game first (it still talks to the audio host), then the host
+        // the controller first (it uses the game), then the game (it still talks to the audio host), then the host
+        impl_->controller.reset();
         impl_->game.reset();
         impl_->audioHost.reset();
     }
@@ -722,11 +852,17 @@ namespace myengine::game
         switch (impl_->state)
         {
             case Impl::State::Start: return "start";
+            case Impl::State::Choose: return "choose";
             case Impl::State::Game: return "game";
             case Impl::State::Error: return "error";
             case Impl::State::Finished: return "finished";
         }
         return "start";
+    }
+
+    std::string DoomGameFlow::ControllerStatus() const
+    {
+        return impl_->controller ? impl_->controller->Status() : std::string();
     }
 
     std::uint64_t DoomGameFlow::FrameCount() const

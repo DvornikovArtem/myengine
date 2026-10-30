@@ -18,6 +18,8 @@
 #include <utility>
 #include <vector>
 
+#include <myengine/game/DoomController.h>
+
 namespace myengine::ui
 {
     class UiManager;
@@ -50,6 +52,9 @@ namespace myengine::game
         std::filesystem::path exeDirectory;                                                      // where assets/doom is looked for
         std::vector<std::filesystem::path> wadDirectories;                                       // the folders of the WAD files of the user (%LOCALAPPDATA%\FlyDoom\wads)
         std::filesystem::path dataDirectory;                                                     // the saves and the config of DOOM
+        // Who plays (DoomController.h). The first mode is the human. More than one mode: a menu in front of the game asks, unless initialMode says.
+        std::vector<DoomMode> modes;
+        int initialMode = -1;                                                                    // the index of the mode to start with, -1: ask when there are several
         bool squarePixels = false;                                                               // false: 4:3 as on the monitors of 1993 (320x200 stretched to 320x240)
         bool music = true;
     };
@@ -67,6 +72,8 @@ namespace myengine::game
 
         // For the logs and the tests: "start" (nothing yet), "game", "error", "finished"
         const char* StateName() const;
+        // The status of the controller ("Fly plays, brain speed 0.92x"), empty for the human
+        std::string ControllerStatus() const;
         std::uint64_t FrameCount() const;
 
     private:

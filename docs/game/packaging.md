@@ -84,6 +84,41 @@ RocketArena/
 
 `games/<id>/game.json` (для Rocket Arena `games/rocketarena/game.json`; поля `id`, `displayName`, `build`, `options`, `externalData` описаны в [../editor/build-panel.md](../editor/build-panel.md)): список корней (`assets`: файл или папка), `exclude` (маски, сильнее всего), `runtime` (Python), `config` и `project` (то, что скрипт пишет в дистрибутив), `licenses`, `steam`. При `followReferences` скрипт идёт дальше по ссылкам: всё, что названо в взятых `.json` (карты, материалы, `.shader.json`, данные) как путь к `.obj`, `.material.json`, `.shader.json`, `.tga`, `.dds`, `.bmp`, `.png`, `.hlsl`, `.wav`, `.ttf`, относительно репозитория или самого файла, попадает в пакет сам. Поэтому, когда G1 переведёт игровую карту на ассеты `rl2`, старые `assets/*/rl/` и `rl_*.obj` уйдут из дистрибутива без правок манифеста. Ссылка на файл, которого нет, выводится предупреждением. Новый ассет игры достаточно положить в одну из перечисленных папок или назвать в карте.
 
+## FlyDoom (D2)
+
+`package_game.ps1 -Game flydoom` (или окно Window > Build, игра FlyDoom) собирает цель `FlyDoom` и кладёт в `dist/FlyDoom` пакет, который можно отдать любому: распаковал, `FlyDoom.exe`, играешь. Манифест — `games/flydoom/game.json`, README — `tools/package_flydoom/README.txt` (русский и английский), проверка — `tools/check_flydoom_package.ps1` (кнопка Check package). У игры нет Steam и Wwise (звук XAudio2), поэтому в имени zip нет суффиксов: `FlyDoom-<версия>-win64.zip`. Всё остальное работает как у Rocket Arena: те же параметры, `##progress`, `-BuildDir`/`-Out` на другом диске.
+
+```
+FlyDoom/
+  FlyDoom.exe                  Release, /MD, без PDB (PDB в dist/symbols)
+  python314.dll, python314.zip, vcruntime140*.dll ...   как у Rocket Arena (движок линкуется с Python)
+  config/app.json, myengine.myproject
+  assets/shaders, assets/fonts   то, что нужно движку (DOOM своих ассетов не имеет)
+  assets/doom/freedoom1.wad    Freedoom Phase 1: пакет играет и без чужих данных
+  wads/doom1.wad               shareware DOOM 1.9 (id Software разрешила раздавать свободно) + wads/doom1.wad.license.txt
+  assets/flybrain/malecns_v1.fbrain   мозг мухи, 154 МБ (если файл есть на машине сборки)
+  COPYING, SOURCE.txt, THIRD_PARTY.txt, README.txt, version.txt
+  licenses/                    тексты лицензий данных и библиотек
+```
+
+**Данные.** Freedoom обязателен: нет `assets/doom/freedoom1.wad` — скрипт сам запускает `tools/doom/fetch_freedoom.ps1` до сборки (скачивает релиз 0.13.0 и сверяет SHA-256), не получилось — остановка. Shareware `doom1.wad` берётся из `%LOCALAPPDATA%/FlyDoom/wads/` (или `assets/doom/`) и кладётся только если его md5 `f0cefca49926d00903cf57551d901abe` (v1.9, 4 196 020 байт): другой файл под этим именем не едет, нет файла — предупреждение, пакет без него (только Freedoom). Текст лицензии shareware (`tools/package_flydoom/doom1.wad.license.txt`, из пакета Debian `doom-wad-shareware`: заявление Джона Кармака 1999 года) лежит рядом с WAD и едет, только если едет WAD. WAD полной игры (`DOOM.WAD`, `DOOM2.WAD`, ...) в пакет не попадает никогда: он собственность игрока, игра сама находит Steam-копию. Игра ищет WAD и в `wads/` рядом с exe ([doom.md](doom.md)), полная игра берётся раньше shareware, а он раньше Freedoom.
+
+**Мозг мухи.** `assets/flybrain/malecns_v1.fbrain` (≈154 МБ, коннектом MaleCNS v1.0, CC BY 4.0) в git не лежит: его делает `tools/flybrain/fetch_malecns.ps1` (гигабайты; поэтому скрипт упаковки его сам не запускает: `autoFetch: false`). Нет файла — предупреждение, пакет без мухи. Атрибуция (Berg et al. 2026, Cell 189(18), doi 10.1016/j.cell.2026.08.015, зеркало QuixiAI/MaleCNS, что изменено нами) — в `THIRD_PARTY.txt` и внутри самого файла (секция `ATTRIB`). Пока игрок-мозг (N1) не в базе, FlyDoom файл не читает.
+
+**GPL.** `FlyDoom.exe` содержит код DOOM, поэтому пакет несёт `COPYING` (GPL v2, из `game/doom/third_party/doomgeneric`) и `SOURCE.txt`: репозиторий, **полный хэш коммита** (`git rev-parse HEAD`), версия, «чисто ли дерево», где лежит код DOOM (`game/doom`) и как собрать то же самое. Если при упаковке в дереве были незакоммиченные изменения, `SOURCE.txt` так и пишет, а скрипт предупреждает: пакет из такого дерева не воспроизводится по названному коммиту. `THIRD_PARTY.txt` перечисляет всё, что в пакете не наше, с лицензиями: doomgeneric и id (GPL v2), модуль OPL Chocolate Doom (GPL), Nuked OPL3 (LGPL 2.1), Freedoom (модифицированная BSD), doom1.wad (лицензия id для shareware), MaleCNS (CC BY 4.0), библиотеки движка.
+
+**База лиц в пакет не кладётся** (решение Артёма: лица реальных людей не едут в игры): `check_flydoom_package.ps1` считает ошибкой `faceid/allowed_faces.fdb` в пакете.
+
+**Проверка.** `tools/check_flydoom_package.ps1 [-Frames 400] [-Keep]` (то же, что кнопка Check package) копирует пакет в `%TEMP%\flydoom_clean` и проверяет:
+
+1. файлы: `COPYING` (GPL v2), `SOURCE.txt` с 40-значным хэшем без неподставленных `{...}`, `THIRD_PARTY.txt` с названиями всех данных и атрибуцией мухи, `licenses/`, `version.txt` перечисляет файлы данных; нет WAD полной игры, PDB, файлов SDK; `doom1.wad` — тот самый (md5) и с лицензией рядом; `.fbrain` — файл формата (`FLYBRAIN`, версия 1, не менее 100 000 нейронов, секция `ATTRIB`);
+2. иконка и поля exe (`FlyDoom`, версия как в `version.txt`);
+3. запуск из чистой папки без аргументов (`--exit-after-frames`): код 0, рядом с exe ничего не изменилось, лог в `<LOCALAPPDATA>/FlyDoom/logs` без путей репозитория и без `[ERROR]`, строка `DOOM: the game data is ...`, в `APPDATA` ничего, скриншот кадра — картинка из многих цветов, а не чёрный экран;
+4. каждый WAD пакета отдельно через `--iwad` с `-warp 1 1`: игра берёт именно его и доходит до первого уровня (на машине с DOOM из Steam запуск без аргументов может выбрать его, поэтому WAD пакета проверяются по `--iwad`);
+5. падение (`MYENGINE_CRASH_TEST=1`): `.dmp` (больше 10 КБ) и `.txt` (с «access violation», версией и местом `FlyDoom.exe+0x…`) в `crashes` и маркер `pending.txt`; следующий запуск пишет в лог «the previous run crashed» с именем отчёта, показывает красную плашку на 12 секунд («The game crashed last time. Send crash-….txt from %LOCALAPPDATA%\FlyDoom\crashes») и снимает маркер.
+
+Мозг мухи проверяется как файл; когда N1 научит игру читать `.fbrain`, к проверке добавится строка лога о загрузке.
+
 ## Иконка, версия и ресурсы exe
 
 `app/resources/RocketArena.ico` (7 размеров, 16..256 пикселей, PNG внутри) рисует `tools/gen_rl_icon.py` (машина Pulse и мяч на тёмно-синем фоне меню; `python tools/gen_rl_icon.py --preview out.png` показывает картинку). Иконка закоммичена, сборка скрипт не запускает. `app/resources/RocketArena.rc.in` превращается CMake в `RocketArena.rc` в папке сборки: иконка с id 1 (Проводник и панель задач, а `Window.cpp` берёт её же для окна), `VERSIONINFO` (название «Rocket Arena», описание, версия файла и продукта `x.y.z`, коммит в `ProductVersion`, оригинальное имя файла). Оба exe (`RocketArena.exe` и `myengine.exe`) получают ресурсы со своими названиями. `package_game.ps1` останавливается, если версия в exe не совпала с версией проекта (папку сборки надо переконфигурировать), а `check_package.ps1` проверяет иконку и поля.

@@ -1,0 +1,42 @@
+{
+  "name": "DOOMFLY",
+  "description": "The neurons of the public DOOMFLY demo (github.com/nftechie/doomfly, MIT): the turn is DNp20 right minus left, the walk and the fire are DNpe017. They are not the biology of walking and turning (the authors say so); they are the neurons that answer to the picture in this model: the descending neurons of the biological set (controls_bio.json) stay silent. The gains and the thresholds are ours.",
+  "smoothingMs": 100,
+  "turn": {
+    "terms": [
+      { "type": "DNp20", "side": "right", "weight": 1.0 },
+      { "type": "DNp20", "side": "left", "weight": -1.0 }
+    ],
+    "offsetHz": 11.0,
+    "deadZoneHz": 2.0,
+    "gain": 0.12,
+    "limit": 6.0
+  },
+  "forward": {
+    "terms": [
+      { "type": "DNpe017", "side": "any", "weight": 1.0 }
+    ],
+    "deadZoneHz": 0.0,
+    "gain": 1.0,
+    "limit": 50.0
+  },
+  "fire": {
+    "terms": [
+      { "type": "DNpe017", "side": "any", "weight": 1.0 }
+    ],
+    "windowMs": 100,
+    "minSpikes": 0,
+    "thresholdHz": 24.0
+  },
+  "use": {
+    "everyTics": 35,
+    "stuckTics": 12,
+    "stuckUnits": 6.0
+  },
+  "unstick": {
+    "afterTics": 50,
+    "turnDegrees": 5.0,
+    "forTics": 18,
+    "backUnits": 10.0
+  }
+}

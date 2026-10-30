@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <map>
 #include <set>
 
@@ -151,6 +153,14 @@ namespace myengine::render::dx12
         {
             if (named.count(source.lexically_normal().generic_string()) != 0)
             {
+                continue;
+            }
+            // Compute-only shaders (assets/shaders/flybrain.hlsl: [numthreads], no VSMain) are not draw programs: their own users compile them
+            std::ifstream file(source, std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            if (text.find("[numthreads") != std::string::npos && text.find("VSMain") == std::string::npos)
+            {
+                outText += "=== " + source.filename().u8string() + " ===\ncompute shader, not a draw program: skipped\n\n";
                 continue;
             }
             ShaderProgramData program;

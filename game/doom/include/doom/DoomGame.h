@@ -121,6 +121,9 @@ namespace doom
         // frame, as DOOM does). true: a new frame is ready. The clock is virtual, so a test that calls Advance(1.0 / 35) runs
         // exactly one tic each time.
         bool Advance(double deltaSeconds);
+        // Runs exactly one tic of the game, whatever the clock says (a brain that plays DOOM steps the game tic by tic, when it has decided).
+        // true: a new frame is ready.
+        bool StepTic();
 
         // ---- the frame ----
         // 320x200 pixels, 0x00RRGGBB; valid until the next Advance. FrameCount() grows with every frame DOOM drew.
@@ -173,7 +176,7 @@ namespace doom
     {
         None,
         Argument,       // --iwad
-        NextToExe,      // assets/doom/ or doom/ next to the exe (Freedoom from tools/doom/fetch_freedoom.ps1, or a WAD the player put there)
+        NextToExe,      // assets/doom/, wads/ (the shareware WAD of the package) or doom/ next to the exe (Freedoom from tools/doom/fetch_freedoom.ps1, or a WAD the player put there)
         UserFolder,     // %LOCALAPPDATA%\FlyDoom\wads (the WAD files of the player, outside the repository and the package)
         Steam,          // the DOOM of the Steam library of the player
         Environment,    // DOOMWADDIR / DOOMWADPATH of DOOM
@@ -188,7 +191,7 @@ namespace doom
         std::vector<std::string> tried;        // for the message "no WAD found": where it was looked for
     };
 
-    // The places: the argument; assets/doom or doom next to the exe; the folders of the user (userDirectories: %LOCALAPPDATA%\FlyDoom\wads ...); the DOOM
+    // The places: the argument; assets/doom, wads or doom next to the exe; the folders of the user (userDirectories: %LOCALAPPDATA%\FlyDoom\wads ...); the DOOM
     // of the Steam library; DOOMWADDIR. Among the WAD files found the full game (DOOM.WAD, DOOM2.WAD, plutonia, tnt) comes before the shareware doom1.wad,
     // and that before Freedoom; with the same rank the order of the places says. What --iwad names is taken whatever it is. exeDirectory is where
     // FlyDoom.exe lies. An empty path in the result: nothing found.

@@ -1,5 +1,6 @@
 #include <myengine/core/CrashHandler.h>
 
+#include <myengine/core/AppPaths.h>
 #include <myengine/core/Version.h>
 
 #include <csignal>
@@ -333,6 +334,14 @@ namespace myengine::core::crash
         report.dump = report.text;
         report.dump.replace_extension(".dmp");
         return report;
+    }
+
+    std::string PlayerNote(const Report& report, const std::filesystem::path& crashDirectory)
+    {
+        const std::string folder = apppaths::IsShipping()
+            ? "%LOCALAPPDATA%\\" + crashDirectory.parent_path().filename().u8string() + "\\" + crashDirectory.filename().u8string()
+            : report.text.parent_path().generic_u8string();
+        return "The game crashed last time. Send " + report.text.filename().generic_u8string() + " from " + folder;
     }
 
     void CrashIfRequested()
