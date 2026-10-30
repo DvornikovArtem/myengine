@@ -87,6 +87,10 @@ namespace flybrain
         // A DAN belongs to the compartment of an MBON when it makes at least this many contacts onto it (a few stray
         // contacts do not make a compartment)
         uint32_t compartmentContacts = 10;
+        // The weights change at the end of the first call of Advance that reaches this many ms after the last change (0: every call). On the GPU every
+        // change makes the next call wait for the spikes of this one: several short calls a tic (FlyPlayer's substeps) learning once a tic keep the GPU
+        // running ahead (N4: the learning brain 0.5x -> ~1x real time). The same steps on the CPU and the GPU.
+        double learnEveryMs = 0.0;
     };
 
     struct PlasticityInfo
@@ -394,5 +398,7 @@ namespace flybrain
         std::vector<uint32_t> trackedTotals_; // GPU: as of completedStep_
         mutable bool gpuStatePulled_ = false;
         std::unique_ptr<Plasticity> plasticity_;
+        uint64_t learnedAtStep_ = 0;    // the end of the last call that learned (PlasticityRule::learnEveryMs)
+        bool learnWait_ = false;        // GPU: the last call learns, the next one waits for its spikes
     };
 }

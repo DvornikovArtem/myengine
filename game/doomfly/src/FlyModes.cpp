@@ -18,6 +18,7 @@
 #include <memory>
 #include <tuple>
 #include <chrono>
+#include <iterator>
 
 namespace doomfly
 {
@@ -56,7 +57,6 @@ namespace doomfly
         {
             FlyModeOptions options;
             std::shared_ptr<const flybrain::Connectome> connectome;
-            bool forgotten = false;             // --fly-forget is done (once per run)
         };
 
         // The panel of one brain: the neurons the controls read, what the player does, the health of the brain. `header` is the big title.
@@ -150,6 +150,14 @@ namespace doomfly
                 std::snprintf(learned, sizeof(learned), "KC %.0f spikes/s   learned weight %.4f", status.kcSpikesPerSecond, status.learnedScale);
                 line(learned, text);
                 line("our bridge: picture -> visual inputs of KCs; MBON in the turn: our weight", dim);
+                line("the KC -> MBON synapses learn, but do not change the walls", dim);
+            }
+            if (status.wallSense)
+            {
+                char wall[128];
+                std::snprintf(wall, sizeof(wall), "OUR LAYER: wall ahead %.0f %%   brake %.0f %%   learned from %u", status.wallChance * 100.0f, status.wallBrake * 100.0f, status.wallPositives);
+                line(wall, amber);
+                line("WallSense: our layer (a memory of pictures), not the connectome", dim);
             }
             char brain[128];
             std::snprintf(brain, sizeof(brain), "spikes %.0f k/s   tics %llu", status.spikesPerSecond / 1000.0f, static_cast<unsigned long long>(status.tics));
@@ -284,16 +292,14 @@ namespace doomfly
                 {
                     out.groups.push_back(std::move(motor));
                 }
-                if (!vision.bars.empty())
-                {
-                    out.groups.push_back(std::move(vision));
-                }
                 out.groups.push_back(Output("OUTPUT"));
+                // N4: what learns goes first (the panel is cut at the foot when it is long), the eyes last
+                std::vector<myengine::game::DoomPanelGroup> learned;
                 if (player_.Learns())
                 {
                     // N3b: what the mushroom body sees and what it has learned (the bridge into the KCs and the MBON turn are ours, docs/flybrain/flybrain.md)
                     myengine::game::DoomPanelGroup learning;
-                    learning.title = "LEARNING";
+                    learning.title = "MUSHROOM BODY";
                     myengine::game::DoomPanelBar kc;
                     kc.label = "Kenyon cells";
                     std::snprintf(text, sizeof(text), "%.0f spikes/s", status.kcSpikesPerSecond);
@@ -302,14 +308,51 @@ namespace doomfly
                     kc.limit = 2000.0f;
                     learning.bars.push_back(std::move(kc));
                     myengine::game::DoomPanelBar scale;
-                    scale.label = "learned weight";
+                    scale.label = "KC -> MBON weight";
                     std::snprintf(text, sizeof(text), "%.4f", status.learnedScale);
                     scale.text = text;
                     scale.value = static_cast<float>(status.learnedScale);
                     scale.limit = 1.0f;
                     learning.bars.push_back(std::move(scale));
-                    out.groups.push_back(std::move(learning));
+                    learned.push_back(std::move(learning));
                     out.debug.push_back("our bridge: picture -> visual inputs of KCs; MBON in the turn: our weight");
+                    out.debug.push_back("the KC -> MBON synapses learn, but do not change the walls");
+                }
+                if (status.wallSense)
+                {
+                    // N4: our layer (WallSense), not the connectome: what it sees coming and how much it brakes
+                    myengine::game::DoomPanelGroup layer;
+                    layer.title = "WALLSENSE: OUR LAYER (PICTURE MEMORY), NOT THE CONNECTOME";
+                    myengine::game::DoomPanelBar chance;
+                    chance.label = "wall ahead";
+                    std::snprintf(text, sizeof(text), "%.0f %%", status.wallChance * 100.0f);
+                    chance.text = text;
+                    chance.value = status.wallChance;
+                    chance.limit = 1.0f;
+                    chance.rgb = 0xe65a3c;
+                    layer.bars.push_back(std::move(chance));
+                    myengine::game::DoomPanelBar brake;
+                    brake.label = "brake";
+                    std::snprintf(text, sizeof(text), "%.0f %%", status.wallBrake * 100.0f);
+                    brake.text = text;
+                    brake.value = status.wallBrake;
+                    brake.limit = 1.0f;
+                    brake.rgb = 0xf0b43c;
+                    layer.bars.push_back(std::move(brake));
+                    myengine::game::DoomPanelBar seen;
+                    seen.label = "before a wall";
+                    std::snprintf(text, sizeof(text), "%u pictures", status.wallPositives);
+                    seen.text = text;
+                    seen.value = static_cast<float>(status.wallPositives);
+                    seen.limit = 2000.0f;
+                    seen.rgb = 0x5ac86e;
+                    layer.bars.push_back(std::move(seen));
+                    learned.insert(learned.begin(), std::move(layer));
+                }
+                out.groups.insert(out.groups.begin(), std::make_move_iterator(learned.begin()), std::make_move_iterator(learned.end()));
+                if (!vision.bars.empty())
+                {
+                    out.groups.push_back(std::move(vision));
                 }
                 // the dim lines at the foot (they are for the one who debugs the brain, not for the player)
                 std::snprintf(text, sizeof(text), "brain %.2fx   game %.2fx   tic %llu", status.brainSpeed, status.gameSpeed, static_cast<unsigned long long>(status.tics));
@@ -496,9 +539,11 @@ namespace doomfly
         class FlyController final : public myengine::game::IDoomController
         {
         public:
+            // `fastest` (N4, Fly learns, the speed MAX): the game runs as fast as the brain can (still one tic of the brain per tic of the game), the speed it reaches
+            // is shown; `mark`: the line over the curve of learning on the picture ("LEARNS from scratch", "TRAINED"), empty: no curve
             FlyController(std::unique_ptr<FlyPlayer> player, std::string title, std::function<void(const std::string&)> log, myengine::render::IRenderAdapter* render,
-                          myengine::editor::ThumbnailService* thumbnails)
-                : player_(std::move(player)), title_(std::move(title)), log_(std::move(log))
+                          myengine::editor::ThumbnailService* thumbnails, const bool fastest = false, std::string mark = {})
+                : player_(std::move(player)), title_(std::move(title)), log_(std::move(log)), fastest_(fastest), mark_(std::move(mark))
             {
                 view_ = std::make_unique<FlyBrainView>(*player_, render, thumbnails, "fly-brain");
             }
@@ -518,7 +563,25 @@ namespace doomfly
                     attached_ = &game;
                     player_->Attach(game);
                 }
-                const bool frame = player_->Pump(game, deltaSeconds);
+                bool frame = false;
+                if (fastest_)
+                {
+                    // as fast as the brain: tic after tic for 40 ms of the frame (the window keeps drawing), at least one
+                    const auto begin = std::chrono::steady_clock::now();
+                    do
+                    {
+                        frame = player_->StepBlocking(game) || frame;
+                        Curve(game);
+                    } while (std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count() < 0.040);
+                }
+                else
+                {
+                    frame = player_->Pump(game, deltaSeconds);
+                    if (frame)
+                    {
+                        Curve(game);
+                    }
+                }
                 view_->Update(deltaSeconds);
                 // a line of the log every 10 seconds of the game: where the fly is and how the brain keeps up
                 const FlyStatus status = player_->Status();
@@ -555,21 +618,118 @@ namespace doomfly
                 {
                     return false;
                 }
-                view_->Describe(out, "FLY PLAYS");
+                view_->Describe(out, player_->Learns() ? "FLY LEARNS" : "FLY PLAYS");
                 return true;
             }
             void DrawBrain(ImDrawList* list, const float x, const float y, const float width, const float height) override { view_->DrawCloud(list, x, y, width, height); }
             bool BigBrainOpen() const override { return view_->Big(); }
             void ToggleBigBrain() override { view_->ToggleBig(); }
-            void DrawOverlay(ImDrawList* list, const float width, const float height) override { view_->DrawOverlay(list, width, height, 1, 0); }
+            void DrawOverlay(ImDrawList* list, const float width, const float height) override
+            {
+                if (!mark_.empty() && !view_->Big())
+                {
+                    DrawCurve(list, height);
+                }
+                view_->DrawOverlay(list, width, height, 1, 0);
+            }
 
         private:
+            static constexpr int kCurveBinTics = 35 * 15;   // a point of the curve: 15 s of the game
+            static constexpr std::size_t kCurvePoints = 48;
+
+            // N4: the curve of learning: the share of the time pushing against a wall in every 15 s of the game, and how long every life lasted
+            void Curve(doom::DoomGame& game)
+            {
+                const FlyStatus status = player_->Status();
+                const doom::PlayerState player = game.Player(game.Info().consolePlayer);
+                if (player.inGame && player.health > 0)
+                {
+                    ++lifeTics_;
+                }
+                else if (lifeTics_ > 0)
+                {
+                    lives_.push_back(lifeTics_ / 35.0f);
+                    lifeTics_ = 0;
+                }
+                if (status.levelTics >= curveLevelTics_ + kCurveBinTics)
+                {
+                    atWall_.push_back(100.0f * static_cast<float>(status.wallTics - curveWallTics_) / static_cast<float>(status.levelTics - curveLevelTics_));
+                    curveWallTics_ = status.wallTics;
+                    curveLevelTics_ = status.levelTics;
+                }
+                if (atWall_.size() > kCurvePoints)
+                {
+                    atWall_.erase(atWall_.begin());
+                }
+                if (lives_.size() > kCurvePoints)
+                {
+                    lives_.erase(lives_.begin());
+                }
+            }
+
+            // Over the top left of the picture: the speed, what the fly is (learning / trained), and the two curves
+            void DrawCurve(ImDrawList* list, const float height) const
+            {
+                ImFont* font = ImGui::GetFont();
+                const float size = std::clamp(std::floor(height / 52.0f), 12.0f, 20.0f);
+                const float w = size * 22.0f;
+                const float graph = size * 3.6f;
+                const float x0 = size * 0.8f;
+                const float y0 = size * 0.8f;
+                const float h = size * 4.2f + 2.0f * (graph + size * 1.6f);
+                const ImU32 text = IM_COL32(230, 230, 230, 255);
+                const ImU32 dim = IM_COL32(150, 150, 160, 255);
+                const ImU32 amber = IM_COL32(240, 180, 60, 255);
+                list->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + w, y0 + h), IM_COL32(8, 8, 12, 200), size * 0.3f);
+                float cursor = y0 + size * 0.5f;
+                char line[160];
+                std::snprintf(line, sizeof(line), "x%.1f", player_->Status().gameSpeed);
+                list->AddText(font, size * 2.0f, ImVec2(x0 + size * 0.6f, cursor), amber, line);
+                list->AddText(font, size * 0.8f, ImVec2(x0 + size * 5.0f, cursor + size * 0.6f), dim,
+                              fastest_ ? "speed MAX: as fast as the brain thinks" : "speed x1: real time (when the brain keeps up)");
+                cursor += size * 2.2f;
+                const FlyStatus status = player_->Status();
+                std::snprintf(line, sizeof(line), "%s   %.1f min of the game", mark_.c_str(), status.levelTics / 35.0 / 60.0);
+                list->AddText(font, size, ImVec2(x0 + size * 0.6f, cursor), text, line);
+                cursor += size * 1.5f;
+                auto plot = [&](const char* title, const std::vector<float>& values, const ImU32 color)
+                {
+                    const float left = x0 + size * 0.6f;
+                    const float right = x0 + w - size * 0.6f;
+                    float top = 1.0f;
+                    for (const float v : values)
+                    {
+                        top = std::max(top, v);
+                    }
+                    std::snprintf(line, sizeof(line), "%s (max %.0f)", title, top);
+                    list->AddText(font, size * 0.85f, ImVec2(left, cursor), dim, line);
+                    cursor += size * 1.1f;
+                    list->AddRectFilled(ImVec2(left, cursor), ImVec2(right, cursor + graph), IM_COL32(30, 30, 40, 220));
+                    const float step = (right - left) / static_cast<float>(kCurvePoints);
+                    for (std::size_t i = 0; i < values.size(); ++i)
+                    {
+                        const float bar = graph * std::clamp(values[i] / top, 0.0f, 1.0f);
+                        list->AddRectFilled(ImVec2(left + step * i + 1.0f, cursor + graph - bar), ImVec2(left + step * (i + 1), cursor + graph), color);
+                    }
+                    cursor += graph + size * 0.5f;
+                };
+                plot("% of the time at a wall, every 15 s", atWall_, IM_COL32(230, 90, 60, 255));
+                plot("life, s, every life", lives_, IM_COL32(90, 200, 110, 255));
+            }
+
             std::unique_ptr<FlyPlayer> player_;
             std::unique_ptr<FlyBrainView> view_;
             std::string title_;
             std::function<void(const std::string&)> log_;
             std::uint64_t nextLogTic_ = 0;
             doom::DoomGame* attached_ = nullptr;
+            bool fastest_ = false;
+            std::string mark_;
+            std::vector<float> atWall_;
+            std::vector<float> lives_;
+            std::uint64_t curveWallTics_ = 0;
+            std::uint64_t curveLevelTics_ = 0;
+            int lifeTics_ = 0;
         };
 
         // The connectome is read once for all the modes of a run; "" when it is there, otherwise the text of the error
@@ -622,19 +782,27 @@ namespace doomfly
             config.renderDevice = options.renderDevice ? options.renderDevice() : nullptr;
             if (learns)
             {
-                // N3b: the fly learns, and keeps what it has learned between the runs (--fly-forget: once per run, it starts again from the connectome)
+                // N3b: the KC -> MBON synapses learn; N4: Fly learns always starts from scratch (no memory file) and our layer WallSense learns next to them
                 config.learning.enabled = true;
-                config.learning.memoryPath = flybrain::FlyBrain::DefaultMemoryPath();
-                if (options.forget && !shared->forgotten)
+                config.wallSense.enabled = true;
+                config.wallSense.learning = true;
+            }
+            else if (!options.untrained && choice.trainedFly)
+            {
+                // N4: the other modes play with the trained fly: our layer learned offline (tests/doomfly/FlyLearnMeasure.cpp --wall-out), it only plays here
+                std::error_code ec;
+                const fs::path trained = FindFile(options, {}, "fly_trained.bin");
+                if (fs::is_regular_file(trained, ec))
                 {
-                    std::error_code ec;
-                    fs::remove(fs::u8path(config.learning.memoryPath), ec);
-                    if (options.log)
-                    {
-                        options.log("fly: the memory " + config.learning.memoryPath + " is forgotten");
-                    }
+                    // it goes on learning in the session (a new map in tens of seconds), the file is not written
+                    config.wallSense.enabled = true;
+                    config.wallSense.learning = true;
+                    config.wallSenseLoad = {trained.u8string()};
                 }
-                shared->forgotten = true;
+                else if (options.log)
+                {
+                    options.log("fly: no trained fly (" + trained.string() + "), the fly plays untrained");
+                }
             }
             const fs::path controls = FindFile(options, {}, controlsFile);
             if (!FlyControls::Load(controls, config.controls, error))
@@ -662,7 +830,10 @@ namespace doomfly
                 return nullptr;
             }
             const char* title = learns ? "Fly learns" : bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)";
-            return std::make_unique<FlyController>(std::move(player), title, shared->options.log, choice.render, choice.thumbnails);
+            // N4: the curve of learning over the picture: Fly learns (from scratch, MAX speed with --fly-fast), and the trained fly
+            const bool trained = player->WallSenseOn() && !learns;
+            const std::string mark = learns ? "LEARNS from scratch (our layer + KC -> MBON)" : trained ? "TRAINED (our layer, fly_trained.bin)" : "";
+            return std::make_unique<FlyController>(std::move(player), title, shared->options.log, choice.render, choice.thumbnails, learns && (shared->options.fastest || choice.fastest), mark);
         }
 
         // ---------------------------------------------------------------------------------------------------------------------------------------

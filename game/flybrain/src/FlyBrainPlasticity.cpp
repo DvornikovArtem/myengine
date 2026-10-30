@@ -169,6 +169,7 @@ namespace flybrain
         p->lastKc.assign(p->kcs.size() * r, 0);
         p->lastDan.assign(p->dans.size() * r, 0);
         p->lastStep = step_;
+        learnedAtStep_ = step_;
         p->info.edges = static_cast<uint32_t>(p->pre.size());
         for (size_t k = 0; k < p->pre.size(); ++k)
         {

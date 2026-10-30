@@ -1121,6 +1121,8 @@ namespace myengine::game
                 request.choice.map = level.map;
                 request.choice.skill = settings.skill;
                 request.choice.flies = settings.flies;
+                request.choice.fastest = settings.learnSpeed == 0;
+                request.choice.trainedFly = settings.flyBrain != "scratch";
                 request.iwad = wad.path;
                 request.doomArgs = WarpArguments(wad.path, level, settings.skill);
                 settings.lastMode = chosen->id;

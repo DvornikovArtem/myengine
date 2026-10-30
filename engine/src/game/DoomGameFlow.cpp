@@ -570,15 +570,16 @@ namespace myengine::game
                 }
             }
             {
-                // The rows of the setup that the fly modes of the application play (N4) are drawn when the application says so; for the captures of the menu
-                // MYENGINE_DOOM_MENU_LEARN=1 says it for Speed and Fly brain (the values are kept in the settings, the game does not use them yet)
+                // The rows of the setup of the fly modes (N4): Speed (Fly learns) and Fly brain (the trained fly of the other modes) when the fly can play;
+                // Fly learns always starts untrained, so no "Start from". MYENGINE_DOOM_MENU_LEARN=1 shows them anyway (the captures of the menu)
                 char* learn = nullptr;
                 std::size_t learnLength = 0;
-                if (_dupenv_s(&learn, &learnLength, "MYENGINE_DOOM_MENU_LEARN") == 0 && learn != nullptr && learn[0] == '1')
-                {
-                    menuModel.learnOptions = {true, false, true};   // Speed and Fly brain; Fly learns always starts untrained (N4), so no "Start from"
-                }
+                const bool forced = _dupenv_s(&learn, &learnLength, "MYENGINE_DOOM_MENU_LEARN") == 0 && learn != nullptr && learn[0] == '1';
                 std::free(learn);
+                if (forced || menuModel.flyAvailable)
+                {
+                    menuModel.learnOptions = {true, false, true};
+                }
             }
             menuBuilt = true;
         }

@@ -135,6 +135,9 @@ namespace myengine::game
         int skill = 3;
         int flies = 16;                         // the swarm: 8..32
         std::uint64_t seed = 1;
+        // N4 (the rows Speed and Fly brain of the menu, DoomSettings::learnSpeed / flyBrain)
+        bool fastest = false;                   // Fly learns as fast as the brain can (MAX), not in real time
+        bool trainedFly = true;                 // Fly plays, Human vs Fly, Fly vs Fly with the trained fly (false: from scratch)
         // The services of the window for a controller that draws a 3D brain (V1): set by DoomGameFlow, null in the tests
         myengine::render::IRenderAdapter* render = nullptr;
         myengine::editor::ThumbnailService* thumbnails = nullptr;
