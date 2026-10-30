@@ -727,8 +727,6 @@ target_link_libraries(myengine_flybrain_circuit PRIVATE myengine_flybrain myengi
 myengine_apply_compiler_options(myengine_flybrain_circuit)
 set_property(TARGET myengine_flybrain_circuit PROPERTY FOLDER "Tests")
 
-
-
 # N1: exploring the connectome for the eyes and the controls of the fly player (manual, not in ctest)
 add_executable(myengine_doomfly_probe
   doomfly/FlyProbe.cpp)
@@ -765,3 +763,15 @@ myengine_apply_compiler_options(myengine_doom_fly_tests)
 set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
 set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
+# N3: the fly learns: KC -> MBON synapses weaken by the dopamine of their compartment (conditioning on a synthetic
+# mushroom body, the memory file, CPU = GPU, and the PPL101 compartments of MaleCNS when the connectome is there)
+add_executable(myengine_flybrain_plasticity_tests
+  flybrain/FlyBrainPlasticityTests.cpp)
+
+target_link_libraries(myengine_flybrain_plasticity_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_plasticity_tests)
+myengine_copy_runtime_assets(myengine_flybrain_plasticity_tests)
+set_property(TARGET myengine_flybrain_plasticity_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_plasticity COMMAND myengine_flybrain_plasticity_tests)
+set_tests_properties(flybrain_plasticity PROPERTIES TIMEOUT 300)

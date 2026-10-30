@@ -3,6 +3,7 @@
 #include <flybrain/FlyBrain.h>
 
 #include "FlyBrainGpu.h"
+#include "FlyBrainPlasticity.h"
 
 #include <myengine/jobs/JobSystem.h>
 
@@ -101,6 +102,15 @@ namespace flybrain
     {
         assert(connectome_ != nullptr);
         neuronCount_ = connectome_->NeuronCount() * replicas_;
+        silentOutput_.assign(connectome_->NeuronCount(), 0);
+        if (!params_.fastModulatorySynapses)
+        {
+            for (uint32_t i = 0; i < connectome_->NeuronCount(); ++i)
+            {
+                const Transmitter t = connectome_->NeuronTransmitter(i);
+                silentOutput_[i] = t == Transmitter::Dopamine || t == Transmitter::Octopamine || t == Transmitter::Serotonin ? 1 : 0;
+            }
+        }
         useAvx2_ = CpuHasAvx2();
 
         const double dt = params_.dtMs;
@@ -270,7 +280,7 @@ namespace flybrain
         constants.decayG = decayG_;
         constants.stepCoupling = couplingK_ * (decayG_ - decayU_);
         constants.couplingK = couplingK_;
-        constants.weight = params_.weightMv;
+        constants.weight = params_.weightMv / kFixedScale;
         constants.kick = params_.poissonKickMv;
         constants.threshold = thresholdU_;
         constants.reset = resetU_;
@@ -284,6 +294,14 @@ namespace flybrain
         if (gpu == nullptr)
         {
             return Backend::Cpu;
+        }
+        if (plasticity_ != nullptr)
+        {
+            gpu->SetPlasticity(plasticity_->rowOffset, plasticity_->edgePlastic, plasticity_->weight);
+        }
+        if (!params_.fastModulatorySynapses)
+        {
+            gpu->SetSilentOutputs(silentOutput_);
         }
         if (options.selfTest && !GpuSelfTest(gpu->Device(), error))
         {
@@ -421,6 +439,10 @@ namespace flybrain
         }
         // A window list overflow would lose input: it is sized 4 spikes per neuron, never reached in practice
         assert(completed.lostSpikes == 0);
+        if (completed.callEnd)
+        {
+            LearnFromGpu(completedStep_);
+        }
     }
 
     void FlyBrain::PullGpuState() const
@@ -705,6 +727,11 @@ namespace flybrain
 
     void FlyBrain::Advance(uint64_t steps)
     {
+        if (gpu_ != nullptr && plasticity_ != nullptr)
+        {
+            // The weights learned from the last call go into this one, as on the CPU: wait for its spikes
+            gpu_->Poll(true);
+        }
         while (steps > 0)
         {
             ExpireStimuli();
@@ -730,8 +757,12 @@ namespace flybrain
         if (gpu_ != nullptr)
         {
             // Sent, not waited for: the counts of earlier submissions come in as the GPU finishes them
-            gpu_->Submit();
+            gpu_->Submit(true);
             gpu_->Poll(false);
+        }
+        else
+        {
+            LearnFromCpu();
         }
     }
 
@@ -862,7 +893,7 @@ namespace flybrain
         const double a = decayU_;
         const double b = decayG_;
         const double c = couplingK_ * (decayG_ - decayU_);
-        const double weight = params_.weightMv;
+        const double weight = params_.weightMv / kFixedScale; // the input is summed in 1/256 of a contact
         const double threshold = thresholdU_;
         const uint32_t d = delaySteps_;
         const size_t n = neuronCount_;
@@ -912,7 +943,7 @@ namespace flybrain
         const __m256d a = _mm256_set1_pd(decayU_);
         const __m256d b = _mm256_set1_pd(decayG_);
         const __m256d c = _mm256_set1_pd(couplingK_ * (decayG_ - decayU_));
-        const __m256d weight = _mm256_set1_pd(params_.weightMv);
+        const __m256d weight = _mm256_set1_pd(params_.weightMv / kFixedScale);
         const __m256d threshold = _mm256_set1_pd(thresholdU_);
         const uint32_t d = delaySteps_;
         const size_t n = neuronCount_;
@@ -995,6 +1026,7 @@ namespace flybrain
         const int16_t* weights = c.Weights();
         const uint32_t d = delaySteps_;
         const uint32_t replicas = replicas_;
+        const Plasticity* plastic = plasticity_.get();
         uint64_t count = 0;
         for (const SpikeEvent* spike = begin; spike != end; ++spike)
         {
@@ -1003,19 +1035,30 @@ namespace flybrain
             int32_t* slot = &arrivals_[(spike->step % d) * size_t(neuronCount_)];
             const uint32_t neuron = spike->neuron / replicas;
             const uint32_t replica = spike->neuron - neuron * replicas;
+            if (silentOutput_[neuron] != 0)
+            {
+                continue; // a modulatory neuron without fast synapses
+            }
             const uint32_t e0 = rowStart[neuron];
             const uint32_t e1 = rowStart[neuron + 1];
+            // A KC with plastic synapses: their weights are the learned ones of this replica
+            const int32_t* rowPlastic = plastic != nullptr && plastic->rowOffset[neuron] != UINT32_MAX ? &plastic->edgePlastic[plastic->rowOffset[neuron]] : nullptr;
             for (uint32_t e = e0; e < e1; ++e)
             {
                 const uint32_t post = targets[e] * replicas + replica;
+                int32_t weight = int32_t(weights[e]) * kFixedScale;
+                if (rowPlastic != nullptr && rowPlastic[e - e0] >= 0)
+                {
+                    weight = plastic->weight[size_t(rowPlastic[e - e0]) * replicas + replica];
+                }
                 if constexpr (Atomic)
                 {
                     // Integer atomic add (long is 32 bits on Windows); the integration phase reads the ring after jobs::Wait
-                    _InterlockedExchangeAdd(reinterpret_cast<volatile long*>(&slot[post]), weights[e]);
+                    _InterlockedExchangeAdd(reinterpret_cast<volatile long*>(&slot[post]), weight);
                 }
                 else
                 {
-                    slot[post] += weights[e];
+                    slot[post] += weight;
                 }
                 pending_[post].store(1, std::memory_order_relaxed);
             }
