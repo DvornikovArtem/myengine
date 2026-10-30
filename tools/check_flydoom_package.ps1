@@ -133,7 +133,8 @@ function Test-PackageFiles([string]$folder) {
     $versionText = Read-Text (Join-Path $folder 'version.txt')
     foreach ($line in @(Get-ChildItem -Path $folder -Recurse -File | Where-Object { $_.FullName -match '\\wads\\' -or $_.FullName -match '\\assets\\(doom|flybrain)\\' })) {
         $relative = (Get-RelativePath $folder $line.FullName).Replace('\', '/')
-        if ($relative -notlike '*.license.txt' -and $versionText.IndexOf("file $relative") -lt 0) { Fail "version.txt does not list the data file $relative" }
+        # the controls of the fly (controls_*.json) travel as assets of the manifest, not as data files: version.txt does not list them
+        if ($relative -notlike '*.license.txt' -and $relative -notlike 'assets/flybrain/controls_*.json' -and $versionText.IndexOf("file $relative") -lt 0) { Fail "version.txt does not list the data file $relative" }
     }
     $total = (Get-ChildItem -Path $folder -Recurse -File | Measure-Object Length -Sum).Sum
     Write-Step ("the package: {0:N1} MB" -f ($total / 1MB))
