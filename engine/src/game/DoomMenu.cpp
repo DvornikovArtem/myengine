@@ -301,7 +301,7 @@ namespace myengine::game
         }
         if (!model.wadProblem.empty())
         {
-            const Rect plate{80.0f, 800.0f, 700.0f, 56.0f};
+            const Rect plate{80.0f, 800.0f, 760.0f, 56.0f};
             paint::Parallelogram(f, plate, Color::Hex(0x3a2e0c, 0.86f));
             paint::ParallelogramOutline(f, plate, style::kBoostA.Faded(0.7f), 1.5f);
             paint::IconGlyph(f, Icon::Info, 24.0f, {plate.x + 36.0f, plate.y + plate.h * 0.5f}, style::kBoostA);
@@ -527,7 +527,7 @@ namespace myengine::game
         const Rect plate{64.0f, 236.0f, 1250.0f, 650.0f};
         paint::Parallelogram(f, plate, style::kNavy);
         paint::ParallelogramOutline(f, plate, style::kLine, 1.0f);
-        const Rect view{96.0f, 258.0f, 1150.0f, 608.0f};
+        const Rect view{96.0f, 258.0f, 1100.0f, 568.0f};
         // the lines that are longer than the view go on to the next row
         struct Row
         {
@@ -567,8 +567,10 @@ namespace myengine::game
         {
             height += row.kind == 0 ? 52.0f : (row.kind == 1 ? 30.0f : 18.0f);
         }
+        float scrolled = 0.0f;
         {
             ScrollView scroll(f, HashId("fd/about"), view, height);
+            scrolled = scroll.Offset();
             float y = view.y - scroll.Offset();
             for (const Row& row : rows)
             {
@@ -587,6 +589,14 @@ namespace myengine::game
                     y += 18.0f;
                 }
             }
+        }
+        // more below: the text fades into the plate and a mark says so (the wheel scrolls)
+        if (height > view.h && scrolled < height - view.h - 2.0f)
+        {
+            const Color navy = Color::Hex(0x09142e);
+            paint::FillRectGradientV(f, {view.x - 24.0f, view.y + view.h - 56.0f, view.w + 8.0f, 56.0f}, navy.Faded(0.0f), navy.Faded(0.97f));
+            paint::IconGlyph(f, Icon::ArrowsVertical, 20.0f, {view.x + view.w * 0.5f - 70.0f, view.y + view.h + 24.0f}, style::kAccent);
+            paint::Text(f, FontStyle::ExtraBoldItalic, 18.0f, {view.x + view.w * 0.5f - 46.0f, view.y + view.h + 12.0f}, style::kAccent, "MORE  (mouse wheel)");
         }
         f.SetDefaultFocus(HashId("fd/aboutback"));
         if (ActionButton(f, HashId("fd/aboutback"), {1180.0f, 900.0f, 560.0f, 72.0f}, "BACK", Icon::Home))

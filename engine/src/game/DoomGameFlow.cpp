@@ -281,6 +281,11 @@ namespace myengine::game
         float fade = 0.0f;                               // 0 .. 1: the black over the menu while it leaves; the black over the game while it comes (1 .. 0)
         float fadeIn = 0.0f;                             // 1 -> 0 after the game was made
         bool menuBuilt = false;
+        // The scripted input of the tests (MYENGINE_UI_SCRIPT): Tab and Esc of the script reach the game too (the real keys are read with GetAsyncKeyState, a script cannot press them)
+        std::function<void(rlui::RawInput&)> scriptHook;
+        bool scriptedRaw = false;
+        bool rawTab = false;
+        bool rawEsc = false;
         bool labPause = false;                           // the pause of Esc is open: the game stands, the player chooses (docs/game/doom.md)
         bool escWas = false;                             // Esc was down in the last frame (the edge opens the pause)
         bool escSwallow = false;                         // Esc was down when the pause opened or closed: DOOM does not get it until it is up
@@ -1021,7 +1026,7 @@ namespace myengine::game
                 {
                     svc.takeMouseDelta();
                 }
-                const bool escDown = active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+                const bool escDown = scriptedRaw ? rawEsc : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
                 if (!escDown)
                 {
                     escSwallow = false;
@@ -1033,7 +1038,7 @@ namespace myengine::game
                 const doom::GameInfo before = game->Info();
                 const bool doomMenu = before.menuActive || before.state != doom::GameState::Level;
                 // Esc opens the pause (not when the menu of DOOM is open: there it closes the menu, as in DOOM)
-                const bool escDown = active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+                const bool escDown = scriptedRaw ? rawEsc : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
                 bool openPause = escDown && !escWas && !before.menuActive;
                 escWas = escDown;
                 if (!escDown)
@@ -1072,7 +1077,7 @@ namespace myengine::game
                 if (controller != nullptr)
                 {
                     // Tab is free when a controller plays (the map of DOOM is the human's): it shows the big brain
-                    const bool tab = active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
+                    const bool tab = scriptedRaw ? rawTab : (active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0);
                     if (tab && !tabHeld)
                     {
                         controller->ToggleBigBrain();
@@ -1168,7 +1173,8 @@ namespace myengine::game
                 const float viewHeightUnits = svc.squarePixels ? static_cast<float>(doom::kScreenHeight) : static_cast<float>(doom::kScreenHeight * 6 / 5);   // 240: the 4:3 of the monitors of 1993, in whole numbers
                 // a controller has a panel at the right of the picture (the brain of the fly); the human has the whole window
                 const float heightFitPicture = std::floor(static_cast<float>(doom::kScreenWidth) * static_cast<float>(height) / viewHeightUnits);
-                const float panelWidth = controller != nullptr ? std::max(240.0f, static_cast<float>(width) - heightFitPicture) : 0.0f;
+                const bool bigBrain = controller != nullptr && controller->BigBrainOpen();   // the whole window is the brain's: DOOM is centred under it, no strip of the panel
+                const float panelWidth = (controller != nullptr && !bigBrain) ? std::max(240.0f, static_cast<float>(width) - heightFitPicture) : 0.0f;
                 const float pictureWidth = static_cast<float>(width) - panelWidth;
                 const float fit = std::min(pictureWidth / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
                 const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(controller != nullptr ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
@@ -1283,7 +1289,18 @@ namespace myengine::game
 
     void DoomGameFlow::SetRawInputHook(std::function<void(rlui::RawInput&)> hook)
     {
-        impl_->host.SetRawInputHook(std::move(hook));
+        Impl* impl = impl_.get();
+        impl->scriptHook = std::move(hook);
+        impl->scriptedRaw = static_cast<bool>(impl->scriptHook);
+        impl->host.SetRawInputHook([impl](rlui::RawInput& input)
+                                   {
+                                       if (impl->scriptHook)
+                                       {
+                                           impl->scriptHook(input);
+                                           impl->rawTab = input.keys[VK_TAB];
+                                           impl->rawEsc = input.keys[VK_ESCAPE];
+                                       }
+                                   });
     }
 
     void DoomGameFlow::Install()
