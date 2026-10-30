@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
 
@@ -24,6 +26,7 @@
 #include <doom/DoomGame.h>
 
 #include "DoomMenu.h"
+#include "DoomMenuSounds.h"
 
 #include <myengine/audio/AudioSystem.h>
 #include <myengine/game/RlGameSettings.h>
@@ -283,6 +286,7 @@ namespace myengine::game
         DoomMenuModel menuModel;
         std::unique_ptr<IDoomBrainView> brain;
         double menuTime = 0.0;
+        float brightness = 1.0f;                         // how bright the brain behind the menu is (the screens under the main one dim it)
         float nestedMix = 0.0f;                          // the brain behind the menu steps back on the screens under the main one (0 .. 1)
         float fade = 0.0f;                               // 0 .. 1: the black over the menu while it leaves; the black over the game while it comes (1 .. 0)
         float fadeIn = 0.0f;                             // 1 -> 0 after the game was made
@@ -298,6 +302,7 @@ namespace myengine::game
         bool tabHeld = false;                            // the key of the big brain, for the edge
         float mouseRemainder = 0.0f;                     // the part of a unit of the scaled mouse movement that was not sent yet
         std::unique_ptr<DoomAudioHost> audioHost;
+        std::unique_ptr<DoomMenuSounds> menuSounds;      // the sounds of the menu and of the pause: lumps of the game data
         std::unique_ptr<doom::DoomGame> game;
         core::WindowId mainWindow = 0;
 
@@ -435,6 +440,10 @@ namespace myengine::game
                 Log("DOOM: " + message);
                 return;
             }
+            if (menuSounds)
+            {
+                menuSounds->Load(found.path);   // the pause sounds as the menu does, also when the game started without the menu
+            }
             Log("DOOM: the game data is " + found.path.string() + " (from " + doom::IwadSourceName(found.source) + (found.isFreedoom ? ", Freedoom" : "") + ")");
             for (const std::filesystem::path& other : found.alternatives)
             {
@@ -560,7 +569,56 @@ namespace myengine::game
                     menuModel.wads.push_back(std::move(entry));
                 }
             }
+            {
+                // The rows of the setup that the fly modes of the application play (N4) are drawn when the application says so; for the captures of the menu
+                // MYENGINE_DOOM_MENU_LEARN=1 says it for Speed and Fly brain (the values are kept in the settings, the game does not use them yet)
+                char* learn = nullptr;
+                std::size_t learnLength = 0;
+                if (_dupenv_s(&learn, &learnLength, "MYENGINE_DOOM_MENU_LEARN") == 0 && learn != nullptr && learn[0] == '1')
+                {
+                    menuModel.learnOptions = {true, false, true};   // Speed and Fly brain; Fly learns always starts untrained (N4), so no "Start from"
+                }
+                std::free(learn);
+            }
             menuBuilt = true;
+        }
+
+        // The line at the top of the pause: "FLY PLAYS · E1M2 · HURT ME PLENTY"
+        std::string PauseLine() const
+        {
+            static const char* const skills[] = {"I'm too young to die", "Hey, not too rough", "Hurt me plenty", "Ultra-Violence", "Nightmare!"};
+            std::string line = chosenMode >= 0 && chosenMode < static_cast<int>(svc.modes.size()) ? svc.modes[static_cast<std::size_t>(chosenMode)].title : std::string("DOOM");
+            for (char& c : line)
+            {
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+            std::vector<int> numbers;
+            for (std::size_t i = 0; i < warpArguments.size(); ++i)
+            {
+                if (warpArguments[i] == "-warp")
+                {
+                    for (std::size_t j = i + 1; j < warpArguments.size() && std::isdigit(static_cast<unsigned char>(warpArguments[j][0])); ++j)
+                    {
+                        numbers.push_back(std::atoi(warpArguments[j].c_str()));
+                    }
+                }
+            }
+            if (numbers.size() == 2)
+            {
+                line += " \xC2\xB7 E" + std::to_string(numbers[0]) + "M" + std::to_string(numbers[1]);
+            }
+            else if (numbers.size() == 1)
+            {
+                char map[16];
+                std::snprintf(map, sizeof(map), "MAP%02d", numbers[0]);
+                line += std::string(" \xC2\xB7 ") + map;
+            }
+            std::string skill = skills[std::clamp(launchChoice.skill, 1, 5) - 1];
+            for (char& c : skill)
+            {
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+            return line + " \xC2\xB7 " + skill;
         }
 
         // The volume, the music and the scale of the UI of the settings; the window mode only when it changed
@@ -621,18 +679,25 @@ namespace myengine::game
             if (brain)
             {
                 nestedMix += ((menu.Nested() ? 1.0f : 0.0f) - nestedMix) * std::min(1.0f, deltaTime * 7.0f);
+                brightness += (menu.BackdropBrightness() - brightness) * std::min(1.0f, deltaTime * 7.0f);
                 brain->SetNested(nestedMix);
+                brain->SetBrightness(brightness);
                 brain->Draw(list, 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), static_cast<double>(deltaTime), 1.0f - leaving);
                 menuModel.brainStatus = brain->Status();
                 menuModel.brainProblem = brain->Problem();
+                const DoomBrainStats stats = brain->Stats();
+                menuModel.neuronCount = stats.neurons;
+                menuModel.spikesPerSecond = stats.spikesPerSecond;
+                menuModel.anchors = brain->Anchors();
             }
             else
             {
-                f.SetSpace(rlui::Space::Screen);
-                rlui::paint::MenuBackdrop(f);
-                f.SetSpace(rlui::Space::Menu);
+                fd::PaintGround(f);
                 menuModel.brainStatus.clear();
                 menuModel.brainProblem.clear();
+                menuModel.neuronCount = 0;
+                menuModel.spikesPerSecond = 0.0f;
+                menuModel.anchors.clear();
             }
 
             if (state == State::Menu)
@@ -722,7 +787,7 @@ namespace myengine::game
             float cursor = y + 10.0f;
             paint::Text(f, FontStyle::BlackItalic, 30.0f, {x + pad, cursor}, style::kText, data.title);
             paint::Text(f, FontStyle::Bold, 18.0f, {x + w - pad, cursor + 10.0f}, style::kAccent, data.chip, Align::Right);
-            paint::Text(f, FontStyle::SemiBold, 18.0f, {x + pad, cursor + 42.0f}, style::kTextDim, data.subtitle);
+            fd::DrawFitted(f, FontStyle::SemiBold, 18.0f, {x + pad, cursor + 42.0f}, style::kTextDim, data.subtitle, w - 2.0f * pad);
             if (!data.brainChip.empty())
             {
                 paint::Text(f, FontStyle::Bold, 15.0f, {x + pad + 8.0f, cloudTop + 6.0f}, style::kAccent.Faded(0.9f), data.brainChip, Align::Left, 0.06f);
@@ -741,6 +806,10 @@ namespace myengine::game
             const float pitch = std::clamp(room / static_cast<float>(std::max<std::size_t>(rows, 1)), 25.0f, 36.0f);
             for (const DoomPanelGroup& group : data.groups)
             {
+                if (group.bars.empty() || cursor + 26.0f + pitch > y + h - footHeight)
+                {
+                    break;   // a title with no row under it (the foot is there) is not drawn
+                }
                 paint::Text(f, FontStyle::ExtraBoldItalic, 16.0f, {x + pad, cursor}, style::kTextFaint, group.title, Align::Left, 0.1f);
                 cursor += 26.0f;
                 for (const DoomPanelBar& bar : group.bars)
@@ -750,7 +819,8 @@ namespace myengine::game
                         break;
                     }
                     const Color color = Color::Hex(bar.rgb);
-                    paint::Text(f, FontStyle::SemiBold, 20.0f, {x + pad, cursor - 2.0f}, style::kText, bar.label);
+                    const float textWidth = paint::TextWidth(f, FontStyle::Bold, 20.0f, bar.text);
+                    fd::DrawFitted(f, FontStyle::SemiBold, 20.0f, {x + pad, cursor - 2.0f}, style::kText, bar.label, w - 2.0f * pad - textWidth - 12.0f);
                     paint::Text(f, FontStyle::Bold, 20.0f, {x + w - pad, cursor - 2.0f}, style::kText, bar.text, Align::Right);
                     const float barY = cursor + 24.0f;
                     const float barHeight = 5.0f;
@@ -776,7 +846,7 @@ namespace myengine::game
             float footY = y + h - footHeight + 2.0f;
             for (const std::string& line : data.debug)
             {
-                paint::Text(f, FontStyle::SemiBold, 15.0f, {x + pad, footY}, style::kTextFaint, line);
+                fd::DrawFitted(f, FontStyle::SemiBold, 15.0f, {x + pad, footY}, style::kTextFaint, line, w - 2.0f * pad);
                 footY += 19.0f;
             }
             f.SetSpace(Space::Menu);
@@ -822,7 +892,7 @@ namespace myengine::game
             const float left = plate.x + pad + paint::Bevel(plate.h) * 0.4f;
             paint::Text(f, FontStyle::BlackItalic, 34.0f, {left, cursor}, style::kText, "FLY BRAIN");
             cursor += 50.0f;
-            paint::Text(f, FontStyle::SemiBold, 17.0f, {left, cursor}, style::kTextDim, data.brainLine);
+            fd::DrawFitted(f, FontStyle::SemiBold, 17.0f, {left, cursor}, style::kTextDim, data.brainLine, plate.w - 2.0f * pad - paint::Bevel(plate.h) * 0.9f);
             cursor += 46.0f;
             const float inner = plate.w - 2.0f * pad - paint::Bevel(plate.h) * 0.8f;
             for (std::size_t row = 0; row < bars.size(); ++row)
@@ -837,7 +907,8 @@ namespace myengine::game
                 paint::FillRect(f, {left, cursor + 6.0f, 14.0f, 14.0f}, color);
                 paint::Text(f, FontStyle::SemiBold, 20.0f, {left + 24.0f, cursor}, style::kText, bar->label);
                 const float barX = left + inner * 0.50f;
-                const float barW = inner * 0.30f;
+                const float valueWidth = paint::TextWidth(f, FontStyle::Bold, 20.0f, bar->text);   // the face of the menu is wider than the one the bars were made for: the bar stops before the value
+                const float barW = std::max(24.0f, std::min(inner * 0.30f, left + inner - valueWidth - 14.0f - barX));
                 paint::FillRect(f, {barX, cursor + 11.0f, barW, 5.0f}, Color::Hex(0x1c3466));
                 const float fraction = std::clamp(std::fabs(bar->value) / std::max(bar->limit, 1e-6f), 0.0f, 1.0f);
                 paint::FillRect(f, {barX, cursor + 11.0f, barW * fraction, 5.0f}, color);
@@ -1377,7 +1448,24 @@ namespace myengine::game
                 }
                 if (labPause)
                 {
-                    const DoomMenu::PauseResult choice = menu.DrawPause(frame, static_cast<bool>(svc.backToMenu), !escSwallow);
+                    DoomMenu::PauseInfo pauseInfo;
+                    pauseInfo.reduceMotion = settings.menuMotion != 0;
+                    pauseInfo.line = PauseLine();
+                    if (panelWidth > 0.0f)
+                    {
+                        pauseInfo.rightEdge = (pictureWidth - frame.metrics().menu.x) / frame.metrics().scale - 28.0f;
+                        pauseInfo.frameRight = pictureWidth / frame.metrics().scale;   // the frame of the pause is the game area, the panel keeps its own
+                    }
+                    if (controller && controller->HasPanel())
+                    {
+                        DoomPanelData panel;
+                        if (controller->DescribePanel(panel))
+                        {
+                            pauseInfo.backend = panel.brainChip.rfind("BRAIN ", 0) == 0 ? panel.brainChip.substr(6) : panel.brainChip;
+                            pauseInfo.speed = panel.chip;
+                        }
+                    }
+                    const DoomMenu::PauseResult choice = menu.DrawPause(frame, static_cast<bool>(svc.backToMenu), !escSwallow, pauseInfo);
                     if (choice == DoomMenu::PauseResult::Resume)
                     {
                         labPause = false;
@@ -1477,7 +1565,13 @@ namespace myengine::game
         }
         rlui::HostConfig config;
         config.uiScale = static_cast<float>(impl->settings.uiScalePercent) / 100.0f;
+        rlui::SetFontSet(fd::FontSet());   // the letters of FlyDoom (Big Shoulders Display and JetBrains Mono), before the atlas is baked
         impl->host.Install(*impl_->svc.ui, config);
+        if (impl->svc.audio != nullptr)
+        {
+            impl->menuSounds = std::make_unique<DoomMenuSounds>(*impl->svc.audio, impl->svc.log);
+            impl->menu.SetSounds(impl->menuSounds.get());
+        }
         impl->host.SetScreen([impl](rlui::Frame& frame)
                              {
                                  const rlui::Vec2 window = frame.metrics().window;

@@ -17,7 +17,18 @@ namespace myengine::game
     {
         sfxVolume = std::clamp(sfxVolume, 0.0f, 1.0f);
         musicVolume = std::clamp(musicVolume, 0.0f, 1.0f);
-        mouseSensitivity = std::clamp(mouseSensitivity, 0.25f, 3.0f);
+        mouseSensitivity = std::clamp(mouseSensitivity, 0.25f, 4.0f);
+        menuMotion = std::clamp(menuMotion, 0, 1);
+        flies = std::clamp(flies, 8, 32);
+        learnSpeed = learnSpeed == 1 ? 1 : 0;   // 1 real time, anything else MAX (the old file had x2 .. x8: that is MAX now)
+        if (learnStart != "scratch" && learnStart != "trained")
+        {
+            learnStart = "scratch";
+        }
+        if (flyBrain != "trained" && flyBrain != "scratch")
+        {
+            flyBrain = "trained";
+        }
         windowMode = std::clamp(windowMode, 0, 2);
         uiScalePercent = std::clamp(uiScalePercent, 75, 125);
         episode = std::clamp(episode, 0, 9);
@@ -71,6 +82,7 @@ namespace myengine::game
         read("windowMode", windowMode);
         read("uiScalePercent", uiScalePercent);
         read("brainBackdrop", brainBackdrop);
+        read("menuMotion", menuMotion);
         read("lastMode", lastMode);
         read("controlSet", controlSet);
         read("backend", backend);
@@ -78,6 +90,10 @@ namespace myengine::game
         read("episode", episode);
         read("map", map);
         read("skill", skill);
+        read("flies", flies);
+        read("learnSpeed", learnSpeed);
+        read("learnStart", learnStart);
+        read("flyBrain", flyBrain);
         Clamp();
         return true;
     }
@@ -97,6 +113,7 @@ namespace myengine::game
         root["windowMode"] = windowMode;
         root["uiScalePercent"] = uiScalePercent;
         root["brainBackdrop"] = brainBackdrop;
+        root["menuMotion"] = menuMotion;
         root["lastMode"] = lastMode;
         root["controlSet"] = controlSet;
         root["backend"] = backend;
@@ -104,6 +121,10 @@ namespace myengine::game
         root["episode"] = episode;
         root["map"] = map;
         root["skill"] = skill;
+        root["flies"] = flies;
+        root["learnSpeed"] = learnSpeed;
+        root["learnStart"] = learnStart;
+        root["flyBrain"] = flyBrain;
         const std::filesystem::path temporary = file.wstring() + L".tmp";
         {
             std::ofstream stream(temporary, std::ios::trunc);

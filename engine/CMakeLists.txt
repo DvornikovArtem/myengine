@@ -204,6 +204,10 @@ set(ENGINE_SOURCES
   src/game/DoomGameFlow.cpp
   src/game/DoomMenu.cpp
   src/game/DoomMenu.h
+  src/game/DoomMenuSounds.cpp
+  src/game/DoomMenuSounds.h
+  src/game/DoomMenuWidgets.cpp
+  src/game/DoomMenuWidgets.h
   src/game/DoomSettings.cpp
   src/game/RlCars.cpp
   src/game/RlFeedback.cpp
