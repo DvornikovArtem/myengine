@@ -107,6 +107,14 @@ namespace myengine::faceid
         float lastScore = 0.0f;          // the similarity of the last frame (shown in the debug line only)
     };
 
+    // What came of one photo that was chosen for the recording (the file name and the words for the screen)
+    struct PhotoReport
+    {
+        std::string file;
+        bool accepted = false;
+        std::string message;
+    };
+
     class FaceIdService
     {
     public:
@@ -176,8 +184,20 @@ namespace myengine::faceid
 
         // ---- the state
         FaceIdView View(bool wantFrame, std::uint64_t knownSerial);
-        // The embeddings of an enrolment that has finished (the profile is not yet in the store: the screen asks the name and the password, then Store().Add)
+        // The embeddings of an enrolment that has finished (the profile is not yet in the store: the screen asks the name and the password, then Store().Add). The faces of the
+        // photos that were added before the camera started come first
         bool TakeEnrolled(std::vector<FaceEmbedding>& embeddings);
+
+        // ---- faces from photos (docs/editor/faceid.md, "Faces from photos"). The camera is off: the pictures are read here and then forgotten, only the embeddings stay in the list
+        // until the recording ends (TakeEnrolled, TakePhotoFaces) or is left (ClearPhotos). The thread of the UI.
+        std::vector<PhotoReport> AddPhotos(const std::vector<std::filesystem::path>& files);
+        std::size_t PhotoCount() const { return photos_.size(); }
+        void ClearPhotos() { photos_.clear(); }
+        // How many faces the camera adds to `photos` photos: 0 when the list is full (or `photos` is large enough that none is wanted)
+        static int CameraFacesAfter(std::size_t photos);
+        // The recording from the photos alone: the embeddings of the list, topped up with the mirrored faces when there are fewer than FaceProfileStore::kMinEmbeddings; false and
+        // `error` when the list is empty. The list is cleared.
+        bool TakePhotoFaces(std::vector<FaceEmbedding>& embeddings, std::string* error = nullptr);
 
         // The login by the password (the camera did not work, or nobody wants it)
         bool LoginByPassword(const std::string& password);
@@ -220,6 +240,13 @@ namespace myengine::faceid
         // the state of the worker (guarded by mutex_ where the screen reads it)
         FaceIdView view_;
         std::vector<FaceEmbedding> enrolled_;
+        struct PhotoFace
+        {
+            std::string file;
+            FaceEmbedding embedding{};
+            FaceEmbedding mirrored{};
+        };
+        std::vector<PhotoFace> photos_;              // the thread of the UI only
         RecognitionDecider decider_;
         AttemptLimiter limiter_;
         LivenessChallenge challenge_;

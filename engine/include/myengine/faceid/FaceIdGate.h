@@ -51,6 +51,8 @@ namespace myengine::faceid
 
         void StartEnrolFlow(bool shared = false);
         void LeaveEnrol();
+        std::string DetailsError(bool firstProfile) const;   // "" when the name and the password are fine
+        void SaveFaces(std::vector<FaceEmbedding> embeddings);
         void DrawLogin(const FaceIdUiContext& context);
         void DrawFirstRun(const FaceIdUiContext& context);
         void DrawConsent(const FaceIdUiContext& context);
@@ -88,6 +90,7 @@ namespace myengine::faceid
         bool consentChecked_ = false;
         bool enrolShared_ = false;            // the face goes into the draft of the shared database (the publisher), not into the local profiles
         std::string detailsError_;
+        std::vector<PhotoReport> photoReports_;   // the last photos that were chosen and what came of each
         std::string savedText_;
         bool savedOk_ = false;
 

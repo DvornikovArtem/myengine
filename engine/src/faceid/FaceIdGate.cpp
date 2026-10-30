@@ -1,5 +1,7 @@
 #include <myengine/faceid/FaceIdGate.h>
 
+#include <myengine/faceid/FacePhotos.h>
+
 #include <imgui/imgui.h>
 
 #include <filesystem>
@@ -100,6 +102,8 @@ namespace myengine::faceid
         enrolShared_ = shared;
         consentChecked_ = false;
         detailsError_.clear();
+        service_.ClearPhotos();
+        photoReports_.clear();
         WipeBuffer(nameBuffer_, sizeof(nameBuffer_));
         WipeBuffer(newPasswordBuffer_, sizeof(newPasswordBuffer_));
         WipeBuffer(repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
@@ -109,6 +113,8 @@ namespace myengine::faceid
     void FaceIdGate::LeaveEnrol()
     {
         service_.Stop();
+        service_.ClearPhotos();
+        photoReports_.clear();
         WipeBuffer(newPasswordBuffer_, sizeof(newPasswordBuffer_));
         WipeBuffer(repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
         if (fromSettings_ || service_.ActiveProfiles().empty())
@@ -268,10 +274,33 @@ namespace myengine::faceid
         EndPanel();
     }
 
+    std::string FaceIdGate::DetailsError(const bool firstProfile) const
+    {
+        const std::string name = Trimmed(nameBuffer_);
+        if (name.empty() || name.size() > FaceProfileStore::kMaxNameBytes)
+        {
+            return "Type a name (up to 32 characters).";
+        }
+        if (enrolShared_ ? std::any_of(service_.Draft().faces.begin(), service_.Draft().faces.end(), [&](const SharedFace& f) { return f.name == name; })
+                         : std::any_of(service_.Store().Profiles().begin(), service_.Store().Profiles().end(), [&](const FaceProfile& p) { return p.name == name; }))
+        {
+            return "There is a face with this name already.";
+        }
+        if (firstProfile && std::strlen(newPasswordBuffer_) < 6)
+        {
+            return "The password needs 6 characters or more.";
+        }
+        if (firstProfile && std::strcmp(newPasswordBuffer_, repeatPasswordBuffer_) != 0)
+        {
+            return "The two passwords are not the same.";
+        }
+        return {};
+    }
+
     void FaceIdGate::DrawDetails(const FaceIdUiContext& context)
     {
         const bool firstProfile = !enrolShared_ && !service_.Store().HasPassword();
-        BeginPanel(context, "Add a face: who is this", 520.0f);
+        BeginPanel(context, "Add a face: who is this", 600.0f);
         ImGui::Spacing();
         ImGui::Text("Name (shown at the login):");
         ImGui::InputText("##name", nameBuffer_, sizeof(nameBuffer_));
@@ -284,38 +313,68 @@ namespace myengine::faceid
             ImGui::Text("Once more:");
             InputPassword("##repeat", repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
         }
+
+        // the faces: from photos, from the camera, or both
+        const std::size_t photos = service_.PhotoCount();
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped("The face can be taken from the camera (eight pictures), from photos of this one person (3 to 10 jpg or png files: straight or turned a little, good light, "
+                           "no filters), or from both. A photo is not kept: only the numbers made of it are.");
+        ImGui::BeginDisabled(photos >= FaceProfileStore::kMaxEmbeddings);
+        if (ImGui::Button("Add from photos ...", ImVec2(180.0f, 34.0f)))
+        {
+            const std::vector<std::filesystem::path> files = ChoosePhotoFiles();
+            if (!files.empty())
+            {
+                for (PhotoReport& report : service_.AddPhotos(files))
+                {
+                    photoReports_.push_back(std::move(report));
+                }
+                constexpr std::size_t kShown = 12;
+                if (photoReports_.size() > kShown)
+                {
+                    photoReports_.erase(photoReports_.begin(), photoReports_.end() - static_cast<std::ptrdiff_t>(kShown));
+                }
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextColored(photos >= 3 ? kGood : kTextDim, "%zu of %zu photos accepted", photos, static_cast<std::size_t>(FaceProfileStore::kMaxEmbeddings));
+        for (const PhotoReport& report : photoReports_)
+        {
+            ImGui::TextColored(report.accepted ? kGood : kBad, "%s: %s", report.file.c_str(), report.message.c_str());
+        }
+
         if (!detailsError_.empty())
         {
             ImGui::TextColored(kBad, "%s", detailsError_.c_str());
         }
         ImGui::Spacing();
-        if (ImGui::Button("Start the camera", ImVec2(180.0f, 34.0f)))
+        const int cameraFaces = FaceIdService::CameraFacesAfter(photos);
+        ImGui::BeginDisabled(photos < 3);
+        if (ImGui::Button("Save from photos", ImVec2(180.0f, 34.0f)))
         {
-            const std::string name = Trimmed(nameBuffer_);
-            if (name.empty() || name.size() > FaceProfileStore::kMaxNameBytes)
+            detailsError_ = DetailsError(firstProfile);
+            std::vector<FaceEmbedding> embeddings;
+            if (detailsError_.empty() && service_.TakePhotoFaces(embeddings, &detailsError_))
             {
-                detailsError_ = "Type a name (up to 32 characters).";
+                SaveFaces(std::move(embeddings));
             }
-            else if (enrolShared_ ? std::any_of(service_.Draft().faces.begin(), service_.Draft().faces.end(), [&](const SharedFace& f) { return f.name == name; })
-                                  : std::any_of(service_.Store().Profiles().begin(), service_.Store().Profiles().end(), [&](const FaceProfile& p) { return p.name == name; }))
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(cameraFaces <= 0);
+        if (ImGui::Button(photos == 0 ? "Start the camera" : "Add the rest by camera", ImVec2(220.0f, 34.0f)))
+        {
+            detailsError_ = DetailsError(firstProfile);
+            if (detailsError_.empty())
             {
-                detailsError_ = "There is a face with this name already.";
-            }
-            else if (firstProfile && std::strlen(newPasswordBuffer_) < 6)
-            {
-                detailsError_ = "The password needs 6 characters or more.";
-            }
-            else if (firstProfile && std::strcmp(newPasswordBuffer_, repeatPasswordBuffer_) != 0)
-            {
-                detailsError_ = "The two passwords are not the same.";
-            }
-            else
-            {
-                detailsError_.clear();
                 service_.BeginEnroll();
                 screen_ = Screen::Capturing;
             }
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120.0f, 34.0f)))
         {
@@ -324,31 +383,38 @@ namespace myengine::faceid
         EndPanel();
     }
 
+    void FaceIdGate::SaveFaces(std::vector<FaceEmbedding> embeddings)
+    {
+        std::string error;
+        if (enrolShared_)
+        {
+            savedOk_ = service_.DraftAddFace(Trimmed(nameBuffer_), std::move(embeddings), &error);
+            savedText_ = savedOk_ ? "Added to the draft of the shared database. It is in the file only after \"Sign and save the database\" (Window > Face ID > Publisher)."
+                                  : "Not added: " + error;
+        }
+        else
+        {
+            FaceProfile profile;
+            profile.name = Trimmed(nameBuffer_);
+            profile.embeddings = std::move(embeddings);
+            savedOk_ = service_.Store().Add(std::move(profile), &error, newPasswordBuffer_);
+            savedText_ = savedOk_ ? "Saved. From now on the editor knows you by your face." : "Not saved: " + error;
+        }
+        service_.Stop();
+        service_.ClearPhotos();
+        photoReports_.clear();
+        WipeBuffer(newPasswordBuffer_, sizeof(newPasswordBuffer_));
+        WipeBuffer(repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
+        screen_ = Screen::Saved;
+    }
+
     void FaceIdGate::DrawCapturing(const FaceIdUiContext& context)
     {
         const FaceIdView view = service_.View(true, textureSerial_);
         std::vector<FaceEmbedding> embeddings;
         if (view.enrolReady && service_.TakeEnrolled(embeddings))
         {
-            std::string error;
-            if (enrolShared_)
-            {
-                savedOk_ = service_.DraftAddFace(Trimmed(nameBuffer_), std::move(embeddings), &error);
-                savedText_ = savedOk_ ? "Added to the draft of the shared database. It is in the file only after \"Sign and save the database\" (Window > Face ID > Publisher)."
-                                      : "Not added: " + error;
-            }
-            else
-            {
-                FaceProfile profile;
-                profile.name = Trimmed(nameBuffer_);
-                profile.embeddings = std::move(embeddings);
-                savedOk_ = service_.Store().Add(std::move(profile), &error, newPasswordBuffer_);
-                savedText_ = savedOk_ ? "Saved. From now on the editor knows you by your face." : "Not saved: " + error;
-            }
-            service_.Stop();
-            WipeBuffer(newPasswordBuffer_, sizeof(newPasswordBuffer_));
-            WipeBuffer(repeatPasswordBuffer_, sizeof(repeatPasswordBuffer_));
-            screen_ = Screen::Saved;
+            SaveFaces(std::move(embeddings));
             return;
         }
         BeginPanel(context, "Add a face: look at the camera", 640.0f);
@@ -362,7 +428,14 @@ namespace myengine::faceid
             ImGui::Text("%s", view.text.c_str());
         }
         ImGui::ProgressBar(static_cast<float>(view.captured) / static_cast<float>(std::max(view.target, 1)), ImVec2(640.0f, 18.0f));
-        ImGui::TextColored(kTextDim, "%d of %d faces. Straight twice, then slowly to one side and to the other.", view.captured, view.target);
+        if (view.target == 8)
+        {
+            ImGui::TextColored(kTextDim, "%d of %d faces. Straight twice, then slowly to one side and to the other.", view.captured, view.target);
+        }
+        else
+        {
+            ImGui::TextColored(kTextDim, "%d of %d faces to add to the photos. Slowly to one side and to the other, then straight.", view.captured, view.target);
+        }
         if (ImGui::Button("Cancel", ImVec2(120.0f, 34.0f)))
         {
             LeaveEnrol();

@@ -15,7 +15,7 @@
 [CmdletBinding()]
 param(
     [switch]$Force,
-    [switch]$WithTestImage   # two public domain photos of strangers for the detector test (assets\faceid\test\, also ignored by git)
+    [switch]$WithTestImage   # public domain portraits of two astronauts for the tests (assets\faceid\test\, also ignored by git)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,6 +102,29 @@ if ($WithTestImage) {
         $target = Join-Path $testDir $portrait.Name
         if ($Force -or -not (Test-Path -LiteralPath $target)) {
             Invoke-WebRequest -UseBasicParsing -Uri $portrait.Url -OutFile $target
+        }
+    }
+    # more portraits of the same two men, years apart and in other light: the tests of the faces from photos (assets\faceid\test\photos)
+    $photoDir = Join-Path $testDir 'photos'
+    New-Item -ItemType Directory -Force $photoDir | Out-Null
+    $photos = @(
+        @{ Name = 'armstrong1.jpg'; Title = 'Neil_Armstrong_1964_portrait.jpg' },
+        @{ Name = 'armstrong2.jpg'; Title = 'Neil_Armstrong_1958_portrait.jpg' },
+        @{ Name = 'armstrong3.jpg'; Title = 'Neil_Armstrong.jpg' },
+        @{ Name = 'armstrong4.jpg'; Title = 'Astronaut_Neil_A._Armstrong_(1964).jpg' },
+        @{ Name = 'armstrong5.jpg'; Title = 'Neil_Armstrong_2.jpg' },
+        @{ Name = 'armstrong6.jpg'; Title = 'Portrait_of_Neil_Armstrong.jpg' },
+        @{ Name = 'aldrin1.jpg'; Title = 'Buzz_Aldrin_(S69-31743).jpg' },
+        @{ Name = 'aldrin2.jpg'; Title = 'PORTRAIT_-_ALDRIN,_EDWIN_E_,_JR_,_ASTRONAUT_(s63-20056).jpg' },
+        @{ Name = 'aldrin3.jpg'; Title = 'Portrait_of_Buzz_Aldrin_during_suit-up_for_launch.jpg' },
+        @{ Name = 'aldrin4.jpg'; Title = 'EdwinAldrin_big.jpg' },
+        @{ Name = 'aldrin5.jpg'; Title = 'Buzz_Aldrin_(Apollo_11).jpg' }
+    )
+    foreach ($photo in $photos) {
+        $target = Join-Path $photoDir $photo.Name
+        if ($Force -or -not (Test-Path -LiteralPath $target)) {
+            $url = 'https://commons.wikimedia.org/wiki/Special:FilePath/' + [System.Uri]::EscapeDataString($photo.Title) + '?width=640'
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $target -UserAgent 'myengine-faceid-test/1.0 (educational project)'
         }
     }
     Write-Host "[ok]   assets\faceid\test"
