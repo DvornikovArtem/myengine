@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-    Builds the shipping game (RocketArena.exe) and packs it into dist/RocketArena and a zip for players.
+    Builds a shipping game (by default RocketArena.exe) and packs it into dist/<name> and a zip for players. The game is chosen by -Game: the manifest
+    games/<id>/game.json says what it is (the target, the exe, the assets, the licenses, the options).
 
 .DESCRIPTION
     1. Configures build-shipping/ (MYENGINE_SHIPPING=ON, no tests, Release) and builds the myengine target. With the Steamworks SDK found
        (see -SteamSdk) the exe is built with Steam; without it, with a warning, the package has no Steam.
-    2. Collects the assets by tools/package_manifest.json (roots plus everything the scenes, materials and data name).
+    2. Collects the assets by the manifest games/<id>/game.json (roots plus everything the scenes, materials and data name).
        Wwise (the sound engine, docs/engine/wwise.md) is on by default: -DMYENGINE_WWISE=ON, the banks of assets/audio/wwise are in the package,
        the WAV files of assets/audio are not (Wwise does not open them), and licenses/ has the notice of Wwise and the licenses of its codecs
        (Ogg, Opus, OpusFile; the license files are copied from the installed SDK of Wwise, see -WwiseSdk). The SDK is not in the repository: when it
@@ -17,13 +18,19 @@
        root CMakeLists.txt, the same as in the exe resources and in the menu.
     Nothing but the exe is taken from the build folder: no PDB, no tests, no editor-only files.
     docs/game/packaging.md describes the package and tools/check_package.ps1 checks it on a clean folder.
+    The progress is also written for a program (the Build window of the editor, docs/editor/build-panel.md): the lines "##progress <0-100> <stage>"
+    and, at the end, "##result ok <the folder of the package>" (and "##zip <the zip>") or "##result fail <what went wrong>"; the exit code is 0 or 1.
 
+.PARAMETER Game
+    The id of the game: the folder games/<id> with game.json (the default is rocketarena). An unknown id stops with the list of the known ones.
 .PARAMETER Config
-    Shipping (the default) or Release: both build the Release configuration of CMake.
+    Shipping (the default) or Release: both build the Release configuration of CMake. RelWithDebInfo: the same shipping build in the configuration with the
+    symbols (the PDB goes to <Out>\symbols, as always; the zip has the suffix -rwdi); the Build window of the editor offers it.
 .PARAMETER Out
-    The output folder (relative to the repository root): <Out>/RocketArena and the zip.
+    The output folder (relative to the repository root, or a full path, also on another drive): <Out>/RocketArena and the zip.
 .PARAMETER BuildDir
-    The build folder of the shipping build (relative to the repository root).
+    The build folder of the shipping build (relative to the repository root, or a full path, also on another drive). With it given the suffixes -nosteam and
+    -nowwise are not added: the folder is the one that is named.
 .PARAMETER SkipBuild
     Pack the exe that is already in the build folder.
 .PARAMETER NoZip
@@ -47,7 +54,8 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Shipping', 'Release')][string]$Config = 'Shipping',
+    [string]$Game = 'rocketarena',
+    [ValidateSet('Shipping', 'Release', 'RelWithDebInfo')][string]$Config = 'Shipping',
     [string]$Out = 'dist',
     [string]$BuildDir = 'build-shipping',
     [switch]$SkipBuild,
@@ -64,11 +72,42 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$outDir = [System.IO.Path]::GetFullPath((Join-Path $root $Out))
-$buildPath = [System.IO.Path]::GetFullPath((Join-Path $root $BuildDir))
-$manifestPath = Join-Path $PSScriptRoot 'package_manifest.json'
+# a folder of the output or of the build: relative to the repository, or a full path (another drive: a build of a gigabyte does not have to lie on the one of the sources)
+function Get-FullFolder([string]$path) {
+    if ([System.IO.Path]::IsPathRooted($path)) { return [System.IO.Path]::GetFullPath($path) }
+    return [System.IO.Path]::GetFullPath((Join-Path $root $path))
+}
+$outDir = Get-FullFolder $Out
+$buildPath = Get-FullFolder $BuildDir
+# a failure is also a line for the program that reads the output (the Build window); the exit code is 1
+trap { Write-Host "##result fail $($_.Exception.Message)"; exit 1 }
+function Write-Progress-Line([int]$percent, [string]$stage) { Write-Host "##progress $percent $stage" }
+Write-Progress-Line 1 'manifest'
+
+$manifestPath = Join-Path $root "games\$Game\game.json"
+if (-not (Test-Path $manifestPath)) {
+    $known = @(Get-ChildItem -Path (Join-Path $root 'games') -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'game.json') } | ForEach-Object { $_.Name })
+    throw "Unknown game '$Game': games\$Game\game.json is not there. Known games: $($known -join ', ')"
+}
 $manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
+if ($manifest.id -ne $Game) { throw "games\$Game\game.json says id '$($manifest.id)', the folder says '$Game'" }
 $gameName = $manifest.name
+# the parts of the manifest that a game may not have (Set-StrictMode does not allow reading what is not there)
+function Get-Part($object, [string]$name) {
+    if ($null -ne $object -and $object.PSObject.Properties[$name]) { return $object.PSObject.Properties[$name].Value }
+    return $null
+}
+function Get-Option([string]$name) {
+    $value = Get-Part (Get-Part $manifest 'options') $name
+    if ($value) { return $value }
+    return 'optional'
+}
+$cmakeTarget = Get-Part (Get-Part $manifest 'build') 'cmakeTarget'
+if (-not $cmakeTarget) { $cmakeTarget = 'myengine' }
+$exeRelative = Get-Part (Get-Part $manifest 'build') 'exePath'
+if (-not $exeRelative) { $exeRelative = "app/Release/$($manifest.exe)" }
+$readmeTemplate = Get-Part (Get-Part $manifest 'build') 'readme'
+if (-not $readmeTemplate) { $readmeTemplate = 'tools/package_readme.txt' }
 # one place of the version: project(myengine VERSION x.y.z) in the root CMakeLists.txt (the exe resources, the menu and the crash report read it from there too)
 $versionMatch = [regex]::Match([System.IO.File]::ReadAllText((Join-Path $root 'CMakeLists.txt')), 'project\(\s*myengine\s+VERSION\s+(\d+\.\d+\.\d+)')
 if (-not $versionMatch.Success) { throw 'project(myengine VERSION x.y.z) not found in CMakeLists.txt' }
@@ -132,6 +171,11 @@ function Find-SteamSdk {
 
 $useSteam = $false
 $steamDll = $null
+if ((Get-Option 'steam') -eq 'no') {
+    if ($WithSteam) { throw "-WithSteam: $($manifest.displayName) has no Steam in its manifest (options.steam is 'no')" }
+    $NoSteam = $true
+}
+Write-Progress-Line 3 'steam'
 if (-not $NoSteam) {
     $found = Find-SteamSdk
     if ($found) {
@@ -144,7 +188,8 @@ if (-not $NoSteam) {
     else { Write-Warning 'The Steamworks SDK was not found: the package is built WITHOUT Steam (LAN and IP only). -SteamSdk <folder> or STEAMWORKS_SDK_DIR fixes that; docs/game/steam-setup.md.' }
 }
 $steamTag = if ($useSteam) { 'steam' } else { 'nosteam' }
-$useWwise = -not $NoWwise
+$useWwise = -not $NoWwise -and (Get-Option 'wwise') -ne 'no'
+Write-Progress-Line 5 'wwise'
 # ---------------------------------------------------------------- Wwise: the SDK is looked for before the long build (the license files of the codecs come from it)
 $wwiseHelp = 'Install Wwise (the exact version is in cmake\Wwise.cmake) in the Audiokinetic Launcher: README.md, section "Wwise SDK", docs/engine/wwise.md; or build the package without Wwise with -NoWwise (XAudio2).'
 function Test-WwiseSdk([string]$folder) {
@@ -156,7 +201,7 @@ function Find-WwiseSdk {
     if ($WwiseSdk) { $candidates.Add($WwiseSdk) }
     # the cache of the folder that a Wwise package is built in (without the suffix -nowwise)
     $wwiseBuildDir = if ($PSBoundParameters.ContainsKey('BuildDir') -or $useSteam) { $BuildDir } else { $BuildDir + '-nosteam' }
-    $cacheFile = Join-Path ([System.IO.Path]::GetFullPath((Join-Path $root $wwiseBuildDir))) 'CMakeCache.txt'
+    $cacheFile = Join-Path (Get-FullFolder $wwiseBuildDir) 'CMakeCache.txt'
     if (-not $WwiseSdk -and (Test-Path $cacheFile)) {
         $line = Select-String -Path $cacheFile -Pattern '^WWISE_SDK_DIR:[A-Z]+=(.+)$' | Select-Object -First 1
         if ($line) { $candidates.Add($line.Matches[0].Groups[1].Value.Trim().Replace('/', '\')) }
@@ -189,12 +234,14 @@ if ($useWwise) {
 if (-not $PSBoundParameters.ContainsKey('BuildDir')) {
     if (-not $useSteam) { $BuildDir += '-nosteam' }
     if (-not $useWwise) { $BuildDir += '-nowwise' }
-    $buildPath = [System.IO.Path]::GetFullPath((Join-Path $root $BuildDir))
+    $buildPath = Get-FullFolder $BuildDir
 }
 Write-Step "Sound: $(if ($useWwise) { 'Wwise (the banks of assets/audio/wwise)' } else { 'XAudio2 (the WAV files of assets/audio)' })"
 
 # ---------------------------------------------------------------- build
-$exe = Join-Path $buildPath 'app\Release\RocketArena.exe'
+Write-Progress-Line 8 'configure'
+$buildConfig = if ($Config -eq 'RelWithDebInfo') { 'RelWithDebInfo' } else { 'Release' }
+$exe = Join-Path $buildPath ($exeRelative.Replace('/Release/', "/$buildConfig/").Replace('/', '\'))
 $vs = $null
 if (-not $SkipBuild) {
     $vs = Find-VisualStudio
@@ -228,9 +275,11 @@ if (-not $SkipBuild) {
     elseif (-not $useWwise -and (Select-String -Path $cache -Pattern '^MYENGINE_WWISE:BOOL=ON' -Quiet)) {
         throw "$BuildDir was configured with MYENGINE_WWISE=ON, and -NoWwise asks for XAudio2: use another folder (-BuildDir) or delete it"
     }
-    Write-Step 'Building the myengine target (Release)'
-    Invoke-Native 'cmake' @('--build', $buildPath, '--config', 'Release', '--target', 'myengine')
+    Write-Step "Building the $cmakeTarget target ($buildConfig)"
+    Write-Progress-Line 12 'build'
+    Invoke-Native 'cmake' @('--build', $buildPath, '--config', $buildConfig, '--target', $cmakeTarget)
 }
+Write-Progress-Line 70 'built'
 if (-not (Test-Path $exe)) { throw "$exe not found" }
 if ($useSteam -and -not (Select-String -Path (Join-Path $buildPath 'CMakeCache.txt') -Pattern '^MYENGINE_STEAM:BOOL=ON' -Quiet)) {
     throw "$BuildDir was built without MYENGINE_STEAM=ON: the exe has no Steam code, steam_api64.dll next to it would do nothing"
@@ -268,7 +317,8 @@ function ConvertTo-ExcludeRegex([string]$glob) {
 }
 
 # the sound: with Wwise the banks and no WAV files, without it the WAV files and no banks (the "wwise" part of the manifest)
-$excludeGlobs = @($manifest.exclude) + @(if ($useWwise) { $manifest.wwise.excludeWith } else { $manifest.wwise.excludeWithout })
+$wwisePart = Get-Part $manifest 'wwise'
+$excludeGlobs = @($manifest.exclude) + @(if ($null -eq $wwisePart) { } elseif ($useWwise) { $wwisePart.excludeWith } else { $wwisePart.excludeWithout })
 $excludes = @($excludeGlobs | ForEach-Object { [regex]::new((ConvertTo-ExcludeRegex $_), 'IgnoreCase') })
 function Test-Excluded([string]$relative) {
     foreach ($pattern in $excludes) { if ($pattern.IsMatch($relative)) { return $true } }
@@ -284,6 +334,7 @@ function Add-AssetFile([string]$relative) {
 }
 
 Write-Step 'Collecting the assets'
+Write-Progress-Line 72 'assets'
 foreach ($asset in $manifest.assets) {
     $full = Join-Path $root $asset
     if (Test-Path $full -PathType Container) {
@@ -328,6 +379,7 @@ if ($useWwise) {
 Write-Step "$($files.Count) asset files"
 
 # ---------------------------------------------------------------- the folder
+Write-Progress-Line 80 'assemble'
 Write-Step "Assembling $dist"
 $outRoot = $outDir.TrimEnd('\') + '\'
 if (-not $dist.StartsWith($outRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to clean $dist" }
@@ -371,7 +423,8 @@ Write-TextFile (Join-Path $dist 'config\app.json') $appConfig $false
 $project = $manifest.project | ConvertTo-Json -Depth 4
 Write-TextFile (Join-Path $dist 'myengine.myproject') $project $false
 
-$readme = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'package_readme.txt')).Replace('{VERSION}', $version)
+Write-Progress-Line 88 'licenses'
+$readme = [System.IO.File]::ReadAllText((Join-Path $root $readmeTemplate)).Replace('{VERSION}', $version)
 $readme = $readme.Replace('{STEAM}', $(if ($useSteam) { 'yes' } else { 'no' }))
 $readme = $readme -replace "`r?`n", "`r`n"
 Write-TextFile (Join-Path $dist 'README.txt') $readme $true
@@ -416,6 +469,7 @@ if ($useSteam) {
 }
 
 # ---------------------------------------------------------------- size and zip
+Write-Progress-Line 94 'size'
 function Get-FolderSize([string]$path) {
     $sum = (Get-ChildItem -Path $path -Recurse -File | Measure-Object -Property Length -Sum).Sum
     if ($null -eq $sum) { return 0 }
@@ -428,12 +482,15 @@ Get-ChildItem -Path $dist | ForEach-Object {
     Write-Host ('    {0,-28} {1,8:N1} MB' -f $_.Name, ($size / 1MB))
 }
 
+$zipPath = ''
 if (-not $NoZip) {
-    $zip = Join-Path $outDir "$gameName-$version-win64-$steamTag$(if ($useWwise) { '' } else { '-nowwise' }).zip"
+    Write-Progress-Line 96 'zip'
+    $zip = Join-Path $outDir "$gameName-$version-win64-$steamTag$(if ($useWwise) { '' } else { '-nowwise' })$(if ($buildConfig -eq 'RelWithDebInfo') { '-rwdi' } else { '' }).zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($dist, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
     Write-Step ('{0}: {1:N1} MB' -f $zip, ((Get-Item $zip).Length / 1MB))
+    $zipPath = $zip
     if ($CopyZipTo) {
         $copyDir = [System.IO.Path]::GetFullPath($CopyZipTo)
         New-Item -ItemType Directory -Force -Path $copyDir | Out-Null
@@ -442,3 +499,7 @@ if (-not $NoZip) {
     }
 }
 Write-Step 'Done'
+Write-Progress-Line 100 'done'
+if ($zipPath) { Write-Host "##zip $zipPath" }
+Write-Host "##result ok $dist"
+

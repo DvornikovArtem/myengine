@@ -7,17 +7,21 @@ set(FLYBRAIN_SOURCES
   src/Connectome.cpp
   src/FbrainFormat.h
   src/FlyBrain.cpp
+  src/FlyBrainGpu.cpp
+  src/FlyBrainGpu.h
 )
 
 # The fly brain of FlyDoom (docs/flybrain/flybrain.md): the connectome from a .fbrain file and its LIF simulation on the
-# job system. Knows nothing about DOOM, rendering or the ECS.
+# job system, or on the GPU with DX12 compute shaders (assets/shaders/flybrain.hlsl). Knows nothing about DOOM or the ECS.
 add_library(myengine_flybrain STATIC ${FLYBRAIN_HEADERS} ${FLYBRAIN_SOURCES})
 
 target_include_directories(myengine_flybrain
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    # the shader compiler of the renderer (ShaderCompiler.h) is an internal header of the engine
+    ${CMAKE_SOURCE_DIR}/engine/src/render/dx12)
 
 target_link_libraries(myengine_flybrain
   PRIVATE

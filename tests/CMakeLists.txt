@@ -226,6 +226,16 @@ set_property(TARGET myengine_dpi_scale_tests PROPERTY FOLDER "Tests")
 add_test(NAME dpi_scale COMMAND myengine_dpi_scale_tests)
 set_tests_properties(dpi_scale PROPERTIES TIMEOUT 60)
 
+# B0: the model of the Build window of the editor (the manifests of the games, the lines of the script, the state of a run, the runner on a child process)
+add_executable(myengine_build_panel_model_tests
+  core/BuildPanelModelTests.cpp)
+
+target_link_libraries(myengine_build_panel_model_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_build_panel_model_tests)
+set_property(TARGET myengine_build_panel_model_tests PROPERTY FOLDER "Tests")
+add_test(NAME build_panel_model COMMAND myengine_build_panel_model_tests)
+set_tests_properties(build_panel_model PROPERTIES TIMEOUT 120)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
@@ -381,6 +391,17 @@ add_executable(myengine_render_target_smoke
 target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
+
+# D0: the classic DOOM of the engine (game/doom) with Freedoom, no window and no sound. Skipped (77) without the WAD:
+# tools/doom/fetch_freedoom.ps1 puts it into assets/doom
+add_executable(myengine_doom_core_tests
+  doom/DoomCoreTests.cpp)
+target_link_libraries(myengine_doom_core_tests PRIVATE myengine_doom)
+target_compile_definitions(myengine_doom_core_tests PRIVATE DOOM_TEST_WAD_DIR="${CMAKE_SOURCE_DIR}/assets/doom")
+myengine_apply_compiler_options(myengine_doom_core_tests)
+set_property(TARGET myengine_doom_core_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_core COMMAND myengine_doom_core_tests)
+set_tests_properties(doom_core PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 # G3: the Rocket League physics (Jolt) without a window
 add_executable(myengine_rl_physics_tests
@@ -627,6 +648,18 @@ if(MYENGINE_WWISE)
   set_tests_properties(audio_wwise_stress PROPERTIES TIMEOUT 60)
 endif()
 
+# F0: Face ID without a camera: the decisions, the alignment, the profile file and (when ONNX Runtime and the models are there) YuNet + SFace on two public domain
+# portraits. Exit code 77: no ONNX Runtime, models or portraits (tools/faceid/fetch_models.ps1 -WithTestImage), the test is skipped.
+add_executable(myengine_faceid_tests
+  faceid/FaceIdTests.cpp)
+
+target_link_libraries(myengine_faceid_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_faceid_tests)
+myengine_copy_runtime_assets(myengine_faceid_tests)
+set_property(TARGET myengine_faceid_tests PROPERTY FOLDER "Tests")
+add_test(NAME faceid COMMAND myengine_faceid_tests)
+set_tests_properties(faceid PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
 # N0 (FlyDoom): the fly brain model on graphs built in code: LIF rate vs analytic, refractoriness, the 1.8 ms delay, Poisson
 # input, spikes of Brian2 (Shiu's equations) one for one, the event-driven simulation vs a step-by-step reference, bit-identical spikes on the job system (docs/flybrain/flybrain.md)
 add_executable(myengine_flybrain_tests
@@ -681,3 +714,53 @@ target_link_libraries(myengine_brainview_demo PRIVATE myengine_brainview myengin
 myengine_apply_compiler_options(myengine_brainview_demo)
 myengine_copy_runtime_assets(myengine_brainview_demo)
 set_property(TARGET myengine_brainview_demo PROPERTY FOLDER "Tests")
+# N0b: the GPU backend of the fly brain (DX12 compute, assets/shaders/flybrain.hlsl) against the CPU: the same spikes on a
+# synthetic graph and on the connectome when it is downloaded. Skipped (exit code 77) without a DX12 adapter with doubles
+add_executable(myengine_flybrain_gpu_tests
+  flybrain/FlyBrainGpuTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_gpu_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_gpu_tests)
+myengine_copy_runtime_assets(myengine_flybrain_gpu_tests)
+set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
+set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+
+# N1: exploring the connectome for the eyes and the controls of the fly player (manual, not in ctest)
+add_executable(myengine_doomfly_probe
+  doomfly/FlyProbe.cpp)
+
+target_link_libraries(myengine_doomfly_probe PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe)
+set_property(TARGET myengine_doomfly_probe PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe2
+  doomfly/FlyProbe2.cpp)
+target_link_libraries(myengine_doomfly_probe2 PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe2)
+set_property(TARGET myengine_doomfly_probe2 PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe3
+  doomfly/FlyProbe3.cpp)
+target_link_libraries(myengine_doomfly_probe3 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe3)
+set_property(TARGET myengine_doomfly_probe3 PROPERTY FOLDER "Tests")
+
+add_executable(myengine_doomfly_probe4
+  doomfly/FlyProbe4.cpp)
+target_link_libraries(myengine_doomfly_probe4 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_probe4)
+set_property(TARGET myengine_doomfly_probe4 PROPERTY FOLDER "Tests")
+
+# N1: the fly plays DOOM (game/doomfly, docs/game/flydoom-fly.md): the eyes, the controls, the steering by the picture, damage, a brain that runs away, E1M1.
+# Skipped (exit code 77) without the connectome (tools/flybrain/fetch_malecns.ps1); the game of E1M1 needs a WAD (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad)
+add_executable(myengine_doom_fly_tests
+  doomfly/DoomFlyTests.cpp)
+target_link_libraries(myengine_doom_fly_tests PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+target_compile_definitions(myengine_doom_fly_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+myengine_apply_compiler_options(myengine_doom_fly_tests)
+set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
+set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)

@@ -1,0 +1,220 @@
+// FlyPlayer.h
+//
+// The fly plays DOOM (docs/game/flydoom-fly.md): the picture goes through the eyes into the brain, the brain runs for the time of one tic of the
+// game, the rates of the descending neurons become the command of the player, the game runs one tic. Then again.
+//
+//   frame -> FlyEyes (luminance of the photoreceptors) -> FlyBrain (28.57 ms of the brain per tic) -> rates of the descending neurons
+//         -> FlyControls (turn, forward, fire, use) -> doom::TicCmd -> one tic of DOOM
+//
+// The game waits for the brain: a tic starts when the brain has finished the 28.57 ms of its time. The brain runs on its own thread (and on the job system
+// for the neurons), so the window keeps drawing while it thinks; when the brain is slower than real time the game is slower, never the brain faster than
+// real time (Pump does not start a tic before 1/35 s of the wall clock has passed since the last one). StepBlocking does the whole chain on the calling thread
+// without any pace (the tests, and a brain that learns faster than real time).
+//
+// Reinforcement as in DOOMFLY: damage puts a current into the dopamine neurons PPL101 (4 mV for 200 ms). Optionally a kill or an item puts a current into PAM
+// neurons (reward, off by default). The brain is made again (rest state, the stimuli of the eyes put back) when the player dies, when the level changes,
+// and when the brain runs away: the activity of the whole brain above `seizureSpikesPerSecond` for `seizureMs` (the tonic current of the lamina above
+// ~15 mV does it, and so does the taste input, docs/flybrain/flybrain.md).
+// There is no plasticity: the weights of the connectome do not change (DOOMFLY has an experimental KC->MBON rule and shows no learning; the API of the brain
+// has no way to change a weight).
+
+#pragma once
+
+#include <doom/DoomGame.h>
+#include <doomfly/FlyControls.h>
+#include <doomfly/FlyEyes.h>
+#include <flybrain/FlyBrain.h>
+
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace doomfly
+{
+    struct FlyPlayerConfig
+    {
+        std::shared_ptr<const flybrain::Connectome> connectome;
+        FlyControls controls;
+        EyesConfig eyes;
+        uint64_t seed = 1;
+        bool parallel = true;                   // the neurons of a window run as jobs (jobs::Initialize must have been called)
+        int substeps = 4;                       // the low pass of the photoreceptors is applied this many times per tic
+        float damageMv = 4.0f;                  // PPL101: current for damageMs when the player is hurt
+        float damageMs = 200.0f;
+        bool reward = false;                    // PAM: current when the player kills a monster or takes an item
+        float rewardMv = 4.0f;
+        float rewardMs = 200.0f;
+        float seizureSpikesPerSecond = 1.0e6f;  // 270 - 410 thousand a second is the brain at rest and under a bright picture
+        float seizureMs = 300.0f;
+        bool pace = true;                       // Pump does not run the game faster than 35 tics a second
+    };
+
+    struct RateReading
+    {
+        std::string name;                       // "DNp20 R"
+        float hz = 0.0f;
+    };
+
+    struct FlyStatus
+    {
+        uint64_t tics = 0;                      // tics of the game the fly has played
+        double brainSpeed = 0.0;                // brain time / wall time of the last tics; 1.0 is real time, above 1 the brain waits for the clock
+        double gameSpeed = 0.0;                 // tics per second / 35
+        bool waiting = false;                   // the game stands: the brain has not finished
+        float turnHz = 0.0f;                    // the sums of the channels (Hz)
+        float forwardHz = 0.0f;
+        float fireHz = 0.0f;
+        float turnDegrees = 0.0f;               // what the player does now
+        float forwardUnits = 0.0f;
+        bool fire = false;
+        bool use = false;
+        float spikesPerSecond = 0.0f;           // the whole brain
+        float dopamineMv = 0.0f;                // the current PPL101 gets now
+        uint32_t resets = 0;                    // the brain was made again (all reasons)
+        uint32_t seizures = 0;                  // ... because it ran away
+        uint32_t damages = 0;
+        std::vector<RateReading> rates;         // the groups of the controls
+        std::string controlsName;
+    };
+
+    // The spikes of the last tic and where the brain is (for a view of the brain, task V0)
+    struct BrainSnapshot
+    {
+        uint64_t step = 0;
+        std::vector<flybrain::SpikeEvent> spikes;
+    };
+
+    class FlyPlayer final : public doom::ITicCmdSource
+    {
+    public:
+        // nullptr and `error` when the connectome lacks what the controls or the eyes need
+        static std::unique_ptr<FlyPlayer> Create(const FlyPlayerConfig& config, std::string& error);
+        ~FlyPlayer() override;
+
+        // Makes the player the source of the commands of the console player of `game`
+        void Attach(doom::DoomGame& game);
+        void Detach(doom::DoomGame& game);
+
+        // One frame of the window: starts a tic of the brain when it is time, runs the game tic when the brain has finished. true: a new frame of DOOM
+        bool Pump(doom::DoomGame& game, double wallSeconds);
+        // The whole chain for one tic, here and now. true: a new frame
+        bool StepBlocking(doom::DoomGame& game);
+
+        FlyStatus Status() const;
+        BrainSnapshot Snapshot() const;
+        const FlyEyes& Eyes() const { return eyes_; }
+        const FlyControls& Controls() const { return config_.controls; }
+        const flybrain::Connectome& GetConnectome() const { return *config_.connectome; }
+
+        // For the tests: a current (mV) into every neuron of a type until the next reset, to make the brain run away
+        void InjectCurrentForTest(const std::string& type, float currentMv);
+        // For the tests: the chain without a game: the picture `frame` (320x200, 0x00RRGGBB) shown for `tics` tics of the brain, `damageAtFirst`: the player is hurt
+        // at the first one. Returns the status after the last tic (the command that the brain gives; the game is not touched). Not together with Pump / StepBlocking.
+        FlyStatus EvaluateFrameForTest(const uint32_t* frame, int tics, bool damageAtFirst = false);
+        // For the tests: the luminance per photoreceptor of the last tick
+        std::vector<float> LastLuminance() const;
+        // doom::ITicCmdSource: the command of the console player is the last one the brain gave
+        void BuildTicCmd(int player, doom::TicCmd& cmd) override;
+
+    private:
+        explicit FlyPlayer(const FlyPlayerConfig& config);
+        struct Group
+        {
+            std::string name;
+            flybrain::Group neurons;
+            float weight = 1.0f;
+            flybrain::WatchId watch = 0;
+        };
+        struct TickInput
+        {
+            std::vector<float> luminance;       // per photoreceptor
+            bool damage = false;
+            bool reward = false;
+            bool reset = false;
+            bool valid = false;
+        };
+        struct TickResult
+        {
+            float turnHz = 0, forwardHz = 0, fireHz = 0;
+            bool fireSpikes = false;
+            float spikesPerSecond = 0;
+            bool seizure = false;
+            bool reset = false;
+            float dopamineMv = 0;
+            std::vector<RateReading> rates;
+            BrainSnapshot snapshot;
+            double wallSeconds = 0;
+            bool valid = false;
+        };
+
+        bool Initialize(std::string& error);
+        void MakeBrain();                       // worker thread (and the constructor)
+        TickResult RunTick(const TickInput& input);
+        void WorkerLoop();
+        TickInput SampleInput(doom::DoomGame& game);
+        void ApplyResult(doom::DoomGame& game, const TickResult& result);
+        void Shape(const TickResult& result, float& turnDegrees, float& forwardUnits, bool& fire) const;
+        void Submit(const TickInput& input);
+        bool WaitResult(TickResult& out, bool block);
+
+        FlyPlayerConfig config_;
+        FlyEyes eyes_;
+        flybrain::Group dopamine_;
+        flybrain::Group rewardGroup_;
+        std::vector<Group> turnGroups_, forwardGroups_, fireGroups_;
+
+        // the brain: touched by the worker thread only (and by the constructor before it runs)
+        std::unique_ptr<flybrain::FlyBrain> brain_;
+        std::vector<float> filtered_;           // the low pass of the photoreceptors
+        std::vector<float> slow_;               // the slow average of the motion channel
+        std::vector<float> lastDrive_;
+        uint64_t lastSpikes_ = 0;
+        double overSeizureMs_ = 0.0;
+        std::vector<std::pair<std::string, float>> injected_;
+        std::mutex injectMutex_;
+        double dopamineUntilMs_ = 0.0;
+
+        // the thread
+        std::thread worker_;
+        mutable std::mutex mutex_;
+        std::condition_variable wake_;
+        std::condition_variable done_;
+        TickInput job_;
+        TickResult result_;
+        bool quit_ = false;
+        bool pending_ = false;                  // a tick was submitted and its result is not taken yet
+        bool brainBusy_ = false;
+
+        // the player's side (the thread of the game)
+        doom::TicCmd command_;
+        int prevHealth_ = 100;
+        int prevMap_ = -1;
+        int prevEpisode_ = -1;
+        int prevKills_ = 0;
+        int prevItems_ = 0;
+        bool needReset_ = true;
+        double sinceSubmit_ = 0.0;
+        uint32_t resets_ = 0, seizures_ = 0, damages_ = 0;
+        uint64_t tics_ = 0;
+        double speedSmoothed_ = 0.0;            // brain time / wall time of the brain
+        double ticIntervalSmoothed_ = 0.0;      // wall seconds between two tics of the game
+        double wallSinceTic_ = 0.0;
+        bool waiting_ = false;
+        struct Position
+        {
+            double x = 0, y = 0;
+        };
+        std::vector<Position> history_;
+        uint32_t useCooldown_ = 0;
+        uint32_t stuckCount_ = 0;
+        uint32_t reflexLeft_ = 0;
+        float reflexSign_ = 1.0f;
+        uint32_t screenCooldown_ = 0;
+        FlyStatus status_;
+        BrainSnapshot snapshot_;
+        std::vector<float> lastLuminance_;
+    };
+}

@@ -41,6 +41,7 @@ namespace myengine::render::dx12
         MeshHandle UploadMesh(const MeshData& meshData) override;
         TextureHandle CreateTexture(const TextureData& textureData) override;
         void DestroyTexture(TextureHandle texture) override;
+        bool UpdateTexture(TextureHandle texture, const TextureData& textureData) override;
         ShaderHandle CreateShaderProgram(const ShaderProgramData& shaderProgram) override;
         bool GetShaderLayout(ShaderHandle shader, ShaderLayout& outLayout, ShaderVariant variant = ShaderVariant::Normal) const override;
         bool GetBuiltinShaderLayout(BuiltinShader shader, ShaderLayout& outLayout) const override;

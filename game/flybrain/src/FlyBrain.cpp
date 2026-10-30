@@ -2,6 +2,8 @@
 
 #include <flybrain/FlyBrain.h>
 
+#include "FlyBrainGpu.h"
+
 #include <myengine/jobs/JobSystem.h>
 
 #include <immintrin.h>
@@ -17,7 +19,7 @@ namespace flybrain
 {
     namespace
     {
-        // The closed-form catch-up takes the powers from a table up to this many steps (0.4 s), exp() beyond it
+        // The closed-form catch-up takes the powers from a table of this many steps (0.4 s) and its last entry
         constexpr uint32_t kPowerTableSize = 4096;
         // Below this many synapses a window's spikes are delivered on the calling thread: a dispatch costs more
         constexpr uint64_t kParallelDeliveryEdges = 16384;
@@ -48,14 +50,26 @@ namespace flybrain
             return osSaves && avx && avx2 && (_xgetbv(0) & 6) == 6;
         }
 
-        // Counter-based random numbers: the draw of a neuron at a step does not depend on the order or the thread
+        // Counter-based random numbers: the draw of a neuron at a step does not depend on the order or the thread.
+        // 32-bit operations only (lowbias32 by C. Wellons), so the compute shader of FlyBrainGpu (SM 5.0, no 64-bit
+        // integers) draws the same numbers
+        inline uint32_t Mix32(uint32_t x)
+        {
+            x ^= x >> 16;
+            x *= 0x7FEB352Du;
+            x ^= x >> 15;
+            x *= 0x846CA68Bu;
+            x ^= x >> 16;
+            return x;
+        }
+
         inline uint32_t PoissonDraw(uint64_t seed, uint32_t neuron, uint64_t step)
         {
-            uint64_t z = seed + neuron * 0x9E3779B97F4A7C15ull + step * 0xD1B54A32D192ED03ull;
-            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-            z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-            z ^= z >> 31;
-            return static_cast<uint32_t>(z >> 32);
+            uint32_t h = Mix32(static_cast<uint32_t>(seed) ^ 0x9E3779B9u);
+            h = Mix32(h ^ static_cast<uint32_t>(seed >> 32));
+            h = Mix32(h ^ static_cast<uint32_t>(step >> 32));
+            h = Mix32(h ^ static_cast<uint32_t>(step));
+            return Mix32(h ^ neuron);
         }
     }
 
@@ -99,9 +113,9 @@ namespace flybrain
         assert(params_.synapseTauMs != params_.membraneTauMs);
         couplingK_ = params_.synapseTauMs / (params_.synapseTauMs - params_.membraneTauMs);
 
-        powU_.resize(kPowerTableSize);
-        powG_.resize(kPowerTableSize);
-        for (uint32_t k = 0; k < kPowerTableSize; ++k)
+        powU_.resize(kPowerTableSize + 1);
+        powG_.resize(kPowerTableSize + 1);
+        for (uint32_t k = 0; k <= kPowerTableSize; ++k)
         {
             powU_[k] = std::exp(-dt * k / params_.membraneTauMs);
             powG_[k] = std::exp(-dt * k / params_.synapseTauMs);
@@ -127,6 +141,7 @@ namespace flybrain
         poissonThreshold_.assign(n, 0);
         poissonStimuli_.assign(n, 0);
         watchHead_.assign(n, 0);
+        watchMask_.assign(n, 0);
 
         const size_t chunks = (n + chunkSize_ - 1) / chunkSize_;
         chunkSpikes_.resize(std::max<size_t>(1, chunks));
@@ -145,6 +160,285 @@ namespace flybrain
         useAvx2_ = enabled && CpuHasAvx2();
     }
 
+    // ---------------------------------------------------------------- backend
+
+    bool ParseBackendChoice(std::string_view text, BackendChoice& out)
+    {
+        if (text == "auto") { out = BackendChoice::Auto; return true; }
+        if (text == "cpu") { out = BackendChoice::Cpu; return true; }
+        if (text == "gpu") { out = BackendChoice::Gpu; return true; }
+        return false;
+    }
+
+    const char* ToString(Backend backend)
+    {
+        return backend == Backend::Gpu ? "gpu" : "cpu";
+    }
+
+    namespace
+    {
+        // A small recurrent network with tonic and Poisson input: the GPU must give the CPU spikes exactly
+        bool GpuSelfTest(ID3D12Device* device, std::string* error)
+        {
+            ConnectomeBuilder builder;
+            const uint32_t n = 300;
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                NeuronInfo info;
+                info.bodyId = 1 + i;
+                info.type = i % 10 == 0 ? "poisson" : (i % 4 == 0 ? "tonic" : "relay");
+                builder.AddNeuron(info);
+            }
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                for (uint32_t k = 1; k <= 12; ++k)
+                {
+                    const uint32_t j = (i * 7 + k * 31) % n;
+                    if (j != i)
+                    {
+                        builder.AddEdge(i, j, (i % 3 == 0 ? -1 : 1) * static_cast<int32_t>(1 + (i * k) % 15));
+                    }
+                }
+            }
+            auto connectome = Connectome::FromImage(builder.Build("self-test"));
+            auto run = [&](FlyBrain& brain)
+            {
+                brain.StimulateCurrent(connectome->Find("tonic"), 14.0f);
+                brain.StimulateRate(connectome->Find("poisson"), 80.0f, 150.0f);
+                brain.Advance(1003);
+                brain.Advance(997);
+                std::vector<SpikeEvent> spikes;
+                brain.RecentSpikes(spikes, 1u << 16);
+                std::sort(spikes.begin(), spikes.end(), [](const SpikeEvent& a, const SpikeEvent& b) { return a.step != b.step ? a.step < b.step : a.neuron < b.neuron; });
+                return spikes;
+            };
+            FlyBrain cpu(connectome);
+            const std::vector<SpikeEvent> expected = run(cpu);
+            FlyBrain gpu(connectome);
+            GpuOptions options;
+            options.device = device;
+            options.selfTest = false;
+            if (gpu.SetBackend(BackendChoice::Gpu, options, error) != Backend::Gpu)
+            {
+                return false;
+            }
+            const std::vector<SpikeEvent> got = run(gpu);
+            bool same = got.size() == expected.size() && !expected.empty();
+            for (size_t k = 0; same && k < got.size(); ++k)
+            {
+                same = got[k].neuron == expected[k].neuron && got[k].step == expected[k].step;
+            }
+            if (!same && error != nullptr)
+            {
+                *error = "the GPU self-test gave other spikes than the CPU (" + std::to_string(got.size()) + " against " + std::to_string(expected.size()) + ")";
+            }
+            return same;
+        }
+    }
+
+    Backend FlyBrain::SetBackend(BackendChoice choice, const GpuOptions& options, std::string* error)
+    {
+        if (choice == BackendChoice::Cpu)
+        {
+            if (gpu_ != nullptr)
+            {
+                gpuStatePulled_ = false;
+                PullGpuState();
+                gpu_.reset();
+            }
+            return Backend::Cpu;
+        }
+        if (gpu_ != nullptr)
+        {
+            return Backend::Gpu;
+        }
+        if (step_ + 0x10000000ull > UINT32_MAX)
+        {
+            if (error != nullptr)
+            {
+                *error = "the GPU counts steps in 32 bits (119 hours)";
+            }
+            return Backend::Cpu;
+        }
+
+        GpuModelConstants constants;
+        constants.decayU = decayU_;
+        constants.decayG = decayG_;
+        constants.stepCoupling = couplingK_ * (decayG_ - decayU_);
+        constants.couplingK = couplingK_;
+        constants.weight = params_.weightMv;
+        constants.kick = params_.poissonKickMv;
+        constants.threshold = thresholdU_;
+        constants.reset = resetU_;
+        constants.delaySteps = delaySteps_;
+        // PoissonDraw with the high half of the step = 0
+        constants.seedHash = Mix32(Mix32(Mix32(static_cast<uint32_t>(params_.seed) ^ 0x9E3779B9u) ^ static_cast<uint32_t>(params_.seed >> 32)) ^ 0u);
+        constants.powU = powU_;
+        constants.powG = powG_;
+        std::unique_ptr<FlyBrainGpu> gpu = FlyBrainGpu::Create(options.device, options.allowWarp, *connectome_, constants,
+            static_cast<uint32_t>(std::max<size_t>(spikeRing_.size(), 1024)), error);
+        if (gpu == nullptr)
+        {
+            return Backend::Cpu;
+        }
+        if (options.selfTest && !GpuSelfTest(gpu->Device(), error))
+        {
+            return Backend::Cpu;
+        }
+
+        // The whole state goes to the GPU: the simulation continues there from this step
+        GpuStateImage image;
+        const size_t n = neuronCount_;
+        image.state.resize(n);
+        image.params.resize(n);
+        image.pending.resize(n);
+        image.spikeTotals = spikeTotals_;
+        image.arrivals = arrivals_;
+        for (size_t i = 0; i < n; ++i)
+        {
+            image.state[i] = { u_[i], g_[i], static_cast<uint32_t>(lastStep_[i]), static_cast<uint32_t>(std::min<uint64_t>(refractoryUntil_[i], UINT32_MAX)), awake_[i], 0u };
+            image.params[i] = { externalDrive_[i], stimulusDrive_[i], poissonThreshold_[i], neuronRefractory_[i], watchMask_[i], { 0u, 0u, 0u } };
+            image.pending[i] = pending_[i].load(std::memory_order_relaxed);
+        }
+        gpu->Upload(image);
+        gpu->SetCompletionHandler([this](const GpuCompletedSteps& completed) { OnGpuCompleted(completed); });
+        gpu_ = std::move(gpu);
+        gpuDirty_.assign(n, 0);
+        gpuDirtyList_.clear();
+        completedStep_ = step_;
+        gpuStatePulled_ = false;
+        return Backend::Gpu;
+    }
+
+    std::string FlyBrain::GpuAdapterName() const
+    {
+        return gpu_ != nullptr ? gpu_->AdapterName() : std::string();
+    }
+
+    uint64_t FlyBrain::GpuMemoryBytes() const
+    {
+        return gpu_ != nullptr ? gpu_->MemoryBytes() : 0;
+    }
+
+    uint64_t FlyBrain::GpuSharedMemoryBytes() const
+    {
+        return gpu_ != nullptr ? gpu_->SharedMemoryBytes() : 0;
+    }
+
+    GpuSpikeRing FlyBrain::GetGpuSpikeRing() const
+    {
+        GpuSpikeRing ring;
+        if (gpu_ != nullptr)
+        {
+            ring.ring = gpu_->RingBuffer();
+            ring.counters = gpu_->CountersBuffer();
+            ring.lastSpikeStep = gpu_->LastSpikeBuffer();
+            ring.capacity = gpu_->RingCapacity();
+            ring.fence = gpu_->Fence();
+            ring.fenceValue = gpu_->LastSubmittedFenceValue();
+        }
+        return ring;
+    }
+
+    void FlyBrain::Poll()
+    {
+        if (gpu_ != nullptr)
+        {
+            gpu_->Poll(false);
+        }
+    }
+
+    void FlyBrain::Synchronize()
+    {
+        if (gpu_ != nullptr)
+        {
+            FlushGpuUpdates();
+            gpu_->Submit();
+            gpu_->Poll(true);
+        }
+    }
+
+    void FlyBrain::MarkGpuDirty(uint32_t neuron, bool wake)
+    {
+        if (gpuDirty_[neuron] == 0)
+        {
+            gpuDirtyList_.push_back(neuron);
+        }
+        gpuDirty_[neuron] = static_cast<uint8_t>(std::max<int>(gpuDirty_[neuron], wake ? 2 : 1));
+        gpuStatePulled_ = false;
+    }
+
+    void FlyBrain::FlushGpuUpdates()
+    {
+        // The changes since the last window, with their final values: the GPU settles a woken neuron under its old
+        // drive first, as Wake does on the CPU
+        for (uint32_t neuron : gpuDirtyList_)
+        {
+            GpuNeuronUpdate update{};
+            update.neuron = neuron;
+            update.wake = gpuDirty_[neuron] == 2 ? 1u : 0u;
+            update.driveExternal = externalDrive_[neuron];
+            update.driveStimulus = stimulusDrive_[neuron];
+            update.poissonThreshold = poissonThreshold_[neuron];
+            update.refractorySteps = neuronRefractory_[neuron];
+            update.watchMask = watchMask_[neuron];
+            gpu_->QueueUpdate(update);
+            gpuDirty_[neuron] = 0;
+        }
+        gpuDirtyList_.clear();
+    }
+
+    void FlyBrain::OnGpuCompleted(const GpuCompletedSteps& completed)
+    {
+        const uint32_t stride = FlyBrainGpu::kWatchStride;
+        for (uint32_t t = 0; t < completed.steps; ++t)
+        {
+            const uint64_t step = completed.firstStep + t;
+            const uint32_t* row = completed.counts + uint64_t(t) * stride;
+            for (WatchId w = 0; w < watchers_.size() && w < FlyBrainGpu::kMaxWatches; ++w)
+            {
+                Watcher& watcher = *watchers_[w];
+                watcher.perStep[step % watcher.perStep.size()] = row[w];
+                watcher.total += row[w];
+            }
+            totalSpikes_ += row[stride - 1];
+            stats_.spikes += row[stride - 1];
+        }
+        completedStep_ = completed.firstStep + completed.steps;
+        // A window list overflow would lose input: it is sized 4 spikes per neuron, never reached in practice
+        assert(completed.lostSpikes == 0);
+    }
+
+    void FlyBrain::PullGpuState() const
+    {
+        if (gpu_ == nullptr || gpuStatePulled_)
+        {
+            return;
+        }
+        FlyBrain& self = const_cast<FlyBrain&>(*this);
+        self.FlushGpuUpdates();
+        GpuStateImage image;
+        self.gpu_->Download(image);
+        for (size_t i = 0; i < neuronCount_; ++i)
+        {
+            self.u_[i] = image.state[i].u;
+            self.g_[i] = image.state[i].g;
+            self.lastStep_[i] = image.state[i].lastStep;
+            self.refractoryUntil_[i] = image.state[i].refractoryUntil;
+            self.awake_[i] = static_cast<uint8_t>(image.state[i].awake);
+            self.pending_[i].store(static_cast<uint8_t>(image.pending[i]), std::memory_order_relaxed);
+        }
+        self.spikeTotals_ = image.spikeTotals;
+        self.arrivals_ = image.arrivals;
+        gpuStatePulled_ = true;
+    }
+
+    uint32_t FlyBrain::NeuronSpikeCount(uint32_t neuron) const
+    {
+        PullGpuState();
+        return spikeTotals_[neuron];
+    }
+
     // ---------------------------------------------------------------- neuron math
 
     inline void FlyBrain::CatchUp(uint32_t neuron, uint64_t step, double& u, double& g) const
@@ -155,17 +449,14 @@ namespace flybrain
             return; // nothing to integrate, or frozen by refractoriness the whole way
         }
         const uint64_t k = step - from;
-        double a;
-        double b;
-        if (k < kPowerTableSize)
+        // a^k = table[k mod 4096] x table[4096]^(k / 4096): only correctly rounded multiplications, so the GPU
+        // (FlyBrainGpu) gets the same bits. After about 40 factors both are 0
+        double a = powU_[k % kPowerTableSize];
+        double b = powG_[k % kPowerTableSize];
+        for (uint64_t q = k / kPowerTableSize; q > 0 && a != 0.0; --q)
         {
-            a = powU_[k];
-            b = powG_[k];
-        }
-        else
-        {
-            a = std::exp(-params_.dtMs * double(k) / params_.membraneTauMs);
-            b = std::exp(-params_.dtMs * double(k) / params_.synapseTauMs);
+            a *= powU_[kPowerTableSize];
+            b *= powG_[kPowerTableSize];
         }
         const double drive = Drive(neuron);
         u = drive + (u - drive) * a + g * couplingK_ * (b - a);
@@ -187,6 +478,11 @@ namespace flybrain
 
     void FlyBrain::Wake(uint32_t neuron)
     {
+        if (gpu_ != nullptr)
+        {
+            MarkGpuDirty(neuron, true);
+            return;
+        }
         // Settle the state at the current step under the old drive before anything about the neuron changes
         double u = u_[neuron];
         double g = g_[neuron];
@@ -199,6 +495,7 @@ namespace flybrain
 
     float FlyBrain::VoltageMv(uint32_t neuron) const
     {
+        PullGpuState();
         double u = u_[neuron];
         double g = g_[neuron];
         CatchUp(neuron, step_, u, g);
@@ -207,6 +504,7 @@ namespace flybrain
 
     float FlyBrain::SynapticMv(uint32_t neuron) const
     {
+        PullGpuState();
         double u = u_[neuron];
         double g = g_[neuron];
         CatchUp(neuron, step_, u, g);
@@ -215,6 +513,7 @@ namespace flybrain
 
     uint32_t FlyBrain::AwakeCount() const
     {
+        PullGpuState();
         uint32_t count = 0;
         for (uint8_t a : awake_)
         {
@@ -334,10 +633,28 @@ namespace flybrain
             // A window never crosses the end of a stimulus, so a stimulus lasts exactly its steps
             const uint64_t untilStimulusEnd = NextStimulusEnd() - step_;
             const uint64_t window = std::min<uint64_t>({ steps, delaySteps_, untilStimulusEnd });
-            RunWindow(window);
+            if (gpu_ != nullptr)
+            {
+                FlushGpuUpdates();
+                gpu_->RecordWindow(step_, static_cast<uint32_t>(window));
+                step_ += window;
+                stats_.steps += window;
+                ++stats_.windows;
+                gpuStatePulled_ = false;
+            }
+            else
+            {
+                RunWindow(window);
+            }
             steps -= window;
         }
         ExpireStimuli();
+        if (gpu_ != nullptr)
+        {
+            // Sent, not waited for: the counts of earlier submissions come in as the GPU finishes them
+            gpu_->Submit();
+            gpu_->Poll(false);
+        }
     }
 
     void FlyBrain::AdvanceMs(double ms)
@@ -792,6 +1109,19 @@ namespace flybrain
             watchHead_[neuron] = static_cast<uint32_t>(watchNext_.size());
         }
         watchers_.push_back(std::move(watcher));
+        if (id < FlyBrainGpu::kMaxWatches)
+        {
+            for (uint32_t neuron : group.neurons)
+            {
+                watchMask_[neuron] |= 1u << id;
+                if (gpu_ != nullptr)
+                {
+                    MarkGpuDirty(neuron, false);
+                }
+            }
+        }
+        // The GPU counts the spikes of the first 32 watches only
+        assert(gpu_ == nullptr || id < FlyBrainGpu::kMaxWatches);
         return id;
     }
 
@@ -799,10 +1129,11 @@ namespace flybrain
     {
         const Watcher& watcher = *watchers_[watch];
         const uint64_t history = watcher.perStep.size();
+        const uint64_t end = CompletedStep();
         uint64_t steps = std::min<uint64_t>(history, static_cast<uint64_t>(std::llround(windowMs / params_.dtMs)));
-        steps = std::min(steps, step_);
+        steps = std::min(steps, end);
         uint64_t count = 0;
-        for (uint64_t t = step_ - steps; t < step_; ++t)
+        for (uint64_t t = end - steps; t < end; ++t)
         {
             count += watcher.perStep[t % history];
         }
@@ -813,7 +1144,7 @@ namespace flybrain
     {
         const Watcher& watcher = *watchers_[watch];
         const uint64_t history = watcher.perStep.size();
-        const uint64_t steps = std::min({ history, static_cast<uint64_t>(std::llround(windowMs / params_.dtMs)), step_ });
+        const uint64_t steps = std::min({ history, static_cast<uint64_t>(std::llround(windowMs / params_.dtMs)), CompletedStep() });
         if (steps == 0 || watcher.neuronCount == 0)
         {
             return 0.0f;
@@ -836,6 +1167,22 @@ namespace flybrain
     void FlyBrain::RecentSpikes(std::vector<SpikeEvent>& out, uint32_t maxCount) const
     {
         out.clear();
+        if (gpu_ != nullptr)
+        {
+            // The ring of the GPU: within a window the order of its spikes is the order the threads wrote them
+            const_cast<FlyBrain&>(*this).FlushGpuUpdates();
+            std::vector<uint32_t> pairs;
+            uint64_t written = 0;
+            gpu_->DownloadRing(pairs, written);
+            const uint64_t capacity = gpu_->RingCapacity();
+            const uint64_t count = std::min<uint64_t>({ written, capacity, maxCount });
+            for (uint64_t k = written - count; k < written; ++k)
+            {
+                const uint64_t index = k & (capacity - 1);
+                out.push_back({ pairs[2 * index], 0u, pairs[2 * index + 1] });
+            }
+            return;
+        }
         if (spikeRing_.empty())
         {
             return;

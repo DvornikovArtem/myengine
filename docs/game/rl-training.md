@@ -29,7 +29,7 @@
 
 ## Наборы упражнений (данные)
 
-`assets/data/training/*.json` — один файл на набор. Папка целиком уходит в пакет игры (`assets/data` в `tools/package_manifest.json`). Набор читается `RlLoadTrainingPackFromFile` / `RlLoadTrainingPacks(папка)` (результат — по полю `order`, затем по имени); файл с ошибкой пропускается, сообщение попадает в `errors`.
+`assets/data/training/*.json` — один файл на набор. Папка целиком уходит в пакет игры (`assets/data` в `games/rocketarena/game.json`). Набор читается `RlLoadTrainingPackFromFile` / `RlLoadTrainingPacks(папка)` (результат — по полю `order`, затем по имени); файл с ошибкой пропускается, сообщение попадает в `errors`.
 
 ```json
 {
