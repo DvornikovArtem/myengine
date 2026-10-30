@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-    Builds the shipping game (RocketArena.exe) and packs it into dist/RocketArena and a zip for players.
+    Builds a shipping game (by default RocketArena.exe) and packs it into dist/<name> and a zip for players. The game is chosen by -Game: the manifest
+    games/<id>/game.json says what it is (the target, the exe, the assets, the licenses, the options).
 
 .DESCRIPTION
     1. Configures build-shipping/ (MYENGINE_SHIPPING=ON, no tests, Release) and builds the myengine target. With the Steamworks SDK found
        (see -SteamSdk) the exe is built with Steam; without it, with a warning, the package has no Steam.
-    2. Collects the assets by tools/package_manifest.json (roots plus everything the scenes, materials and data name).
+    2. Collects the assets by the manifest games/<id>/game.json (roots plus everything the scenes, materials and data name).
        Wwise (the sound engine, docs/engine/wwise.md) is on by default: -DMYENGINE_WWISE=ON, the banks of assets/audio/wwise are in the package,
        the WAV files of assets/audio are not (Wwise does not open them), and licenses/ has the notice of Wwise and the licenses of its codecs
        (Ogg, Opus, OpusFile; the license files are copied from the installed SDK of Wwise, see -WwiseSdk). The SDK is not in the repository: when it
@@ -16,14 +17,23 @@
     4. Writes dist/RocketArena-<version>-win64-steam.zip (or -nosteam.zip). The version is the one of project(myengine VERSION ...) in the
        root CMakeLists.txt, the same as in the exe resources and in the menu.
     Nothing but the exe is taken from the build folder: no PDB, no tests, no editor-only files.
+    A game may also name the data that is not in git (the manifest parts "externalData": a missing one with a "fetch" script is downloaded first; "files": a
+    file of the repository or of the machine goes to a place of the package, optional ones with a warning; "licenses.generated": texts with the commit and the
+    version in them), see docs/game/packaging.md.
     docs/game/packaging.md describes the package and tools/check_package.ps1 checks it on a clean folder.
+    The progress is also written for a program (the Build window of the editor, docs/editor/build-panel.md): the lines "##progress <0-100> <stage>"
+    and, at the end, "##result ok <the folder of the package>" (and "##zip <the zip>") or "##result fail <what went wrong>"; the exit code is 0 or 1.
 
+.PARAMETER Game
+    The id of the game: the folder games/<id> with game.json (the default is rocketarena). An unknown id stops with the list of the known ones.
 .PARAMETER Config
-    Shipping (the default) or Release: both build the Release configuration of CMake.
+    Shipping (the default) or Release: both build the Release configuration of CMake. RelWithDebInfo: the same shipping build in the configuration with the
+    symbols (the PDB goes to <Out>\symbols, as always; the zip has the suffix -rwdi); the Build window of the editor offers it.
 .PARAMETER Out
-    The output folder (relative to the repository root): <Out>/RocketArena and the zip.
+    The output folder (relative to the repository root, or a full path, also on another drive): <Out>/RocketArena and the zip.
 .PARAMETER BuildDir
-    The build folder of the shipping build (relative to the repository root).
+    The build folder of the shipping build (relative to the repository root, or a full path, also on another drive). With it given the suffixes -nosteam and
+    -nowwise are not added: the folder is the one that is named.
 .PARAMETER SkipBuild
     Pack the exe that is already in the build folder.
 .PARAMETER NoZip
@@ -47,7 +57,8 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Shipping', 'Release')][string]$Config = 'Shipping',
+    [string]$Game = 'rocketarena',
+    [ValidateSet('Shipping', 'Release', 'RelWithDebInfo')][string]$Config = 'Shipping',
     [string]$Out = 'dist',
     [string]$BuildDir = 'build-shipping',
     [switch]$SkipBuild,
@@ -64,11 +75,50 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$outDir = [System.IO.Path]::GetFullPath((Join-Path $root $Out))
-$buildPath = [System.IO.Path]::GetFullPath((Join-Path $root $BuildDir))
-$manifestPath = Join-Path $PSScriptRoot 'package_manifest.json'
+# a folder of the output or of the build: relative to the repository, or a full path (another drive: a build of a gigabyte does not have to lie on the one of the sources)
+function Get-FullFolder([string]$path) {
+    if ([System.IO.Path]::IsPathRooted($path)) { return [System.IO.Path]::GetFullPath($path) }
+    return [System.IO.Path]::GetFullPath((Join-Path $root $path))
+}
+$outDir = Get-FullFolder $Out
+$buildPath = Get-FullFolder $BuildDir
+# a failure is also a line for the program that reads the output (the Build window); the exit code is 1
+trap { Write-Host "##result fail $($_.Exception.Message)"; exit 1 }
+function Write-Progress-Line([int]$percent, [string]$stage) { Write-Host "##progress $percent $stage" }
+# a warning as a line of text that does not depend on the language of Windows (Write-Warning prints a translated word on a Russian Windows): the Build window finds "WARNING:"
+function Write-Warning([string]$Message) { Write-Host "WARNING: $Message" }
+Write-Progress-Line 1 'manifest'
+
+$manifestPath = Join-Path $root "games\$Game\game.json"
+if (-not (Test-Path $manifestPath)) {
+    $known = @(Get-ChildItem -Path (Join-Path $root 'games') -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'game.json') } | ForEach-Object { $_.Name })
+    throw "Unknown game '$Game': games\$Game\game.json is not there. Known games: $($known -join ', ')"
+}
 $manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
+if ($manifest.id -ne $Game) { throw "games\$Game\game.json says id '$($manifest.id)', the folder says '$Game'" }
 $gameName = $manifest.name
+# the parts of the manifest that a game may not have (Set-StrictMode does not allow reading what is not there)
+function Get-Part($object, [string]$name) {
+    if ($null -ne $object -and $object.PSObject.Properties[$name]) { return $object.PSObject.Properties[$name].Value }
+    return $null
+}
+function Get-Option([string]$name) {
+    $value = Get-Part (Get-Part $manifest 'options') $name
+    if ($value) { return $value }
+    return 'optional'
+}
+# a list of the manifest as an array (nothing: an empty one)
+function Get-List($object, [string]$name) {
+    $value = Get-Part $object $name
+    if ($null -eq $value) { return @() }
+    return @($value)
+}
+$cmakeTarget = Get-Part (Get-Part $manifest 'build') 'cmakeTarget'
+if (-not $cmakeTarget) { $cmakeTarget = 'myengine' }
+$exeRelative = Get-Part (Get-Part $manifest 'build') 'exePath'
+if (-not $exeRelative) { $exeRelative = "app/Release/$($manifest.exe)" }
+$readmeTemplate = Get-Part (Get-Part $manifest 'build') 'readme'
+if (-not $readmeTemplate) { $readmeTemplate = 'tools/package_readme.txt' }
 # one place of the version: project(myengine VERSION x.y.z) in the root CMakeLists.txt (the exe resources, the menu and the crash report read it from there too)
 $versionMatch = [regex]::Match([System.IO.File]::ReadAllText((Join-Path $root 'CMakeLists.txt')), 'project\(\s*myengine\s+VERSION\s+(\d+\.\d+\.\d+)')
 if (-not $versionMatch.Success) { throw 'project(myengine VERSION x.y.z) not found in CMakeLists.txt' }
@@ -132,6 +182,11 @@ function Find-SteamSdk {
 
 $useSteam = $false
 $steamDll = $null
+if ((Get-Option 'steam') -eq 'no') {
+    if ($WithSteam) { throw "-WithSteam: $($manifest.displayName) has no Steam in its manifest (options.steam is 'no')" }
+    $NoSteam = $true
+}
+Write-Progress-Line 3 'steam'
 if (-not $NoSteam) {
     $found = Find-SteamSdk
     if ($found) {
@@ -144,7 +199,8 @@ if (-not $NoSteam) {
     else { Write-Warning 'The Steamworks SDK was not found: the package is built WITHOUT Steam (LAN and IP only). -SteamSdk <folder> or STEAMWORKS_SDK_DIR fixes that; docs/game/steam-setup.md.' }
 }
 $steamTag = if ($useSteam) { 'steam' } else { 'nosteam' }
-$useWwise = -not $NoWwise
+$useWwise = -not $NoWwise -and (Get-Option 'wwise') -ne 'no'
+Write-Progress-Line 5 'wwise'
 # ---------------------------------------------------------------- Wwise: the SDK is looked for before the long build (the license files of the codecs come from it)
 $wwiseHelp = 'Install Wwise (the exact version is in cmake\Wwise.cmake) in the Audiokinetic Launcher: README.md, section "Wwise SDK", docs/engine/wwise.md; or build the package without Wwise with -NoWwise (XAudio2).'
 function Test-WwiseSdk([string]$folder) {
@@ -156,7 +212,7 @@ function Find-WwiseSdk {
     if ($WwiseSdk) { $candidates.Add($WwiseSdk) }
     # the cache of the folder that a Wwise package is built in (without the suffix -nowwise)
     $wwiseBuildDir = if ($PSBoundParameters.ContainsKey('BuildDir') -or $useSteam) { $BuildDir } else { $BuildDir + '-nosteam' }
-    $cacheFile = Join-Path ([System.IO.Path]::GetFullPath((Join-Path $root $wwiseBuildDir))) 'CMakeCache.txt'
+    $cacheFile = Join-Path (Get-FullFolder $wwiseBuildDir) 'CMakeCache.txt'
     if (-not $WwiseSdk -and (Test-Path $cacheFile)) {
         $line = Select-String -Path $cacheFile -Pattern '^WWISE_SDK_DIR:[A-Z]+=(.+)$' | Select-Object -First 1
         if ($line) { $candidates.Add($line.Matches[0].Groups[1].Value.Trim().Replace('/', '\')) }
@@ -189,12 +245,37 @@ if ($useWwise) {
 if (-not $PSBoundParameters.ContainsKey('BuildDir')) {
     if (-not $useSteam) { $BuildDir += '-nosteam' }
     if (-not $useWwise) { $BuildDir += '-nowwise' }
-    $buildPath = [System.IO.Path]::GetFullPath((Join-Path $root $BuildDir))
+    $buildPath = Get-FullFolder $BuildDir
 }
 Write-Step "Sound: $(if ($useWwise) { 'Wwise (the banks of assets/audio/wwise)' } else { 'XAudio2 (the WAV files of assets/audio)' })"
 
+# ---------------------------------------------------------------- the data that is not in git (the manifest part externalData)
+# %NAME% in a path is an environment variable (%LOCALAPPDATA%); a relative path is relative to the repository. A missing item with a "fetch" script is made by it
+# before the build ("autoFetch": false: not by the packing, the script is for hand, it downloads gigabytes); "optional": a missing one does not stop the packing
+function Resolve-DataPath([string]$path) {
+    $expanded = [System.Environment]::ExpandEnvironmentVariables($path).Replace('/', '\')
+    if ([System.IO.Path]::IsPathRooted($expanded)) { return $expanded }
+    return Join-Path $root $expanded
+}
+Write-Progress-Line 6 'data'
+foreach ($item in (Get-List $manifest 'externalData')) {
+    $checkPath = Resolve-DataPath $item.check
+    $optional = [bool](Get-Part $item 'optional')
+    $fetch = Get-Part $item 'fetch'
+    if (-not (Test-Path $checkPath) -and $fetch -and (Get-Part $item 'autoFetch') -ne $false) {
+        Write-Step "$($item.name) is not there, running $fetch"
+        try { Invoke-Native 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root $fetch)) }
+        catch { if (-not $optional) { throw }; Write-Warning "$fetch failed: $($_.Exception.Message)" }
+    }
+    if (Test-Path $checkPath) { Write-Step "$($item.name): $checkPath" }
+    elseif ($optional) { Write-Step "$($item.name) is not found ($($item.check)): the package goes without it (the warning is where the files are put in)" }
+    else { throw "$($item.name) is not found ($($item.check))$(if ($fetch) { ": $fetch makes it" })" }
+}
+
 # ---------------------------------------------------------------- build
-$exe = Join-Path $buildPath 'app\Release\RocketArena.exe'
+Write-Progress-Line 8 'configure'
+$buildConfig = if ($Config -eq 'RelWithDebInfo') { 'RelWithDebInfo' } else { 'Release' }
+$exe = Join-Path $buildPath ($exeRelative.Replace('/Release/', "/$buildConfig/").Replace('/', '\'))
 $vs = $null
 if (-not $SkipBuild) {
     $vs = Find-VisualStudio
@@ -228,9 +309,11 @@ if (-not $SkipBuild) {
     elseif (-not $useWwise -and (Select-String -Path $cache -Pattern '^MYENGINE_WWISE:BOOL=ON' -Quiet)) {
         throw "$BuildDir was configured with MYENGINE_WWISE=ON, and -NoWwise asks for XAudio2: use another folder (-BuildDir) or delete it"
     }
-    Write-Step 'Building the myengine target (Release)'
-    Invoke-Native 'cmake' @('--build', $buildPath, '--config', 'Release', '--target', 'myengine')
+    Write-Step "Building the $cmakeTarget target ($buildConfig)"
+    Write-Progress-Line 12 'build'
+    Invoke-Native 'cmake' @('--build', $buildPath, '--config', $buildConfig, '--target', $cmakeTarget)
 }
+Write-Progress-Line 70 'built'
 if (-not (Test-Path $exe)) { throw "$exe not found" }
 if ($useSteam -and -not (Select-String -Path (Join-Path $buildPath 'CMakeCache.txt') -Pattern '^MYENGINE_STEAM:BOOL=ON' -Quiet)) {
     throw "$BuildDir was built without MYENGINE_STEAM=ON: the exe has no Steam code, steam_api64.dll next to it would do nothing"
@@ -268,7 +351,8 @@ function ConvertTo-ExcludeRegex([string]$glob) {
 }
 
 # the sound: with Wwise the banks and no WAV files, without it the WAV files and no banks (the "wwise" part of the manifest)
-$excludeGlobs = @($manifest.exclude) + @(if ($useWwise) { $manifest.wwise.excludeWith } else { $manifest.wwise.excludeWithout })
+$wwisePart = Get-Part $manifest 'wwise'
+$excludeGlobs = @($manifest.exclude) + @(if ($null -eq $wwisePart) { } elseif ($useWwise) { $wwisePart.excludeWith } else { $wwisePart.excludeWithout })
 $excludes = @($excludeGlobs | ForEach-Object { [regex]::new((ConvertTo-ExcludeRegex $_), 'IgnoreCase') })
 function Test-Excluded([string]$relative) {
     foreach ($pattern in $excludes) { if ($pattern.IsMatch($relative)) { return $true } }
@@ -284,6 +368,7 @@ function Add-AssetFile([string]$relative) {
 }
 
 Write-Step 'Collecting the assets'
+Write-Progress-Line 72 'assets'
 foreach ($asset in $manifest.assets) {
     $full = Join-Path $root $asset
     if (Test-Path $full -PathType Container) {
@@ -328,6 +413,7 @@ if ($useWwise) {
 Write-Step "$($files.Count) asset files"
 
 # ---------------------------------------------------------------- the folder
+Write-Progress-Line 80 'assemble'
 Write-Step "Assembling $dist"
 $outRoot = $outDir.TrimEnd('\') + '\'
 if (-not $dist.StartsWith($outRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to clean $dist" }
@@ -354,6 +440,40 @@ foreach ($relative in ($files | Sort-Object)) {
     Copy-Item (Join-Path $root $relative) $target
 }
 
+# The files that are not assets (the manifest part "files"): the game data and files of the machine, each to its place in the package. "from" is a path or a
+# list of them (the first one that is there is taken; %NAME% is an environment variable); "required" stops the packing when none is there, otherwise a warning
+# ("warnIfMissing": false makes it a plain line); "md5" says which file is meant; "requires" puts the file only when another file of the list was put.
+$placed = New-Object 'System.Collections.Generic.List[string]'
+foreach ($entry in (Get-List $manifest 'files')) {
+    $label = Get-Part $entry 'name'
+    if (-not $label) { $label = $entry.to }
+    $required = Get-Part $entry 'requires'
+    if ($required -and -not $placed.Contains($required)) { continue }
+    $sourceFile = $null
+    $tried = @(Get-List $entry 'from')
+    foreach ($candidate in $tried) {
+        $path = Resolve-DataPath $candidate
+        if (Test-Path $path -PathType Leaf) { $sourceFile = $path; break }
+    }
+    if ($null -eq $sourceFile) {
+        $message = "$label is not found ($($tried -join ', '))"
+        if (Get-Part $entry 'required') { throw $message }
+        $hint = Get-Part $entry 'ifMissing'
+        if ($hint) { $message += ": $hint" }
+        if ((Get-Part $entry 'warnIfMissing') -eq $false) { Write-Step $message } else { Write-Warning $message }
+        continue
+    }
+    $md5 = Get-Part $entry 'md5'
+    if ($md5 -and (Get-FileHash -Algorithm MD5 -LiteralPath $sourceFile).Hash -ne $md5.ToUpper()) {
+        throw "$sourceFile is not the file that the manifest means by '$label' (md5 $md5): it would go into the package under a wrong name"
+    }
+    $target = Join-Path $dist $entry.to.Replace('/', '\')
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+    Copy-Item -LiteralPath $sourceFile $target
+    $placed.Add($entry.to)
+    Write-Step ('{0}: {1} ({2:N1} MB, from {3})' -f $label, $entry.to, ((Get-Item -LiteralPath $target).Length / 1MB), $sourceFile)
+}
+
 # The Visual C++ runtime app-local (VC\Redist\MSVC\<version>\x64\Microsoft.VC*.CRT): the redistributable folder of Visual Studio
 if ($null -eq $vs) { $vs = Find-VisualStudio }
 $redistRoot = Join-Path $vs.Path 'VC\Redist\MSVC'
@@ -371,7 +491,8 @@ Write-TextFile (Join-Path $dist 'config\app.json') $appConfig $false
 $project = $manifest.project | ConvertTo-Json -Depth 4
 Write-TextFile (Join-Path $dist 'myengine.myproject') $project $false
 
-$readme = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'package_readme.txt')).Replace('{VERSION}', $version)
+Write-Progress-Line 88 'licenses'
+$readme = [System.IO.File]::ReadAllText((Join-Path $root $readmeTemplate)).Replace('{VERSION}', $version)
 $readme = $readme.Replace('{STEAM}', $(if ($useSteam) { 'yes' } else { 'no' }))
 $readme = $readme -replace "`r?`n", "`r`n"
 Write-TextFile (Join-Path $dist 'README.txt') $readme $true
@@ -379,10 +500,15 @@ Write-TextFile (Join-Path $dist 'README.txt') $readme $true
 $licenseDir = Join-Path $dist 'licenses'
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
 Copy-Item (Join-Path (Join-Path $root $manifest.licenses.notices) '*') $licenseDir
-foreach ($license in $manifest.licenses.copy) {
-    $source = Join-Path $root $license.from
-    if (-not (Test-Path $source)) { throw "License file not found: $($license.from)" }
-    Copy-Item $source (Join-Path $licenseDir $license.to)
+# a license of the manifest goes to licenses/; "root": true puts it next to the exe (COPYING, THIRD_PARTY.txt); "optional": true: not there is a warning
+foreach ($license in (Get-List $manifest.licenses 'copy')) {
+    $source = Resolve-DataPath $license.from
+    if (-not (Test-Path $source)) {
+        if (Get-Part $license 'optional') { Write-Warning "License file not found: $($license.from)"; continue }
+        throw "License file not found: $($license.from)"
+    }
+    $licenseTarget = if (Get-Part $license 'root') { $dist } else { $licenseDir }
+    Copy-Item $source (Join-Path $licenseTarget $license.to)
 }
 
 # Wwise: the notice of Audiokinetic and the licenses of the codecs that the libraries of the SDK have in them (Vorbis, Opus: linked statically, so
@@ -405,8 +531,27 @@ $sdkFiles = @(Get-ChildItem -Path $dist -Recurse -File | Where-Object { $_.Exten
 if ($sdkFiles.Count -gt 0) { throw "Files of an SDK are in the package: $($sdkFiles[0].FullName)" }
 
 $commit = 'unknown'
-try { $commit = (& git -C $root rev-parse --short HEAD 2>$null | Out-String).Trim() } catch { }
-Write-TextFile (Join-Path $dist 'version.txt') ("$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n") $false
+$commitFull = 'unknown'
+$treeState = 'the sources are exactly this commit'
+try {
+    $commit = (& git -C $root rev-parse --short HEAD 2>$null | Out-String).Trim()
+    $commitFull = (& git -C $root rev-parse HEAD 2>$null | Out-String).Trim()
+    $changes = @(& git -C $root status --porcelain 2>$null)
+    if ($changes.Count -gt 0) { $treeState = "the sources had $($changes.Count) uncommitted change(s) when this package was built: they are not in the commit" }
+} catch { }
+$versionText = "$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n"
+foreach ($placedFile in $placed) { $versionText += "file $placedFile`r`n" }
+Write-TextFile (Join-Path $dist 'version.txt') $versionText $false
+
+# The texts of the manifest part licenses.generated: a template of the repository with {VERSION}, {COMMIT}, {COMMIT_FULL}, {TREE} filled in (SOURCE.txt of a GPL game)
+foreach ($generated in (Get-List $manifest.licenses 'generated')) {
+    $template = [System.IO.File]::ReadAllText((Join-Path $root $generated.template))
+    $text = $template.Replace('{VERSION}', $version).Replace('{COMMIT_FULL}', $commitFull).Replace('{COMMIT}', $commit).Replace('{TREE}', $treeState)
+    $text = $text -replace "`r?`n", "`r`n"
+    $generatedTarget = if (Get-Part $generated 'root') { $dist } else { $licenseDir }
+    Write-TextFile (Join-Path $generatedTarget $generated.to) $text $true
+    if ($template.Contains('{COMMIT') -and $treeState -notlike 'the sources are exactly*') { Write-Warning "$($generated.to) names the commit $commit, but $treeState" }
+}
 
 # Steam (only with the SDK; see docs/game/rl-online.md section 7.4)
 if ($useSteam) {
@@ -416,6 +561,7 @@ if ($useSteam) {
 }
 
 # ---------------------------------------------------------------- size and zip
+Write-Progress-Line 94 'size'
 function Get-FolderSize([string]$path) {
     $sum = (Get-ChildItem -Path $path -Recurse -File | Measure-Object -Property Length -Sum).Sum
     if ($null -eq $sum) { return 0 }
@@ -428,12 +574,17 @@ Get-ChildItem -Path $dist | ForEach-Object {
     Write-Host ('    {0,-28} {1,8:N1} MB' -f $_.Name, ($size / 1MB))
 }
 
+$zipPath = ''
 if (-not $NoZip) {
-    $zip = Join-Path $outDir "$gameName-$version-win64-$steamTag$(if ($useWwise) { '' } else { '-nowwise' }).zip"
+    Write-Progress-Line 96 'zip'
+    $zipSteamTag = if ((Get-Option 'steam') -eq 'no') { '' } else { "-$steamTag" }
+    $zipWwiseTag = if ((Get-Option 'wwise') -eq 'no' -or $useWwise) { '' } else { '-nowwise' }
+    $zip = Join-Path $outDir "$gameName-$version-win64$zipSteamTag$zipWwiseTag$(if ($buildConfig -eq 'RelWithDebInfo') { '-rwdi' } else { '' }).zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::CreateFromDirectory($dist, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
     Write-Step ('{0}: {1:N1} MB' -f $zip, ((Get-Item $zip).Length / 1MB))
+    $zipPath = $zip
     if ($CopyZipTo) {
         $copyDir = [System.IO.Path]::GetFullPath($CopyZipTo)
         New-Item -ItemType Directory -Force -Path $copyDir | Out-Null
@@ -442,3 +593,7 @@ if (-not $NoZip) {
     }
 }
 Write-Step 'Done'
+Write-Progress-Line 100 'done'
+if ($zipPath) { Write-Host "##zip $zipPath" }
+Write-Host "##result ok $dist"
+

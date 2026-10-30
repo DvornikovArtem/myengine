@@ -1,6 +1,27 @@
 {
+  "id": "rocketarena",
+  "displayName": "Rocket Arena",
   "name": "RocketArena",
   "exe": "RocketArena.exe",
+
+  "build": {
+    "comment": "How the game is built (tools/package_game.ps1 -Game rocketarena, the Build window of the editor). cmakeTarget is the target of the shipping build; exePath is where its exe lands in the build folder; userDataFolder is the folder of the player's files under %LOCALAPPDATA%; checkScript checks a package of the game (the Check package button); readme is the template of README.txt of the package ({VERSION}, {STEAM}).",
+    "cmakeTarget": "myengine",
+    "exePath": "app/Release/RocketArena.exe",
+    "userDataFolder": "RocketArena",
+    "icon": "app/resources/RocketArena.ico",
+    "readme": "tools/package_readme.txt",
+    "checkScript": "tools/check_package.ps1"
+  },
+
+  "options": {
+    "comment": "What the Build window offers: steam and wwise are 'optional' (the SDK is looked for, the switch is there), 'no' (the game has none: the switch is not shown and the SDK is not looked for) ; zip is the default of the switch.",
+    "steam": "optional",
+    "wwise": "optional",
+    "zip": true
+  },
+
+  "externalData": [],
 
   "comment": "What goes into dist/RocketArena (tools/package_game.ps1, docs/game/packaging.md). 'assets' are roots: a file, a folder (with everything inside) or a wildcard, relative to the repository. With followReferences the script also takes everything a taken scene / material / shader / data file names (models, materials, textures, shaders), so the list follows the map: when the game scene moves to other assets, the old ones leave the package by themselves. 'exclude' wins over everything.",
 

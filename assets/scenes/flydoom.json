@@ -1,0 +1,17 @@
+{
+  "entities": [
+    {
+      "id": 1,
+      "Tag": { "name": "Camera_1" },
+      "Camera": {
+        "position": [0.0, 1.0, -5.0],
+        "rotationDeg": [0.0, 0.0, 0.0],
+        "fovYDeg": 60.0,
+        "nearPlane": 0.1,
+        "farPlane": 100.0,
+        "isPrimary": true
+      },
+      "WindowBinding": { "windowId": 1 }
+    }
+  ]
+}

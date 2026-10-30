@@ -226,6 +226,16 @@ set_property(TARGET myengine_dpi_scale_tests PROPERTY FOLDER "Tests")
 add_test(NAME dpi_scale COMMAND myengine_dpi_scale_tests)
 set_tests_properties(dpi_scale PROPERTIES TIMEOUT 60)
 
+# B0: the model of the Build window of the editor (the manifests of the games, the lines of the script, the state of a run, the runner on a child process)
+add_executable(myengine_build_panel_model_tests
+  core/BuildPanelModelTests.cpp)
+
+target_link_libraries(myengine_build_panel_model_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_build_panel_model_tests)
+set_property(TARGET myengine_build_panel_model_tests PROPERTY FOLDER "Tests")
+add_test(NAME build_panel_model COMMAND myengine_build_panel_model_tests)
+set_tests_properties(build_panel_model PROPERTIES TIMEOUT 120)
+
 # QA1: GPU diagnostics without a GPU: statistics text, capture tool lookup; the report script self test
 add_executable(myengine_gpu_stats_tests
   render/GpuStatsTests.cpp)
@@ -382,6 +392,17 @@ target_link_libraries(myengine_render_target_smoke PRIVATE myengine_engine)
 myengine_apply_compiler_options(myengine_render_target_smoke)
 set_property(TARGET myengine_render_target_smoke PROPERTY FOLDER "Tests")
 
+# D0: the classic DOOM of the engine (game/doom) with Freedoom, no window and no sound. Skipped (77) without the WAD:
+# tools/doom/fetch_freedoom.ps1 puts it into assets/doom
+add_executable(myengine_doom_core_tests
+  doom/DoomCoreTests.cpp)
+target_link_libraries(myengine_doom_core_tests PRIVATE myengine_doom)
+target_compile_definitions(myengine_doom_core_tests PRIVATE DOOM_TEST_WAD_DIR="${CMAKE_SOURCE_DIR}/assets/doom")
+myengine_apply_compiler_options(myengine_doom_core_tests)
+set_property(TARGET myengine_doom_core_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_core COMMAND myengine_doom_core_tests)
+set_tests_properties(doom_core PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 # G3: the Rocket League physics (Jolt) without a window
 add_executable(myengine_rl_physics_tests
   rl/RlPhysicsTests.cpp)
@@ -500,7 +521,6 @@ if(MYENGINE_ASAN)
   endforeach()
 endif()
 
-
 # G7c: the audio module without a sound device: WAV, 3D, the pool of voices, buses, fades, the sound bank, the sounds of the project
 add_executable(myengine_audio_tests
   audio/AudioTests.cpp)
@@ -511,7 +531,6 @@ set_property(TARGET myengine_audio_tests PROPERTY FOLDER "Tests")
 add_test(NAME audio COMMAND myengine_audio_tests)
 set_tests_properties(audio PROPERTIES TIMEOUT 120)
 
-
 # G7c: the particle simulation without a renderer: presets, bursts and rates, the budget, batches, the cost of 5000 particles
 add_executable(myengine_fx_tests
   fx/FxTests.cpp)
@@ -521,7 +540,6 @@ myengine_apply_compiler_options(myengine_fx_tests)
 set_property(TARGET myengine_fx_tests PROPERTY FOLDER "Tests")
 add_test(NAME fx COMMAND myengine_fx_tests)
 set_tests_properties(fx PROPERTIES TIMEOUT 120)
-
 
 # G7d: the sounds and effects of a Rocket League match from the state of the simulation: events of pairs of ticks, no doubles after a
 # rollback, the commands that reach the audio and particle systems (no device, no renderer), a bot match with the journal
@@ -534,7 +552,6 @@ set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
 set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
 
-
 # G4g: the training: free play, the packs of exercises (assets/data/training), the conditions of success, the attempts, the results file (no window)
 add_executable(myengine_rl_training_tests
   rl/RlTrainingTests.cpp)
@@ -546,7 +563,6 @@ set_property(TARGET myengine_rl_training_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_training COMMAND myengine_rl_training_tests)
 set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
 
-
 # G4i: the cars of the garage: the data (the hitboxes of RocketSim), the meshes and previews they name, the bars, broken data, the key in the settings (no window)
 add_executable(myengine_rl_cars_tests
   rl/RlCarsTests.cpp)
@@ -556,7 +572,6 @@ myengine_apply_compiler_options(myengine_rl_cars_tests)
 set_property(TARGET myengine_rl_cars_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_cars COMMAND myengine_rl_cars_tests)
 set_tests_properties(rl_cars PROPERTIES TIMEOUT 120)
-
 
 # G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
 # RlFeedback in the replay mode (no window)
@@ -569,7 +584,6 @@ set_property(TARGET myengine_rl_replay_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_replay COMMAND myengine_rl_replay_tests)
 set_tests_properties(rl_replay PROPERTIES TIMEOUT 300)
 
-
 # G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery
 add_executable(myengine_rl_ui_tests
   ui/RlUiTests.cpp)
@@ -580,7 +594,6 @@ myengine_apply_compiler_options(myengine_rl_ui_tests)
 set_property(TARGET myengine_rl_ui_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_ui COMMAND myengine_rl_ui_tests)
 set_tests_properties(rl_ui PROPERTIES TIMEOUT 120)
-
 
 # G1-flow: the game mode of Rocket League without a window: the settings file, the script of the UI tests, and RlGameSystem driven through the commands of the
 # screens (a match from the start to the results, the pause, the feed, the lobby, the controls)
@@ -626,3 +639,183 @@ if(MYENGINE_WWISE)
   add_test(NAME audio_wwise_stress COMMAND myengine_wwise_stress_tests)
   set_tests_properties(audio_wwise_stress PROPERTIES TIMEOUT 60)
 endif()
+
+# F0: Face ID without a camera: the decisions, the alignment, the profile file and (when ONNX Runtime and the models are there) YuNet + SFace on two public domain
+# portraits. Exit code 77: no ONNX Runtime, models or portraits (tools/faceid/fetch_models.ps1 -WithTestImage), the test is skipped.
+add_executable(myengine_faceid_tests
+  faceid/FaceIdTests.cpp)
+
+target_link_libraries(myengine_faceid_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_faceid_tests)
+myengine_copy_runtime_assets(myengine_faceid_tests)
+set_property(TARGET myengine_faceid_tests PROPERTY FOLDER "Tests")
+add_test(NAME faceid COMMAND myengine_faceid_tests)
+set_tests_properties(faceid PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+# N0 (FlyDoom): the fly brain model on graphs built in code: LIF rate vs analytic, refractoriness, the 1.8 ms delay, Poisson
+# input, spikes of Brian2 (Shiu's equations) one for one, the event-driven simulation vs a step-by-step reference, bit-identical spikes on the job system (docs/flybrain/flybrain.md)
+add_executable(myengine_flybrain_tests
+  flybrain/FlyBrainTests.cpp
+  flybrain/BrianGolden.h
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_tests)
+set_property(TARGET myengine_flybrain_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain COMMAND myengine_flybrain_tests)
+set_tests_properties(flybrain PROPERTIES TIMEOUT 120)
+
+# N0: the same on the real connectome (assets/flybrain/malecns_v1.fbrain, tools/flybrain/fetch_malecns.ps1). Skipped (exit
+# code 77) when the file is not downloaded
+add_executable(myengine_flybrain_connectome_tests
+  flybrain/FlyBrainConnectomeTests.cpp)
+
+target_link_libraries(myengine_flybrain_connectome_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_connectome_tests)
+set_property(TARGET myengine_flybrain_connectome_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_connectome COMMAND myengine_flybrain_connectome_tests)
+set_tests_properties(flybrain_connectome PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N0: speed of the fly brain against real time, 1/2/4/8 threads (manual, not in ctest: minutes)
+add_executable(myengine_flybrain_bench
+  flybrain/FlyBrainBench.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_bench PRIVATE myengine_flybrain myengine_engine psapi)
+myengine_apply_compiler_options(myengine_flybrain_bench)
+set_property(TARGET myengine_flybrain_bench PROPERTY FOLDER "Tests")
+
+# V0: the 3D view of the fly brain (game/brainview): layout, flash buffer, activity of the groups, camera, the runner on a small brain, and the picture of a point
+# cloud on a real DX12 device (or WARP) read back from a render target. Exit code 77: no device, desktop or shader next to the test (the rest has run).
+add_executable(myengine_brainview_tests
+  brainview/BrainViewTests.cpp)
+
+target_link_libraries(myengine_brainview_tests PRIVATE myengine_brainview myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_brainview_tests)
+myengine_copy_runtime_assets(myengine_brainview_tests)
+set_property(TARGET myengine_brainview_tests PROPERTY FOLDER "Tests")
+add_test(NAME brainview COMMAND myengine_brainview_tests)
+set_tests_properties(brainview PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+# Manual (not CTest): the fly brain on the real connectome without the editor: --bench measures the frame time of the cloud with the brain running next to it, --out saves
+# frames of the picture (the evidence of V0)
+add_executable(myengine_brainview_demo
+  brainview/BrainViewDemo.cpp)
+
+target_link_libraries(myengine_brainview_demo PRIVATE myengine_brainview myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_brainview_demo)
+myengine_copy_runtime_assets(myengine_brainview_demo)
+set_property(TARGET myengine_brainview_demo PROPERTY FOLDER "Tests")
+# N0b: the GPU backend of the fly brain (DX12 compute, assets/shaders/flybrain.hlsl) against the CPU: the same spikes on a
+# synthetic graph and on the connectome when it is downloaded. Skipped (exit code 77) without a DX12 adapter with doubles
+add_executable(myengine_flybrain_gpu_tests
+  flybrain/FlyBrainGpuTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_gpu_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_gpu_tests)
+myengine_copy_runtime_assets(myengine_flybrain_gpu_tests)
+set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
+set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N2: the brains of the swarm (FlySwarmBrain): replicas = single brains, the batch on the GPU = on the CPU, and with the
+# connectome the cut-out circuit (size, silence, looming -> escape and steering, speed of 32 flies)
+add_executable(myengine_flybrain_swarm_tests
+  flybrain/FlyBrainSwarmTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_swarm_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_swarm_tests)
+myengine_copy_runtime_assets(myengine_flybrain_swarm_tests)
+set_property(TARGET myengine_flybrain_swarm_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_swarm COMMAND myengine_flybrain_swarm_tests)
+set_tests_properties(flybrain_swarm PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N2: cuts the swarm circuit out of MaleCNS into assets/flybrain/swarm_circuit.fbrain (manual)
+add_executable(myengine_flybrain_circuit
+  flybrain/FlyBrainCircuitTool.cpp)
+
+target_link_libraries(myengine_flybrain_circuit PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_circuit)
+set_property(TARGET myengine_flybrain_circuit PROPERTY FOLDER "Tests")
+
+# N1: the fly plays DOOM (game/doomfly, docs/game/flydoom-fly.md): the eyes, the controls, the steering by the picture, damage, a brain that runs away, E1M1.
+# Skipped (exit code 77) without the connectome (tools/flybrain/fetch_malecns.ps1); the game of E1M1 needs a WAD (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad)
+add_executable(myengine_doom_fly_tests
+  doomfly/DoomFlyTests.cpp)
+target_link_libraries(myengine_doom_fly_tests PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+target_compile_definitions(myengine_doom_fly_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+myengine_apply_compiler_options(myengine_doom_fly_tests)
+set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
+set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
+# V1: the menu of FlyDoom without a window: the settings file, the levels of a WAD by its name, the arguments of DOOM that start one
+add_executable(myengine_doom_frontend_tests
+  doomflow/DoomFrontEndTests.cpp)
+
+target_link_libraries(myengine_doom_frontend_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_doom_frontend_tests)
+set_property(TARGET myengine_doom_frontend_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_frontend COMMAND myengine_doom_frontend_tests)
+set_tests_properties(doom_frontend PROPERTIES TIMEOUT 60)
+
+# D1c: the swarm of enemy flies (game/doomfly FlySwarm, game/doom DoomSwarm): the pictures of the fly, the brain of the circuit at looming, a game of E1M1 with waves.
+# The brain and the game need assets/flybrain/swarm_circuit.fbrain (build/tests/RelWithDebInfo/myengine_flybrain_circuit.exe) and the game a WAD
+# (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad); they are skipped without them
+add_executable(myengine_doom_swarm_tests
+  doomfly/SwarmTests.cpp)
+target_link_libraries(myengine_doom_swarm_tests PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+target_compile_definitions(myengine_doom_swarm_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+myengine_apply_compiler_options(myengine_doom_swarm_tests)
+set_property(TARGET myengine_doom_swarm_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_fly_swarm COMMAND myengine_doom_swarm_tests)
+set_tests_properties(doom_fly_swarm PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+# D1: what the motion and looming neurons answer to on synthetic scenes (manual tool, not in ctest): myengine_doomfly_vision [gpu|cpu] [onGain] [offGain]
+add_executable(myengine_doomfly_vision
+  doomfly/FlyVision.cpp)
+target_link_libraries(myengine_doomfly_vision PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_vision)
+set_property(TARGET myengine_doomfly_vision PROPERTY FOLDER "Tests")
+
+# N3: the fly learns: KC -> MBON synapses weaken by the dopamine of their compartment (conditioning on a synthetic
+# mushroom body, the memory file, CPU = GPU, and the PPL101 compartments of MaleCNS when the connectome is there)
+add_executable(myengine_flybrain_plasticity_tests
+  flybrain/FlyBrainPlasticityTests.cpp)
+
+target_link_libraries(myengine_flybrain_plasticity_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_plasticity_tests)
+myengine_copy_runtime_assets(myengine_flybrain_plasticity_tests)
+set_property(TARGET myengine_flybrain_plasticity_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_plasticity COMMAND myengine_flybrain_plasticity_tests)
+set_tests_properties(flybrain_plasticity PROPERTIES TIMEOUT 300)
+
+# N3b: what the connectome says about learning in the game: the inputs of the Kenyon cells, MBON -> descending neurons,
+# the share of KCs a visual drive makes fire (manual)
+add_executable(myengine_flybrain_mb_probe
+  flybrain/FlyBrainMushroomProbe.cpp)
+
+target_link_libraries(myengine_flybrain_mb_probe PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_mb_probe)
+set_property(TARGET myengine_flybrain_mb_probe PROPERTY FOLDER "Tests")
+
+# N3b: the fly learns what it sees, on the connectome: KcVision (the visual inputs of the KCs and their receptive fields),
+# a sparse KC answer without runaway, "view X + damage" weakens the MBON answer to X more than to Y. Skipped (77) without the file
+add_executable(myengine_flybrain_kc_vision_tests
+  flybrain/FlyBrainKcVisionTests.cpp)
+
+target_link_libraries(myengine_flybrain_kc_vision_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_kc_vision_tests)
+set_property(TARGET myengine_flybrain_kc_vision_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_kc_vision COMMAND myengine_flybrain_kc_vision_tests)
+set_tests_properties(flybrain_kc_vision PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+
+# N3b: does the fly learn in the game? Lives of the fly that learns, with learning on or off, the same seed (manual tool, not in ctest):
+# myengine_fly_learn_measure --learning 0|1 [--lives 25] [--skill 5] [--seed 1] [--trace <file>] [--calibrate] (FlyLearnMeasure.cpp)
+add_executable(myengine_fly_learn_measure
+  doomfly/FlyLearnMeasure.cpp)
+
+target_link_libraries(myengine_fly_learn_measure PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+myengine_apply_compiler_options(myengine_fly_learn_measure)
+set_property(TARGET myengine_fly_learn_measure PROPERTY FOLDER "Tests")

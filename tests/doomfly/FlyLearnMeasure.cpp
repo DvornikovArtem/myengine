@@ -1,0 +1,321 @@
+// FlyLearnMeasure.cpp
+// N3b (FlyDoom): does the fly learn in the game? The fly plays one map life after life with the learning brain (FlyPlayerConfig::learning,
+// controls_learn.json); the arms differ by learning on or off only, with the same seed. While the player is dead the tool presses "use" to come
+// back. Prints every life and a summary; docs/flybrain/flybrain.md, section "Муха учится в игре".
+//   per life: seconds, damage, damage per second, kills, the KC spikes per second, the mean learned scale, and the turn away from the attacker:
+//   for every hit with a known attacker, how much the angle between the view and the attacker grew in the second after the hit (degrees)
+//
+//   myengine_fly_learn_measure --learning 0|1 [--lives 20] [--max-minutes 30] [--seed 1] [--skill 4] [--map 1] [--backend auto|cpu|gpu]
+//                              [--trace <file>] (one line per tic: the player, the command, the frame hash, the brain step)
+//                              [--controls controls_learn.json] [--plain] (the brain of D1a, without the learning mode: a reference)
+//                              [--kc-rate 120] (KcVisionConfig::maxRateHz; 0: the KCs see nothing)
+//                              [--calibrate] (the rates of the controls on even frames, for the offsets of the controls)
+
+#include <doom/DoomGame.h>
+#include <doomfly/FlyControls.h>
+#include <doomfly/FlyPlayer.h>
+#include <flybrain/FlyBrain.h>
+#include <myengine/jobs/JobSystem.h>
+
+#include <windows.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace
+{
+    // Forwards the commands of the fly; while the player is dead it presses "use" every other tic to come back
+    struct Respawner : doom::ITicCmdSource
+    {
+        doomfly::FlyPlayer* fly = nullptr;
+        bool dead = false;
+        int tic = 0;
+        doom::TicCmd last;
+        void BuildTicCmd(int player, doom::TicCmd& cmd) override
+        {
+            fly->BuildTicCmd(player, cmd);
+            if (player == 0 && dead)
+            {
+                cmd.buttons = (++tic % 2) ? doom::kButtonUse : 0;
+                cmd.forwardMove = 0;
+                cmd.sideMove = 0;
+                cmd.angleTurn = 0;
+            }
+            if (player == 0)
+            {
+                last = cmd;
+            }
+        }
+    };
+
+    // The angle (degrees, 0 .. 180) between the view of the player and the direction to the attacker
+    double OffAttacker(const doom::PlayerState& p)
+    {
+        const double to = std::atan2(p.attackerY - p.y, p.attackerX - p.x) * 180.0 / 3.14159265358979;
+        double d = std::fmod(std::fabs(to - p.angleDegrees), 360.0);
+        return d > 180.0 ? 360.0 - d : d;
+    }
+
+    struct Hit
+    {
+        int tic = 0;
+        double offAtHit = 0.0;
+    };
+
+    struct Life
+    {
+        int tics = 0;
+        int damage = 0;
+        int kills = 0;
+        bool died = false;
+        double kcSum = 0.0;          // KC spikes per second, summed over the tics
+        double scale = 1.0;
+        std::vector<Hit> open;       // hits waiting for their second
+        double awaySum = 0.0;
+        int awayCount = 0;
+    };
+
+    double Mean(const std::vector<double>& v)
+    {
+        double s = 0.0;
+        for (double x : v)
+        {
+            s += x;
+        }
+        return v.empty() ? 0.0 : s / static_cast<double>(v.size());
+    }
+}
+
+int main(int argc, char** argv)
+{
+    int learning = 1;
+    int lifeTarget = 20;
+    double maxMinutes = 30.0;
+    uint64_t seed = 1;
+    std::string skill = "4";
+    std::string map = "1";
+    std::string backend = "auto";
+    std::string tracePath;
+    std::string controls = "controls_learn.json";
+    bool plain = false;
+    bool calibrate = false;
+    float kcRate = -1.0f;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+        auto next = [&]() { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
+        if (arg == "--learning") learning = std::atoi(next().c_str());
+        else if (arg == "--lives") lifeTarget = std::atoi(next().c_str());
+        else if (arg == "--max-minutes") maxMinutes = std::atof(next().c_str());
+        else if (arg == "--seed") seed = std::strtoull(next().c_str(), nullptr, 10);
+        else if (arg == "--skill") skill = next();
+        else if (arg == "--map") map = next();
+        else if (arg == "--backend") backend = next();
+        else if (arg == "--trace") tracePath = next();
+        else if (arg == "--controls") controls = next();
+        else if (arg == "--plain") plain = true;
+        else if (arg == "--calibrate") calibrate = true;
+        else if (arg == "--kc-rate") kcRate = static_cast<float>(std::atof(next().c_str()));
+    }
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    myengine::jobs::Initialize();
+
+    const fs::path source = fs::path(MYENGINE_SOURCE_DIR);
+    std::string error;
+    auto connectome = flybrain::Connectome::Load((source / "assets/flybrain/malecns_v1.fbrain").u8string(), &error);
+    if (!connectome)
+    {
+        std::printf("connectome: %s\n", error.c_str());
+        return 77;
+    }
+    wchar_t* local = nullptr;
+    size_t length = 0;
+    _wdupenv_s(&local, &length, L"LOCALAPPDATA");
+    const fs::path wad = fs::path(local ? local : L"") / L"FlyDoom" / L"wads" / L"doom1.wad";
+    std::free(local);
+    if (!fs::exists(wad))
+    {
+        std::printf("no WAD at %s\n", wad.u8string().c_str());
+        return 77;
+    }
+
+    doom::DoomConfig config;
+    config.iwad = wad;
+    config.dataDirectory = fs::temp_directory_path() / "myengine_fly_learn";
+    std::error_code removed;
+    fs::remove_all(config.dataDirectory, removed);   // no default.cfg of an earlier run: every run starts the same
+    config.extraArgs = { "-warp", "1", map, "-skill", skill, "-nomusic" };
+    auto game = doom::DoomGame::Create(config, error);
+    if (!game)
+    {
+        std::printf("DOOM: %s\n", error.c_str());
+        return 1;
+    }
+    for (int i = 0; i < 10; ++i)
+    {
+        game->StepTic();
+    }
+
+    doomfly::FlyPlayerConfig fly;
+    fly.connectome = connectome;
+    fly.seed = seed;
+    fly.backend = backend == "cpu" ? flybrain::BackendChoice::Cpu : backend == "gpu" ? flybrain::BackendChoice::Gpu : flybrain::BackendChoice::Auto;
+    fly.pace = false;
+    fly.learning.enabled = !plain;
+    fly.learning.learning = learning != 0;
+    if (kcRate >= 0.0f)
+    {
+        fly.learning.vision.maxRateHz = kcRate;
+    }
+    fly.log = [](const std::string& line) { std::printf("%s\n", line.c_str()); };
+    if (!doomfly::FlyControls::Load(source / "assets/flybrain" / controls, fly.controls, error))
+    {
+        std::printf("controls: %s\n", error.c_str());
+        return 1;
+    }
+    auto player = doomfly::FlyPlayer::Create(fly, error);
+    if (!player)
+    {
+        std::printf("player: %s\n", error.c_str());
+        return 1;
+    }
+    if (calibrate)
+    {
+        // The rates of the groups of the controls on even grey, dark and bright frames: the offsets of the controls of this brain (as N1 did for DOOMFLY)
+        for (const float grey : { 0.5f, 0.1f, 0.9f })
+        {
+            const uint32_t c = static_cast<uint32_t>(grey * 255.0f);
+            std::vector<uint32_t> frame(static_cast<size_t>(doom::kScreenWidth) * doom::kScreenHeight, (c << 16) | (c << 8) | c);
+            auto still = doomfly::FlyPlayer::Create(fly, error);
+            const doomfly::FlyStatus status = still->EvaluateFrameForTest(frame.data(), 140);
+            std::printf("calibrate grey %.1f: turn %.2f Hz, forward %.2f Hz, fire %.2f Hz;", grey, status.turnHz, status.forwardHz, status.fireHz);
+            for (const doomfly::RateReading& r : status.rates)
+            {
+                std::printf(" %s %.1f;", r.name.c_str(), r.hz);
+            }
+            std::printf("\n");
+        }
+        return 0;
+    }
+    player->Attach(*game);
+    Respawner respawner;
+    respawner.fly = player.get();
+    game->SetTicCmdSource(&respawner);
+    FILE* trace = nullptr;
+    if (!tracePath.empty() && fopen_s(&trace, tracePath.c_str(), "w") != 0)
+    {
+        trace = nullptr;
+    }
+
+    const int maxTics = static_cast<int>(maxMinutes * 60.0 * 35.0);
+    std::vector<Life> lives(1);
+    doom::PlayerState prev = game->Player(0);
+    const auto begin = std::chrono::steady_clock::now();
+    int tic = 0;
+    for (; tic < maxTics; ++tic)
+    {
+        const uint64_t frame = trace != nullptr ? game->FrameHash() : 0;
+        player->StepBlocking(*game);
+        const doom::PlayerState p = game->Player(0);
+        const doomfly::FlyStatus status = player->Status();
+        Life& life = lives.back();
+        if (trace != nullptr)
+        {
+            std::fprintf(trace, "%d hp %d pos %.4f %.4f ang %.4f cmd %d %d %u frame %016llx step %llu turnHz %.1f forwardHz %.1f central %.0f kc %.0f\n", tic, p.health, p.x,
+                p.y, p.angleDegrees, respawner.last.forwardMove, respawner.last.angleTurn, respawner.last.buttons, static_cast<unsigned long long>(frame),
+                static_cast<unsigned long long>(player->Snapshot().step), status.turnHz, status.forwardHz, status.centralSpikesPerSecond, status.kcSpikesPerSecond);
+        }
+        if (!respawner.dead)
+        {
+            ++life.tics;
+            const int hurt = std::max(0, prev.health - p.health);
+            life.damage += hurt;
+            life.kills += std::max(0, p.kills - prev.kills);
+            life.kcSum += status.kcSpikesPerSecond;
+            if (hurt > 0 && p.hasAttacker && p.health > 0)
+            {
+                life.open.push_back({ tic, OffAttacker(p) });
+            }
+            for (auto it = life.open.begin(); it != life.open.end();)
+            {
+                if (tic - it->tic >= 35)
+                {
+                    if (p.hasAttacker)
+                    {
+                        life.awaySum += OffAttacker(p) - it->offAtHit;
+                        ++life.awayCount;
+                    }
+                    it = life.open.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            if (p.health <= 0)
+            {
+                life.died = true;
+                life.scale = status.learnedScale;
+                respawner.dead = true;
+                const double seconds = life.tics / 35.0;
+                std::printf("life %zu: %.1f s, damage %d (%.2f / s), kills %d, KC %.0f spikes / s, turn away %+.1f deg over %d hits, mean scale %.5f\n", lives.size(),
+                    seconds, life.damage, seconds > 0 ? life.damage / seconds : 0.0, life.kills, life.tics ? life.kcSum / life.tics : 0.0,
+                    life.awayCount ? life.awaySum / life.awayCount : 0.0, life.awayCount, life.scale);
+                if (static_cast<int>(lives.size()) >= lifeTarget)
+                {
+                    break;
+                }
+            }
+        }
+        else if (p.health > 0)
+        {
+            respawner.dead = false;
+            lives.push_back(Life{});
+        }
+        prev = p;
+    }
+    const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+    if (trace != nullptr)
+    {
+        std::fclose(trace);
+    }
+
+    // Summary over the lives that ended in death, and the first and the second half of them
+    std::vector<double> seconds, damageRate, away;
+    double awaySum = 0.0;
+    int awayCount = 0;
+    for (const Life& life : lives)
+    {
+        if (!life.died)
+        {
+            continue;
+        }
+        seconds.push_back(life.tics / 35.0);
+        damageRate.push_back(life.tics ? life.damage / (life.tics / 35.0) : 0.0);
+        awaySum += life.awaySum;
+        awayCount += life.awayCount;
+    }
+    const size_t half = seconds.size() / 2;
+    const std::vector<double> firstHalf(seconds.begin(), seconds.begin() + half), secondHalf(seconds.begin() + half, seconds.end());
+    std::vector<double> sorted = seconds;
+    std::sort(sorted.begin(), sorted.end());
+    std::printf("SUMMARY learning=%d skill=%s map=%s seed=%llu lives_died=%zu mean_life_s=%.1f median_life_s=%.1f first_half_mean_s=%.1f "
+                "second_half_mean_s=%.1f damage_per_s=%.3f turn_away_deg=%+.2f hits=%d mean_scale=%.5f tics=%d wall_s=%.0f resets=%u seizures=%u\n",
+        learning, skill.c_str(), map.c_str(), static_cast<unsigned long long>(seed), seconds.size(), Mean(seconds), sorted.empty() ? 0.0 : sorted[sorted.size() / 2],
+        Mean(firstHalf), Mean(secondHalf), Mean(damageRate), awayCount ? awaySum / awayCount : 0.0, awayCount, player->Status().learnedScale, tic, wall,
+        player->Status().resets, player->Status().seizures);
+    game->SetTicCmdSource(nullptr);
+    player->Detach(*game);
+    player.reset();
+    game.reset();
+    myengine::jobs::Shutdown();
+    return 0;
+}

@@ -1,0 +1,61 @@
+{
+  "name": "DOOMFLY + MBON",
+  "description": "The DOOMFLY controls (controls_doomfly.json) for the fly that learns (N3b, docs/flybrain/flybrain.md, \"Муха учится в игре\"): the turn also gets MBON32 and MBON20 right minus left, the output neurons of the mushroom body that the KCs of the picture reach in the PPL1 compartments. The fly turns towards the side whose MBONs answer more; what hurt it weakens the MBONs of what it saw, so it turns away from it. In the connectome the MBONs barely reach the descending neurons (at most 1.3 % of their input): this MBON -> turn is our weight, not the biology. The offsets and the gains are measured for this brain in the game (E1M1, skill 5, the first minute, myengine_fly_learn_measure): the visual input of the KCs puts the central brain into another state, where DNp20 right minus left is 0.5 Hz on average (11 Hz in the brain of D1a) and DNpe017 3.7 Hz (23.4): so the turn offset is 0.5 Hz, the walk gain 6 and the fire threshold 4 Hz, for the same walk and the same shooting as DOOMFLY.",
+  "smoothingMs": 100,
+  "turn": {
+    "terms": [
+      { "type": "DNp20", "side": "right", "weight": 1.0 },
+      { "type": "DNp20", "side": "left", "weight": -1.0 },
+      { "type": "DNa02", "side": "right", "weight": 2.0 },
+      { "type": "DNa02", "side": "left", "weight": -2.0 },
+      { "type": "MBON32", "side": "right", "weight": 0.5 },
+      { "type": "MBON32", "side": "left", "weight": -0.5 },
+      { "type": "MBON20", "side": "right", "weight": 0.5 },
+      { "type": "MBON20", "side": "left", "weight": -0.5 }
+    ],
+    "offsetHz": 0.5,
+    "deadZoneHz": 2.0,
+    "gain": 0.12,
+    "limit": 6.0
+  },
+  "forward": {
+    "terms": [
+      { "type": "DNpe017", "side": "any", "weight": 1.0 }
+    ],
+    "deadZoneHz": 0.0,
+    "gain": 6.0,
+    "limit": 50.0
+  },
+  "fire": {
+    "terms": [
+      { "type": "DNpe017", "side": "any", "weight": 1.0 }
+    ],
+    "thresholdHz": 4.0,
+    "spikeTerms": [
+      { "type": "DNp01", "side": "any", "weight": 1.0 }
+    ],
+    "windowMs": 100,
+    "minSpikes": 1
+  },
+  "show": [
+    { "type": "LPLC2", "side": "left" },
+    { "type": "LPLC2", "side": "right" },
+    { "type": "LC4", "side": "left" },
+    { "type": "LC4", "side": "right" },
+    { "type": "MBON32", "side": "left" },
+    { "type": "MBON32", "side": "right" },
+    { "type": "MBON20", "side": "left" },
+    { "type": "MBON20", "side": "right" }
+  ],
+  "use": {
+    "everyTics": 35,
+    "stuckTics": 12,
+    "stuckUnits": 6.0
+  },
+  "unstick": {
+    "afterTics": 50,
+    "turnDegrees": 5.0,
+    "forTics": 18,
+    "backUnits": 10.0
+  }
+}

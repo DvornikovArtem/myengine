@@ -238,6 +238,60 @@ namespace myengine::render
         core::Color color{1.0f, 0.3f, 0.2f, 1.0f};
     };
 
+    // A cloud of glowing points that all look alike and flash over time (IRenderAdapter::CreatePointCloud, docs/flybrain/brain-view.md): the positions
+    // go to the GPU once, only one float per point (when it flashed last) goes there every frame
+    struct PointCloudHandle
+    {
+        std::uint32_t value = 0;
+
+        bool IsValid() const
+        {
+            return value != 0;
+        }
+    };
+
+    struct PointCloudData
+    {
+        std::vector<float> positions;          // x, y, z of every point (3 floats each)
+        std::vector<std::uint8_t> colorIndex;  // the row of PointCloudDrawParams::palette of every point (0..15); empty: all 0
+        std::uint32_t Count() const { return static_cast<std::uint32_t>(positions.size() / 3); }
+    };
+
+    // The time of the last flash of every point kept on the GPU by whoever runs the simulation (the GPU brain of FlyDoom): one uint per point, the step of its last
+    // spike (0xFFFFFFFF: never). The renderer reads the buffer as the second vertex stream instead of the floats of `flashTimes`; there is no copy to the CPU.
+    struct GpuFlashSource
+    {
+        void* buffer = nullptr;               // ID3D12Resource* of the device of the renderer, in the COMMON state between the submissions of its owner
+        void* fence = nullptr;                // ID3D12Fence* that the owner signals; the graphics queue waits for fenceValue before it reads (null: no wait)
+        std::uint64_t fenceValue = 0;
+        std::uint32_t stepWhole = 0;          // the step "now" on the clock of the simulation
+        float stepFraction = 0.0f;            // plus a part of a step: the wall time since that step was known, in steps (the flashes keep fading between the tics of a game)
+        float stepSeconds = 0.0001f;          // the length of a step
+    };
+
+    // One draw of a cloud into the render target that is being rendered (between BeginRenderTarget and EndRenderTarget)
+    struct PointCloudDrawParams
+    {
+        Matrix4 view = Matrix4::Identity();
+        Matrix4 projection = Matrix4::Identity();
+        const float* flashTimes = nullptr;     // one float per point: the time of its last flash, seconds (any clock, the same as `time`); read during the call
+        GpuFlashSource gpuFlash;               // or the steps of the last spikes on the GPU (then flashTimes may be null)
+        float time = 0.0f;                     // now
+        float decaySeconds = 0.15f;            // a flash fades to 1/e in this time
+        float baseBrightness = 0.04f;          // a point at rest (HDR: above 1 glows)
+        float flashBrightness = 5.0f;          // added by a point that flashes just now
+        float baseSizePixels = 1.6f;
+        float flashSizePixels = 3.0f;          // added by a flash, in pixels of the target
+        float referenceDepth = 3.0f;           // distance of the camera at which the point size is as given; nearer ones are bigger
+        float depthRange = 1.5f;               // points this much behind the reference depth are dimmed to a quarter
+        float palette[16][4] = {};             // the colour of each colour index (rgb; a is not used)
+        bool bloom = true;
+        float bloomThreshold = 0.6f;
+        float bloomIntensity = 1.0f;
+        float exposure = 1.0f;                 // the HDR picture goes to the 8 bit target as 1 - exp(-x * exposure)
+        core::Color background{0.0f, 0.0f, 0.0f, 1.0f};
+    };
+
     struct UiVertex
     {
         Float2 position{};

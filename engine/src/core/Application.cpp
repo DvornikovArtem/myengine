@@ -40,6 +40,7 @@
 #include <myengine/ecs/systems/PlayerControlSystem.h>
 #include <myengine/ecs/systems/RenderSystem.h>
 #include <myengine/ecs/systems/RlGameSystem.h>
+#include <myengine/game/DoomGameFlow.h>
 #include <myengine/game/RlGameFlow.h>
 #include <myengine/game/RlGameSettings.h>
 #include <myengine/jobs/JobSystem.h>
@@ -59,6 +60,48 @@ namespace myengine::core
     {
         // The scene opened without --scene (benchmark.json stays available through --scene for LR1 measurements)
         constexpr char kDefaultScenePath[] = "assets/scenes/coin_guard_demo.json";
+
+        // An environment variable that is set to anything but "" and "0" (MYENGINE_NO_FACEID=1)
+        bool EnvironmentFlag(const char* name)
+        {
+            char* value = nullptr;
+            std::size_t length = 0;
+            bool on = false;
+            if (_dupenv_s(&value, &length, name) == 0 && value != nullptr)
+            {
+                on = value[0] != '\0' && std::string(value) != "0";
+                std::free(value);
+            }
+            return on;
+        }
+
+        // The path in an environment variable (MYENGINE_FACEID_DB, set by --faceid-db), empty when there is none
+        std::filesystem::path EnvironmentPath(const wchar_t* name)
+        {
+            wchar_t* value = nullptr;
+            std::size_t length = 0;
+            std::filesystem::path path;
+            if (_wdupenv_s(&value, &length, name) == 0 && value != nullptr)
+            {
+                path = value;
+                std::free(value);
+            }
+            return path;
+        }
+
+        // The editor overlay of the UiManager as the context of the Face ID screens
+        faceid::FaceIdUiContext ToFaceIdContext(const ui::UiManager::EditorOverlayContext& context)
+        {
+            faceid::FaceIdUiContext result;
+            result.width = context.width;
+            result.height = context.height;
+            result.time = context.time;
+            result.uploadPreview = [upload = context.uploadImage](const faceid::FaceImage& image, const bool mirror) -> std::uint64_t
+            {
+                return upload ? upload(image.width, image.height, image.rgb.data(), mirror) : 0;
+            };
+            return result;
+        }
 
         // Buttons that hold the OS mouse capture (bits of Application::mouseCaptureButtons_)
         constexpr std::uint32_t kCaptureLeftButton = 1u << 0;
@@ -174,13 +217,22 @@ namespace myengine::core
         Shutdown();
     }
 
+    void Application::AddEditorToolWindow(std::string name, std::function<void(bool& open, double deltaSeconds)> draw, const bool openAtStart)
+    {
+        ui::EditorToolWindow tool;
+        tool.name = std::move(name);
+        tool.open = openAtStart;
+        tool.draw = std::move(draw);
+        editorToolWindows_.push_back(std::move(tool));
+    }
+
     bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& requestedScene, const bool requestedPlay)
     {
         config_ = config;
 
         // The scene to start with: the command line first, then "startScene" / "startInPlay" of app.json
         // The game mode (--game or "startInGame" of app.json) plays the Rocket League map with the screens of the game instead of the editor
-        gameMode_ = gameMode_ || config.startInGame;
+        gameMode_ = gameMode_ || config.startInGame || doomMode_;
         char* keepIme = nullptr;
         std::size_t keepImeLength = 0;
         const bool keepTextServices = _dupenv_s(&keepIme, &keepImeLength, "MYENGINE_KEEP_IME") == 0 && keepIme != nullptr && *keepIme != '\0';  // for the comparison of the frame times
@@ -196,7 +248,7 @@ namespace myengine::core
         std::filesystem::path scenePath = sceneFromConfig ? std::filesystem::u8path(config.startScene) : requestedScene;
         if (gameMode_ && scenePath.empty())
         {
-            scenePath = "assets/scenes/rocket_league.json";
+            scenePath = doomMode_ ? "assets/scenes/flydoom.json" : "assets/scenes/rocket_league.json";
         }
         const bool startInPlay = requestedPlay || gameMode_ || (sceneFromConfig && config.startInPlay);
 
@@ -385,9 +437,11 @@ namespace myengine::core
         sceneEditorServices.world = &world_;
         sceneEditorServices.resourceManager = resourceManager_.get();
         sceneEditorServices.thumbnails = thumbnailService_.get();
+        sceneEditorServices.toolWindows = &editorToolWindows_;
         sceneEditorServices.logger = &logger_;
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
+        sceneEditorServices.screenshot = [this](const std::string& path) { if (renderAdapter_ != nullptr) { renderAdapter_->RequestScreenshot(path); } };
         sceneEditorServices.saveScene = [this]() { return SaveSceneToDisk(); };
         sceneEditorServices.loadScene = [this](std::function<void(bool)> done) { BeginRevertScene(std::move(done)); };
         sceneEditorServices.openScene = [this](const std::string& scenePath, std::function<void(bool)> done)
@@ -530,20 +584,133 @@ namespace myengine::core
                 scriptSystem_->ClearRecentErrors();
             }
         };
+        // Face ID (docs/editor/faceid.md): the login that covers the editor until the face (or the password) is known. The editor of an automated run (a script, a limit of
+        // frames) and --no-faceid / MYENGINE_NO_FACEID=1 do not ask: tests, CI and the hidden desktop go on as before.
+        if (!gameMode_ && !EnvironmentFlag("MYENGINE_NO_FACEID"))
+        {
+            faceid::FaceIdService::Options faceIdOptions;
+            faceIdOptions.databaseFile = EnvironmentPath(L"MYENGINE_FACEID_DB");   // --faceid-db <file>: the shared database that is named, not looked for
+            faceIdService_ = std::make_unique<faceid::FaceIdService>(std::move(faceIdOptions));
+            if (!faceIdService_->Initialize())
+            {
+                logger_.Info("Face ID is off: " + faceIdService_->UnavailableReason());
+            }
+            faceIdGate_ = std::make_unique<faceid::FaceIdGate>(*faceIdService_);
+            sceneEditorServices.openFaceId = [this]() { faceIdGate_->OpenSettings(); };
+        }
         if (!uiManager_.Initialize(*renderAdapter_, logger_, std::move(sceneEditorServices)))
         {
             logger_.Error("UI manager initialization failed");
             return false;
         }
+        if (faceIdGate_ != nullptr)
+        {
+            uiManager_.SetEditorGate([this](const ui::UiManager::EditorOverlayContext& context) { return faceIdGate_->Draw(ToFaceIdContext(context)); });
+            uiManager_.SetEditorOverlay(
+                [this](const ui::UiManager::EditorOverlayContext& context)
+                {
+                    faceIdGate_->DrawSettings(ToFaceIdContext(context));
+                    return false;
+                });
+            const bool automated = exitAfterFrames_ > 0 || EnvironmentFlag("MYENGINE_UI_SCRIPT") || EnvironmentFlag("MYENGINE_UI_GALLERY");
+            if (!automated)
+            {
+                faceIdGate_->Begin();
+            }
+        }
 
         // the Rocket League game (G3, G4): does nothing unless the scene has an RlArena; it is added to the world below
         auto rlGame = std::make_unique<ecs::systems::RlGameSystem>(input_);
         rlGame->SetOnlineOptions(rlOnline_);
-        rlGame->SetGameMode(gameMode_);
+        rlGame->SetGameMode(gameMode_ && !doomMode_);
         rlGameSystem_ = rlGame.get();
 
+        // FlyDoom: the classic DOOM is the whole window (docs/game/doom.md)
+        if (doomMode_)
+        {
+            game::DoomGameServices services;
+            services.ui = &uiManager_;
+            services.render = renderAdapter_.get();
+            services.audio = &audio::GetAudioSystem();
+            services.quit = [this]() { RequestQuit(); };
+            // "To the laboratory": DOOM lives once in a process, so the program starts again with the menu on the PLAY screen and this one quits
+            services.backToMenu = [this]()
+            {
+                wchar_t path[MAX_PATH * 2] = {};
+                if (GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path))) == 0)
+                {
+                    logger_.Error("To the laboratory: the path of the program is unknown");
+                    return;
+                }
+                std::wstring command = std::wstring(L"\"") + path + L"\"";
+                if (!doomOptions_.relaunchArguments.empty())
+                {
+                    command += L" " + doomOptions_.relaunchArguments;
+                }
+                const std::wstring directory = std::filesystem::path(path).parent_path().wstring();
+                // the new program opens on PLAY and does not repeat a script of the tests
+                _wputenv_s(L"MYENGINE_DOOM_MENU_SCREEN", L"play");
+                _wputenv_s(L"MYENGINE_UI_SCRIPT", L"");
+                _wputenv_s(L"MYENGINE_DOOM_KEYS", L"");
+                STARTUPINFOW startup{};
+                startup.cb = sizeof(startup);
+                PROCESS_INFORMATION process{};
+                const BOOL started = CreateProcessW(path, command.data(), nullptr, nullptr, FALSE, 0, nullptr, directory.c_str(), &startup, &process);
+                _wputenv_s(L"MYENGINE_DOOM_MENU_SCREEN", L"");
+                if (started == FALSE)
+                {
+                    logger_.Error("To the laboratory: the program did not start again, error " + std::to_string(GetLastError()));
+                    return;
+                }
+                CloseHandle(process.hThread);
+                CloseHandle(process.hProcess);
+                RequestQuit();
+            };
+            services.takeMouseDelta = [this]()
+            {
+                const std::pair<int, int> delta{rawMouseX_, rawMouseY_};
+                rawMouseX_ = 0;
+                rawMouseY_ = 0;
+                return delta;
+            };
+            services.captureCursor = [this](const bool capture) { CaptureCursorForGame(capture); };
+            services.setTitle = [this](const std::string& title)
+            {
+                doomTitle_ = title;
+                UpdateWindowTitles();
+            };
+            services.log = [this](const std::string& text) { logger_.Info(text); };
+            services.iwad = doomOptions_.iwad;
+            services.doomArgs = doomOptions_.args;
+            services.exeDirectory = ProjectContext::ExecutableDirectory();
+            services.dataDirectory = apppaths::UserDataDirectory() / L"doom";
+            // the WAD files of the player: next to the files of the game, and always in %LOCALAPPDATA%\FlyDoom\wads (myengine.exe keeps its files elsewhere)
+            services.wadDirectories.push_back(apppaths::UserDataDirectory() / L"wads");
+            {
+                wchar_t localAppData[MAX_PATH]{};
+                if (GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH) > 0)
+                {
+                    services.wadDirectories.push_back(std::filesystem::path(localAppData) / L"FlyDoom" / L"wads");
+                }
+            }
+            services.squarePixels = doomOptions_.squarePixels;
+            services.music = doomOptions_.music;
+            services.modes = doomOptions_.modes;
+            services.initialMode = doomOptions_.initialMode;
+            services.choice = doomOptions_.choice;
+            // the laboratory: the menu, the brain behind it, the window mode of its settings, the file that keeps them
+            services.showMenu = doomOptions_.showMenu;
+            services.thumbnails = thumbnailService_.get();
+            services.makeBrainView = doomOptions_.makeBrainView;
+            services.applyVideo = [this](const game::RlVideoSettings& video) { ApplyVideoSettings(video); };
+            services.windowSize = [this]() { return GetWindowSize(); };
+            services.settingsFile = apppaths::UserDataDirectory() / L"settings.json";
+            doomFlow_ = std::make_unique<game::DoomGameFlow>(services);
+            doomFlow_->Install();
+        }
+
         // The game mode: the screens of the game (menus, HUD) instead of the editor
-        if (gameMode_)
+        if (gameMode_ && !doomMode_)
         {
             game::RlGameFlowServices services;
             services.system = rlGameSystem_;
@@ -627,8 +794,11 @@ namespace myengine::core
             }
             gameFlow_ = std::make_unique<game::RlGameFlow>(services);
             gameFlow_->Install();
+        }
 
-            // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md)
+        // MYENGINE_UI_SCRIPT=<file>: timed keys, clicks and screenshots instead of a person (docs/game/rl-ui.md); in the editor only the commands `editor ...`,
+        // `shot` and `quit` matter (docs/editor/build-panel.md)
+        {
             char* scriptPath = nullptr;
             std::size_t scriptPathLength = 0;
             if (_dupenv_s(&scriptPath, &scriptPathLength, "MYENGINE_UI_SCRIPT") == 0 && scriptPath != nullptr && *scriptPath != 0)
@@ -646,7 +816,14 @@ namespace myengine::core
                 {
                     uiScript_ = std::move(script);
                     UiScript* raw = uiScript_.get();
-                    gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    if (gameFlow_ != nullptr)
+                    {
+                        gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    }
+                    if (doomFlow_ != nullptr)
+                    {
+                        doomFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    }
                     logger_.Info(std::string("UI script: ") + scriptPath);
                 }
             }
@@ -971,6 +1148,7 @@ namespace myengine::core
                         rlGameSystem_->DebugCommand(command);
                     }
                 };
+                sink.editor = [this](const std::string& command) { logger_.Info("UI script: editor " + command + " -> " + uiManager_.RunEditorCommand(command)); };
                 sink.quit = [this]() { RequestQuit(); };
                 uiScript_->Advance(static_cast<double>(deltaTime), sink);
             }
@@ -1080,7 +1258,7 @@ namespace myengine::core
             framePacer.Wait(fpsLimit_);
 
             // a running match hides the cursor (only while this application is the one in front)
-            if (gameMode_ && !cameraControlActive_)
+            if (gameMode_ && !doomMode_ && !cameraControlActive_)
             {
                 const bool hide = core::ServiceLocator::GetEditorRuntimeState().gameHidesCursor && GetForegroundWindow() != nullptr &&
                                   !windows_.empty() && windows_.front().window != nullptr && GetForegroundWindow() == windows_.front().window->Handle();
@@ -1117,6 +1295,14 @@ namespace myengine::core
         cameraControlActive_ = false;
         SetCursorVisible(true);
 
+        // FlyDoom: DOOM and its sounds go first, while the audio system and the render adapter they use are still there
+        if (doomFlow_ != nullptr)
+        {
+            uiManager_.SetGameUi({});
+            doomFlow_.reset();
+            ClipCursor(nullptr);
+        }
+
         // A map that is still being read on a worker must finish before anything it may touch goes away
         WaitPendingSceneLoad();
 
@@ -1144,6 +1330,8 @@ namespace myengine::core
         gameFlow_.reset();    // before the UiManager it is hooked into (it saves the settings)
         uiGallery_.reset();
         uiManager_.Shutdown();
+        faceIdGate_.reset();
+        faceIdService_.reset();   // the camera goes off
         audio::GetAudioSystem().Shutdown();
         thumbnailService_.reset();
         resourceManager_.reset();
@@ -1193,6 +1381,65 @@ namespace myengine::core
     bool Application::GameMode() const
     {
         return gameMode_;
+    }
+
+    void Application::SetDoomMode(const bool enabled, const DoomOptions& options)
+    {
+        doomMode_ = enabled;
+        doomOptions_ = options;
+        if (enabled)
+        {
+            gameMode_ = true;
+        }
+    }
+
+    bool Application::DoomMode() const
+    {
+        return doomMode_;
+    }
+
+    void* Application::RenderDevice() const
+    {
+        const auto* dx12 = dynamic_cast<const render::dx12::Dx12RenderAdapter*>(renderAdapter_.get());
+        return dx12 != nullptr ? static_cast<void*>(dx12->GetDevice()) : nullptr;
+    }
+
+    // DOOM turns with the mouse: the cursor is hidden and kept in the window (the movement itself comes as raw input, WM_INPUT)
+    void Application::CaptureCursorForGame(const bool capture)
+    {
+        if (windows_.empty() || windows_.front().window == nullptr)
+        {
+            return;
+        }
+        const HWND hwnd = windows_.front().window->Handle();
+        if (capture)
+        {
+            if (!rawMouseRegistered_)
+            {
+                RAWINPUTDEVICE device{};
+                device.usUsagePage = 0x01;   // generic desktop
+                device.usUsage = 0x02;       // mouse
+                device.dwFlags = 0;
+                device.hwndTarget = hwnd;
+                rawMouseRegistered_ = RegisterRawInputDevices(&device, 1, sizeof(device)) != FALSE;
+            }
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            POINT topLeft{client.left, client.top};
+            POINT bottomRight{client.right, client.bottom};
+            ClientToScreen(hwnd, &topLeft);
+            ClientToScreen(hwnd, &bottomRight);
+            const RECT clip{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+            ClipCursor(&clip);
+            SetCursorVisible(false);
+            rawMouseX_ = 0;
+            rawMouseY_ = 0;
+        }
+        else
+        {
+            ClipCursor(nullptr);
+            SetCursorVisible(true);
+        }
     }
 
     std::vector<std::pair<std::uint32_t, std::uint32_t>> Application::ListDisplayResolutions() const
@@ -1745,6 +1992,23 @@ namespace myengine::core
                 return 0;
             }
 
+            case WM_INPUT:
+            {
+                // FlyDoom: the raw movement of the mouse (it turns the player while the cursor is held in the window)
+                if (doomMode_ && rawMouseRegistered_)
+                {
+                    RAWINPUT raw{};
+                    UINT size = sizeof(raw);
+                    if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lparam), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1) &&
+                        raw.header.dwType == RIM_TYPEMOUSE && (raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0)
+                    {
+                        rawMouseX_ += raw.data.mouse.lLastX;
+                        rawMouseY_ += raw.data.mouse.lLastY;
+                    }
+                }
+                return DefWindowProcW(window.Handle(), msg, wparam, lparam);
+            }
+
             case WM_MOUSEMOVE:
             {
                 if (uiWantsMouseCapture)
@@ -1824,11 +2088,12 @@ namespace myengine::core
         titleShowsPlay_ = core::ServiceLocator::GetEditorRuntimeState().mode == editor::RuntimeMode::Play;
         if (gameMode_)
         {
+            const std::wstring gameTitle = doomMode_ ? (doomTitle_.empty() ? std::wstring(L"FlyDoom") : L"FlyDoom - " + Utf8ToWide(doomTitle_)) : std::wstring(L"Rocket Arena");
             for (auto& runtime : windows_)
             {
                 if (!runtime.closed && runtime.window)
                 {
-                    runtime.window->SetTitle(L"Rocket Arena");
+                    runtime.window->SetTitle(gameTitle);
                 }
             }
             return;

@@ -1,0 +1,53 @@
+{
+  "name": "DOOMFLY",
+  "description": "The neurons of the public DOOMFLY demo (github.com/nftechie/doomfly, MIT): the turn is DNp20 right minus left, the walk is DNpe017. They are not the biology of walking and turning (the authors say so); they are the neurons that answer to the picture in this model. Added for the objects that come at the fly (the looming): DNa02 (the fast turn: right minus left, twice the weight) and the giant fiber DNp01 (a single spike is a shot). The gains and the thresholds are ours.",
+  "smoothingMs": 100,
+  "turn": {
+    "terms": [
+      { "type": "DNp20", "side": "right", "weight": 1.0 },
+      { "type": "DNp20", "side": "left", "weight": -1.0 },
+      { "type": "DNa02", "side": "right", "weight": 2.0 },
+      { "type": "DNa02", "side": "left", "weight": -2.0 }
+    ],
+    "offsetHz": 11.0,
+    "deadZoneHz": 2.0,
+    "gain": 0.12,
+    "limit": 6.0
+  },
+  "forward": {
+    "terms": [
+      { "type": "DNpe017", "side": "any", "weight": 1.0 }
+    ],
+    "deadZoneHz": 0.0,
+    "gain": 1.0,
+    "limit": 50.0
+  },
+  "fire": {
+    "terms": [
+      { "type": "DNpe017", "side": "any", "weight": 1.0 }
+    ],
+    "thresholdHz": 24.0,
+    "spikeTerms": [
+      { "type": "DNp01", "side": "any", "weight": 1.0 }
+    ],
+    "windowMs": 100,
+    "minSpikes": 1
+  },
+  "show": [
+    { "type": "LPLC2", "side": "left" },
+    { "type": "LPLC2", "side": "right" },
+    { "type": "LC4", "side": "left" },
+    { "type": "LC4", "side": "right" }
+  ],
+  "use": {
+    "everyTics": 35,
+    "stuckTics": 12,
+    "stuckUnits": 6.0
+  },
+  "unstick": {
+    "afterTics": 50,
+    "turnDegrees": 5.0,
+    "forTics": 18,
+    "backUnits": 10.0
+  }
+}

@@ -1,0 +1,27 @@
+FlyDoom {VERSION}: where the source code is
+===========================================
+
+FlyDoom.exe contains the source code of DOOM (id Software, 1997) in the port doomgeneric, and the OPL music module of Chocolate Doom: both are
+free software under the GNU General Public License version 2 (COPYING in this folder). The GPL says that you may get the source code of the
+program you are given. Here it is:
+
+  Repository : https://github.com/DvornikovArtem/myengine
+  Commit     : {COMMIT_FULL}
+  Version    : {VERSION}
+  Sources    : {TREE}
+
+The part of DOOM is in the folder game/doom of the repository:
+  game/doom/third_party/doomgeneric   the source of DOOM as it was taken (README-myengine.md says what was changed and where)
+  game/doom/third_party/opl           the music module of Chocolate Doom and Nuked OPL3 (LGPL 2.1)
+  game/doom/src                       our part: the loop, the sound, the search of the WAD
+The rest of FlyDoom (the window, the DirectX 12 renderer, the input, the audio) is the engine myengine in the same repository (engine/, app/).
+
+To build it yourself (Windows, Visual Studio 2022 or newer with the C++ workload, CMake):
+  git clone --recurse-submodules https://github.com/DvornikovArtem/myengine
+  cd myengine
+  git checkout {COMMIT_FULL}
+  setup.bat
+  build.bat RelWithDebInfo FlyDoom
+  powershell -ExecutionPolicy Bypass -File tools\package_game.ps1 -Game flydoom     (the same package as this one)
+
+The game data is not part of the program: see THIRD_PARTY.txt (Freedoom and the shareware DOOM have their own licenses).

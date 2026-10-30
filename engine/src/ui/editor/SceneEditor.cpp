@@ -24,6 +24,7 @@ namespace myengine::ui
         scriptConsole_ = std::make_unique<ScriptConsole>();
         contentBrowser_ = std::make_unique<ContentBrowser>();
         projectUi_ = std::make_unique<ProjectUiState>();
+        buildPanel_ = std::make_unique<BuildPanelState>();
         if (const auto& project = core::ServiceLocator::GetProjectContext(); project.IsInitialized())
         {
             // The content folder of the project; maps get their own root when they are outside of it
@@ -190,6 +191,30 @@ namespace myengine::ui
         DrawThumbnailsDebugWindow();
         DrawShaderLayoutsWindow();
         DrawRlTuningWindow();
+        DrawBuildWindow();
+        DrawToolWindows(windowContext.windowId);
+    }
+
+    // The windows of other modules (Window > Fly Brain): drawn by one editor window only, so that what they run advances once per frame
+    void SceneEditor::DrawToolWindows(const core::WindowId windowId)
+    {
+        if (services_.toolWindows == nullptr || services_.toolWindows->empty())
+        {
+            return;
+        }
+        if (toolWindowOwner_ != 0 && toolWindowOwner_ != windowId)
+        {
+            return;
+        }
+        toolWindowOwner_ = windowId;
+        const double deltaSeconds = static_cast<double>(ImGui::GetIO().DeltaTime);
+        for (EditorToolWindow& tool : *services_.toolWindows)
+        {
+            if (tool.draw)
+            {
+                tool.draw(tool.open, deltaSeconds);
+            }
+        }
     }
 
     // Developer tool: the layouts that the reflection reads from every shader of assets/shaders (resources, constant
@@ -436,9 +461,18 @@ namespace myengine::ui
                 {
                     if (MenuItemIcon(ICON_SLIDERS_HORIZONTAL, "RL Tuning", nullptr, showRlTuning_, true, true, width)) { showRlTuning_ = !showRlTuning_; }
                 }
+                if (MenuItemIcon(ICON_WRENCH, "Build", nullptr, showBuild_, true, true, width)) { showBuild_ = !showBuild_; }
                 if (MenuItemIcon(ICON_SCROLL_TEXT, "Output Log", nullptr, editorState.showScriptConsole, true, true, width)) { editorState.showScriptConsole = !editorState.showScriptConsole; }
                 if (MenuItemIcon(ICON_ACTIVITY, "Statistics", nullptr, editorState.showStatistics, true, true, width)) { editorState.showStatistics = !editorState.showStatistics; }
+                if (services_.openFaceId && MenuItemIcon(ICON_SCAN, "Face ID", nullptr, false, true, false, width)) { services_.openFaceId(); }
                 if (MenuItemIcon(ICON_SPARKLES, "Assistant", nullptr, editorState.showAssistant, true, true, width)) { editorState.showAssistant = !editorState.showAssistant; }
+                if (services_.toolWindows != nullptr)
+                {
+                    for (EditorToolWindow& tool : *services_.toolWindows)
+                    {
+                        if (MenuItemIcon(ICON_BRAIN, tool.name.c_str(), nullptr, tool.open, true, true, width)) { tool.open = !tool.open; }
+                    }
+                }
                 ImGui::Separator();
                 if (MenuItemIcon(ICON_LAYOUT_GRID, "Reset Layout", nullptr, false, true, false, width))
                 {
