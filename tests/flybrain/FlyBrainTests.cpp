@@ -262,6 +262,35 @@ namespace
         Check(gap, "inhibition makes a long pause in the target");
     }
 
+    void TestSilentTypes()
+    {
+        // source -> lLN1_bc -> relay and source -> PN -> relay2: with "lLN" silent the LN fires, its relay does not (N3b)
+        ConnectomeBuilder builder;
+        builder.AddNeuron(Neuron(1, "source"));
+        builder.AddNeuron(Neuron(2, "lLN1_bc"));
+        builder.AddNeuron(Neuron(3, "relay"));
+        builder.AddNeuron(Neuron(4, "PN"));
+        builder.AddNeuron(Neuron(5, "relay2"));
+        builder.AddEdge(0, 1, 20000);
+        builder.AddEdge(1, 2, 20000);
+        builder.AddEdge(0, 3, 20000);
+        builder.AddEdge(3, 4, 20000);
+        auto connectome = Build(builder);
+        for (const bool silent : { false, true })
+        {
+            ModelParams params;
+            if (silent)
+            {
+                params.silentTypePrefixes = { "lLN" };
+            }
+            FlyBrain brain(connectome, params);
+            brain.StimulateCurrent(connectome->Find("source"), 100000.0f, 0.1f);
+            brain.Advance(200);
+            Check(brain.NeuronSpikeCount(1) == 1 && brain.NeuronSpikeCount(3) == 1 && brain.NeuronSpikeCount(4) == 1, "the LN and the PN path fire");
+            Check(brain.NeuronSpikeCount(2) == (silent ? 0u : 1u), silent ? "a silent type delivers nothing" : "without silent types the LN drives its relay");
+        }
+    }
+
     // ---------------------------------------------------------------- Poisson
 
     void TestPoisson()
@@ -563,6 +592,8 @@ int main()
         std::cout << "refractory: ok\n";
         TestDelayChain();
         std::cout << "delay chain: ok\n";
+        TestSilentTypes();
+        std::cout << "silent types: ok\n";
         TestPoisson();
         std::cout << "poisson: ok\n";
         TestBrianGolden();

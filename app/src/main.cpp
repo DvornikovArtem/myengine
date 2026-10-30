@@ -42,6 +42,7 @@ namespace
         bool flyBio = false;
         std::string flyMode;                        // --fly-mode human|fly|human-vs-fly|fly-vs-fly: starts this mode without the menu
         bool flyReward = false;                     // --fly-reward
+        bool flyForget = false;                     // --fly-forget: "Fly learns" starts from the weights of the connectome
         std::uint64_t flySeed = 1;                  // --fly-seed N
         std::filesystem::path fbrain;               // --fbrain <file>: the connectome
         std::string flybrain = "auto";              // --flybrain auto|cpu|gpu: where the brain of the fly runs
@@ -120,6 +121,11 @@ namespace
             if (argument == L"--fly-reward")
             {
                 options.flyReward = true;
+                continue;
+            }
+            if (argument == L"--fly-forget")
+            {
+                options.flyForget = true;
                 continue;
             }
             if (argument == L"--doom-square-pixels")
@@ -479,7 +485,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>] [--fly-brain [--fbrain <file>]]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
-            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward] [--flybrain auto|cpu|gpu] [--fly-mode human-vs-fly|fly-vs-fly]  (docs/game/flydoom-fly.md)\n"
+            L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward] [--flybrain auto|cpu|gpu] [--fly-mode fly-learn|human-vs-fly|fly-vs-fly] [--fly-forget]  (docs/game/flydoom-fly.md)\n"
             L"  GPU: [--gpu-capture-frame N [--exit-after-capture]] [--frame-stats N [--frame-stats-out <file>]]\n"
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
@@ -525,6 +531,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
         options.doom.choice.backend = options.flybrain;
         options.doom.choice.seed = options.flySeed;
         fly.reward = options.flyReward;
+        fly.forget = options.flyForget;
         fly.log = [&app](const std::string& text) { app.GetLogger().Info(text); };
         fly.renderDevice = [&app]() { return app.RenderDevice(); };
         options.doom.modes = doomfly::MakeModes(fly, options.fly || doomfly::ConnectomeAvailable(fly));

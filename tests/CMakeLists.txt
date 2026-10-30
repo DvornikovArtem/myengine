@@ -790,3 +790,32 @@ myengine_copy_runtime_assets(myengine_flybrain_plasticity_tests)
 set_property(TARGET myengine_flybrain_plasticity_tests PROPERTY FOLDER "Tests")
 add_test(NAME flybrain_plasticity COMMAND myengine_flybrain_plasticity_tests)
 set_tests_properties(flybrain_plasticity PROPERTIES TIMEOUT 300)
+
+# N3b: what the connectome says about learning in the game: the inputs of the Kenyon cells, MBON -> descending neurons,
+# the share of KCs a visual drive makes fire (manual)
+add_executable(myengine_flybrain_mb_probe
+  flybrain/FlyBrainMushroomProbe.cpp)
+
+target_link_libraries(myengine_flybrain_mb_probe PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_mb_probe)
+set_property(TARGET myengine_flybrain_mb_probe PROPERTY FOLDER "Tests")
+
+# N3b: the fly learns what it sees, on the connectome: KcVision (the visual inputs of the KCs and their receptive fields),
+# a sparse KC answer without runaway, "view X + damage" weakens the MBON answer to X more than to Y. Skipped (77) without the file
+add_executable(myengine_flybrain_kc_vision_tests
+  flybrain/FlyBrainKcVisionTests.cpp)
+
+target_link_libraries(myengine_flybrain_kc_vision_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_kc_vision_tests)
+set_property(TARGET myengine_flybrain_kc_vision_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_kc_vision COMMAND myengine_flybrain_kc_vision_tests)
+set_tests_properties(flybrain_kc_vision PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+
+# N3b: does the fly learn in the game? Lives of the fly that learns, with learning on or off, the same seed (manual tool, not in ctest):
+# myengine_fly_learn_measure --learning 0|1 [--lives 25] [--skill 5] [--seed 1] [--trace <file>] [--calibrate] (FlyLearnMeasure.cpp)
+add_executable(myengine_fly_learn_measure
+  doomfly/FlyLearnMeasure.cpp)
+
+target_link_libraries(myengine_fly_learn_measure PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+myengine_apply_compiler_options(myengine_fly_learn_measure)
+set_property(TARGET myengine_fly_learn_measure PROPERTY FOLDER "Tests")

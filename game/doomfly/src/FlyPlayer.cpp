@@ -89,6 +89,33 @@ namespace doomfly
             return false;
         }
         rewardGroup_ = connectome.FindPrefix("PAM");
+        if (config_.learning.enabled)
+        {
+            std::string visionError;
+            if (!kcVision_.Build(connectome, config_.learning.vision, &visionError))
+            {
+                error = "learning: " + visionError;
+                return false;
+            }
+            // the columns of the KC inputs are the columns of the eyes (the same assignedOlHex1/2 of one side)
+            const std::vector<Column>& columns = eyes_.Columns();
+            kcVisionColumn_.assign(kcVision_.Columns().size(), -1);
+            for (size_t k = 0; k < kcVisionColumn_.size(); ++k)
+            {
+                const flybrain::KcVisionColumn& c = kcVision_.Columns()[k];
+                const int eye = c.side == flybrain::Side::Left ? 0 : c.side == flybrain::Side::Right ? 1 : -1;
+                for (size_t i = 0; i < columns.size() && eye >= 0; ++i)
+                {
+                    if (columns[i].eye == eye && columns[i].hex1 == c.hex1 && columns[i].hex2 == c.hex2)
+                    {
+                        kcVisionColumn_[k] = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+            kcFeature_.assign(kcVisionColumn_.size(), 0.0f);
+            kcs_ = connectome.FindPrefix("KC");
+        }
 
         MakeBrain();
         history_.reserve(64);
@@ -106,10 +133,22 @@ namespace doomfly
         {
             worker_.join();
         }
+        if (brain_ && config_.learning.enabled && !config_.learning.memoryPath.empty())
+        {
+            std::string error;
+            if (!brain_->SaveMemory(config_.learning.memoryPath, &error) && config_.log)
+            {
+                config_.log("fly: the memory was not saved: " + error);
+            }
+        }
     }
 
     void FlyPlayer::MakeBrain()
     {
+        if (brain_ && config_.learning.enabled)
+        {
+            learned_ = brain_->GetPlasticScales();
+        }
         if (brain_)
         {
             // not destroyed on this thread: a view may be drawing the ring of its spikes (see BrainFeedSnapshot)
@@ -118,8 +157,29 @@ namespace doomfly
         }
         flybrain::ModelParams params;
         params.seed = config_.seed;
+        if (config_.learning.enabled)
+        {
+            // dopamine as a modulator (fast, it starts the self-sustained activity of the central brain), the antennal lobe silent (with the visual input
+            // into the KCs its local neurons start it too)
+            params.fastModulatorySynapses = false;
+            params.silentTypePrefixes = {"lLN"};
+        }
         brain_ = std::make_unique<flybrain::FlyBrain>(config_.connectome, params);
         brain_->SetParallel(config_.parallel);
+        if (config_.learning.enabled)
+        {
+            brain_->EnablePlasticity();   // before the GPU takes it
+            std::string error;
+            if (!learned_.empty())
+            {
+                brain_->SetPlasticScales(learned_);
+            }
+            else if (!config_.learning.memoryPath.empty() && !brain_->LoadMemory(config_.learning.memoryPath, &error) && config_.log)
+            {
+                config_.log("fly: no memory loaded (" + error + "), the fly starts with the weights of the connectome");
+            }
+            brain_->SetLearning(config_.learning.learning);
+        }
         {
             flybrain::GpuOptions options;
             options.device = static_cast<ID3D12Device*>(config_.renderDevice);
@@ -150,6 +210,7 @@ namespace doomfly
         watch(spikeGroups_);
         watch(showGroups_);
         centralWatch_ = central_.Empty() ? 0 : brain_->Watch(central_, 500.0f);
+        kcWatch_ = kcs_.Empty() ? 0 : brain_->Watch(kcs_, 500.0f);
         slowColumn_.clear();
         lastMotionDrive_.assign(eyes_.MotionNeurons().size(), -1.0f);
         filtered_.clear();
@@ -199,7 +260,14 @@ namespace doomfly
         }
         if (input.damage)
         {
-            brain_->StimulateCurrent(dopamine_, config_.damageMv, config_.damageMs);
+            if (config_.learning.enabled)
+            {
+                brain_->StimulateCurrent(brain_->PunishmentNeurons(), config_.learning.punishmentMv, config_.damageMs);
+            }
+            else
+            {
+                brain_->StimulateCurrent(dopamine_, config_.damageMv, config_.damageMs);
+            }
             dopamineUntilMs_ = brain_->TimeMs() + config_.damageMs;
         }
         if (input.reward && !rewardGroup_.Empty())
@@ -214,8 +282,31 @@ namespace doomfly
             filtered_ = input.luminance;   // the first picture: no transient from darkness
             slow_ = input.luminance;
         }
+        const bool motionChannel = config_.eyes.motionOnGainMv > 0.0f || config_.eyes.motionOffGainMv > 0.0f;
+        // learning: the KCs see the change of the light of their columns against the slow average of the motion channel (KcVision, Poisson input)
+        if (config_.learning.enabled && !input.columnLuminance.empty())
+        {
+            if (slowColumn_.size() != input.columnLuminance.size())
+            {
+                slowColumn_ = input.columnLuminance;
+            }
+            for (size_t k = 0; k < kcVisionColumn_.size(); ++k)
+            {
+                const int c = kcVisionColumn_[k];
+                kcFeature_[k] = c < 0 ? 0.0f : std::min(1.0f, std::fabs(input.columnLuminance[c] - slowColumn_[c]) / (slowColumn_[c] + 0.05f));
+            }
+            kcVision_.Apply(*brain_, kcFeature_);
+            if (!motionChannel)
+            {
+                const float slowAlphaTic = 1.0f - std::exp(-static_cast<float>(kTicMs) / std::max(config_.eyes.motionAverageMs, 1.0f));
+                for (size_t c = 0; c < slowColumn_.size(); ++c)
+                {
+                    slowColumn_[c] += (input.columnLuminance[c] - slowColumn_[c]) * slowAlphaTic;
+                }
+            }
+        }
         // the motion channel: the columns' changes of the light drive the cells that carry them (once a tic: the picture is the same for the whole tic)
-        if (!input.columnLuminance.empty() && (config_.eyes.motionOnGainMv > 0.0f || config_.eyes.motionOffGainMv > 0.0f))
+        if (!input.columnLuminance.empty() && motionChannel)
         {
             if (slowColumn_.size() != input.columnLuminance.size())
             {
@@ -292,7 +383,21 @@ namespace doomfly
                 }
             }
         }
-        result.dopamineMv = brain_->TimeMs() < dopamineUntilMs_ ? config_.damageMv : 0.0f;
+        result.dopamineMv = brain_->TimeMs() < dopamineUntilMs_ ? (config_.learning.enabled ? config_.learning.punishmentMv : config_.damageMv) : 0.0f;
+        if (config_.learning.enabled)
+        {
+            result.kcSpikesPerSecond = kcWatch_ != 0 ? static_cast<float>(static_cast<double>(brain_->SpikeCount(kcWatch_, static_cast<float>(kTicMs))) / (kTicMs / 1000.0)) : 0.0f;
+            if (learnedTics_++ % 35 == 0)
+            {
+                const std::vector<double> scales = brain_->GetPlasticScales();
+                double scaleSum = 0.0;
+                for (const double s : scales)
+                {
+                    scaleSum += s;
+                }
+                result.learnedScale = scales.empty() ? 1.0 : scaleSum / static_cast<double>(scales.size());
+            }
+        }
 
         const uint64_t total = brain_->TotalSpikes();
         result.spikesPerSecond = static_cast<float>(static_cast<double>(total - lastSpikes_) / (kTicMs / 1000.0));
@@ -570,6 +675,11 @@ namespace doomfly
         status_.spikesPerSecond = result.spikesPerSecond;
         status_.centralSpikesPerSecond = result.centralSpikesPerSecond;
         status_.dopamineMv = result.dopamineMv;
+        status_.kcSpikesPerSecond = result.kcSpikesPerSecond;
+        if (result.learnedScale >= 0.0)
+        {
+            status_.learnedScale = result.learnedScale;
+        }
         status_.rates = result.rates;
         snapshot_ = result.snapshot;
         feed_ = result.feed;
@@ -634,6 +744,11 @@ namespace doomfly
             status_.spikesPerSecond = result.spikesPerSecond;
             status_.centralSpikesPerSecond = result.centralSpikesPerSecond;
             status_.dopamineMv = result.dopamineMv;
+            status_.kcSpikesPerSecond = result.kcSpikesPerSecond;
+            if (result.learnedScale >= 0.0)
+            {
+                status_.learnedScale = result.learnedScale;
+            }
             status_.rates = result.rates;
             snapshot_ = result.snapshot;
             feed_ = result.feed;

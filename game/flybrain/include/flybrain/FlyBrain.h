@@ -134,6 +134,11 @@ namespace flybrain
         // two PPL101 neurons at 150 Hz are enough to start the self-sustained activity of the central brain when they are
         // excitatory (docs/flybrain/flybrain.md, "Обучение")
         bool fastModulatorySynapses = true;
+        // The neurons of the types with these prefixes fire but their synapses carry nothing. The game silences "lLN":
+        // the local neurons of the antennal lobe excite one another so strongly as point neurons (lLN1_bc: 86 864
+        // contacts onto its own type) that one spike starts self-sustained activity of the whole brain (N3b,
+        // docs/flybrain/flybrain.md, "Муха учится в игре"); DOOM has no smell
+        std::vector<std::string> silentTypePrefixes;
     };
 
     struct SpikeEvent

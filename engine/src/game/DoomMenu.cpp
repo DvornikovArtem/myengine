@@ -341,11 +341,15 @@ namespace myengine::game
         // the cards of the modes
         modeIndex_ = std::clamp(modeIndex_, 0, std::max(0, static_cast<int>(model.modes.size()) - 1));
         const float cardTop = 200.0f;
+        // the cards share the width up to the shade (x 1500): five keep their full width, six (with "Fly learns") are narrower
+        const float cardGap = 22.0f;
+        const float cardCount = static_cast<float>(std::max<std::size_t>(1, model.modes.size()));
+        const float cardWidth = std::min(style::kModeCardWidth, (1420.0f - cardGap * (cardCount - 1.0f)) / cardCount);
         for (std::size_t i = 0; i < model.modes.size(); ++i)
         {
             const DoomMenuModel::Mode& mode = model.modes[i];
-            const Rect rect{80.0f + static_cast<float>(i) * (style::kModeCardWidth + 22.0f), cardTop, style::kModeCardWidth, style::kModeCardHeight};
-            const std::string big = mode.id == "human" ? "YOU" : (mode.id == "fly" ? "FLY" : (mode.id == "human-vs-fly" ? "VS" : (mode.id == "fly-vs-fly" ? "2 FLY" : "SWARM")));
+            const Rect rect{80.0f + static_cast<float>(i) * (cardWidth + cardGap), cardTop, cardWidth, style::kModeCardHeight};
+            const std::string big = mode.id == "human" ? "YOU" : (mode.id == "fly" ? "FLY" : (mode.id == "fly-learn" ? "LEARN" : (mode.id == "human-vs-fly" ? "VS" : (mode.id == "fly-vs-fly" ? "2 FLY" : "SWARM"))));
             if (mode.available)
             {
                 const ItemState state = f.Item(HashId("fd/mode") + static_cast<Id>(i), rect, true);
@@ -381,7 +385,7 @@ namespace myengine::game
         }
         const DoomMenuModel::Mode& chosen = model.modes[static_cast<std::size_t>(modeIndex_)];
         paint::Text(f, FontStyle::SemiBold, 22.0f, {82.0f, cardTop + style::kModeCardHeight + 14.0f}, style::kTextDim, chosen.description);
-        const bool flyMode = chosen.id == "fly" || chosen.id == "human-vs-fly" || chosen.id == "fly-vs-fly" || chosen.id == "swarm";
+        const bool flyMode = chosen.id == "fly" || chosen.id == "fly-learn" || chosen.id == "human-vs-fly" || chosen.id == "fly-vs-fly" || chosen.id == "swarm";
 
         // the rows
         float y = 610.0f;
@@ -418,8 +422,11 @@ namespace myengine::game
         }
         if (flyMode)
         {
-            const std::string_view sets[] = {"DOOMFLY neurons", "Bio neurons"};
-            settings.controlSet = OptionRow(f, HashId("fd/neurons"), next(), "Neurons", Span<std::string_view>(sets), settings.controlSet == "bio" ? 1 : 0) == 1 ? "bio" : "doomfly";
+            if (chosen.id != "fly-learn")   // the fly that learns has its own controls (controls_learn.json)
+            {
+                const std::string_view sets[] = {"DOOMFLY neurons", "Bio neurons"};
+                settings.controlSet = OptionRow(f, HashId("fd/neurons"), next(), "Neurons", Span<std::string_view>(sets), settings.controlSet == "bio" ? 1 : 0) == 1 ? "bio" : "doomfly";
+            }
             const std::string_view backends[] = {"Auto", "GPU", "CPU"};
             const int backend = OptionRow(f, HashId("fd/backend"), next(), "Brain on", Span<std::string_view>(backends), settings.backend == "gpu" ? 1 : (settings.backend == "cpu" ? 2 : 0));
             settings.backend = backend == 1 ? "gpu" : (backend == 2 ? "cpu" : "auto");

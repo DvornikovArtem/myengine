@@ -15,8 +15,10 @@
 // neurons (reward, off by default). The brain is made again (rest state, the stimuli of the eyes put back) when the player dies, when the level changes,
 // and when the brain runs away: the activity of the whole brain above `seizureSpikesPerSecond` for `seizureMs` (the tonic current of the lamina above
 // ~15 mV does it, and so does the taste input, docs/flybrain/flybrain.md).
-// There is no plasticity: the weights of the connectome do not change (DOOMFLY has an experimental KC->MBON rule and shows no learning; the API of the brain
-// has no way to change a weight).
+// The weights of the connectome do not change, unless `learning` is on (N3b, docs/flybrain/flybrain.md, "Муха учится в игре"): then the KC -> MBON synapses
+// learn, the change of the light of the columns goes straight into the visual inputs of the Kenyon cells (flybrain::KcVision, our bridge in place of the optic
+// lobe), damage goes into every PPL1 above their threshold, dopamine is a modulator, the local neurons of the antennal lobe are silent, and what was learned
+// stays across the brains of the lives (and in a memory file).
 
 #pragma once
 
@@ -24,6 +26,7 @@
 #include <doomfly/FlyControls.h>
 #include <doomfly/FlyEyes.h>
 #include <flybrain/FlyBrain.h>
+#include <flybrain/KcVision.h>
 
 #include <condition_variable>
 #include <functional>
@@ -61,6 +64,15 @@ namespace doomfly
         int playerIndex = -1;                   // -1: the console player of the game
         bool ownView = false;
         bool drivesScreens = true;              // presses the keys of the title, the intermission and the menu (one brain of a game does)
+        // The fly learns (N3b). Off: the brain of D1a, as it was (fast dopamine, the antennal lobe on: the looming answer of D1a needs neither change)
+        struct Learning
+        {
+            bool enabled = false;
+            bool learning = true;               // false: the weights stay (the control arm of a measurement), everything else the same
+            float punishmentMv = 15.0f;         // damage into every PPL1 for damageMs (their threshold is 7 mV), instead of damageMv into PPL101
+            std::string memoryPath;             // what was learned, between the runs (flybrain::FlyBrain::DefaultMemoryPath()); empty: no file
+            flybrain::KcVisionConfig vision;    // the KCs see the change of the light of the columns: |L - slow| / (slow + 0.05), 0..1
+        } learning;
     };
 
     struct RateReading
@@ -86,7 +98,9 @@ namespace doomfly
         bool reflex = false;                    // the command is a reflex outside the brain now (turning away from a wall, the use button at a door), not what the neurons say
         float spikesPerSecond = 0.0f;           // the whole brain
         float centralSpikesPerSecond = 0.0f;    // the central brain (what the guard against the runaway watches)
-        float dopamineMv = 0.0f;                // the current PPL101 gets now
+        float dopamineMv = 0.0f;                // the current PPL101 (with learning: every PPL1) gets now
+        float kcSpikesPerSecond = 0.0f;         // learning: the Kenyon cells
+        double learnedScale = 1.0;              // learning: the mean scale of the KC -> MBON synapses (1: nothing learned), once a second
         uint32_t resets = 0;                    // the brain was made again (all reasons)
         uint32_t seizures = 0;                  // ... because it ran away
         uint32_t damages = 0;
@@ -136,6 +150,7 @@ namespace doomfly
         const FlyEyes& Eyes() const { return eyes_; }
         const FlyControls& Controls() const { return config_.controls; }
         const flybrain::Connectome& GetConnectome() const { return *config_.connectome; }
+        bool Learns() const { return config_.learning.enabled; }
 
         // For the tests: a current (mV) into every neuron of a type until the next reset, to make the brain run away
         void InjectCurrentForTest(const std::string& type, float currentMv);
@@ -186,6 +201,8 @@ namespace doomfly
             bool seizure = false;
             bool reset = false;
             float dopamineMv = 0;
+            float kcSpikesPerSecond = 0;
+            double learnedScale = -1.0;         // -1: not measured this tic
             std::vector<RateReading> rates;
             BrainSnapshot snapshot;
             BrainFeedSnapshot feed;
@@ -212,6 +229,14 @@ namespace doomfly
         flybrain::WatchId centralWatch_ = 0;
         std::vector<float> slowColumn_;         // the slow average of the luminance of each column (the motion channel)
         std::vector<float> lastMotionDrive_;
+        // learning (N3b)
+        flybrain::KcVision kcVision_;
+        std::vector<int> kcVisionColumn_;       // a column of kcVision_ -> the column of the eyes (-1: the eyes do not have it)
+        std::vector<float> kcFeature_;
+        flybrain::Group kcs_;
+        flybrain::WatchId kcWatch_ = 0;
+        std::vector<double> learned_;           // the scales of the last brain, for the next one
+        uint64_t learnedTics_ = 0;
 
         // the brain: touched by the worker thread only (and by the constructor before it runs)
         std::unique_ptr<flybrain::FlyBrain> brain_;

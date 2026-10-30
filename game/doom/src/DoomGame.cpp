@@ -562,6 +562,9 @@ namespace doom
         state.secrets = raw.secrets;
         state.frags = raw.frags;
         state.deaths = raw.deaths;
+        state.hasAttacker = raw.hasAttacker != 0;
+        state.attackerX = raw.attackerX / 65536.0;
+        state.attackerY = raw.attackerY / 65536.0;
         return state;
     }
 }

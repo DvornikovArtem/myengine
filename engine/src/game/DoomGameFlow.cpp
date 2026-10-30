@@ -456,7 +456,7 @@ namespace myengine::game
 
         // ---- the laboratory ----
 
-        // The five modes of FlyDoom as the menu shows them. The modes the application gave are told by their id.
+        // The six modes of FlyDoom as the menu shows them. The modes the application gave are told by their id.
         void BuildMenuModel()
         {
             menuModel = {};
@@ -470,6 +470,7 @@ namespace myengine::game
             static const Slot slots[] = {
                 {"human", "HUMAN", "Classic DOOM", "You play DOOM with the keyboard and the mouse."},
                 {"fly", "FLY PLAYS", "A brain plays", "The picture goes through the eyes into a fly brain; its descending neurons steer. The game waits for the brain."},
+                {"fly-learn", "FLY LEARNS", "A brain learns", "The fly plays and learns from the damage; it keeps what it learned between the runs (--fly-forget starts again)."},
                 {"human-vs-fly", "HUMAN VS FLY", "Deathmatch", "You against a fly in one game."},
                 {"fly-vs-fly", "FLY VS FLY", "Spectator", "Two flies fight, you watch their brains."},
                 {"swarm", "SWARM", "Monsters are flies", "Every monster is a fly with a small brain."},

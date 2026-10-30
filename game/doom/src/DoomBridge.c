@@ -128,6 +128,12 @@ int dgb_GetPlayer(int player, dgb_player* out)
         out->z = p->mo->z;
         out->angle = p->mo->angle;
     }
+    if (p->attacker != NULL && p->attacker != p->mo)
+    {
+        out->hasAttacker = 1;
+        out->attackerX = p->attacker->x;
+        out->attackerY = p->attacker->y;
+    }
     out->readyWeapon = (int)p->readyweapon;
     out->kills = p->killcount;
     out->items = p->itemcount;

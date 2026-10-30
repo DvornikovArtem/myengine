@@ -5,6 +5,7 @@
 //   - a synthetic graph of 40,000 neurons with tonic drives, Poisson input, stimuli that end mid-window, per-tick drive
 //     changes and DOOM ticks of 28.57 ms: the same spikes as on the CPU (every spike, every step), the same spike count
 //     of every neuron, the same membrane potentials, the same watch counts
+//   - silent types (ModelParams::silentTypePrefixes, N3b): the same spikes as on the CPU
 //   - the state moves between the backends at any step: CPU -> GPU -> CPU gives the run of the CPU alone
 //   - Advance does not wait for the GPU: CompletedStep() lags behind Step() until Synchronize
 //   - the real connectome (when downloaded): visual input for 300 ms, the same spikes as on the CPU
@@ -212,6 +213,42 @@ namespace
         Check(cpu.AwakeCount() == gpu.AwakeCount(), "the same neurons are awake");
     }
 
+    void TestSilentTypesSameAsCpu()
+    {
+        // N3b: the types syn7, syn70 .. syn79 fire but deliver nothing (ModelParams::silentTypePrefixes), on both backends
+        test::SyntheticOptions options;
+        options.neurons = 20000;
+        options.meanDegree = 60;
+        options.maxContacts = 6;
+        auto connectome = test::MakeSyntheticConnectome(options);
+        const std::vector<float> drive = RandomDrive(options.neurons, 7);
+        Group poisson;
+        for (uint32_t i = 2; i < options.neurons; i += 50)
+        {
+            poisson.neurons.push_back(i);
+        }
+        ModelParams params;
+        params.silentTypePrefixes = { "syn7" };
+        FlyBrain cpu(connectome, params);
+        cpu.SetSpikeRingCapacity(1u << 22);
+        cpu.SetParallel(true);
+        std::vector<WatchId> cpuWatches;
+        Scenario(cpu, *connectome, drive, poisson, cpuWatches);
+        FlyBrain gpu(connectome, params);
+        gpu.SetSpikeRingCapacity(1u << 22);
+        Check(gpu.SetBackend(BackendChoice::Gpu, Options()) == Backend::Gpu, "GPU backend");
+        std::vector<WatchId> gpuWatches;
+        Scenario(gpu, *connectome, drive, poisson, gpuWatches);
+        FlyBrain loud(connectome);
+        loud.SetParallel(true);
+        std::vector<WatchId> loudWatches;
+        Scenario(loud, *connectome, drive, poisson, loudWatches);
+        std::printf("  silent syn7*: %llu spikes on the CPU and %llu on the GPU, %llu when they deliver\n", static_cast<unsigned long long>(cpu.TotalSpikes()),
+            static_cast<unsigned long long>(gpu.TotalSpikes()), static_cast<unsigned long long>(loud.TotalSpikes()));
+        Check(cpu.TotalSpikes() != loud.TotalSpikes(), "silent types change the activity");
+        CheckSameSpikes(SortedSpikes(cpu), SortedSpikes(gpu), "silent types");
+    }
+
     void TestSwitchBackends()
     {
         test::SyntheticOptions options;
@@ -338,6 +375,8 @@ int main(int argc, char** argv)
         std::cout << "available, self-test: ok\n";
         TestSyntheticSameAsCpu();
         std::cout << "synthetic graph, GPU = CPU spike for spike: ok\n";
+        TestSilentTypesSameAsCpu();
+        std::cout << "silent types, GPU = CPU: ok\n";
         TestSwitchBackends();
         std::cout << "switching backends: ok\n";
         TestAsync();

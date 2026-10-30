@@ -111,6 +111,13 @@ namespace flybrain
                 silentOutput_[i] = t == Transmitter::Dopamine || t == Transmitter::Octopamine || t == Transmitter::Serotonin ? 1 : 0;
             }
         }
+        for (const std::string& prefix : params_.silentTypePrefixes)
+        {
+            for (const uint32_t i : connectome_->FindPrefix(prefix).neurons)
+            {
+                silentOutput_[i] = 1;
+            }
+        }
         useAvx2_ = CpuHasAvx2();
 
         const double dt = params_.dtMs;
@@ -299,7 +306,7 @@ namespace flybrain
         {
             gpu->SetPlasticity(plasticity_->rowOffset, plasticity_->edgePlastic, plasticity_->weight);
         }
-        if (!params_.fastModulatorySynapses)
+        if (!params_.fastModulatorySynapses || !params_.silentTypePrefixes.empty())
         {
             gpu->SetSilentOutputs(silentOutput_);
         }
