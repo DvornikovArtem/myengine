@@ -9,7 +9,9 @@
 //   CSCompact   the neurons that have input or may fire, packed into a list (about a fifth of the brain in a window)
 //   CSIntegrate one thread per neuron of that list: the steps of the window, spikes into the window list, the GPU spike ring and the
 //               per-step counts of the watched groups
-//   CSDeliver   the spikes of the window along the CSR: integer atomic adds into the input ring
+//   CSDeliver   the spikes of the window along the CSR: integer atomic adds into the input ring, in 1/256 of a contact; a
+//               plastic synapse (N3, KC -> MBON) adds its learned weight of the replica
+//   CSPlastic   learned weights that changed since the last window (the learning step runs on the CPU, FlyBrainPlasticity)
 // CSReset clears the counters at the start of a submission.
 
 struct NeuronState
@@ -64,6 +66,9 @@ cbuffer Model : register(b0)
     uint kSeedHash;        // the seed and the high half of the step, mixed as in PoissonDraw
     uint kWatchStride;     // 33: 32 watches and the whole brain
     uint kMaxWindows;      // windows of a submission: Counters[2 + kMaxWindows + window] counts its active neurons
+    uint kReplicas;        // independent brains on the CSR: unit = neuron * kReplicas + replica (kNeuronCount counts units)
+    uint kPlastic;         // 1: PlasticRowOffset, EdgePlastic and PlasticWeights are bound
+    uint2 kUnused;
 };
 
 cbuffer Window : register(b1)
@@ -84,6 +89,10 @@ StructuredBuffer<uint> Weights : register(t2);   // int16 pairs, the even edge i
 StructuredBuffer<uint2> PowU : register(t3);     // double: decayU^k, k = 0..kTableSize
 StructuredBuffer<uint2> PowG : register(t4);
 StructuredBuffer<NeuronUpdate> Updates : register(t5);
+StructuredBuffer<uint> PlasticRowOffset : register(t6); // per neuron: offset of its row into EdgePlastic, 0xFFFFFFFF: none
+StructuredBuffer<int> EdgePlastic : register(t7);       // per edge of those rows: the plastic synapse or -1
+StructuredBuffer<uint2> PlasticUpdates : register(t8);  // (synapse * kReplicas + replica, weight)
+StructuredBuffer<uint> SilentOutput : register(t9);     // per neuron: 1 when its spikes are not delivered (modulatory, N3)
 
 RWStructuredBuffer<NeuronState> State : register(u0);
 RWStructuredBuffer<NeuronParams> Params : register(u1);
@@ -97,6 +106,7 @@ RWStructuredBuffer<uint> WatchCounts : register(u7); // [step of the submission]
 RWStructuredBuffer<uint2> Ring : register(u8);       // the last spikes of the brain: neuron, step (BrainView reads it)
 RWStructuredBuffer<uint> Active : register(u9);      // the neurons CSIntegrate steps in this window
 RWStructuredBuffer<uint> LastSpike : register(u10);  // step of the last spike of every neuron, 0xFFFFFFFF: none (BrainView)
+RWStructuredBuffer<int> PlasticWeights : register(u11); // [synapse][replica], 1/256 of a contact
 
 groupshared uint gsActiveCount;
 groupshared uint gsActiveBase;
@@ -347,6 +357,16 @@ int WeightOf(uint edge)
 }
 
 [numthreads(64, 1, 1)]
+void CSPlastic(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < gUpdateCount)
+    {
+        const uint2 update = PlasticUpdates[gUpdateOffset + id.x];
+        PlasticWeights[update.x] = asint(update.y);
+    }
+}
+
+[numthreads(64, 1, 1)]
 void CSDeliver(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
 {
     // Every group takes every gGroupCount-th spike, its threads share the synapses of the spike
@@ -354,13 +374,36 @@ void CSDeliver(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
     for (uint s = group.x; s < count; s += gGroupCount)
     {
         const uint2 spike = SpikeList[s];
-        // The spike of step t lands at step t + delay: the same slot, already consumed in this window
+        // The spike of step t lands at step t + delay: the same slot, already consumed in this window. A spike of a
+        // replica reaches the units of that replica only
         const uint slotBase = (spike.y % kDelaySteps) * kNeuronCount;
-        const uint e1 = RowStart[spike.x + 1];
-        for (uint e = RowStart[spike.x] + thread.x; e < e1; e += 64)
+        const uint neuron = spike.x / kReplicas;
+        const uint replica = spike.x - neuron * kReplicas;
+        if (SilentOutput[neuron] != 0)
         {
-            const uint post = Targets[e];
-            InterlockedAdd(Arrivals[slotBase + post], WeightOf(e));
+            continue;
+        }
+        const uint e0 = RowStart[neuron];
+        const uint e1 = RowStart[neuron + 1];
+        // Not ?: - fxc evaluates both sides of it, and a read of PlasticRowOffset has no bounds check (a root descriptor)
+        uint rowPlastic = 0xFFFFFFFFu;
+        [branch] if (kPlastic != 0)
+        {
+            rowPlastic = PlasticRowOffset[neuron];
+        }
+        for (uint e = e0 + thread.x; e < e1; e += 64)
+        {
+            const uint post = Targets[e] * kReplicas + replica;
+            int weight = WeightOf(e) * 256;
+            [branch] if (rowPlastic != 0xFFFFFFFFu)
+            {
+                const int plastic = EdgePlastic[rowPlastic + (e - e0)];
+                [branch] if (plastic >= 0)
+                {
+                    weight = PlasticWeights[plastic * kReplicas + replica];
+                }
+            }
+            InterlockedAdd(Arrivals[slotBase + post], weight);
             Pending[post] = 1;
         }
     }

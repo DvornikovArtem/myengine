@@ -22,12 +22,15 @@
 | `build.checkScript` | скрипт проверки пакета (`tools/check_package.ps1`); пусто: у игры нет проверки, кнопка Check package выключена |
 | `options.steam`, `options.wwise` | `optional`: переключатель есть, скрипт ищет SDK и без него собирает без него, с предупреждением; `no`: у игры этого нет, переключателя нет и SDK не ищется |
 | `options.zip` | включён ли zip по умолчанию |
-| `externalData[]` | данные, которые не лежат в репозитории и скачиваются скриптом: `name`, `check` (файл, по которому видно, что данные есть), `fetch` (скрипт, который их скачивает). Окно показывает «found» или «not found» и название скрипта |
+| `externalData[]` | данные, которые не лежат в репозитории: `name`, `check` (файл, по которому видно, что данные есть: путь от репозитория или с переменной окружения, `%LOCALAPPDATA%/FlyDoom/wads/doom1.wad`), `fetch` (скрипт, который их скачивает; `package_game.ps1` сам запускает его до сборки, если файла нет, а `"autoFetch": false` оставляет запуск человеку: мозг мухи качает гигабайты), `optional` (нет данных — предупреждение, пакет собирается без них). Окно показывает «found» или «not found», «the package goes without it» и название скрипта |
+| `files[]` | файлы пакета, которые не ассеты: данные игры и файлы машины. `from` (путь или список: берётся первый, который есть; можно `%ИМЯ%`), `to` (место в пакете), `required` (нет файла — остановка; иначе предупреждение с текстом `ifMissing`, а `"warnIfMissing": false` — обычная строка), `md5` (какой именно файл имеется в виду: чужой не кладётся), `requires` (класть, только если положен другой файл списка: лицензия рядом с WAD). Положенные файлы `package_game.ps1` перечисляет в `version.txt` строками `file <путь>` |
+| `licenses.copy[]` | `from`, `to`; `"root": true` кладёт файл рядом с exe (`COPYING`, `THIRD_PARTY.txt`), а не в `licenses/`; `"optional": true` — нет файла только предупреждение |
+| `licenses.generated[]` | тексты из шаблона репозитория (`template`, `to`, `root`) с подстановкой `{VERSION}`, `{COMMIT}`, `{COMMIT_FULL}`, `{TREE}` (чисто ли дерево исходников: если нет, скрипт предупреждает, что коммит не содержит изменений пакета): `SOURCE.txt` игры под GPL |
 | `assets`, `exclude`, `followReferences`, `runtime`, `config`, `project`, `licenses`, `wwise`, `steam` | как в [packaging.md](../game/packaging.md): что и откуда кладётся в пакет |
 
 Ошибки манифеста понятны и называют поле: `game.json is not valid JSON: ...`, `game.json: "id" is missing`, `game.json: "id" is "x", but the folder is games/y`, `options: "steam" is "maybe", it must be "optional" or "no"`, `externalData[0]: "check" is missing`. Сломанный манифест не прячет игру: она остаётся в списке («broken game.json») с причиной под выбором.
 
-`games/flydoom/game.json` — заготовка (FlyDoom, серия FLYDOOM): цель `flydoom` появится в D0 (`game/doom`), Freedoom проверяется по `external/freedoom/freedoom1.wad`, `COPYING` идёт в `licenses`. Пока цели нет, окно пишет «The CMake target "flydoom" was not found» и кнопка Build & Package выключена.
+`games/flydoom/game.json` — FlyDoom (серия FLYDOOM, D2): цель `FlyDoom` (`app/CMakeLists.txt`), без Steam и Wwise (переключателей в окне нет), данные игры и лицензии GPL; что именно кладётся и как проверяется — [../game/packaging.md](../game/packaging.md), раздел «FlyDoom». Окно показывает три внешних данных: Freedoom (нет — `package_game.ps1` скачивает его сам), shareware `doom1.wad` с этой машины и мозг мухи (оба необязательные: без них пакет собирается с предупреждением).
 
 ## Окно
 

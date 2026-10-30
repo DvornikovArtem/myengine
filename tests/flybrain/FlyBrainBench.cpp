@@ -3,7 +3,7 @@
 //
 //   myengine_flybrain_bench [--fbrain <path> | --synthetic] [--threads 1,2,4,8] [--repeats 3] [--seconds 1] [--warmup 0.2]
 //                           [--scenarios silent,rest,vision20,vision50,taste] [--degree 153] [--probe <type>|rest|vision20]
-//                           [--flybrain cpu,gpu] [--flies 1,4]
+//                           [--flybrain cpu,gpu] [--flies 1,4] [--silent-modulators]
 //
 // Method of LR1: a warm-up, then N runs, the median. A run is a fresh brain: warm-up of simulated time, then the measured
 // simulated seconds. Speed = simulated time / wall time (1.0 = real time).
@@ -179,6 +179,7 @@ int main(int argc, char** argv)
     double seconds = 1.0;
     double warmup = 0.2;
     std::string probeType;
+    bool silentModulators = false;
     std::vector<std::string> backends = { "cpu" };
     std::vector<std::string> fliesList = { "1" };
     for (int i = 1; i < argc; ++i)
@@ -194,6 +195,7 @@ int main(int argc, char** argv)
         else if (arg == "--seconds") seconds = std::stod(next());
         else if (arg == "--warmup") warmup = std::stod(next());
         else if (arg == "--probe") probeType = next();
+        else if (arg == "--silent-modulators") silentModulators = true;
         else if (arg == "--flybrain") backends = Split(next());
         else if (arg == "--flies") fliesList = Split(next());
         else
@@ -251,7 +253,9 @@ int main(int argc, char** argv)
     {
         // Diagnostics: one type at 150 Hz for the first 0.5 s of 1 s (or the scenario input with --probe rest/vision20); spikes by superclass
         myengine::jobs::Initialize();
-        FlyBrain brain(connectome);
+        ModelParams params;
+        params.fastModulatorySynapses = !silentModulators;
+        FlyBrain brain(connectome, params);
         brain.SetParallel(true);
         if (probeType == "rest" || probeType == "vision20")
         {
@@ -266,16 +270,40 @@ int main(int argc, char** argv)
             brain.StimulateRate(connectome->Find(probeType), 150.0f, 500.0f);
         }
         std::vector<double> rateAt;
+        std::vector<uint32_t> atHalf(connectome->NeuronCount(), 0);
         for (int k = 0; k < 10; ++k)
         {
             const uint64_t before = brain.TotalSpikes();
             brain.AdvanceMs(100.0);
             rateAt.push_back(double(brain.TotalSpikes() - before) * 10.0);
+            if (k == 5)
+            {
+                for (uint32_t i = 0; i < connectome->NeuronCount(); ++i)
+                {
+                    atHalf[i] = brain.NeuronSpikeCount(i);
+                }
+            }
         }
         std::printf("probe %s: spikes per second of the whole brain, every 100 ms:", probeType.c_str());
         for (double r : rateAt)
         {
             std::printf(" %.0f", r);
+        }
+        std::printf("\n");
+        // What keeps firing in the last 0.4 s (after the stimulus of a type ended at 0.5 s)
+        std::map<std::string, uint64_t> lateByType;
+        for (uint32_t i = 0; i < connectome->NeuronCount(); ++i)
+        {
+            const uint32_t late = brain.NeuronSpikeCount(i) - atHalf[i];
+            if (late > 0)
+            {
+                lateByType[std::string(connectome->Type(i)) + " (" + ToString(connectome->NeuronSide(i)) + ", " + ToString(connectome->NeuronTransmitter(i)) + ")"] += late;
+            }
+        }
+        std::printf("firing in the last 0.4 s:");
+        for (const auto& [type, count] : lateByType)
+        {
+            std::printf(" %s %llu;", type.c_str(), static_cast<unsigned long long>(count));
         }
         std::printf("\n");
         std::map<std::string, std::pair<uint64_t, uint32_t>> bySuperclass; // spikes, neurons

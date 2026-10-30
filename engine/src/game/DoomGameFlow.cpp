@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -23,6 +24,8 @@
 #include <doom/DoomGame.h>
 
 #include <myengine/audio/AudioSystem.h>
+#include <myengine/core/AppPaths.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/render/IRenderAdapter.h>
 #include <myengine/ui/UiManager.h>
 
@@ -258,6 +261,9 @@ namespace myengine::game
         } state = State::Start;
 
         std::string message;                             // what the error screen says
+        bool crashChecked = false;                       // the report of a crash of the previous run is looked for once, on the first frame of the window
+        std::string crashNote;                           // what the banner says about it (core::crash::PlayerNote); empty: no banner
+        float crashNoteLeft = 0.0f;                      // seconds the banner stays
         std::unique_ptr<IDoomController> controller;     // nullptr: the human plays
         int chosenMode = 0;
         bool modeAsked = false;
@@ -637,6 +643,27 @@ namespace myengine::game
             list->AddText(font, size, ImVec2(x, y), IM_COL32(150, 150, 150, 255), "Esc - exit");
         }
 
+        // The banner about the crash of the previous run: over everything, 12 seconds, the last one fades
+        void DrawCrashNote(const std::uint32_t width, const std::uint32_t height, const float deltaTime)
+        {
+            if (crashNoteLeft <= 0.0f)
+            {
+                return;
+            }
+            crashNoteLeft -= deltaTime;
+            const float size = std::max(14.0f, std::floor(static_cast<float>(height) / 36.0f));
+            ImFont* font = ImGui::GetFont();
+            ImDrawList* list = ImGui::GetForegroundDrawList();
+            const float alpha = std::min(1.0f, std::max(0.0f, crashNoteLeft));
+            const float margin = size * 0.8f;
+            const float maxWidth = static_cast<float>(width) - 2.0f * margin;
+            const ImVec2 text = font->CalcTextSizeA(size, FLT_MAX, maxWidth, crashNote.c_str());
+            const ImVec2 corner(margin, margin);
+            const ImVec2 end(margin + text.x + 2.0f * size, margin + text.y + size);
+            list->AddRectFilled(corner, end, IM_COL32(120, 20, 20, static_cast<int>(235.0f * alpha)), size * 0.3f);
+            list->AddText(font, size, ImVec2(corner.x + size, corner.y + size * 0.5f), IM_COL32(255, 235, 235, static_cast<int>(255.0f * alpha)), crashNote.c_str(), nullptr, maxWidth);
+        }
+
         void Build(const core::WindowId windowId, const std::uint32_t width, const std::uint32_t height, const float deltaTime)
         {
             ImDrawList* list = ImGui::GetBackgroundDrawList();
@@ -650,6 +677,20 @@ namespace myengine::game
                 return;
             }
             const bool active = ProcessIsForeground();
+
+            if (!crashChecked)
+            {
+                // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
+                crashChecked = true;
+                const std::filesystem::path crashDirectory = core::apppaths::UserDataDirectory() / L"crashes";
+                if (const auto report = core::crash::TakePending(crashDirectory))
+                {
+                    Log("the previous run crashed: " + report->summary + "; the report is " + report->text.generic_u8string());
+                    crashNote = core::crash::PlayerNote(*report, crashDirectory);
+                    crashNoteLeft = 12.0f;
+                }
+            }
+            DrawCrashNote(width, height, deltaTime);
 
             if (state == State::Start && std::count_if(svc.modes.begin(), svc.modes.end(), [](const DoomMode& m) { return m.available; }) > 1 && svc.initialMode < 0 && !modeAsked)
             {

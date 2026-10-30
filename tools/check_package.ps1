@@ -47,6 +47,8 @@ $work = Join-Path $env:TEMP 'rocket_clean'
 $failures = New-Object 'System.Collections.Generic.List[string]'
 
 function Write-Step([string]$text) { Write-Host "[CHECK] $text" }
+# a warning as a line of text that does not depend on the language of Windows (Write-Warning prints a translated word on a Russian Windows): the Build window finds "WARNING:"
+function Write-Warning([string]$Message) { Write-Host "WARNING: $Message" }
 function Fail([string]$text) { $failures.Add($text); Write-Host "[CHECK] FAILED: $text" -ForegroundColor Red }
 
 function Get-Snapshot([string]$folder) {

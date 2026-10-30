@@ -1,14 +1,20 @@
 set(FLYBRAIN_HEADERS
+  include/flybrain/Circuit.h
   include/flybrain/Connectome.h
   include/flybrain/FlyBrain.h
+  include/flybrain/FlySwarmBrain.h
 )
 
 set(FLYBRAIN_SOURCES
+  src/Circuit.cpp
   src/Connectome.cpp
   src/FbrainFormat.h
   src/FlyBrain.cpp
   src/FlyBrainGpu.cpp
   src/FlyBrainGpu.h
+  src/FlyBrainPlasticity.cpp
+  src/FlyBrainPlasticity.h
+  src/FlySwarmBrain.cpp
 )
 
 # The fly brain of FlyDoom (docs/flybrain/flybrain.md): the connectome from a .fbrain file and its LIF simulation on the

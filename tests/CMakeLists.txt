@@ -698,6 +698,27 @@ set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
 add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
 set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+# N2: the brains of the swarm (FlySwarmBrain): replicas = single brains, the batch on the GPU = on the CPU, and with the
+# connectome the cut-out circuit (size, silence, looming -> escape and steering, speed of 32 flies)
+add_executable(myengine_flybrain_swarm_tests
+  flybrain/FlyBrainSwarmTests.cpp
+  flybrain/SyntheticGraph.h)
+
+target_link_libraries(myengine_flybrain_swarm_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_swarm_tests)
+myengine_copy_runtime_assets(myengine_flybrain_swarm_tests)
+set_property(TARGET myengine_flybrain_swarm_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_swarm COMMAND myengine_flybrain_swarm_tests)
+set_tests_properties(flybrain_swarm PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# N2: cuts the swarm circuit out of MaleCNS into assets/flybrain/swarm_circuit.fbrain (manual)
+add_executable(myengine_flybrain_circuit
+  flybrain/FlyBrainCircuitTool.cpp)
+
+target_link_libraries(myengine_flybrain_circuit PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_circuit)
+set_property(TARGET myengine_flybrain_circuit PROPERTY FOLDER "Tests")
+
 # N1: the fly plays DOOM (game/doomfly, docs/game/flydoom-fly.md): the eyes, the controls, the steering by the picture, damage, a brain that runs away, E1M1.
 # Skipped (exit code 77) without the connectome (tools/flybrain/fetch_malecns.ps1); the game of E1M1 needs a WAD (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad)
 add_executable(myengine_doom_fly_tests
@@ -715,3 +736,15 @@ add_executable(myengine_doomfly_vision
 target_link_libraries(myengine_doomfly_vision PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
 myengine_apply_compiler_options(myengine_doomfly_vision)
 set_property(TARGET myengine_doomfly_vision PROPERTY FOLDER "Tests")
+
+# N3: the fly learns: KC -> MBON synapses weaken by the dopamine of their compartment (conditioning on a synthetic
+# mushroom body, the memory file, CPU = GPU, and the PPL101 compartments of MaleCNS when the connectome is there)
+add_executable(myengine_flybrain_plasticity_tests
+  flybrain/FlyBrainPlasticityTests.cpp)
+
+target_link_libraries(myengine_flybrain_plasticity_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_plasticity_tests)
+myengine_copy_runtime_assets(myengine_flybrain_plasticity_tests)
+set_property(TARGET myengine_flybrain_plasticity_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_plasticity COMMAND myengine_flybrain_plasticity_tests)
+set_tests_properties(flybrain_plasticity PROPERTIES TIMEOUT 300)

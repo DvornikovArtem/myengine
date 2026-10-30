@@ -4,14 +4,14 @@
   "name": "FlyDoom",
   "exe": "FlyDoom.exe",
 
-  "comment": "A blank: the target of FlyDoom appears with D0 (game/doom). Until then the Build window says that the target was not found. The values below are the plan of the series (.team/doom/plan.md), D0 changes them to what it builds.",
-
   "build": {
-    "cmakeTarget": "flydoom",
+    "comment": "FlyDoom.exe is the target FlyDoom (app/CMakeLists.txt): the engine with the game fixed to the classic DOOM (docs/game/doom.md). checkScript checks a package of the game (the Check package button); readme is the template of README.txt of the package.",
+    "cmakeTarget": "FlyDoom",
     "exePath": "app/Release/FlyDoom.exe",
     "userDataFolder": "FlyDoom",
-    "icon": "",
-    "readme": "tools/package_readme.txt"
+    "icon": "app/resources/FlyDoom.ico",
+    "readme": "tools/package_flydoom/README.txt",
+    "checkScript": "tools/check_flydoom_package.ps1"
   },
 
   "options": {
@@ -22,28 +22,76 @@
 
   "externalData": [
     {
-      "name": "Freedoom (the free data of the game, WAD)",
-      "check": "external/freedoom/freedoom1.wad",
-      "fetch": "tools/fetch_freedoom.ps1"
+      "name": "Freedoom 0.13.0 (the free data of the game, WAD)",
+      "check": "assets/doom/freedoom1.wad",
+      "fetch": "tools/doom/fetch_freedoom.ps1"
+    },
+    {
+      "name": "doom1.wad, the shareware DOOM 1.9 (a copy of the machine, not downloaded)",
+      "check": "%LOCALAPPDATA%/FlyDoom/wads/doom1.wad",
+      "optional": true
+    },
+    {
+      "name": "The fly brain, malecns_v1.fbrain (tools/flybrain/fetch_malecns.ps1: gigabytes, run by hand)",
+      "check": "assets/flybrain/malecns_v1.fbrain",
+      "fetch": "tools/flybrain/fetch_malecns.ps1",
+      "autoFetch": false,
+      "optional": true
     }
   ],
+
+  "comment": "What goes into dist/FlyDoom (tools/package_game.ps1, docs/game/packaging.md). 'files' are the game data and the files of the machine that are not assets: 'from' is a path or a list (the first one that is there; %NAME% is an environment variable), 'required' stops the packing when there is none, otherwise a warning; 'md5' says which file is meant; 'requires' puts the file only when another one was put.",
 
   "followReferences": false,
 
   "assets": [
-    "game/doom/assets"
+    "assets/scenes/flydoom.json",
+    "assets/shaders",
+    "assets/fonts"
   ],
 
   "exclude": [
     "**/*.pdb"
   ],
 
-  "runtime": [],
+  "runtime": [
+    "external/runtime/python314.dll",
+    "external/runtime/python314.zip"
+  ],
+
+  "files": [
+    {
+      "name": "Freedoom Phase 1",
+      "from": "assets/doom/freedoom1.wad",
+      "to": "assets/doom/freedoom1.wad",
+      "required": true
+    },
+    {
+      "name": "the shareware DOOM 1.9 (doom1.wad)",
+      "from": ["%LOCALAPPDATA%/FlyDoom/wads/doom1.wad", "assets/doom/doom1.wad"],
+      "to": "wads/doom1.wad",
+      "md5": "f0cefca49926d00903cf57551d901abe",
+      "ifMissing": "the package has Freedoom only (put doom1.wad into %LOCALAPPDATA%\\FlyDoom\\wads to have the real DOOM episode in it)"
+    },
+    {
+      "name": "the license of the shareware DOOM",
+      "from": "tools/package_flydoom/doom1.wad.license.txt",
+      "to": "wads/doom1.wad.license.txt",
+      "requires": "wads/doom1.wad"
+    },
+    {
+      "name": "the fly brain (MaleCNS v1.0)",
+      "from": "assets/flybrain/malecns_v1.fbrain",
+      "to": "assets/flybrain/malecns_v1.fbrain",
+      "ifMissing": "the package has no fly (tools/flybrain/fetch_malecns.ps1 makes the file)"
+    }
+  ],
 
   "config": {
     "windows": [
       { "title": "FlyDoom", "width": 1280, "height": 800, "clearColor": [0.0, 0.0, 0.0, 1.0] }
     ],
+    "startScene": "assets/scenes/flydoom.json",
     "startInGame": true
   },
 
@@ -52,13 +100,26 @@
     "engineVersion": 1,
     "contentDir": "assets",
     "mapsDir": "assets/scenes",
-    "defaultMap": ""
+    "defaultMap": "assets/scenes/flydoom.json"
   },
 
   "licenses": {
-    "notices": "tools/package_licenses",
+    "notices": "tools/package_licenses_flydoom",
     "copy": [
-      { "from": "game/doom/COPYING", "to": "COPYING" }
+      { "from": "game/doom/third_party/doomgeneric/COPYING", "to": "COPYING", "root": true },
+      { "from": "tools/package_flydoom/THIRD_PARTY.txt", "to": "THIRD_PARTY.txt", "root": true },
+      { "from": "game/doom/third_party/opl/COPYING-nuked-opl3.txt", "to": "COPYING-nuked-opl3.txt" },
+      { "from": "assets/doom/COPYING-freedoom.txt", "to": "Freedoom-COPYING.txt" },
+      { "from": "assets/doom/CREDITS-freedoom.txt", "to": "Freedoom-CREDITS.txt" },
+      { "from": "external/python/LICENSE.txt", "to": "Python-PSF-LICENSE.txt" },
+      { "from": "external/JoltPhysics/LICENSE", "to": "JoltPhysics-MIT-LICENSE.txt" },
+      { "from": "external/freetype/docs/FTL.TXT", "to": "FreeType-FTL.txt" },
+      { "from": "external/pybind11/LICENSE", "to": "pybind11-BSD-LICENSE.txt" },
+      { "from": "assets/fonts/LICENSE-lucide.txt", "to": "Lucide-ISC-LICENSE.txt" },
+      { "from": "assets/fonts/exo2/OFL.txt", "to": "Exo2-OFL.txt" }
+    ],
+    "generated": [
+      { "template": "tools/package_flydoom/SOURCE.txt", "to": "SOURCE.txt", "root": true }
     ]
   }
 }
