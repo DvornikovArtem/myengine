@@ -225,6 +225,71 @@ namespace
         return 0;
     }
 
+    // Two players in one process (D1): "-deathmatch -players 2"; player 1 is driven by the source of commands, player 0 stands still
+    class SecondPlayer final : public doom::ITicCmdSource
+    {
+    public:
+        void BuildTicCmd(int player, doom::TicCmd& cmd) override
+        {
+            if (player == 1)
+            {
+                ++calls;
+                cmd.forwardMove = 40;
+                cmd.angleTurn = 200;
+            }
+        }
+        int calls = 0;
+    };
+
+    std::uint64_t HashOf(const doom::ViewBuffer& view)
+    {
+        std::uint64_t hash = 1469598103934665603ull;
+        for (const std::uint32_t pixel : view.pixels)
+        {
+            hash = (hash ^ pixel) * 1099511628211ull;
+        }
+        return hash;
+    }
+
+    int ScenarioPlayers(const fs::path& wad)
+    {
+        auto game = Start(wad, {"-warp", "1", "1", "-skill", "3", "-nomonsters", "-nomusic", "-deathmatch", "-players", "2"});
+        if (!game)
+        {
+            return 1;
+        }
+        Run(*game, 10);
+        SecondPlayer second;
+        game->SetTicCmdSource(&second);
+        const doom::PlayerState p0Before = game->Player(0);
+        const doom::PlayerState p1Before = game->Player(1);
+        Run(*game, 40);
+        const doom::PlayerState p0After = game->Player(0);
+        const doom::PlayerState p1After = game->Player(1);
+        game->SetTicCmdSource(nullptr);
+        Result("in0", p0Before.inGame ? "1" : "0");
+        Result("in1", p1Before.inGame ? "1" : "0");
+        Result("in2", game->Player(2).inGame ? "1" : "0");
+        Result("apart", std::hypot(p0Before.x - p1Before.x, p0Before.y - p1Before.y));
+        Result("p0_moved", std::hypot(p0After.x - p0Before.x, p0After.y - p0Before.y));
+        Result("p1_moved", std::hypot(p1After.x - p1Before.x, p1After.y - p1Before.y));
+        Result("calls", second.calls);
+        Result("deathmatch", game->Info().deathmatch);
+        doom::ViewBuffer v0;
+        doom::ViewBuffer v1;
+        const bool got0 = game->RenderView(0, v0);
+        const bool got1 = game->RenderView(1, v1);
+        Result("view0", got0 ? "1" : "0");
+        Result("view1", got1 && v1.width == doom::kScreenWidth && v1.height == doom::kScreenHeight ? "1" : "0");
+        Result("views_differ", got0 && got1 && HashOf(v0) != HashOf(v1) ? "1" : "0");
+        // the second render pass must not break the picture DOOM draws next
+        Run(*game, 2);
+        Result("frags0", game->Player(0).frags);
+        Result("frags1", game->Player(1).frags);
+        Result("alive", game->Info().state == doom::GameState::Level ? "1" : "0");
+        return 0;
+    }
+
     // The menu: Esc, then the "Quit game" with the keys of DOOM (up from the first item reaches it) and "y"
     int ScenarioQuit(const fs::path& wad)
     {
@@ -562,6 +627,23 @@ namespace
         CHECK(Str(hook, "view0") == "1");
         CHECK(Str(hook, "view1") == "0");
 
+        // 3b. two players in one process: both in the game apart, the second one driven by a source, its own view through its eyes
+        const ChildResult players = RunChild(exe, "players", wad);
+        CHECK(players.exitCode == 0);
+        std::printf("  players: apart %.0f, p0 moved %.1f, p1 moved %.1f, views differ %s\n", Num(players, "apart"), Num(players, "p0_moved"), Num(players, "p1_moved"), Str(players, "views_differ").c_str());
+        CHECK(Str(players, "in0") == "1");
+        CHECK(Str(players, "in1") == "1");
+        CHECK(Str(players, "in2") == "0");
+        CHECK(Num(players, "deathmatch") >= 1.0);
+        CHECK(Num(players, "apart") > 30.0);
+        CHECK(Num(players, "p0_moved") < 1.0);
+        CHECK(Num(players, "p1_moved") > 20.0);
+        CHECK(Num(players, "calls") >= 35.0);
+        CHECK(Str(players, "view0") == "1");
+        CHECK(Str(players, "view1") == "1");
+        CHECK(Str(players, "views_differ") == "1");
+        CHECK(Str(players, "alive") == "1");
+
         // 4. Quit game from the menu ends the game without ending the process
         const ChildResult quit = RunChild(exe, "quit", wad);
         CHECK(quit.exitCode == 0);
@@ -635,6 +717,7 @@ int main(int argc, char** argv)
         if (scenario == "demo") return ScenarioDemo(wad);
         if (scenario == "input") return ScenarioInput(wad);
         if (scenario == "hook") return ScenarioHook(wad);
+        if (scenario == "players") return ScenarioPlayers(wad);
         if (scenario == "quit") return ScenarioQuit(wad);
         if (scenario == "badwad") return ScenarioBadWad(wad);
         if (scenario == "audio") return ScenarioAudio(wad);

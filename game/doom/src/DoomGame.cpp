@@ -459,15 +459,32 @@ namespace doom
 
     bool DoomGame::RenderView(const int player, ViewBuffer& out)
     {
-        // The console player is what DOOM draws; the other players need their own render pass (task D1)
-        if (player != Info().consolePlayer || Pixels() == nullptr)
+        if (Pixels() == nullptr)
         {
             return false;
         }
         out.width = kScreenWidth;
         out.height = kScreenHeight;
-        out.pixels.assign(Pixels(), Pixels() + kScreenWidth * kScreenHeight);
-        return true;
+        if (player == Info().consolePlayer)
+        {
+            out.pixels.assign(Pixels(), Pixels() + kScreenWidth * kScreenHeight);
+            return true;
+        }
+        out.pixels.resize(static_cast<size_t>(kScreenWidth) * kScreenHeight);
+        return dgb_RenderPlayerView(player, out.pixels.data()) != 0;
+    }
+
+    void DoomGame::RestartLevel()
+    {
+        dgb_RestartLevel();
+    }
+
+    bool DoomGame::RenderEyes(const int player, ViewBuffer& out)
+    {
+        out.width = kScreenWidth;
+        out.height = kScreenHeight;
+        out.pixels.resize(static_cast<size_t>(kScreenWidth) * kScreenHeight);
+        return dgb_RenderPlayerView(player, out.pixels.data()) != 0;
     }
 
     void DoomGame::PostKey(const int key, const bool pressed)
@@ -534,6 +551,8 @@ namespace doom
         state.kills = raw.kills;
         state.items = raw.items;
         state.secrets = raw.secrets;
+        state.frags = raw.frags;
+        state.deaths = raw.deaths;
         return state;
     }
 }

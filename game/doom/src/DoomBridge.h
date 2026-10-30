@@ -32,6 +32,8 @@ typedef struct dgb_player
     int kills;
     int items;
     int secrets;
+    int frags;            /* the fragcount of DOOM: kills of the others minus suicides */
+    int deaths;           /* the times the others killed this player */
 } dgb_player;
 
 typedef struct dgb_state
@@ -52,6 +54,11 @@ typedef struct dgb_state
 void dgb_GetState(dgb_state* out);
 /* 0: no such player in the game */
 int dgb_GetPlayer(int player, dgb_player* out);
+/* Loads the level again at the next tic (from the level or from the intermission after its exit): every player of the game is born again at a start, the frags go to zero. The players of "-players N" stay in the game (a new game would send them out). */
+void dgb_RestartLevel(void);
+/* The 3D view of a player of the game drawn as it is seen through his eyes, into out (320 x 200, 0x00RRGGBB, the status bar black). 0: no such player or no level */
+int dgb_RenderPlayerView(int player, unsigned int* out);
+
 /* The tic command the player really had in the last tic (after the hook) */
 int dgb_GetTicCmd(int player, signed char* forwardmove, signed char* sidemove, short* angleturn, unsigned char* buttons);
 

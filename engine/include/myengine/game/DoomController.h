@@ -23,6 +23,17 @@ namespace doom
 
 namespace myengine::game
 {
+    // A second picture next to the one of the game: the view of another player through his eyes (Human vs Fly: the eyes of the fly; Fly vs Fly: the second fly)
+    struct SecondaryView
+    {
+        int width = 0;
+        int height = 0;
+        std::vector<std::uint32_t> pixels;      // width * height, 0x00RRGGBB
+        std::uint64_t serial = 0;               // grows when the pixels changed
+        std::string mainLabel;                  // the caption of the picture of the game ("YOU", "FLY 1")
+        std::string label;                      // the caption of this picture ("FLY'S EYES", "FLY 2")
+    };
+
     class IDoomController
     {
     public:
@@ -44,6 +55,12 @@ namespace myengine::game
             (void)width;
             (void)height;
         }
+
+        // The keyboard and the mouse play the console player although a controller runs the game (Human vs Fly: the human against the fly)
+        virtual bool HumanPlays() const { return false; }
+
+        // The second picture next to the game's (nullptr: none). Valid until the next Advance.
+        virtual const SecondaryView* Secondary() const { return nullptr; }
 
         // The short text for the title of the window and the log ("Fly plays (Bio), brain speed 0.92x")
         virtual std::string Status() const { return {}; }
