@@ -564,7 +564,8 @@ namespace myengine::render::dx12
         for (const ConstantBufferSlot& slot : postProgram_.slots.constantBuffers)
         {
             constantScratch_.assign(slot.sizeBytes, 0);
-            const float params[4] = {mode, settings_.bloomThreshold, settings_.bloomIntensity, 0.0f};
+            const float params[4] = {mode, postThresholdOverride_ >= 0.0f ? postThresholdOverride_ : settings_.bloomThreshold,
+                postIntensityOverride_ >= 0.0f ? postIntensityOverride_ : settings_.bloomIntensity, postExposure_};
             const float texel[4] = {texelX, texelY, 0.0f, 0.0f};
             if (slot.postParams != kNoOffset)
             {

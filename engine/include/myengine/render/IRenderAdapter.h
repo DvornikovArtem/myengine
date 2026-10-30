@@ -207,6 +207,24 @@ namespace myengine::render
             return false;
         }
 
+        // ---- point clouds ----
+        // A cloud of glowing points (the 3D view of the fly brain): the positions go to the GPU now (between frames, like UploadMesh), the flashes with every
+        // DrawPointCloud. Drawn additively with HDR, a bloom and a tone map into the render target that is being rendered; 0: no support.
+        virtual PointCloudHandle CreatePointCloud(const PointCloudData& data)
+        {
+            (void)data;
+            return {};
+        }
+        virtual void DestroyPointCloud(PointCloudHandle cloud) { (void)cloud; }
+        // Inside BeginRenderTarget / EndRenderTarget of the frame's surface. The target is overwritten (the background is in `params`).
+        virtual bool DrawPointCloud(RenderSurfaceHandle surface, PointCloudHandle cloud, const PointCloudDrawParams& params)
+        {
+            (void)surface;
+            (void)cloud;
+            (void)params;
+            return false;
+        }
+
         // ---- GPU diagnostics (capture tools, statistics) ----
         // A named group of commands: a marker that RenderDoc / PIX show as a tree node, and a timed pass of the frame
         // statistics. Inside a frame only; groups nest, EndDebugEvent closes the innermost.
@@ -223,6 +241,8 @@ namespace myengine::render
             return false;
         }
         virtual std::string GetAdapterName() const { return {}; }
+        // The native device of the renderer (an ID3D12Device* for DX12): the GPU brain is made on it so that the 3D view reads its spikes without a copy. nullptr: none.
+        virtual void* GetNativeDevice() const { return nullptr; }
         // The GPU device was removed (a hang, a page fault, a driver reset): nothing is drawn any more
         virtual bool IsDeviceRemoved() const { return false; }
 

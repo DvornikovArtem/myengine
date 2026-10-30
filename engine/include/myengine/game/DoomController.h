@@ -21,8 +21,46 @@ namespace doom
     class DoomGame;
 }
 
+namespace myengine::render
+{
+    class IRenderAdapter;
+}
+
+namespace myengine::editor
+{
+    class ThumbnailService;
+}
+
 namespace myengine::game
 {
+    // The panel of a controller as data: the flow draws it with the UI kit of the game (Exo 2, the plates of the menu), so the controller does not need the fonts
+    struct DoomPanelBar
+    {
+        std::string label;                      // "DNp20 R"
+        std::string text;                       // the value as it is shown: "30 Hz", "+0.84 deg/tic"
+        float value = 0.0f;                     // the bar: value / limit (centered: -limit .. limit around the middle)
+        float limit = 1.0f;
+        bool centered = false;
+        std::uint32_t rgb = 0x5090f0;           // 0xRRGGBB: the colour of the neurons in the cloud
+    };
+
+    struct DoomPanelGroup
+    {
+        std::string title;                      // "MOTOR"
+        std::vector<DoomPanelBar> bars;
+    };
+
+    struct DoomPanelData
+    {
+        std::string title;                      // "FLY PLAYS"
+        std::string subtitle;                   // "DOOMFLY neurons"
+        std::string chip;                       // "1.7x real time"
+        std::string brainChip;                  // "BRAIN GPU": on the picture of the cloud
+        std::string brainLine;                  // the big brain: "164 789 neurons, 0.34 M spikes/s, 1.56x real time"
+        std::vector<DoomPanelGroup> groups;
+        std::vector<std::string> debug;         // dim lines at the foot: the speed, the tics, the resets
+    };
+
     // A second picture next to the one of the game: the view of another player through his eyes (Human vs Fly: the eyes of the fly; Fly vs Fly: the second fly)
     struct SecondaryView
     {
@@ -56,6 +94,24 @@ namespace myengine::game
             (void)height;
         }
 
+        // The panel as data (see DoomPanelData); false: the controller draws the panel itself in DrawPanel (no renderer, the old way). With true the flow draws the panel and
+        // asks DrawBrain for the picture of the brain inside the rect it leaves for it.
+        virtual bool DescribePanel(DoomPanelData& out) const
+        {
+            (void)out;
+            return false;
+        }
+        virtual void DrawBrain(ImDrawList* list, float x, float y, float width, float height)
+        {
+            (void)list;
+            (void)x;
+            (void)y;
+            (void)width;
+            (void)height;
+        }
+        // The big brain is on: the flow hides the panel and draws the legend over the picture of the brain
+        virtual bool BigBrainOpen() const { return false; }
+
         // The keyboard and the mouse play the console player although a controller runs the game (Human vs Fly: the human against the fly)
         virtual bool HumanPlays() const { return false; }
 
@@ -79,6 +135,9 @@ namespace myengine::game
         int skill = 3;
         int flies = 16;                         // the swarm: 8..32
         std::uint64_t seed = 1;
+        // The services of the window for a controller that draws a 3D brain (V1): set by DoomGameFlow, null in the tests
+        myengine::render::IRenderAdapter* render = nullptr;
+        myengine::editor::ThumbnailService* thumbnails = nullptr;
     };
 
     // One entry of the menu in front of the game: "Human plays", "Fly plays", "Human vs Fly", ... The first mode of the list is the human (no controller)

@@ -229,6 +229,10 @@ namespace myengine::render::dx12
             logger_.Warning("The post program (assets/shaders/post.shader.json) could not be built: no MSAA resolve and no bloom");
             postProgram_ = {};
         }
+        else if (!BuildCloudPipeline())
+        {
+            logger_.Warning("The point cloud program (assets/shaders/brain_cloud.hlsl) could not be built: no point clouds");
+        }
         TextureData defaultWhiteTexture;
         defaultWhiteTexture.width = 1;
         defaultWhiteTexture.height = 1;
@@ -2014,6 +2018,12 @@ namespace myengine::render::dx12
             return;
         }
 
+        if (const auto cloudTargets = cloudTargets_.find(target.value); cloudTargets != cloudTargets_.end())
+        {
+            RetireCloudTargets(std::move(cloudTargets->second));
+            cloudTargets_.erase(cloudTargets);
+        }
+
         RetiredResource retired;
         retired.resource = std::move(it->second.color);
         retired.secondResource = std::move(it->second.depth);
@@ -2330,6 +2340,11 @@ namespace myengine::render::dx12
         }
 
         sceneTargets_ = {};
+        clouds_.clear();
+        cloudTargets_.clear();
+        cloudPipeline_.Reset();
+        cloudPipelineGpu_.Reset();
+        cloudRootSignature_.Reset();
         shadowMap_.Reset();
         shadowDsvHeap_.Reset();
         postProgram_ = {};

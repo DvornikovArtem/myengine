@@ -129,6 +129,18 @@ namespace myengine::render::dx12
                 {"TEXCOORD", 0, StreamFormat::Float2, 12},
             };
             streams.push_back(std::move(ui));
+
+            // The point cloud pass (Dx12CloudPass.cpp) builds its own pipeline: both buffers are read per instance (six vertices from SV_VertexID, one instance per point).
+            // The entry is here so that the shader is compiled and reflected like the others (the layout dump, the Shader Layouts window).
+            VertexStreamDesc cloud;
+            cloud.name = "point_cloud";
+            cloud.stride = kPointCloudStride;
+            cloud.attributes = {{"CLOUDPOS", 0, StreamFormat::Float4, 0}};
+            cloud.instanceStride = kPointCloudFlashStride;
+            StreamAttribute spike{"CLOUDSPIKE", 0, StreamFormat::Float, 0};
+            spike.slot = 1;
+            cloud.attributes.push_back(spike);
+            streams.push_back(std::move(cloud));
             return streams;
         }
     }

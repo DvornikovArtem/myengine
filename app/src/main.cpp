@@ -10,6 +10,9 @@
 
 #include <states/LoadingState.h>
 
+#include <brainview/BrainViewWindow.h>
+#include <brainview/DoomMenuBackdrop.h>
+
 #include <myengine/config/AppConfig.h>
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
@@ -43,6 +46,7 @@ namespace
         std::filesystem::path fbrain;               // --fbrain <file>: the connectome
         std::string flybrain = "auto";              // --flybrain auto|cpu|gpu: where the brain of the fly runs
         bool showProjectBrowser = false;
+        bool openFlyBrain = false;                  // --fly-brain: Window > Fly Brain is open at the start
         DWORD waitForPid = 0;
         myengine::core::DiagnosticsOptions diagnostics;
         std::uint32_t exitAfterFrames = 0; // 0: run until the window is closed
@@ -137,6 +141,11 @@ namespace
             if (argument == L"--no-faceid")   // the editor starts without the Face ID login (same as MYENGINE_NO_FACEID=1)
             {
                 _putenv_s("MYENGINE_NO_FACEID", "1");
+                continue;
+            }
+            if (argument == L"--fly-brain")   // the 3D fly brain window open at the start (docs/flybrain/brain-view.md)
+            {
+                options.openFlyBrain = true;
                 continue;
             }
             // Steam starts the game of a friend who accepts an invitation with "+connect_lobby <lobby id>": the lobby screens read it from the command line
@@ -467,7 +476,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
     {
         MessageBoxW(
             nullptr,
-            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>]\n"
+            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>] [--fly-brain [--fbrain <file>]]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
             L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward] [--flybrain auto|cpu|gpu] [--fly-mode human-vs-fly|fly-vs-fly]  (docs/game/flydoom-fly.md)\n"
@@ -509,6 +518,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 #ifdef MYENGINE_SOURCE_DIR
         fly.sourceDirectory = std::filesystem::u8path(MYENGINE_SOURCE_DIR);
 #endif
+#ifndef MYENGINE_FLYDOOM
+        options.doom.relaunchArguments = L"--game doom";
+#endif
         fly.seed = options.flySeed;
         options.doom.choice.backend = options.flybrain;
         options.doom.choice.seed = options.flySeed;
@@ -531,6 +543,19 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
         {
             options.doom.initialMode = 1;
             options.doom.choice.controlSet = options.flyBio ? "bio" : "doomfly";
+        }
+        // The laboratory (docs/game/doom.md): the menu with the brain behind it asks what to play, unless the command line already said (--iwad, --doom-args, --fly) or the
+        // environment asks for no menu (the scripts and the captures of the game itself: MYENGINE_DOOM_NO_MENU=1)
+        {
+            char* noMenu = nullptr;
+            std::size_t noMenuLength = 0;
+            const bool noMenuEnvironment = _dupenv_s(&noMenu, &noMenuLength, "MYENGINE_DOOM_NO_MENU") == 0 && noMenu != nullptr && noMenu[0] != '\0' && std::string_view(noMenu) != "0";
+            std::free(noMenu);
+            options.doom.showMenu = options.doom.iwad.empty() && options.doom.args.empty() && !options.fly && !noMenuEnvironment;
+            options.doom.makeBrainView = [explicitPath = options.fbrain, exeDirectory = fly.exeDirectory, sourceDirectory = fly.sourceDirectory](const myengine::game::DoomBrainViewContext& context)
+            {
+                return std::make_unique<brainview::DoomMenuBackdrop>(context, brainview::DoomMenuBackdrop::FindConnectome(explicitPath, exeDirectory, sourceDirectory));
+            };
         }
     }
     app.SetDoomMode(options.doomMode, options.doom);
@@ -557,8 +582,17 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
 
     app.GetStateMachine().ChangeState(std::make_unique<myengine::appstate::LoadingState>(), app);
 
+    // Window > Fly Brain: the 3D cloud of the connectome with a test stimulus (the module game/brainview); the simulation runs only while the window is open
+    std::unique_ptr<brainview::BrainViewWindow> flyBrainWindow;
+    if (!options.gameMode && app.GetRenderAdapter() != nullptr && app.GetThumbnailService() != nullptr)
+    {
+        flyBrainWindow = std::make_unique<brainview::BrainViewWindow>(*app.GetRenderAdapter(), *app.GetThumbnailService(), app.GetLogger(), options.fbrain);   // --fbrain, else the default connectome
+        app.AddEditorToolWindow("Fly Brain", [window = flyBrainWindow.get()](bool& open, const double deltaSeconds) { window->Draw(open, deltaSeconds); }, options.openFlyBrain);
+    }
+
     const int exitCode = app.Run();
 
+    flyBrainWindow.reset();   // its GPU objects go back before the renderer shuts down
     app.Shutdown();
     return exitCode;
 }

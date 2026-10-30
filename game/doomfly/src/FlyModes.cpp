@@ -6,6 +6,9 @@
 #include <doomfly/FlyPlayer.h>
 #include <doomfly/FlySwarm.h>
 
+#include <brainview/BrainLayout.h>
+#include <brainview/PlayerBrainPanel.h>
+
 #include <imgui/imgui.h>
 
 #include <algorithm>
@@ -13,6 +16,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <tuple>
+#include <chrono>
 
 namespace doomfly
 {
@@ -162,12 +167,310 @@ namespace doomfly
             }
         }
 
+        // The 3D brain of one player (V1, docs/flybrain/brain-view.md): the cloud, the groups of neurons that are coloured in it, what the panel says about the brain. The
+        // controller of a single fly owns one, the duel one per brain.
+        class FlyBrainView
+        {
+        public:
+            FlyBrainView(FlyPlayer& player, myengine::render::IRenderAdapter* render, myengine::editor::ThumbnailService* thumbnails, const std::string& id) : player_(player)
+            {
+                if (render != nullptr && thumbnails != nullptr)
+                {
+                    panel_ = std::make_unique<brainview::PlayerBrainPanel>(render, thumbnails, id);
+                    BuildGroups();
+                }
+            }
+
+            bool Valid() const { return panel_ != nullptr; }
+
+            // What the brain did since the last frame, for the picture of the cloud: the spikes of the last tic on the CPU, or the buffer of the last spike steps of the brain
+            // itself on the GPU (it lives on the device of the renderer; the ring of a feed is good until the end of the frame, so it is not kept)
+            void Update(const double deltaSeconds)
+            {
+                if (panel_ == nullptr)
+                {
+                    return;
+                }
+                const BrainFeedSnapshot feed = player_.BrainFeed();
+                if (feed.connectome == nullptr)
+                {
+                    return;
+                }
+                const double dtSeconds = flybrain::ModelParams{}.dtMs / 1000.0;
+                const auto now = std::chrono::steady_clock::now();
+                if (feed.step != lastFeedStep_)
+                {
+                    lastFeedStep_ = feed.step;
+                    stepSeen_ = now;
+                }
+                brainview::BrainFeedFrame frame;
+                frame.connectome = feed.connectome;
+                if (panel_->View() == nullptr)
+                {
+                    frame.groups = groups_;   // until the view is made
+                }
+                frame.simSecondsNow = static_cast<double>(feed.step) * dtSeconds;
+                frame.generation = feed.generation;
+                const FlyStatus status = player_.Status();
+                frame.spikesPerSecond = status.spikesPerSecond;
+                frame.brainSpeed = status.brainSpeed;
+                if (feed.backend == flybrain::Backend::Gpu && feed.ring.lastSpikeStep != nullptr)
+                {
+                    frame.gpu = true;
+                    frame.backend = "GPU";
+                    frame.gpuFlash.buffer = feed.ring.lastSpikeStep;
+                    frame.gpuFlash.fence = feed.ring.fence;
+                    frame.gpuFlash.fenceValue = feed.ring.fenceValue;
+                    frame.gpuFlash.stepWhole = static_cast<std::uint32_t>(feed.step);
+                    frame.gpuFlash.stepSeconds = static_cast<float>(dtSeconds);
+                    // the step was known `since` seconds ago: the flashes go on fading between two tics of the game
+                    const double since = std::min(std::chrono::duration<double>(now - stepSeen_).count(), 0.25);
+                    frame.gpuFlash.stepFraction = static_cast<float>(since / dtSeconds);
+                }
+                else
+                {
+                    frame.backend = "CPU";
+                    frame.spikes.reserve(feed.spikes.size());
+                    for (const flybrain::SpikeEvent& spike : feed.spikes)
+                    {
+                        frame.spikes.push_back({spike.neuron, static_cast<double>(spike.step) * dtSeconds});
+                    }
+                }
+                panel_->Update(frame, deltaSeconds);
+            }
+
+            // The panel of a single brain: the groups of neurons by what they do, with the colours of the cloud
+            void Describe(myengine::game::DoomPanelData& out, const std::string& title) const
+            {
+                const FlyStatus status = player_.Status();
+                char text[160];
+                out.title = title;
+                out.subtitle = status.controlsName + " neurons";
+                std::snprintf(text, sizeof(text), "%.1fx real time", status.brainSpeed);
+                out.chip = text;
+                out.brainChip = "BRAIN " + status.backend.substr(0, status.backend.find(' '));
+                myengine::game::DoomPanelGroup motor;
+                motor.title = "MOTOR";
+                myengine::game::DoomPanelGroup vision;
+                vision.title = "VISION";
+                for (const Entry& entry : entries_)
+                {
+                    float hz = 0.0f;
+                    for (const RateReading& reading : status.rates)
+                    {
+                        if (reading.name == entry.name)
+                        {
+                            hz = reading.hz;
+                        }
+                    }
+                    myengine::game::DoomPanelBar bar;
+                    bar.label = entry.name;
+                    std::snprintf(text, sizeof(text), "%.0f Hz", hz);
+                    bar.text = text;
+                    bar.value = hz;
+                    bar.limit = 60.0f;
+                    bar.rgb = Rgb(entry.color);
+                    (entry.vision ? vision : motor).bars.push_back(std::move(bar));
+                }
+                if (!motor.bars.empty())
+                {
+                    out.groups.push_back(std::move(motor));
+                }
+                if (!vision.bars.empty())
+                {
+                    out.groups.push_back(std::move(vision));
+                }
+                out.groups.push_back(Output("OUTPUT"));
+                // the dim lines at the foot (they are for the one who debugs the brain, not for the player)
+                std::snprintf(text, sizeof(text), "brain %.2fx   game %.2fx   tic %llu", status.brainSpeed, status.gameSpeed, static_cast<unsigned long long>(status.tics));
+                out.debug.push_back(text);
+                std::snprintf(text, sizeof(text), "%.0f k spikes/s   resets %u   runaway %u   hurt %u", status.spikesPerSecond / 1000.0f, status.resets, status.seizures, status.damages);
+                out.debug.push_back(text);
+                if (status.waiting)
+                {
+                    out.debug.push_back("the game waits for the brain");
+                }
+                if (status.reflex)
+                {
+                    out.debug.push_back("a reflex of the legs, not the brain");
+                }
+                // the line of the big brain: the neurons, the spikes, the speed
+                std::string neurons = std::to_string(player_.GetConnectome().NeuronCount());
+                for (std::size_t at = neurons.size(); at > 3; at -= 3)
+                {
+                    neurons.insert(at - 3, " ");
+                }
+                std::snprintf(text, sizeof(text), "%s neurons   %.2f M spikes/s   %.2fx real time", neurons.c_str(), status.spikesPerSecond / 1.0e6f, status.brainSpeed);
+                out.brainLine = text;
+            }
+
+            // What the player does and the pain, as a group of the panel
+            myengine::game::DoomPanelGroup Output(const std::string& title) const
+            {
+                const FlyStatus status = player_.Status();
+                char text[160];
+                myengine::game::DoomPanelGroup action;
+                action.title = title;
+                myengine::game::DoomPanelBar turn;
+                turn.label = "turn";
+                std::snprintf(text, sizeof(text), "%+.2f deg/tic", status.turnDegrees);
+                turn.text = text;
+                turn.value = status.turnDegrees;
+                turn.limit = 6.0f;
+                turn.centered = true;
+                turn.rgb = 0x46e08a;
+                action.bars.push_back(std::move(turn));
+                myengine::game::DoomPanelBar forward;
+                forward.label = "forward";
+                std::snprintf(text, sizeof(text), "%.0f", std::fabs(status.forwardUnits));
+                forward.text = text;
+                forward.value = std::fabs(status.forwardUnits);
+                forward.limit = 50.0f;
+                forward.rgb = 0x46e08a;
+                action.bars.push_back(std::move(forward));
+                myengine::game::DoomPanelBar fire;
+                fire.label = "fire";
+                fire.text = status.fire ? "ON" : "off";
+                fire.value = status.fire ? 1.0f : 0.0f;
+                fire.limit = 1.0f;
+                fire.rgb = Rgb(brainview::kColorFire);
+                action.bars.push_back(std::move(fire));
+                myengine::game::DoomPanelBar dopamine;
+                dopamine.label = "dopamine (pain)";
+                std::snprintf(text, sizeof(text), "%.1f mV", status.dopamineMv);
+                dopamine.text = text;
+                dopamine.value = status.dopamineMv;
+                dopamine.limit = 4.0f;
+                dopamine.rgb = Rgb(brainview::kColorDopamine);
+                action.bars.push_back(std::move(dopamine));
+                return action;
+            }
+
+            void DrawCloud(ImDrawList* list, const float x, const float y, const float width, const float height)
+            {
+                if (panel_ != nullptr)
+                {
+                    panel_->DrawPanel(list, x, y, width, height);
+                }
+            }
+            bool Big() const { return panel_ != nullptr && panel_->Big(); }
+            void ToggleBig()
+            {
+                if (panel_ != nullptr)
+                {
+                    panel_->ToggleBig();
+                }
+            }
+            void DrawOverlay(ImDrawList* list, const float width, const float height, const int count, const int slot)
+            {
+                if (panel_ != nullptr)
+                {
+                    panel_->DrawOverlay(list, width, height, count, slot);
+                }
+            }
+            std::string Backend() const
+            {
+                const std::string backend = player_.Status().backend;
+                return backend.substr(0, backend.find(' '));
+            }
+
+        private:
+            struct Entry
+            {
+                std::string name;      // as the rates name it: "DNp20 R", "DNpe017"
+                std::uint8_t color = 0;
+                bool vision = false;
+            };
+
+            // The 0xRRGGBB of a colour of the cloud for a bar of the panel: the palette is HDR (the groups glow), the panel wants the colour
+            static std::uint32_t Rgb(const std::uint8_t colorIndex)
+            {
+                float palette[brainview::kPaletteSize][4];
+                brainview::FillPalette(palette);
+                const float* c = palette[colorIndex];
+                const float peak = std::max({c[0], c[1], c[2], 1.0f});
+                auto channel = [&](const float v) { return static_cast<std::uint32_t>(std::clamp(v / peak, 0.0f, 1.0f) * 255.0f + 0.5f); };
+                return (channel(c[0]) << 16) | (channel(c[1]) << 8) | channel(c[2]);
+            }
+
+            // The neurons that the controls read, grouped as the panel lists them, and the groups that colour them in the cloud (with the photoreceptors and the dopamine neurons)
+            void BuildGroups()
+            {
+                const flybrain::Connectome& connectome = player_.GetConnectome();
+                const FlyControls& controls = player_.Controls();
+                auto add = [&](const ControlTerm& term, const std::uint8_t color, const bool vision)
+                {
+                    const std::string name = term.type + (term.side == flybrain::Side::Left ? " L" : term.side == flybrain::Side::Right ? " R" : "");
+                    for (const Entry& entry : entries_)
+                    {
+                        if (entry.name == name)
+                        {
+                            return;
+                        }
+                    }
+                    brainview::BrainGroup group;
+                    group.id = name;
+                    group.label = name;
+                    group.colorIndex = color;
+                    group.neurons = connectome.Find(term.type, term.side).neurons;
+                    if (group.neurons.empty())
+                    {
+                        return;
+                    }
+                    groups_.push_back(std::move(group));
+                    entries_.push_back({name, color, vision});
+                };
+                auto side = [](const ControlTerm& term, const std::uint8_t fallback)
+                {
+                    return term.side == flybrain::Side::Left ? static_cast<std::uint8_t>(brainview::kColorTurnLeft)
+                                                              : term.side == flybrain::Side::Right ? static_cast<std::uint8_t>(brainview::kColorTurnRight) : fallback;
+                };
+                for (const ControlTerm& term : controls.turn.terms)
+                {
+                    add(term, side(term, brainview::kColorTurnLeft), false);
+                }
+                for (const ControlTerm& term : controls.forward.terms)
+                {
+                    add(term, brainview::kColorForward, false);
+                }
+                for (const ControlTerm& term : controls.fire.terms)
+                {
+                    add(term, brainview::kColorFire, false);
+                }
+                for (const ControlTerm& term : controls.fire.spikeTerms)
+                {
+                    add(term, brainview::kColorFire, false);
+                }
+                for (const ControlTerm& term : controls.show)
+                {
+                    add(term, term.type == "LC4" ? brainview::kColorVision : brainview::kColorEyes, true);
+                }
+                for (const auto& [id, label, color, neurons] : {std::make_tuple("dopamine", "Dopamine (pain)", brainview::kColorDopamine, connectome.FindPrefix("PPL1").neurons),
+                                                                 std::make_tuple("eyes", "Eyes (R1-R6)", brainview::kColorEyes, connectome.Find("R1-R6").neurons)})
+                {
+                    if (!neurons.empty())
+                    {
+                        groups_.push_back({id, label, static_cast<std::uint8_t>(color), neurons});
+                    }
+                }
+            }
+
+            FlyPlayer& player_;
+            std::unique_ptr<brainview::PlayerBrainPanel> panel_;
+            std::vector<brainview::BrainGroup> groups_;
+            std::vector<Entry> entries_;
+            std::uint64_t lastFeedStep_ = ~0ull;
+            std::chrono::steady_clock::time_point stepSeen_ = std::chrono::steady_clock::now();
+        };
+
         class FlyController final : public myengine::game::IDoomController
         {
         public:
-            FlyController(std::unique_ptr<FlyPlayer> player, std::string title, std::function<void(const std::string&)> log)
+            FlyController(std::unique_ptr<FlyPlayer> player, std::string title, std::function<void(const std::string&)> log, myengine::render::IRenderAdapter* render,
+                          myengine::editor::ThumbnailService* thumbnails)
                 : player_(std::move(player)), title_(std::move(title)), log_(std::move(log))
             {
+                view_ = std::make_unique<FlyBrainView>(*player_, render, thumbnails, "fly-brain");
             }
 
             ~FlyController() override
@@ -186,6 +489,7 @@ namespace doomfly
                     player_->Attach(game);
                 }
                 const bool frame = player_->Pump(game, deltaSeconds);
+                view_->Update(deltaSeconds);
                 // a line of the log every 10 seconds of the game: where the fly is and how the brain keeps up
                 const FlyStatus status = player_->Status();
                 if (log_ && status.tics >= nextLogTic_)
@@ -214,8 +518,24 @@ namespace doomfly
                 DrawFlyPanel(*player_, "FLY PLAYS", list, x, y, width, height);
             }
 
+            // with a renderer the window draws the panel in the style of the menu from this data (the cloud of the brain in it); without one DrawPanel is the panel
+            bool DescribePanel(myengine::game::DoomPanelData& out) const override
+            {
+                if (!view_->Valid())
+                {
+                    return false;
+                }
+                view_->Describe(out, "FLY PLAYS");
+                return true;
+            }
+            void DrawBrain(ImDrawList* list, const float x, const float y, const float width, const float height) override { view_->DrawCloud(list, x, y, width, height); }
+            bool BigBrainOpen() const override { return view_->Big(); }
+            void ToggleBigBrain() override { view_->ToggleBig(); }
+            void DrawOverlay(ImDrawList* list, const float width, const float height) override { view_->DrawOverlay(list, width, height, 1, 0); }
+
         private:
             std::unique_ptr<FlyPlayer> player_;
+            std::unique_ptr<FlyBrainView> view_;
             std::string title_;
             std::function<void(const std::string&)> log_;
             std::uint64_t nextLogTic_ = 0;
@@ -294,7 +614,7 @@ namespace doomfly
             {
                 return nullptr;
             }
-            return std::make_unique<FlyController>(std::move(player), bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)", shared->options.log);
+            return std::make_unique<FlyController>(std::move(player), bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)", shared->options.log, choice.render, choice.thumbnails);
         }
 
         // ---------------------------------------------------------------------------------------------------------------------------------------
@@ -322,9 +642,14 @@ namespace doomfly
         {
         public:
             // `flies`: the brains with their players (1 for Human vs Fly, 0 and 1 for Fly vs Fly)
-            DuelController(std::vector<std::unique_ptr<FlyPlayer>> flies, std::vector<int> players, const bool humanPlays, std::function<void(const std::string&)> log)
+            DuelController(std::vector<std::unique_ptr<FlyPlayer>> flies, std::vector<int> players, const bool humanPlays, std::function<void(const std::string&)> log,
+                           myengine::render::IRenderAdapter* render, myengine::editor::ThumbnailService* thumbnails)
                 : flies_(std::move(flies)), players_(std::move(players)), humanPlays_(humanPlays), log_(std::move(log))
             {
+                for (std::size_t i = 0; i < flies_.size(); ++i)
+                {
+                    views_.push_back(std::make_unique<FlyBrainView>(*flies_[i], render, thumbnails, "duel-brain-" + std::to_string(i)));
+                }
             }
 
             ~DuelController() override
@@ -354,6 +679,10 @@ namespace doomfly
                 for (const auto& fly : flies_)
                 {
                     ready = fly->Poll(game) && ready;
+                }
+                for (const auto& view : views_)
+                {
+                    view->Update(deltaSeconds);
                 }
                 bool frame = false;
                 if (ready)
@@ -412,6 +741,71 @@ namespace doomfly
                 {
                     std::string name = humanPlays_ ? "FLY PLAYS" : (i == 0 ? "FLY 1" : "FLY 2");
                     DrawFlyPanel(*flies_[i], name, list, x, y + headHeight + each * static_cast<float>(i), width, each);
+                }
+            }
+
+            // with a renderer the window draws the panel in the style of the menu: the score and the time, the clouds of both brains side by side, what each player does
+            bool DescribePanel(myengine::game::DoomPanelData& out) const override
+            {
+                for (const auto& view : views_)
+                {
+                    if (!view->Valid())
+                    {
+                        return false;
+                    }
+                }
+                if (views_.empty())
+                {
+                    return false;
+                }
+                char text[200];
+                out.title = humanPlays_ ? "HUMAN VS FLY" : "FLY VS FLY";
+                std::snprintf(text, sizeof(text), "%s  %d : %d  %s", humanPlays_ ? "YOU" : "FLY 1", frags_[0], frags_[1], humanPlays_ ? "FLY" : "FLY 2");
+                out.subtitle = text;
+                if (winner_ >= 0)
+                {
+                    out.chip = winner_ == 2 ? "DRAW" : (winner_ == 0 ? (humanPlays_ ? "YOU WIN" : "FLY 1 WINS") : (humanPlays_ ? "THE FLY WINS" : "FLY 2 WINS"));
+                }
+                else
+                {
+                    std::snprintf(text, sizeof(text), "%d:%02d", (roundTicsLimit_ - roundTics_) / 35 / 60, (roundTicsLimit_ - roundTics_) / 35 % 60);
+                    out.chip = text;
+                }
+                out.brainChip = "BRAIN " + views_.front()->Backend();
+                for (std::size_t i = 0; i < views_.size(); ++i)
+                {
+                    out.groups.push_back(views_[i]->Output(humanPlays_ ? "THE FLY" : (i == 0 ? "FLY 1" : "FLY 2")));
+                }
+                std::snprintf(text, sizeof(text), "to %d frags or 3 min   rounds won %d : %d", kFragLimit, wins_[0], wins_[1]);
+                out.debug.push_back(text);
+                std::snprintf(text, sizeof(text), "brain %.2fx", flies_.back()->Status().brainSpeed);
+                out.debug.push_back(text);
+                std::snprintf(text, sizeof(text), "%zu brains", views_.size());
+                out.brainLine = text;
+                return true;
+            }
+            // the clouds of the brains side by side in the rect
+            void DrawBrain(ImDrawList* list, const float x, const float y, const float width, const float height) override
+            {
+                const float each = width / static_cast<float>(std::max<std::size_t>(views_.size(), 1));
+                for (std::size_t i = 0; i < views_.size(); ++i)
+                {
+                    views_[i]->DrawCloud(list, x + each * static_cast<float>(i), y, each, height);
+                }
+            }
+            bool BigBrainOpen() const override { return !views_.empty() && views_.front()->Big(); }
+            void ToggleBigBrain() override
+            {
+                for (const auto& view : views_)
+                {
+                    view->ToggleBig();
+                }
+            }
+            void DrawOverlay(ImDrawList* list, const float width, const float height) override
+            {
+                for (std::size_t i = 0; i < views_.size(); ++i)
+                {
+                    views_[i]->DrawOverlay(list, width, height, static_cast<int>(views_.size()), static_cast<int>(i));
                 }
             }
 
@@ -541,6 +935,7 @@ namespace doomfly
             }
 
             std::vector<std::unique_ptr<FlyPlayer>> flies_;
+            std::vector<std::unique_ptr<FlyBrainView>> views_;   // one cloud per brain (empty cloud without a renderer)
             std::vector<int> players_;
             bool humanPlays_ = false;
             std::function<void(const std::string&)> log_;
@@ -585,7 +980,7 @@ namespace doomfly
                     return nullptr;
                 }
             }
-            return std::make_unique<DuelController>(std::move(flies), std::move(players), humanVsFly, shared->options.log);
+            return std::make_unique<DuelController>(std::move(flies), std::move(players), humanVsFly, shared->options.log, choice.render, choice.thumbnails);
         }
     }
 

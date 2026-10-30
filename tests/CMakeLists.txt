@@ -685,6 +685,27 @@ target_link_libraries(myengine_flybrain_bench PRIVATE myengine_flybrain myengine
 myengine_apply_compiler_options(myengine_flybrain_bench)
 set_property(TARGET myengine_flybrain_bench PROPERTY FOLDER "Tests")
 
+# V0: the 3D view of the fly brain (game/brainview): layout, flash buffer, activity of the groups, camera, the runner on a small brain, and the picture of a point
+# cloud on a real DX12 device (or WARP) read back from a render target. Exit code 77: no device, desktop or shader next to the test (the rest has run).
+add_executable(myengine_brainview_tests
+  brainview/BrainViewTests.cpp)
+
+target_link_libraries(myengine_brainview_tests PRIVATE myengine_brainview myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_brainview_tests)
+myengine_copy_runtime_assets(myengine_brainview_tests)
+set_property(TARGET myengine_brainview_tests PROPERTY FOLDER "Tests")
+add_test(NAME brainview COMMAND myengine_brainview_tests)
+set_tests_properties(brainview PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+# Manual (not CTest): the fly brain on the real connectome without the editor: --bench measures the frame time of the cloud with the brain running next to it, --out saves
+# frames of the picture (the evidence of V0)
+add_executable(myengine_brainview_demo
+  brainview/BrainViewDemo.cpp)
+
+target_link_libraries(myengine_brainview_demo PRIVATE myengine_brainview myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_brainview_demo)
+myengine_copy_runtime_assets(myengine_brainview_demo)
+set_property(TARGET myengine_brainview_demo PROPERTY FOLDER "Tests")
 # N0b: the GPU backend of the fly brain (DX12 compute, assets/shaders/flybrain.hlsl) against the CPU: the same spikes on a
 # synthetic graph and on the connectome when it is downloaded. Skipped (exit code 77) without a DX12 adapter with doubles
 add_executable(myengine_flybrain_gpu_tests
@@ -729,6 +750,16 @@ myengine_apply_compiler_options(myengine_doom_fly_tests)
 set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
 set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
+# V1: the menu of FlyDoom without a window: the settings file, the levels of a WAD by its name, the arguments of DOOM that start one
+add_executable(myengine_doom_frontend_tests
+  doomflow/DoomFrontEndTests.cpp)
+
+target_link_libraries(myengine_doom_frontend_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_doom_frontend_tests)
+set_property(TARGET myengine_doom_frontend_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_frontend COMMAND myengine_doom_frontend_tests)
+set_tests_properties(doom_frontend PROPERTIES TIMEOUT 60)
 
 # D1c: the swarm of enemy flies (game/doomfly FlySwarm, game/doom DoomSwarm): the pictures of the fly, the brain of the circuit at looming, a game of E1M1 with waves.
 # The brain and the game need assets/flybrain/swarm_circuit.fbrain (build/tests/RelWithDebInfo/myengine_flybrain_circuit.exe) and the game a WAD

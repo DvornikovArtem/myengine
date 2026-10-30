@@ -27,6 +27,7 @@
 #include <myengine/scripting/PrefabLibrary.h>
 #include <myengine/scripting/ScriptRuntime.h>
 #include <myengine/game/DoomController.h>
+#include <myengine/game/DoomFrontEnd.h>
 #include <myengine/state/StateMachine.h>
 #include <myengine/ui/UiManager.h>
 
@@ -106,8 +107,11 @@ namespace myengine::core
             bool squarePixels = false;              // --doom-square-pixels: no 4:3 stretch of the 320x200 picture
             bool music = true;                      // --doom-no-music
             std::vector<game::DoomMode> modes;      // who can play: the human first, then the controllers of the app (the fly, docs/game/flydoom-fly.md)
-            int initialMode = -1;                   // the mode to start with (--fly), -1: a menu asks when there are several
-            game::DoomLaunchChoice choice;          // the set of neurons and the backend of the brain (--fly bio, --flybrain gpu)
+            std::wstring relaunchArguments;         // the command line that starts the game again for "to the laboratory" (FlyDoom.exe: none; myengine.exe: --game doom)
+            game::DoomLaunchChoice choice;          // what the mode is made with when there is no menu (--fly-bio: controlSet "bio")
+            int initialMode = -1;                   // the mode to start with (--fly), -1: the menu of FlyDoom asks
+            bool showMenu = true;                   // false: no menu, the game starts with what the command line says (--iwad, --doom-args, MYENGINE_DOOM_NO_MENU=1)
+            game::DoomBrainViewFactory makeBrainView;   // the brain behind the menu (game/brainview; the engine does not link it)
         };
         void SetDoomMode(bool enabled, const DoomOptions& options = {});
         /// The DX12 device of the renderer (ID3D12Device*), nullptr before Initialize or with another adapter: the brain of the fly lives on it
@@ -155,6 +159,12 @@ namespace myengine::core
         std::string CaptureSceneSnapshot() const;
         bool RestoreSceneSnapshot(std::string_view snapshotJson);
 
+        /// A window of another module in the Window menu of the editor (docs/flybrain/brain-view.md): `draw(open, deltaSeconds)` runs every frame inside the ImGui frame,
+        /// also while the window is closed. Call it before Initialize, or after: the menu takes new entries at once.
+        void AddEditorToolWindow(std::string name, std::function<void(bool& open, double deltaSeconds)> draw, bool openAtStart = false);
+        /// The renderer and the live-view service, for what such a window draws (null before Initialize)
+        render::IRenderAdapter* GetRenderAdapter() { return renderAdapter_.get(); }
+        editor::ThumbnailService* GetThumbnailService() { return thumbnailService_.get(); }
         /// The start map is in the world (with SetDeferredSceneLoad it takes a few frames after Run starts).
         bool IsSceneLoaded() const;
         /// The long operations that the editor shows (a window for a map, an indicator in the status bar).
@@ -247,6 +257,7 @@ namespace myengine::core
         std::unique_ptr<render::IRenderAdapter> renderAdapter_;
         std::unique_ptr<resource::ResourceManager> resourceManager_;
         std::unique_ptr<editor::ThumbnailService> thumbnailService_; // after the adapter and the resources it uses
+        std::vector<ui::EditorToolWindow> editorToolWindows_; // the windows of other modules (SceneEditorServices::toolWindows); after the adapter: they release GPU objects when they go
         editor::LoadingService loadingService_;
         std::unique_ptr<PendingSceneLoad> pendingSceneLoad_;
         ui::UiManager uiManager_;

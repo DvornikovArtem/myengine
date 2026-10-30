@@ -217,6 +217,15 @@ namespace myengine::core
         Shutdown();
     }
 
+    void Application::AddEditorToolWindow(std::string name, std::function<void(bool& open, double deltaSeconds)> draw, const bool openAtStart)
+    {
+        ui::EditorToolWindow tool;
+        tool.name = std::move(name);
+        tool.open = openAtStart;
+        tool.draw = std::move(draw);
+        editorToolWindows_.push_back(std::move(tool));
+    }
+
     bool Application::Initialize(const config::AppConfig& config, const std::filesystem::path& requestedScene, const bool requestedPlay)
     {
         config_ = config;
@@ -428,6 +437,7 @@ namespace myengine::core
         sceneEditorServices.world = &world_;
         sceneEditorServices.resourceManager = resourceManager_.get();
         sceneEditorServices.thumbnails = thumbnailService_.get();
+        sceneEditorServices.toolWindows = &editorToolWindows_;
         sceneEditorServices.logger = &logger_;
         sceneEditorServices.prefabLibrary = &prefabLibrary_;
         sceneEditorServices.requestQuit = [this]() { RequestQuit(); };
@@ -623,6 +633,39 @@ namespace myengine::core
             services.render = renderAdapter_.get();
             services.audio = &audio::GetAudioSystem();
             services.quit = [this]() { RequestQuit(); };
+            // "To the laboratory": DOOM lives once in a process, so the program starts again with the menu on the PLAY screen and this one quits
+            services.backToMenu = [this]()
+            {
+                wchar_t path[MAX_PATH * 2] = {};
+                if (GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path))) == 0)
+                {
+                    logger_.Error("To the laboratory: the path of the program is unknown");
+                    return;
+                }
+                std::wstring command = std::wstring(L"\"") + path + L"\"";
+                if (!doomOptions_.relaunchArguments.empty())
+                {
+                    command += L" " + doomOptions_.relaunchArguments;
+                }
+                const std::wstring directory = std::filesystem::path(path).parent_path().wstring();
+                // the new program opens on PLAY and does not repeat a script of the tests
+                _wputenv_s(L"MYENGINE_DOOM_MENU_SCREEN", L"play");
+                _wputenv_s(L"MYENGINE_UI_SCRIPT", L"");
+                _wputenv_s(L"MYENGINE_DOOM_KEYS", L"");
+                STARTUPINFOW startup{};
+                startup.cb = sizeof(startup);
+                PROCESS_INFORMATION process{};
+                const BOOL started = CreateProcessW(path, command.data(), nullptr, nullptr, FALSE, 0, nullptr, directory.c_str(), &startup, &process);
+                _wputenv_s(L"MYENGINE_DOOM_MENU_SCREEN", L"");
+                if (started == FALSE)
+                {
+                    logger_.Error("To the laboratory: the program did not start again, error " + std::to_string(GetLastError()));
+                    return;
+                }
+                CloseHandle(process.hThread);
+                CloseHandle(process.hProcess);
+                RequestQuit();
+            };
             services.takeMouseDelta = [this]()
             {
                 const std::pair<int, int> delta{rawMouseX_, rawMouseY_};
@@ -655,6 +698,13 @@ namespace myengine::core
             services.modes = doomOptions_.modes;
             services.initialMode = doomOptions_.initialMode;
             services.choice = doomOptions_.choice;
+            // the laboratory: the menu, the brain behind it, the window mode of its settings, the file that keeps them
+            services.showMenu = doomOptions_.showMenu;
+            services.thumbnails = thumbnailService_.get();
+            services.makeBrainView = doomOptions_.makeBrainView;
+            services.applyVideo = [this](const game::RlVideoSettings& video) { ApplyVideoSettings(video); };
+            services.windowSize = [this]() { return GetWindowSize(); };
+            services.settingsFile = apppaths::UserDataDirectory() / L"settings.json";
             doomFlow_ = std::make_unique<game::DoomGameFlow>(services);
             doomFlow_->Install();
         }
@@ -769,6 +819,10 @@ namespace myengine::core
                     if (gameFlow_ != nullptr)
                     {
                         gameFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
+                    }
+                    if (doomFlow_ != nullptr)
+                    {
+                        doomFlow_->SetRawInputHook([raw](rlui::RawInput& input) { raw->ApplyTo(input); });
                     }
                     logger_.Info(std::string("UI script: ") + scriptPath);
                 }

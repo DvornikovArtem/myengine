@@ -22,6 +22,8 @@ namespace myengine::render::dx12
     constexpr std::uint32_t kDebugLineVertexStride = 32; // float4 position (clip space), float4 colour
     constexpr std::uint32_t kUiVertexStride = 20;        // float2 position, rgba8 colour, float2 uv
     constexpr std::uint32_t kInstanceStride = 64;        // slot 1 of the "mesh_instanced" stream: the model matrix, four float4 rows
+    constexpr std::uint32_t kPointCloudStride = 16;      // the "point_cloud" stream, slot 0 (per instance): float3 position, the colour index as a float
+    constexpr std::uint32_t kPointCloudFlashStride = 4;  // slot 1 (per instance): the time of the last flash
 
     // The format of an attribute in the vertex buffer
     enum class StreamFormat : std::uint8_t
@@ -71,7 +73,7 @@ namespace myengine::render::dx12
     };
 
     // The streams of the renderer: "mesh", "mesh_instanced" (the mesh plus the model matrix per instance as INSTANCE0..3),
-    // "debug_lines", "ui". nullptr: no such stream
+    // "debug_lines", "ui", "point_cloud" (both slots per instance). nullptr: no such stream
     const VertexStreamDesc* FindVertexStream(const std::string& name);
 
     // `layout.vertexInputs` against the stream. A semantic that the stream does not have, or an input that the format of the
