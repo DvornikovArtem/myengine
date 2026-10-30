@@ -51,6 +51,9 @@ namespace doom
         int secrets = 0;
         int frags = 0;                          // deathmatch: kills of the others minus suicides
         int deaths = 0;                         // deathmatch: how many times the others killed this player
+        bool hasAttacker = false;               // the monster (or player) that hurt this player last, while it exists (the turn away from it, N3b)
+        double attackerX = 0.0;
+        double attackerY = 0.0;
     };
 
     enum class GameState : std::uint8_t

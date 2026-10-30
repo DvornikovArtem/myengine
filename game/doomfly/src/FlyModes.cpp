@@ -56,6 +56,7 @@ namespace doomfly
         {
             FlyModeOptions options;
             std::shared_ptr<const flybrain::Connectome> connectome;
+            bool forgotten = false;             // --fly-forget is done (once per run)
         };
 
         // The panel of one brain: the neurons the controls read, what the player does, the health of the brain. `header` is the big title.
@@ -142,7 +143,14 @@ namespace doomfly
             cursor += size * 0.3f;
 
             // the reinforcement and the health of the brain
-            bar("dopamine PPL101 (mV)", status.dopamineMv, 4.0f, status.dopamineMv > 0.0f ? red : dim);
+            bar(fly.Learns() ? "dopamine PPL1 (mV)" : "dopamine PPL101 (mV)", status.dopamineMv, fly.Learns() ? 15.0f : 4.0f, status.dopamineMv > 0.0f ? red : dim);
+            if (fly.Learns())
+            {
+                char learned[128];
+                std::snprintf(learned, sizeof(learned), "KC %.0f spikes/s   learned weight %.4f", status.kcSpikesPerSecond, status.learnedScale);
+                line(learned, text);
+                line("our bridge: picture -> visual inputs of KCs; MBON in the turn: our weight", dim);
+            }
             char brain[128];
             std::snprintf(brain, sizeof(brain), "spikes %.0f k/s   tics %llu", status.spikesPerSecond / 1000.0f, static_cast<unsigned long long>(status.tics));
             line(brain, text);
@@ -281,6 +289,28 @@ namespace doomfly
                     out.groups.push_back(std::move(vision));
                 }
                 out.groups.push_back(Output("OUTPUT"));
+                if (player_.Learns())
+                {
+                    // N3b: what the mushroom body sees and what it has learned (the bridge into the KCs and the MBON turn are ours, docs/flybrain/flybrain.md)
+                    myengine::game::DoomPanelGroup learning;
+                    learning.title = "LEARNING";
+                    myengine::game::DoomPanelBar kc;
+                    kc.label = "Kenyon cells";
+                    std::snprintf(text, sizeof(text), "%.0f spikes/s", status.kcSpikesPerSecond);
+                    kc.text = text;
+                    kc.value = status.kcSpikesPerSecond;
+                    kc.limit = 2000.0f;
+                    learning.bars.push_back(std::move(kc));
+                    myengine::game::DoomPanelBar scale;
+                    scale.label = "learned weight";
+                    std::snprintf(text, sizeof(text), "%.4f", status.learnedScale);
+                    scale.text = text;
+                    scale.value = static_cast<float>(status.learnedScale);
+                    scale.limit = 1.0f;
+                    learning.bars.push_back(std::move(scale));
+                    out.groups.push_back(std::move(learning));
+                    out.debug.push_back("our bridge: picture -> visual inputs of KCs; MBON in the turn: our weight");
+                }
                 // the dim lines at the foot (they are for the one who debugs the brain, not for the player)
                 std::snprintf(text, sizeof(text), "brain %.2fx   game %.2fx   tic %llu", status.brainSpeed, status.gameSpeed, static_cast<unsigned long long>(status.tics));
                 out.debug.push_back(text);
@@ -567,11 +597,11 @@ namespace doomfly
 
         // One brain: `index` is its player in the game (-1: the console player), `seedOffset` makes the noise of two brains different
         std::unique_ptr<FlyPlayer> CreateFly(const std::shared_ptr<Shared>& shared, const myengine::game::DoomLaunchChoice& choice, const int index, const bool ownView,
-                                             const bool drivesScreens, const std::uint64_t seedOffset, std::string& error)
+                                             const bool drivesScreens, const std::uint64_t seedOffset, std::string& error, const bool learns = false)
         {
             const FlyModeOptions& options = shared->options;
-            const bool bio = choice.controlSet == "bio";
-            const char* controlsFile = bio ? "controls_bio.json" : "controls_doomfly.json";
+            const bool bio = choice.controlSet == "bio" && !learns;
+            const char* controlsFile = learns ? "controls_learn.json" : bio ? "controls_bio.json" : "controls_doomfly.json";
             if (!EnsureConnectome(shared, error))
             {
                 return nullptr;
@@ -590,6 +620,22 @@ namespace doomfly
                 return nullptr;
             }
             config.renderDevice = options.renderDevice ? options.renderDevice() : nullptr;
+            if (learns)
+            {
+                // N3b: the fly learns, and keeps what it has learned between the runs (--fly-forget: once per run, it starts again from the connectome)
+                config.learning.enabled = true;
+                config.learning.memoryPath = flybrain::FlyBrain::DefaultMemoryPath();
+                if (options.forget && !shared->forgotten)
+                {
+                    std::error_code ec;
+                    fs::remove(fs::u8path(config.learning.memoryPath), ec);
+                    if (options.log)
+                    {
+                        options.log("fly: the memory " + config.learning.memoryPath + " is forgotten");
+                    }
+                }
+                shared->forgotten = true;
+            }
             const fs::path controls = FindFile(options, {}, controlsFile);
             if (!FlyControls::Load(controls, config.controls, error))
             {
@@ -599,22 +645,24 @@ namespace doomfly
             if (player && options.log)
             {
                 const EyesInfo& info = player->Eyes().Info();
-                options.log(std::string("fly: ") + (bio ? "Bio" : "DOOMFLY") + " neurons, controls " + controls.string() + "; photoreceptors " + std::to_string(info.receptors[0]) +
+                options.log(std::string("fly: ") + (learns ? "learning DOOMFLY + MBON" : bio ? "Bio" : "DOOMFLY") + " neurons, controls " + controls.string() + "; photoreceptors " + std::to_string(info.receptors[0]) +
                             " left / " + std::to_string(info.receptors[1]) + " right, columns covered " + std::to_string(info.columnsCovered[0]) + " of " + std::to_string(info.columns[0]) +
                             " / " + std::to_string(info.columnsCovered[1]) + " of " + std::to_string(info.columns[1]));
             }
             return player;
         }
 
-        std::unique_ptr<myengine::game::IDoomController> MakeFly(const std::shared_ptr<Shared>& shared, const myengine::game::DoomLaunchChoice& choice, std::string& error)
+        std::unique_ptr<myengine::game::IDoomController> MakeFly(const std::shared_ptr<Shared>& shared, const myengine::game::DoomLaunchChoice& choice, std::string& error,
+                                                                 const bool learns = false)
         {
             const bool bio = choice.controlSet == "bio";
-            auto player = CreateFly(shared, choice, -1, false, true, 0, error);
+            auto player = CreateFly(shared, choice, -1, false, true, 0, error, learns);
             if (!player)
             {
                 return nullptr;
             }
-            return std::make_unique<FlyController>(std::move(player), bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)", shared->options.log, choice.render, choice.thumbnails);
+            const char* title = learns ? "Fly learns" : bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)";
+            return std::make_unique<FlyController>(std::move(player), title, shared->options.log, choice.render, choice.thumbnails);
         }
 
         // ---------------------------------------------------------------------------------------------------------------------------------------
@@ -1013,6 +1061,16 @@ namespace doomfly
         fly.unavailableReason = withFly ? "" : noBrain;
         fly.make = [shared](const DoomLaunchChoice& choice, std::string& error) { return MakeFly(shared, choice, error); };
         modes.push_back(std::move(fly));
+
+        DoomMode learn;
+        learn.id = "fly-learn";
+        learn.title = "Fly learns";
+        learn.description = "The fly plays and learns: what it saw when it was hurt weakens in its mushroom body, and it keeps that between the runs. "
+                            "Our bridge: picture -> visual inputs of the Kenyon cells; MBON in the turn: our weight.";
+        learn.available = withFly;
+        learn.unavailableReason = withFly ? "" : noBrain;
+        learn.make = [shared](const DoomLaunchChoice& choice, std::string& error) { return MakeFly(shared, choice, error, true); };
+        modes.push_back(std::move(learn));
 
         DoomMode versus;
         versus.id = "human-vs-fly";

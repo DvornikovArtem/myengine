@@ -338,7 +338,8 @@ namespace
     }
 
     // An object that comes at the fly (an expanding bright disc, 28 tics a loop) on the left, on the right, in the middle, and the same disc standing still
-    int ScenarioLoom()
+    // learning: the brain of the fly that learns (N3b: dopamine as a modulator, the antennal lobe silent, KCs see the columns) with its controls
+    int ScenarioLoom(const bool learning = false)
     {
         myengine::jobs::Initialize();
         auto connectome = LoadBrain();
@@ -355,7 +356,8 @@ namespace
         const Case cases[] = {{"left", 80.0f, true}, {"right", 240.0f, true}, {"centre", 160.0f, true}, {"still", 240.0f, false}};
         for (const Case& c : cases)
         {
-            auto player = MakePlayer(connectome, "controls_doomfly.json");
+            auto player = learning ? MakePlayer(connectome, "controls_learn.json", 1, [](doomfly::FlyPlayerConfig& config) { config.learning.enabled = true; })
+                                   : MakePlayer(connectome, "controls_doomfly.json");
             if (!player)
             {
                 return 1;
@@ -396,11 +398,18 @@ namespace
             {
                 afterCentral += history[i].centralSpikesPerSecond;
             }
-            const std::string prefix = std::string("loom_") + c.name + "_";
+            const std::string prefix = std::string(learning ? "loomlearn_" : "loom_") + c.name + "_";
             Result((prefix + "central_after_mean").c_str(), afterCentral / 28.0);
             for (const char* name : {"LC4 L", "LC4 R", "LPLC2 L", "LPLC2 R", "DNp01", "DNa02 L", "DNa02 R", "DNp20 L", "DNp20 R", "DNpe017"})
             {
                 Result((prefix + name).c_str(), peak[name]);
+            }
+            if (learning)
+            {
+                for (const char* name : {"MBON32 L", "MBON32 R", "MBON20 L", "MBON20 R"})
+                {
+                    Result((prefix + name).c_str(), peak[name]);
+                }
             }
             Result((prefix + "fire_tics").c_str(), fireTics);
             Result((prefix + "turn_mean").c_str(), turnSum / 70.0);
@@ -409,6 +418,101 @@ namespace
             Result((prefix + "central_peak").c_str(), centralPeak);
             Result((prefix + "central_mean").c_str(), centralSum / 70.0);
             Result((prefix + "seizures").c_str(), history.back().seizures);
+        }
+        myengine::jobs::Shutdown();
+        return 0;
+    }
+
+    // N3b: "view X + damage" through the whole chain of the fly that learns. X: a flickering pattern on the left half of the picture (its columns change, so
+    // the KCs see it), Y: the same on the right half. Before: X; then 8 pairings of X with damage (into every PPL1); after: X and Y. Two arms, learning on
+    // and off, the same seed: the only difference is the weights (the DANs fire a little at any picture, so the arms part already at the first X)
+    int ScenarioLearnShift()
+    {
+        myengine::jobs::Initialize();
+        auto connectome = LoadBrain();
+        if (!connectome)
+        {
+            return 1;
+        }
+        auto picture = [](const bool left, const int tic, std::vector<std::uint32_t>& frame)
+        {
+            for (int y = 0; y < kH; ++y)
+            {
+                for (int x = 0; x < kW; ++x)
+                {
+                    const bool inside = left ? x < kW / 2 - 20 : x >= kW / 2 + 20;
+                    const bool on = ((x / 16 + y / 16 + tic) % 2) == 0;
+                    frame[static_cast<std::size_t>(y) * kW + x] = Gray(inside ? (on ? 0.85f : 0.15f) : 0.3f);
+                }
+            }
+        };
+        std::vector<std::uint32_t> frame(static_cast<std::size_t>(kW) * kH);
+        for (const bool learning : {true, false})
+        {
+            auto player = MakePlayer(connectome, "controls_learn.json", 1, [learning](doomfly::FlyPlayerConfig& config) {
+                config.learning.enabled = true;
+                config.learning.learning = learning;
+            });
+            if (!player)
+            {
+                return 1;
+            }
+            int tic = 0;
+            // the spikes of the MBONs the turn reads, by side, and the turn, over `tics` tics of a picture (left: X, right: Y; none: grey)
+            auto show = [&](const int pictureSide, const int tics, double& mbonLeft, double& mbonRight, double& turn, const bool hurt = false)
+            {
+                mbonLeft = mbonRight = turn = 0.0;
+                for (int t = 0; t < tics; ++t, ++tic)
+                {
+                    if (pictureSide == 0)
+                    {
+                        std::fill(frame.begin(), frame.end(), Gray(0.3f));
+                    }
+                    else
+                    {
+                        picture(pictureSide < 0, tic, frame);
+                    }
+                    const doomfly::FlyStatus status = player->EvaluateFrameForTest(frame.data(), 1, hurt && t % 7 == 0);
+                    for (const doomfly::RateReading& r : status.rates)
+                    {
+                        if (r.name == "MBON32 L" || r.name == "MBON20 L")
+                        {
+                            mbonLeft += r.hz / tics;
+                        }
+                        if (r.name == "MBON32 R" || r.name == "MBON20 R")
+                        {
+                            mbonRight += r.hz / tics;
+                        }
+                    }
+                    turn += status.turnDegrees / tics;
+                }
+            };
+            double l = 0, r = 0, turn = 0;
+            show(0, 35, l, r, turn);
+            double xLeftBefore = 0, xRightBefore = 0, xTurnBefore = 0;
+            show(-1, 70, xLeftBefore, xRightBefore, xTurnBefore);
+            show(0, 35, l, r, turn);
+            for (int pairing = 0; pairing < 8; ++pairing)
+            {
+                show(-1, 21, l, r, turn, true);
+                show(0, 14, l, r, turn);
+            }
+            show(0, 35, l, r, turn);
+            double xLeftAfter = 0, xRightAfter = 0, xTurnAfter = 0;
+            show(-1, 70, xLeftAfter, xRightAfter, xTurnAfter);
+            show(0, 35, l, r, turn);
+            double yLeftAfter = 0, yRightAfter = 0, yTurnAfter = 0;
+            show(1, 70, yLeftAfter, yRightAfter, yTurnAfter);
+            const std::string prefix = learning ? "shift_on_" : "shift_off_";
+            Result((prefix + "x_mbon_left_before").c_str(), xLeftBefore);
+            Result((prefix + "x_mbon_left_after").c_str(), xLeftAfter);
+            Result((prefix + "x_mbon_right_after").c_str(), xRightAfter);
+            Result((prefix + "x_turn_before").c_str(), xTurnBefore);
+            Result((prefix + "x_turn_after").c_str(), xTurnAfter);
+            Result((prefix + "y_mbon_right_after").c_str(), yRightAfter);
+            Result((prefix + "y_turn_after").c_str(), yTurnAfter);
+            Result((prefix + "scale").c_str(), player->Status().learnedScale);
+            Result((prefix + "seizures").c_str(), player->Status().seizures);
         }
         myengine::jobs::Shutdown();
         return 0;
@@ -871,6 +975,37 @@ namespace
         CHECK(Num(loom, "loom_left_seizures") == 0.0);
         CHECK(Num(loom, "loom_right_turn_mean") < Num(loom, "loom_left_turn_mean") - 0.5);
 
+        // 6c. the same with the brain of the fly that learns (N3b: dopamine a modulator, the antennal lobe silent, the KCs see the columns; controls_learn.json):
+        // no storm and no reset; the turn away from an object on the right is weaker than in D1a (against the disc that stands, with the offset of these
+        // controls) and an object on the left draws the fly towards it (the MBONs of that side answer it); controls_learn.json shoots at any picture
+        const ChildResult loomLearn = RunChild(exe, "--scenario loom_learn");
+        CHECK(loomLearn.exitCode == 0);
+        std::printf("  looming, the brain that learns: right: turn mean %.2f min %.1f, %.0f shot tics, giant fiber %.1f Hz, %.0f resets, central %.0f spikes/s, MBON32 R %.0f Hz;"
+                    " left: turn mean %.2f, %.0f shot tics; a disc that only stands: turn mean %.2f, %.0f shot tics\n",
+                    Num(loomLearn, "loomlearn_right_turn_mean"), Num(loomLearn, "loomlearn_right_turn_min"), Num(loomLearn, "loomlearn_right_fire_tics"),
+                    Num(loomLearn, "loomlearn_right_DNp01"), Num(loomLearn, "loomlearn_right_seizures"), Num(loomLearn, "loomlearn_right_central_mean"),
+                    Num(loomLearn, "loomlearn_right_MBON32 R"), Num(loomLearn, "loomlearn_left_turn_mean"), Num(loomLearn, "loomlearn_left_fire_tics"),
+                    Num(loomLearn, "loomlearn_still_turn_mean"), Num(loomLearn, "loomlearn_still_fire_tics"));
+        CHECK(Num(loomLearn, "loomlearn_right_turn_min") <= -4.0);
+        CHECK(Num(loomLearn, "loomlearn_right_turn_mean") < Num(loomLearn, "loomlearn_still_turn_mean") - 0.3);
+        CHECK(Num(loomLearn, "loomlearn_centre_turn_mean") < Num(loomLearn, "loomlearn_still_turn_mean") - 0.3);
+        CHECK(Num(loomLearn, "loomlearn_right_seizures") == 0.0 && Num(loomLearn, "loomlearn_centre_seizures") == 0.0);
+        CHECK(Num(loomLearn, "loomlearn_right_MBON32 R") > 0.0);
+        CHECK(Num(loomLearn, "loomlearn_still_MBON32 R") == 0.0);
+        CHECK(Num(loomLearn, "loomlearn_still_central_mean") == 0.0);
+
+        // 6d. "view X + damage" through the whole chain of the fly that learns: afterwards the MBONs of its side answer X less, and the fly turns less towards X
+        // than the same brain without learning (MBON -> turn is our weight, controls_learn.json)
+        const ChildResult shift = RunChild(exe, "--scenario learn_shift");
+        CHECK(shift.exitCode == 0);
+        std::printf("  view X + damage (learning on / off): MBONs of the left to X %.1f / %.1f Hz, turn at X %.2f / %.2f deg per tic, to Y %.2f / %.2f; mean weight %.4f / %.4f\n",
+                    Num(shift, "shift_on_x_mbon_left_after"), Num(shift, "shift_off_x_mbon_left_after"), Num(shift, "shift_on_x_turn_after"), Num(shift, "shift_off_x_turn_after"),
+                    Num(shift, "shift_on_y_turn_after"), Num(shift, "shift_off_y_turn_after"), Num(shift, "shift_on_scale"), Num(shift, "shift_off_scale"));
+        CHECK(Num(shift, "shift_on_x_mbon_left_after") <= 0.8 * Num(shift, "shift_off_x_mbon_left_after"));
+        CHECK(Num(shift, "shift_on_x_turn_after") > Num(shift, "shift_off_x_turn_after") + 0.5);
+        CHECK(Num(shift, "shift_on_scale") < 1.0 && Num(shift, "shift_off_scale") == 1.0);
+        CHECK(Num(shift, "shift_on_seizures") == 0.0 && Num(shift, "shift_off_seizures") == 0.0);
+
         // 7. the game
         const fs::path wad = FindWad();
         if (wad.empty())
@@ -966,6 +1101,8 @@ int main(int argc, char** argv)
         if (scenario == "bio") return ScenarioBio();
         if (scenario == "damage") return ScenarioDamage();
         if (scenario == "loom") return ScenarioLoom();
+        if (scenario == "loom_learn") return ScenarioLoom(true);
+        if (scenario == "learn_shift") return ScenarioLearnShift();
         if (scenario == "seizure") return ScenarioSeizure();
         if (scenario == "duel")
         {

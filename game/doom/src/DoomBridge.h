@@ -34,6 +34,8 @@ typedef struct dgb_player
     int secrets;
     int frags;            /* the fragcount of DOOM: kills of the others minus suicides */
     int deaths;           /* the times the others killed this player */
+    int hasAttacker;      /* the thing that hurt the player last (player_t::attacker), when it is still there */
+    int attackerX, attackerY;
 } dgb_player;
 
 typedef struct dgb_state
