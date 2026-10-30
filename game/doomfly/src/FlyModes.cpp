@@ -126,12 +126,12 @@ namespace doomfly
                     std::snprintf(number, sizeof(number), "%5.1f", value);
                     list->AddText(font, size, ImVec2(left, cursor), dim, label.c_str());
                     list->AddText(font, size, ImVec2(left + inner - size * 3.2f, cursor), text, number);
-                    cursor += size * 1.25f;
-                    const float barHeight = size * 0.5f;
+                    cursor += size * 1.1f;
+                    const float barHeight = size * 0.3f;
                     list->AddRectFilled(ImVec2(left, cursor), ImVec2(left + inner, cursor + barHeight), IM_COL32(40, 40, 52, 255));
                     const float fraction = std::clamp(value / maxValue, 0.0f, 1.0f);
                     list->AddRectFilled(ImVec2(left, cursor), ImVec2(left + inner * fraction, cursor + barHeight), color);
-                    cursor += barHeight + size * 0.55f;
+                    cursor += barHeight + size * 0.3f;
                 };
                 // a bar that goes both ways (turn): the middle is zero
                 auto signedBar = [&](const std::string& label, const float value, const float limit, const std::string& unit)
@@ -140,19 +140,20 @@ namespace doomfly
                     std::snprintf(number, sizeof(number), "%+.2f %s", value, unit.c_str());
                     list->AddText(font, size, ImVec2(left, cursor), dim, label.c_str());
                     list->AddText(font, size, ImVec2(left + inner - size * 6.5f, cursor), text, number);
-                    cursor += size * 1.25f;
-                    const float barHeight = size * 0.5f;
+                    cursor += size * 1.1f;
+                    const float barHeight = size * 0.3f;
                     const float middle = left + inner * 0.5f;
                     list->AddRectFilled(ImVec2(left, cursor), ImVec2(left + inner, cursor + barHeight), IM_COL32(40, 40, 52, 255));
                     const float fraction = std::clamp(value / limit, -1.0f, 1.0f);
                     list->AddRectFilled(ImVec2(std::min(middle, middle + inner * 0.5f * fraction), cursor), ImVec2(std::max(middle, middle + inner * 0.5f * fraction), cursor + barHeight),
                                         fraction < 0 ? amber : green);
                     list->AddLine(ImVec2(middle, cursor - 2.0f), ImVec2(middle, cursor + barHeight + 2.0f), text, 1.0f);
-                    cursor += barHeight + size * 0.55f;
+                    cursor += barHeight + size * 0.3f;
                 };
 
                 line("FLY PLAYS", red, 1.5f);
                 line(status.controlsName + " neurons", dim);
+                line("brain on the " + status.backend, dim);
                 cursor += size * 0.4f;
 
                 // the speed of the brain: 1.0 is real time
@@ -176,6 +177,7 @@ namespace doomfly
                 signedBar("turn", status.turnDegrees, 6.0f, "deg/tic");
                 bar("forward", std::fabs(status.forwardUnits), 50.0f, green);
                 line(std::string("fire ") + (status.fire ? "ON" : "off") + "   use " + (status.use ? "ON" : "off"), status.fire ? red : dim);
+                line(status.reflex ? "REFLEX of the legs, not the brain" : "the brain steers", status.reflex ? amber : dim);
                 cursor += size * 0.3f;
 
                 // the reinforcement and the health of the brain
@@ -212,9 +214,12 @@ namespace doomfly
             doom::DoomGame* attached_ = nullptr;
         };
 
-        std::unique_ptr<myengine::game::IDoomController> MakeFly(const std::shared_ptr<Shared>& shared, const char* controlsFile, const char* title, std::string& error)
+        std::unique_ptr<myengine::game::IDoomController> MakeFly(const std::shared_ptr<Shared>& shared, const myengine::game::DoomLaunchChoice& choice, std::string& error)
         {
             const FlyModeOptions& options = shared->options;
+            const bool bio = choice.controlSet == "bio";
+            const char* controlsFile = bio ? "controls_bio.json" : "controls_doomfly.json";
+            const char* title = bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)";
             if (!shared->connectome)
             {
                 const fs::path path = FindFile(options, options.connectome, "malecns_v1.fbrain");
@@ -236,8 +241,15 @@ namespace doomfly
             }
             FlyPlayerConfig config;
             config.connectome = shared->connectome;
-            config.seed = options.seed;
+            config.seed = choice.seed != 1 ? choice.seed : options.seed;
             config.reward = options.reward;
+            config.log = options.log;
+            if (!flybrain::ParseBackendChoice(choice.backend, config.backend))
+            {
+                error = "unknown backend \"" + choice.backend + "\" (auto, cpu, gpu)";
+                return nullptr;
+            }
+            config.renderDevice = options.renderDevice ? options.renderDevice() : nullptr;
             const fs::path controls = FindFile(options, {}, controlsFile);
             if (!FlyControls::Load(controls, config.controls, error))
             {
@@ -267,14 +279,37 @@ namespace doomfly
 
     std::vector<myengine::game::DoomMode> MakeModes(const FlyModeOptions& options, const bool withFly)
     {
-        std::vector<myengine::game::DoomMode> modes;
-        modes.push_back({"Human plays", {}});
-        if (withFly)
+        using myengine::game::DoomLaunchChoice;
+        using myengine::game::DoomMode;
+        std::vector<DoomMode> modes;
+        const std::string noBrain = "no connectome: tools\\flybrain\\fetch_malecns.ps1";
+
+        DoomMode human;
+        human.id = "human";
+        human.title = "Human plays";
+        human.description = "You play DOOM with the keyboard and the mouse.";
+        modes.push_back(std::move(human));
+
+        auto shared = std::make_shared<Shared>();
+        shared->options = options;
+        DoomMode fly;
+        fly.id = "fly";
+        fly.title = "Fly plays";
+        fly.description = "The brain of a fly (164 789 neurons of the MaleCNS connectome) plays: the picture goes in through the eyes, the descending neurons steer.";
+        fly.available = withFly;
+        fly.unavailableReason = withFly ? "" : noBrain;
+        fly.make = [shared](const DoomLaunchChoice& choice, std::string& error) { return MakeFly(shared, choice, error); };
+        modes.push_back(std::move(fly));
+
+        for (const char* id : {"human-vs-fly", "fly-vs-fly", "swarm"})
         {
-            auto shared = std::make_shared<Shared>();
-            shared->options = options;
-            modes.push_back({"Fly plays (DOOMFLY neurons: DNp20, DNpe017)", [shared](std::string& error) { return MakeFly(shared, "controls_doomfly.json", "Fly plays (DOOMFLY neurons)", error); }});
-            modes.push_back({"Fly plays (Bio neurons: DNa02, DNp09: stands still)", [shared](std::string& error) { return MakeFly(shared, "controls_bio.json", "Fly plays (Bio neurons)", error); }});
+            DoomMode later;
+            later.id = id;
+            later.title = std::string(id) == "human-vs-fly" ? "Human vs Fly" : std::string(id) == "fly-vs-fly" ? "Fly vs Fly" : "Swarm";
+            later.description = std::string(id) == "human-vs-fly" ? "A deathmatch against a fly." : std::string(id) == "fly-vs-fly" ? "Two brains play against each other, you watch." : "8-32 flies hunt you.";
+            later.available = false;
+            later.unavailableReason = "soon";
+            modes.push_back(std::move(later));
         }
         return modes;
     }

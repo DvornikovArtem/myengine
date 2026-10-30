@@ -654,6 +654,7 @@ namespace myengine::core
             services.music = doomOptions_.music;
             services.modes = doomOptions_.modes;
             services.initialMode = doomOptions_.initialMode;
+            services.choice = doomOptions_.choice;
             doomFlow_ = std::make_unique<game::DoomGameFlow>(services);
             doomFlow_->Install();
         }
@@ -1341,6 +1342,12 @@ namespace myengine::core
     bool Application::DoomMode() const
     {
         return doomMode_;
+    }
+
+    void* Application::RenderDevice() const
+    {
+        const auto* dx12 = dynamic_cast<const render::dx12::Dx12RenderAdapter*>(renderAdapter_.get());
+        return dx12 != nullptr ? static_cast<void*>(dx12->GetDevice()) : nullptr;
     }
 
     // DOOM turns with the mouse: the cursor is hidden and kept in the window (the movement itself comes as raw input, WM_INPUT)

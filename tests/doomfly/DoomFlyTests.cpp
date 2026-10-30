@@ -156,6 +156,11 @@ namespace
         doomfly::FlyPlayerConfig config;
         config.connectome = connectome;
         config.seed = seed;
+        wchar_t motion[32] = {};
+        if (GetEnvironmentVariableW(L"FLYDOOM_TEST_MOTION", motion, 32) > 0)
+        {
+            config.eyes.motionOnGainMv = config.eyes.motionOffGainMv = static_cast<float>(_wtof(motion));   // to find the gain
+        }
         std::string error;
         if (!doomfly::FlyControls::Load(ControlsPath(controls), config.controls, error))
         {
@@ -232,7 +237,7 @@ namespace
         Result("bio_ok", doomfly::FlyControls::Load(ControlsPath("controls_bio.json"), bio, error) ? "1" : "0");
         Result("doomfly_turn_terms", static_cast<double>(fly.turn.terms.size()));
         Result("bio_turn_terms", static_cast<double>(bio.turn.terms.size()));
-        Result("bio_fire_type", bio.fire.terms.empty() ? "" : bio.fire.terms[0].type);
+        Result("bio_fire_type", bio.fire.spikeTerms.empty() ? "" : bio.fire.spikeTerms[0].type);
         std::string bad;
         doomfly::FlyControls broken;
         Result("bad_json", doomfly::FlyControls::Parse("{ not json", broken, bad) ? "0" : "1");
@@ -327,6 +332,83 @@ namespace
         return 0;
     }
 
+    // An object that comes at the fly (an expanding bright disc, 28 tics a loop) on the left, on the right, in the middle, and the same disc standing still
+    int ScenarioLoom()
+    {
+        myengine::jobs::Initialize();
+        auto connectome = LoadBrain();
+        if (!connectome)
+        {
+            return 1;
+        }
+        struct Case
+        {
+            const char* name;
+            float centreX;
+            bool grows;
+        };
+        const Case cases[] = {{"left", 80.0f, true}, {"right", 240.0f, true}, {"centre", 160.0f, true}, {"still", 240.0f, false}};
+        for (const Case& c : cases)
+        {
+            auto player = MakePlayer(connectome, "controls_doomfly.json");
+            if (!player)
+            {
+                return 1;
+            }
+            std::vector<doomfly::FlyStatus> history;
+            player->EvaluateSequenceForTest(
+                [&](int tic, std::vector<std::uint32_t>& frame)
+                {
+                    const float radius = tic >= 84 ? 0.0f : (c.grows ? 3.0f + 2.4f * static_cast<float>(tic % 28) : 40.0f);   // after 84 tics the object is gone
+                    for (int y = 0; y < kH; ++y)
+                    {
+                        for (int x = 0; x < kW; ++x)
+                        {
+                            const float dx = static_cast<float>(x) - c.centreX;
+                            const float dy = static_cast<float>(y) - 84.0f;
+                            frame[static_cast<std::size_t>(y) * kW + x] = Gray(dx * dx + dy * dy < radius * radius ? 0.9f : 0.1f);
+                        }
+                    }
+                },
+                84 + 56, &history);
+            std::map<std::string, double> peak;
+            double fireTics = 0, turnSum = 0, centralPeak = 0, turnMin = 0, turnMax = 0, centralSum = 0;
+            for (std::size_t i = 14; i < 84; ++i)   // after the start, while the object comes
+            {
+                for (const doomfly::RateReading& reading : history[i].rates)
+                {
+                    peak[reading.name] = std::max(peak[reading.name], static_cast<double>(reading.hz));
+                }
+                fireTics += history[i].fire ? 1 : 0;
+                turnSum += history[i].turnDegrees;
+                turnMin = std::min<double>(turnMin, history[i].turnDegrees);
+                turnMax = std::max<double>(turnMax, history[i].turnDegrees);
+                centralPeak = std::max<double>(centralPeak, history[i].centralSpikesPerSecond);
+                centralSum += history[i].centralSpikesPerSecond;
+            }
+            double afterCentral = 0.0;
+            for (std::size_t i = 84 + 28; i < history.size(); ++i)
+            {
+                afterCentral += history[i].centralSpikesPerSecond;
+            }
+            const std::string prefix = std::string("loom_") + c.name + "_";
+            Result((prefix + "central_after_mean").c_str(), afterCentral / 28.0);
+            for (const char* name : {"LC4 L", "LC4 R", "LPLC2 L", "LPLC2 R", "DNp01", "DNa02 L", "DNa02 R", "DNp20 L", "DNp20 R", "DNpe017"})
+            {
+                Result((prefix + name).c_str(), peak[name]);
+            }
+            Result((prefix + "fire_tics").c_str(), fireTics);
+            Result((prefix + "turn_mean").c_str(), turnSum / 70.0);
+            Result((prefix + "turn_min").c_str(), turnMin);
+            Result((prefix + "turn_max").c_str(), turnMax);
+            Result((prefix + "central_peak").c_str(), centralPeak);
+            Result((prefix + "central_mean").c_str(), centralSum / 70.0);
+            Result((prefix + "seizures").c_str(), history.back().seizures);
+        }
+        myengine::jobs::Shutdown();
+        return 0;
+    }
+
     // Damage: a current into PPL101 for 200 ms, and it stops
     int ScenarioDamage()
     {
@@ -375,15 +457,23 @@ namespace
         player->InjectCurrentForTest("L2", 25.0f);
         player->InjectCurrentForTest("L3", 25.0f);
         double peak = 0.0;
+        double peakCentral = 0.0;
+        double centralSumRun = 0.0;
+        int centralTicks = 0;
         int ticks = 0;
         for (; ticks < 60 && status.seizures == 0; ++ticks)
         {
             status = player->EvaluateFrameForTest(frame.data(), 1, false);
             peak = std::max<double>(peak, status.spikesPerSecond);
+            peakCentral = std::max<double>(peakCentral, status.centralSpikesPerSecond);
+            centralSumRun += status.centralSpikesPerSecond;
+            ++centralTicks;
         }
         Result("seizures", status.seizures);
         Result("resets", status.resets);
         Result("peak_spikes", peak);
+        Result("peak_central", peakCentral);
+        Result("mean_central", centralTicks > 0 ? centralSumRun / centralTicks : 0.0);
         Result("ticks_to_seizure", ticks);
         // after the reset the brain is at rest again
         status = player->EvaluateFrameForTest(frame.data(), 15, false);
@@ -571,7 +661,7 @@ namespace
         CHECK(controls.exitCode == 0);
         CHECK(Str(controls, "doomfly_ok") == "1");
         CHECK(Str(controls, "bio_ok") == "1");
-        CHECK(Num(controls, "doomfly_turn_terms") == 2.0);
+        CHECK(Num(controls, "doomfly_turn_terms") == 4.0);
         CHECK(Num(controls, "bio_turn_terms") == 4.0);
         CHECK(Str(controls, "bio_fire_type") == "MN9");
         CHECK(Str(controls, "bad_json") == "1");
@@ -639,8 +729,34 @@ namespace
         CHECK(Num(seizure, "seizures") == 1.0);
         CHECK(Num(seizure, "resets") >= 1.0);
         CHECK(Num(seizure, "peak_spikes") > 1000000.0);
+        CHECK(Num(seizure, "peak_central") > 600000.0);
         CHECK(Num(seizure, "after_spikes") < 600000.0);
         CHECK(Num(seizure, "seizures_after") == 1.0);
+
+        // 6b. an object comes at the fly (an expanding bright disc): what the looming path does in this model
+        const ChildResult loom = RunChild(exe, "--scenario loom");
+        CHECK(loom.exitCode == 0);
+        std::printf("  looming (84 tics, then the object is gone): right: LC4 R %.1f Hz, giant fiber %.1f Hz, DNa02 L %.1f Hz, turn mean %.2f min %.1f degrees per tic, %.0f shot tics, %.0f runaway resets;"
+                    " centre: turn mean %.2f; left: turn mean %.2f, %.0f shot tics; a disc that only stands: turn %.2f, %.0f shot tics\n",
+                    Num(loom, "loom_right_LC4 R"), Num(loom, "loom_right_DNp01"), Num(loom, "loom_right_DNa02 L"), Num(loom, "loom_right_turn_mean"), Num(loom, "loom_right_turn_min"),
+                    Num(loom, "loom_right_fire_tics"), Num(loom, "loom_right_seizures"), Num(loom, "loom_centre_turn_mean"), Num(loom, "loom_left_turn_mean"), Num(loom, "loom_left_fire_tics"),
+                    Num(loom, "loom_still_turn_mean"), Num(loom, "loom_still_fire_tics"));
+        // from the right and from the front: the central brain is thrown into its own state (DNa02 of the opposite side fires), the fly turns hard away and shoots
+        CHECK(Num(loom, "loom_right_DNa02 L") > 10.0);
+        CHECK(Num(loom, "loom_right_turn_min") <= -4.0);
+        CHECK(Num(loom, "loom_right_turn_mean") < -0.8);
+        CHECK(Num(loom, "loom_right_fire_tics") >= 1.0);
+        CHECK(Num(loom, "loom_right_LC4 R") > 0.0);
+        CHECK(Num(loom, "loom_centre_DNa02 L") > 10.0);
+        CHECK(Num(loom, "loom_centre_turn_mean") < -0.8);
+        CHECK(Num(loom, "loom_centre_fire_tics") >= 1.0);
+        // the object that stands, and the object on the left: nothing (the left eye is silent in this model, docs/game/flydoom-fly.md)
+        CHECK(Num(loom, "loom_still_fire_tics") == 0.0);
+        CHECK(Num(loom, "loom_still_central_mean") == 0.0);
+        CHECK(Num(loom, "loom_still_seizures") == 0.0);
+        CHECK(Num(loom, "loom_left_fire_tics") == 0.0);
+        CHECK(Num(loom, "loom_left_seizures") == 0.0);
+        CHECK(Num(loom, "loom_right_turn_mean") < Num(loom, "loom_left_turn_mean") - 0.5);
 
         // 7. the game
         const fs::path wad = FindWad();
@@ -717,6 +833,7 @@ int main(int argc, char** argv)
         if (scenario == "steer") return ScenarioSteer();
         if (scenario == "bio") return ScenarioBio();
         if (scenario == "damage") return ScenarioDamage();
+        if (scenario == "loom") return ScenarioLoom();
         if (scenario == "seizure") return ScenarioSeizure();
         if (scenario == "play")
         {

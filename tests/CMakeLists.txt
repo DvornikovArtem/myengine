@@ -521,7 +521,6 @@ if(MYENGINE_ASAN)
   endforeach()
 endif()
 
-
 # G7c: the audio module without a sound device: WAV, 3D, the pool of voices, buses, fades, the sound bank, the sounds of the project
 add_executable(myengine_audio_tests
   audio/AudioTests.cpp)
@@ -532,7 +531,6 @@ set_property(TARGET myengine_audio_tests PROPERTY FOLDER "Tests")
 add_test(NAME audio COMMAND myengine_audio_tests)
 set_tests_properties(audio PROPERTIES TIMEOUT 120)
 
-
 # G7c: the particle simulation without a renderer: presets, bursts and rates, the budget, batches, the cost of 5000 particles
 add_executable(myengine_fx_tests
   fx/FxTests.cpp)
@@ -542,7 +540,6 @@ myengine_apply_compiler_options(myengine_fx_tests)
 set_property(TARGET myengine_fx_tests PROPERTY FOLDER "Tests")
 add_test(NAME fx COMMAND myengine_fx_tests)
 set_tests_properties(fx PROPERTIES TIMEOUT 120)
-
 
 # G7d: the sounds and effects of a Rocket League match from the state of the simulation: events of pairs of ticks, no doubles after a
 # rollback, the commands that reach the audio and particle systems (no device, no renderer), a bot match with the journal
@@ -555,7 +552,6 @@ set_property(TARGET myengine_rl_feedback_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_feedback COMMAND myengine_rl_feedback_tests)
 set_tests_properties(rl_feedback PROPERTIES TIMEOUT 300)
 
-
 # G4g: the training: free play, the packs of exercises (assets/data/training), the conditions of success, the attempts, the results file (no window)
 add_executable(myengine_rl_training_tests
   rl/RlTrainingTests.cpp)
@@ -567,7 +563,6 @@ set_property(TARGET myengine_rl_training_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_training COMMAND myengine_rl_training_tests)
 set_tests_properties(rl_training PROPERTIES TIMEOUT 300)
 
-
 # G4i: the cars of the garage: the data (the hitboxes of RocketSim), the meshes and previews they name, the bars, broken data, the key in the settings (no window)
 add_executable(myengine_rl_cars_tests
   rl/RlCarsTests.cpp)
@@ -577,7 +572,6 @@ myengine_apply_compiler_options(myengine_rl_cars_tests)
 set_property(TARGET myengine_rl_cars_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_cars COMMAND myengine_rl_cars_tests)
 set_tests_properties(rl_cars PROPERTIES TIMEOUT 120)
-
 
 # G7e: the replay of a goal and the cinematic cameras: the ring of ticks, the clip, the speed profile, the skip, the online case, the cameras,
 # RlFeedback in the replay mode (no window)
@@ -590,7 +584,6 @@ set_property(TARGET myengine_rl_replay_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_replay COMMAND myengine_rl_replay_tests)
 set_tests_properties(rl_replay PROPERTIES TIMEOUT 300)
 
-
 # G1-kit: the UI kit of the game without a window: the input, the focus, the widgets, the HUD logic, the layout at several window sizes, a draw of the gallery
 add_executable(myengine_rl_ui_tests
   ui/RlUiTests.cpp)
@@ -601,7 +594,6 @@ myengine_apply_compiler_options(myengine_rl_ui_tests)
 set_property(TARGET myengine_rl_ui_tests PROPERTY FOLDER "Tests")
 add_test(NAME rl_ui COMMAND myengine_rl_ui_tests)
 set_tests_properties(rl_ui PROPERTIES TIMEOUT 120)
-
 
 # G1-flow: the game mode of Rocket League without a window: the settings file, the script of the UI tests, and RlGameSystem driven through the commands of the
 # screens (a match from the start to the results, the pause, the feed, the lobby, the controls)
@@ -706,33 +698,6 @@ set_property(TARGET myengine_flybrain_gpu_tests PROPERTY FOLDER "Tests")
 add_test(NAME flybrain_gpu COMMAND myengine_flybrain_gpu_tests)
 set_tests_properties(flybrain_gpu PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
-
-# N1: exploring the connectome for the eyes and the controls of the fly player (manual, not in ctest)
-add_executable(myengine_doomfly_probe
-  doomfly/FlyProbe.cpp)
-
-target_link_libraries(myengine_doomfly_probe PRIVATE myengine_flybrain myengine_engine)
-myengine_apply_compiler_options(myengine_doomfly_probe)
-set_property(TARGET myengine_doomfly_probe PROPERTY FOLDER "Tests")
-
-add_executable(myengine_doomfly_probe2
-  doomfly/FlyProbe2.cpp)
-target_link_libraries(myengine_doomfly_probe2 PRIVATE myengine_flybrain myengine_engine)
-myengine_apply_compiler_options(myengine_doomfly_probe2)
-set_property(TARGET myengine_doomfly_probe2 PROPERTY FOLDER "Tests")
-
-add_executable(myengine_doomfly_probe3
-  doomfly/FlyProbe3.cpp)
-target_link_libraries(myengine_doomfly_probe3 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
-myengine_apply_compiler_options(myengine_doomfly_probe3)
-set_property(TARGET myengine_doomfly_probe3 PROPERTY FOLDER "Tests")
-
-add_executable(myengine_doomfly_probe4
-  doomfly/FlyProbe4.cpp)
-target_link_libraries(myengine_doomfly_probe4 PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
-myengine_apply_compiler_options(myengine_doomfly_probe4)
-set_property(TARGET myengine_doomfly_probe4 PROPERTY FOLDER "Tests")
-
 # N1: the fly plays DOOM (game/doomfly, docs/game/flydoom-fly.md): the eyes, the controls, the steering by the picture, damage, a brain that runs away, E1M1.
 # Skipped (exit code 77) without the connectome (tools/flybrain/fetch_malecns.ps1); the game of E1M1 needs a WAD (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad)
 add_executable(myengine_doom_fly_tests
@@ -743,3 +708,10 @@ myengine_apply_compiler_options(myengine_doom_fly_tests)
 set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
 set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
+# D1: what the motion and looming neurons answer to on synthetic scenes (manual tool, not in ctest): myengine_doomfly_vision [gpu|cpu] [onGain] [offGain]
+add_executable(myengine_doomfly_vision
+  doomfly/FlyVision.cpp)
+target_link_libraries(myengine_doomfly_vision PRIVATE myengine_doomfly myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_doomfly_vision)
+set_property(TARGET myengine_doomfly_vision PROPERTY FOLDER "Tests")

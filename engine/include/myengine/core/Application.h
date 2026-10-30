@@ -107,8 +107,11 @@ namespace myengine::core
             bool music = true;                      // --doom-no-music
             std::vector<game::DoomMode> modes;      // who can play: the human first, then the controllers of the app (the fly, docs/game/flydoom-fly.md)
             int initialMode = -1;                   // the mode to start with (--fly), -1: a menu asks when there are several
+            game::DoomLaunchChoice choice;          // the set of neurons and the backend of the brain (--fly bio, --flybrain gpu)
         };
         void SetDoomMode(bool enabled, const DoomOptions& options = {});
+        /// The DX12 device of the renderer (ID3D12Device*), nullptr before Initialize or with another adapter: the brain of the fly lives on it
+        void* RenderDevice() const;
         bool DoomMode() const;
         /// The video settings of the game: window mode and size, vertical sync, the limit of frames per second, shadows / MSAA / bloom. A --render-settings
         /// request on the command line wins over the quality of the settings.

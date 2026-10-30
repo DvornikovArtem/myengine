@@ -371,6 +371,11 @@ namespace myengine::game
             config.iwad = found.path;
             config.dataDirectory = svc.dataDirectory;
             config.extraArgs = svc.doomArgs;
+            if (chosenMode >= 0 && chosenMode < static_cast<int>(svc.modes.size()))
+            {
+                const auto& modeArgs = svc.modes[static_cast<std::size_t>(chosenMode)].doomArgs;
+                config.extraArgs.insert(config.extraArgs.end(), modeArgs.begin(), modeArgs.end());
+            }
             config.music = svc.music;
             if (svc.audio != nullptr)
             {
@@ -391,15 +396,15 @@ namespace myengine::game
             if (chosenMode >= 0 && chosenMode < static_cast<int>(svc.modes.size()) && svc.modes[static_cast<std::size_t>(chosenMode)].make)
             {
                 std::string controllerError;
-                controller = svc.modes[static_cast<std::size_t>(chosenMode)].make(controllerError);
+                controller = svc.modes[static_cast<std::size_t>(chosenMode)].make(svc.choice, controllerError);
                 if (!controller)
                 {
-                    message = svc.modes[static_cast<std::size_t>(chosenMode)].name + " did not start:\n" + controllerError;
+                    message = svc.modes[static_cast<std::size_t>(chosenMode)].title + " did not start:\n" + controllerError;
                     state = State::Error;
                     Log("DOOM: " + message);
                     return;
                 }
-                Log("DOOM: " + svc.modes[static_cast<std::size_t>(chosenMode)].name);
+                Log("DOOM: " + svc.modes[static_cast<std::size_t>(chosenMode)].title);
             }
         }
 
@@ -414,8 +419,9 @@ namespace myengine::game
             y += size * 3.4f;
             for (std::size_t i = 0; i < svc.modes.size() && i < 9; ++i)
             {
-                const std::string line = std::to_string(i + 1) + "  " + svc.modes[i].name;
-                list->AddText(font, size * 1.3f, ImVec2(x, y), IM_COL32(235, 235, 235, 255), line.c_str());
+                const DoomMode& mode = svc.modes[i];
+                const std::string line = std::to_string(i + 1) + "  " + mode.title + (mode.available ? "" : "  (" + mode.unavailableReason + ")");
+                list->AddText(font, size * 1.3f, ImVec2(x, y), mode.available ? IM_COL32(235, 235, 235, 255) : IM_COL32(110, 110, 120, 255), line.c_str());
                 y += size * 2.0f;
             }
             y += size;
@@ -427,7 +433,7 @@ namespace myengine::game
             for (int digit = 1; digit <= 9 && digit <= static_cast<int>(svc.modes.size()); ++digit)
             {
                 const bool down = (GetAsyncKeyState('0' + digit) & 0x8000) != 0 || (GetAsyncKeyState(VK_NUMPAD0 + digit) & 0x8000) != 0;
-                if (down && !chooseHeld[static_cast<std::size_t>(digit)])
+                if (down && !chooseHeld[static_cast<std::size_t>(digit)] && svc.modes[static_cast<std::size_t>(digit - 1)].available)
                 {
                     chosenMode = digit - 1;
                     state = State::Start;
@@ -633,7 +639,7 @@ namespace myengine::game
             }
             const bool active = ProcessIsForeground();
 
-            if (state == State::Start && svc.modes.size() > 1 && svc.initialMode < 0 && !modeAsked)
+            if (state == State::Start && std::count_if(svc.modes.begin(), svc.modes.end(), [](const DoomMode& m) { return m.available; }) > 1 && svc.initialMode < 0 && !modeAsked)
             {
                 modeAsked = true;
                 state = State::Choose;

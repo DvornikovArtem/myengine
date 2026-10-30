@@ -26,6 +26,7 @@
 #include <flybrain/FlyBrain.h>
 
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -40,6 +41,9 @@ namespace doomfly
         FlyControls controls;
         EyesConfig eyes;
         uint64_t seed = 1;
+        flybrain::BackendChoice backend = flybrain::BackendChoice::Auto;   // the brain on the GPU when there is one that gives the same spikes (--flybrain)
+        void* renderDevice = nullptr;           // the ID3D12Device* of the renderer: the brain lives on it, so that a view reads the ring of the spikes without a copy
+        std::function<void(const std::string&)> log;
         bool parallel = true;                   // the neurons of a window run as jobs (jobs::Initialize must have been called)
         int substeps = 4;                       // the low pass of the photoreceptors is applied this many times per tic
         float damageMv = 4.0f;                  // PPL101: current for damageMs when the player is hurt
@@ -47,7 +51,9 @@ namespace doomfly
         bool reward = false;                    // PAM: current when the player kills a monster or takes an item
         float rewardMv = 4.0f;
         float rewardMs = 200.0f;
-        float seizureSpikesPerSecond = 1.0e6f;  // 270 - 410 thousand a second is the brain at rest and under a bright picture
+        // The brain ran away when the central brain (the cb_intrinsic neurons, 32 160 of them) fires more than this many spikes a second for seizureMs: at rest and under a
+        // bright picture it is silent (0), a looming object lights it up to 0.1 - 1 million, the runaway of a lamina current above ~15 mV is several million
+        float seizureSpikesPerSecond = 6.0e5f;
         float seizureMs = 300.0f;
         bool pace = true;                       // Pump does not run the game faster than 35 tics a second
     };
@@ -60,6 +66,7 @@ namespace doomfly
 
     struct FlyStatus
     {
+        std::string backend;                    // "GPU (NVIDIA GeForce RTX 3050 Laptop GPU)" or "CPU (8 threads)"
         uint64_t tics = 0;                      // tics of the game the fly has played
         double brainSpeed = 0.0;                // brain time / wall time of the last tics; 1.0 is real time, above 1 the brain waits for the clock
         double gameSpeed = 0.0;                 // tics per second / 35
@@ -71,7 +78,9 @@ namespace doomfly
         float forwardUnits = 0.0f;
         bool fire = false;
         bool use = false;
+        bool reflex = false;                    // the command is a reflex outside the brain now (turning away from a wall, the use button at a door), not what the neurons say
         float spikesPerSecond = 0.0f;           // the whole brain
+        float centralSpikesPerSecond = 0.0f;    // the central brain (what the guard against the runaway watches)
         float dopamineMv = 0.0f;                // the current PPL101 gets now
         uint32_t resets = 0;                    // the brain was made again (all reasons)
         uint32_t seizures = 0;                  // ... because it ran away
@@ -85,6 +94,19 @@ namespace doomfly
     {
         uint64_t step = 0;
         std::vector<flybrain::SpikeEvent> spikes;
+    };
+
+    // What a view of the brain needs (V1): the connectome, the spikes of the last tic, and on the GPU the ring of the spikes of the brain itself. The ring points into
+    // the resources of the brain that made it; the brain is made again when the player dies, the level changes or the brain runs away (`generation` grows), and the old
+    // one is kept until the next Pump of the game's thread: the ring of a feed is good until the end of the frame in which the feed was taken. Do not keep it longer.
+    struct BrainFeedSnapshot
+    {
+        std::shared_ptr<const flybrain::Connectome> connectome;
+        std::vector<flybrain::SpikeEvent> spikes;
+        flybrain::GpuSpikeRing ring;
+        uint64_t step = 0;
+        flybrain::Backend backend = flybrain::Backend::Cpu;
+        uint32_t generation = 0;
     };
 
     class FlyPlayer final : public doom::ITicCmdSource
@@ -105,6 +127,7 @@ namespace doomfly
 
         FlyStatus Status() const;
         BrainSnapshot Snapshot() const;
+        BrainFeedSnapshot BrainFeed() const { return feed_; }
         const FlyEyes& Eyes() const { return eyes_; }
         const FlyControls& Controls() const { return config_.controls; }
         const flybrain::Connectome& GetConnectome() const { return *config_.connectome; }
@@ -114,6 +137,8 @@ namespace doomfly
         // For the tests: the chain without a game: the picture `frame` (320x200, 0x00RRGGBB) shown for `tics` tics of the brain, `damageAtFirst`: the player is hurt
         // at the first one. Returns the status after the last tic (the command that the brain gives; the game is not touched). Not together with Pump / StepBlocking.
         FlyStatus EvaluateFrameForTest(const uint32_t* frame, int tics, bool damageAtFirst = false);
+        // The same for a picture that changes: `makeFrame(tic, frame)` fills the frame of each tic (320x200, 0x00RRGGBB); `perTic` gets the status after every tic
+        FlyStatus EvaluateSequenceForTest(const std::function<void(int, std::vector<uint32_t>&)>& makeFrame, int tics, std::vector<FlyStatus>* perTic = nullptr);
         // For the tests: the luminance per photoreceptor of the last tick
         std::vector<float> LastLuminance() const;
         // doom::ITicCmdSource: the command of the console player is the last one the brain gave
@@ -134,6 +159,7 @@ namespace doomfly
             bool damage = false;
             bool reward = false;
             bool reset = false;
+            std::vector<float> columnLuminance; // per column of the eyes (the motion channel)
             bool valid = false;
         };
         struct TickResult
@@ -141,11 +167,13 @@ namespace doomfly
             float turnHz = 0, forwardHz = 0, fireHz = 0;
             bool fireSpikes = false;
             float spikesPerSecond = 0;
+            float centralSpikesPerSecond = 0;
             bool seizure = false;
             bool reset = false;
             float dopamineMv = 0;
             std::vector<RateReading> rates;
             BrainSnapshot snapshot;
+            BrainFeedSnapshot feed;
             double wallSeconds = 0;
             bool valid = false;
         };
@@ -164,10 +192,17 @@ namespace doomfly
         FlyEyes eyes_;
         flybrain::Group dopamine_;
         flybrain::Group rewardGroup_;
-        std::vector<Group> turnGroups_, forwardGroups_, fireGroups_;
+        std::vector<Group> turnGroups_, forwardGroups_, fireGroups_, spikeGroups_, showGroups_;
+        flybrain::Group central_;
+        flybrain::WatchId centralWatch_ = 0;
+        std::vector<float> slowColumn_;         // the slow average of the luminance of each column (the motion channel)
+        std::vector<float> lastMotionDrive_;
 
         // the brain: touched by the worker thread only (and by the constructor before it runs)
         std::unique_ptr<flybrain::FlyBrain> brain_;
+        std::vector<std::unique_ptr<flybrain::FlyBrain>> retired_;   // made again: kept until the game's thread has drawn (under mutex_)
+        std::string backendText_;
+        uint32_t generation_ = 0;
         std::vector<float> filtered_;           // the low pass of the photoreceptors
         std::vector<float> slow_;               // the slow average of the motion channel
         std::vector<float> lastDrive_;
@@ -215,6 +250,7 @@ namespace doomfly
         uint32_t screenCooldown_ = 0;
         FlyStatus status_;
         BrainSnapshot snapshot_;
+        BrainFeedSnapshot feed_;
         std::vector<float> lastLuminance_;
     };
 }
