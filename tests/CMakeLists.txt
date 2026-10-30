@@ -765,3 +765,15 @@ myengine_apply_compiler_options(myengine_doom_fly_tests)
 set_property(TARGET myengine_doom_fly_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_fly COMMAND myengine_doom_fly_tests)
 set_tests_properties(doom_fly PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+
+# D1c: the swarm of enemy flies (game/doomfly FlySwarm, game/doom DoomSwarm): the pictures of the fly, the brain of the circuit at looming, a game of E1M1 with waves.
+# The brain and the game need assets/flybrain/swarm_circuit.fbrain (build/tests/RelWithDebInfo/myengine_flybrain_circuit.exe) and the game a WAD
+# (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad); they are skipped without them
+add_executable(myengine_doom_swarm_tests
+  doomfly/SwarmTests.cpp)
+target_link_libraries(myengine_doom_swarm_tests PRIVATE myengine_doomfly myengine_flybrain myengine_doom myengine_engine)
+target_compile_definitions(myengine_doom_swarm_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+myengine_apply_compiler_options(myengine_doom_swarm_tests)
+set_property(TARGET myengine_doom_swarm_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_fly_swarm COMMAND myengine_doom_swarm_tests)
+set_tests_properties(doom_fly_swarm PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)

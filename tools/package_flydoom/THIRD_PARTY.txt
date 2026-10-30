@@ -39,7 +39,8 @@ The wiring diagram of the brain of a male fruit fly: the MaleCNS v1.0 connectome
 License: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
 Changed by us: the traced neurons and their connections were taken from the release and written to a compact binary file (.fbrain); the weight of a
 connection is the number of synaptic contacts times the sign of the neurotransmitter of the sending neuron; the annotations are reduced to type, class,
-side, transmitter, position and the column of the optic lobe. The same notice is inside the file (the section ATTRIB). The signs follow DOOMFLY
+side, transmitter, position and the column of the optic lobe. The same notice is inside the file (the section ATTRIB). The file assets\flybrain\swarm_circuit.fbrain (the enemy flies of the mode Swarm) is a small piece of it (1,660 neurons on the paths of looming to the descending
+neurons), cut out by us with the same attribution inside the file. The signs follow DOOMFLY
 (https://github.com/nftechie/doomfly, MIT license, Alex Wormuth).
 
 4. The engine myengine and the libraries in it

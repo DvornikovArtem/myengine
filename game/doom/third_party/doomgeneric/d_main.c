@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "doomgeneric.h"
 #include "deh_main.h"
 #include "doomdef.h"
 #include "doomstat.h"
@@ -1382,6 +1383,9 @@ void D_DoomMain (void)
 #endif
 
     W_CheckCorrectIWAD(doom);
+
+    // myengine: the host may add lumps in memory now (the sprites and the sound of the flies of the swarm); R_Init has not run yet
+    DG_AfterIwad();
 
     // Now that we've loaded the IWAD, we can figure out what gamemission
     // we're playing and which version of Vanilla Doom we need to emulate.

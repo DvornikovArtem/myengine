@@ -38,6 +38,7 @@ namespace
         bool fly = false;                           // --fly [doomfly|bio]: FlyDoom starts with the fly as the player (docs/game/flydoom-fly.md)
         bool flyBio = false;
         bool flyReward = false;                     // --fly-reward
+        bool swarm = false;                         // --swarm: FlyDoom starts in the mode of the swarm of flies (with --doom-args "-nomonsters -flyswarm" until the menu gives the arguments)
         std::uint64_t flySeed = 1;                  // --fly-seed N
         std::filesystem::path fbrain;               // --fbrain <file>: the connectome
         bool showProjectBrowser = false;
@@ -114,6 +115,11 @@ namespace
             if (argument == L"--fly-reward")
             {
                 options.flyReward = true;
+                continue;
+            }
+            if (argument == L"--swarm")
+            {
+                options.swarm = true;
                 continue;
             }
             if (argument == L"--doom-square-pixels")
@@ -504,6 +510,13 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
         if (options.fly)
         {
             options.doom.initialMode = options.flyBio ? 2 : 1;
+        }
+        for (std::size_t mode = 0; options.swarm && mode < options.doom.modes.size(); ++mode)
+        {
+            if (options.doom.modes[mode].name.rfind("Swarm", 0) == 0)
+            {
+                options.doom.initialMode = static_cast<int>(mode);
+            }
         }
     }
     app.SetDoomMode(options.doomMode, options.doom);

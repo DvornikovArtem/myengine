@@ -536,6 +536,111 @@ void W_Profile (void)
 
 // Generate a hash table for fast lookups
 
+// myengine: lumps of the host that live in memory
+static size_t MemoryFileRead(wad_file_t *file, unsigned int offset, void *buffer, size_t buffer_len)
+{
+    if (offset >= file->length)
+    {
+        return 0;
+    }
+    if (offset + buffer_len > file->length)
+    {
+        buffer_len = file->length - offset;
+    }
+    memcpy(buffer, file->mapped + offset, buffer_len);
+    return buffer_len;
+}
+
+static wad_file_class_t memory_file_class = { NULL, NULL, MemoryFileRead };
+
+void W_RenameLumps(const char *prefix, char replaceFirst)
+{
+    unsigned int i;
+
+    for (i = 0; i < numlumps; ++i)
+    {
+        if (strncasecmp(lumpinfo[i].name, prefix, 4) == 0)
+        {
+            lumpinfo[i].name[0] = replaceFirst;
+        }
+    }
+    if (lumphash != NULL)
+    {
+        W_GenerateHashTable();
+    }
+}
+
+void W_InsertMemoryLumps(const char *before, unsigned int count, const char (*names)[8], const unsigned char *const *data, const int *sizes)
+{
+    unsigned int i;
+    unsigned int total = 0;
+    unsigned int at;
+    unsigned int newnumlumps;
+    int found;
+    byte *buffer;
+    byte *put;
+    wad_file_t *file;
+    lumpinfo_t *newlumpinfo;
+
+    for (i = 0; i < count; ++i)
+    {
+        total += (unsigned int) sizes[i];
+    }
+    buffer = malloc(total > 0 ? total : 1);
+    file = malloc(sizeof(wad_file_t));
+    file->file_class = &memory_file_class;
+    file->mapped = buffer;
+    file->length = total;
+
+    found = before != NULL ? W_CheckNumForName((char *) before) : -1;
+    at = found >= 0 ? (unsigned int) found : numlumps;
+    newnumlumps = numlumps + count;
+    newlumpinfo = malloc(sizeof(lumpinfo_t) * newnumlumps);
+    if (newlumpinfo == NULL)
+    {
+        I_Error("W_InsertMemoryLumps: out of memory");
+    }
+    memset(newlumpinfo, 0, sizeof(lumpinfo_t) * newnumlumps);
+
+    for (i = 0; i < at; ++i)
+    {
+        memcpy(&newlumpinfo[i], &lumpinfo[i], sizeof(lumpinfo_t));
+    }
+    put = buffer;
+    for (i = 0; i < count; ++i)
+    {
+        lumpinfo_t *lump = &newlumpinfo[at + i];
+
+        memcpy(lump->name, names[i], 8);
+        lump->wad_file = file;
+        lump->position = (int) (put - buffer);
+        lump->size = sizes[i];
+        lump->cache = NULL;
+        memcpy(put, data[i], (size_t) sizes[i]);
+        put += sizes[i];
+    }
+    for (i = at; i < numlumps; ++i)
+    {
+        memcpy(&newlumpinfo[i + count], &lumpinfo[i], sizeof(lumpinfo_t));
+    }
+    // a lump that was cached has its user pointer in the old array
+    for (i = 0; i < newnumlumps; ++i)
+    {
+        newlumpinfo[i].next = NULL;
+        if (newlumpinfo[i].cache != NULL)
+        {
+            Z_ChangeUser(newlumpinfo[i].cache, &newlumpinfo[i].cache);
+        }
+    }
+    free(lumpinfo);
+    lumpinfo = newlumpinfo;
+    numlumps = newnumlumps;
+    if (lumphash != NULL)
+    {
+        W_GenerateHashTable();
+    }
+}
+
 void W_GenerateHashTable(void)
 {
     unsigned int i;

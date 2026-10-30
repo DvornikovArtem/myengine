@@ -4,6 +4,7 @@
 
 #include <doomfly/FlyControls.h>
 #include <doomfly/FlyPlayer.h>
+#include <doomfly/FlySwarm.h>
 
 #include <imgui/imgui.h>
 
@@ -275,6 +276,12 @@ namespace doomfly
             shared->options = options;
             modes.push_back({"Fly plays (DOOMFLY neurons: DNp20, DNpe017)", [shared](std::string& error) { return MakeFly(shared, "controls_doomfly.json", "Fly plays (DOOMFLY neurons)", error); }});
             modes.push_back({"Fly plays (Bio neurons: DNa02, DNp09: stands still)", [shared](std::string& error) { return MakeFly(shared, "controls_bio.json", "Fly plays (Bio neurons)", error); }});
+        }
+        // the swarm needs the DOOM of FlyDoom started with SwarmDoomArgs() (the list of the menu of D1 gives them to the game; until then --doom-args "-nomonsters -flyswarm")
+        std::string swarmReason;
+        if (SwarmAvailable(options, swarmReason))
+        {
+            modes.push_back({"Swarm: the human plays, the flies attack in waves", [options](std::string& error) { return MakeSwarmController(options, 16, "auto", options.seed, error); }});
         }
         return modes;
     }

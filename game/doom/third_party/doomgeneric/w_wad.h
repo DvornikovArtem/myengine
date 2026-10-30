@@ -68,6 +68,13 @@ void*	W_CacheLumpName (char* name, int tag);
 
 void    W_GenerateHashTable(void);
 
+// myengine: lumps that live in memory (the sprites and the sound of the flies of the swarm, game/doom/src/DoomSwarm.c). The names that start with
+// `prefix` (4 characters) get `replaceFirst` as their first character, so that the sprite scan of DOOM does not find them; W_InsertMemoryLumps puts `count`
+// lumps before the last lump called `before` (the end of the sprite section), or at the end when there is none. Called between the loading of the WADs
+// and R_Init, when no lump is cached yet.
+void    W_RenameLumps(const char *prefix, char replaceFirst);
+void    W_InsertMemoryLumps(const char *before, unsigned int count, const char (*names)[8], const unsigned char *const *data, const int *sizes);
+
 extern unsigned int W_LumpNameHash(const char *s);
 
 void    W_ReleaseLumpNum(int lump);

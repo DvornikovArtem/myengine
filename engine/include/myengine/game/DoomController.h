@@ -34,6 +34,16 @@ namespace myengine::game
         // The panel of the controller (right of the picture): window pixels. A controller with nothing to show draws nothing.
         virtual void DrawPanel(ImDrawList* list, float x, float y, float width, float height) = 0;
 
+        // true: the human plays (the keyboard and the mouse stay with the human, there is no panel at the right of the picture) and the controller only runs the
+        // world round the human (the swarm of flies). DrawOverlay is called every frame after the picture (window pixels); it does nothing by default.
+        virtual bool HumanPlays() const { return false; }
+        virtual void DrawOverlay(ImDrawList* list, float width, float height)
+        {
+            (void)list;
+            (void)width;
+            (void)height;
+        }
+
         // The short text for the title of the window and the log ("Fly plays (Bio), brain speed 0.92x")
         virtual std::string Status() const { return {}; }
     };
