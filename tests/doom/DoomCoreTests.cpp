@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -132,6 +133,36 @@ namespace
         Result((std::string(prefix) + "_x").c_str(), s.x);
         Result((std::string(prefix) + "_y").c_str(), s.y);
         Result((std::string(prefix) + "_angle").c_str(), s.angle);
+    }
+
+    // The mouse movement of one tic is the sum of the events that came in it: eight events of 5 turn the player as one event of 40 does (DOOM kept only the last)
+    int ScenarioMouse(const fs::path& wad)
+    {
+        auto game = Start(wad, {"-warp", "1", "1", "-skill", "3", "-nomonsters", "-nomusic"});
+        if (!game)
+        {
+            return 1;
+        }
+        Run(*game, 35);
+        auto turnOf = [&](const std::function<void()>& post)
+        {
+            const Spot before = Where(*game);
+            post();
+            Run(*game, 1);
+            const Spot after = Where(*game);
+            Run(*game, 3);
+            double delta = after.angle - before.angle;
+            while (delta > 180.0) delta -= 360.0;
+            while (delta < -180.0) delta += 360.0;
+            return delta;
+        };
+        Result("one_event", turnOf([&] { game->PostMouse(0, 40, 0); }));
+        Result("eight_events", turnOf([&] { for (int i = 0; i < 8; ++i) game->PostMouse(0, 5, 0); }));
+        Result("back_and_forth", turnOf([&] { game->PostMouse(0, 30, 0); game->PostMouse(0, -30, 0); }));
+        Result("hundred_events", turnOf([&] { for (int i = 0; i < 100; ++i) game->PostMouse(0, 1, 0); }));
+        Result("hundred_one", turnOf([&] { game->PostMouse(0, 100, 0); }));
+        Result("still", turnOf([&] {}));
+        return 0;
     }
 
     // E1M1, skill 3: the player stands; W (the up arrow of DOOM) moves it; the mouse turns it; Esc opens the menu
@@ -616,6 +647,17 @@ namespace
         CHECK(Str(input, "menu1") == "1");
         CHECK(Str(input, "pixels") == "1");
 
+        // 2b. the mouse: the movement of all the events of a tic adds up (the host posts at the frame rate, several events per tic)
+        const ChildResult mouse = RunChild(exe, "mouse", wad);
+        CHECK(mouse.exitCode == 0);
+        std::printf("  mouse: 1 event of 40 -> %.2f degrees, 8 events of 5 -> %.2f, 100 events of 1 -> %.2f (100 in one: %.2f)\n", Num(mouse, "one_event"), Num(mouse, "eight_events"),
+                    Num(mouse, "hundred_events"), Num(mouse, "hundred_one"));
+        CHECK(std::fabs(Num(mouse, "one_event")) > 1.0);
+        CHECK(std::fabs(Num(mouse, "eight_events") - Num(mouse, "one_event")) < 0.01);
+        CHECK(std::fabs(Num(mouse, "hundred_events") - Num(mouse, "hundred_one")) < 0.01);
+        CHECK(std::fabs(Num(mouse, "back_and_forth")) < 0.01);
+        CHECK(std::fabs(Num(mouse, "still")) < 0.01);
+
         // 3. the source of tic commands (the point of extension for a brain)
         const ChildResult hook = RunChild(exe, "hook", wad);
         CHECK(hook.exitCode == 0);
@@ -716,6 +758,7 @@ int main(int argc, char** argv)
     {
         if (scenario == "demo") return ScenarioDemo(wad);
         if (scenario == "input") return ScenarioInput(wad);
+        if (scenario == "mouse") return ScenarioMouse(wad);
         if (scenario == "hook") return ScenarioHook(wad);
         if (scenario == "players") return ScenarioPlayers(wad);
         if (scenario == "quit") return ScenarioQuit(wad);
