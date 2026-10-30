@@ -725,3 +725,15 @@ myengine_copy_runtime_assets(myengine_faceid_tests)
 set_property(TARGET myengine_faceid_tests PROPERTY FOLDER "Tests")
 add_test(NAME faceid COMMAND myengine_faceid_tests)
 set_tests_properties(faceid PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+# N3: the fly learns: KC -> MBON synapses weaken by the dopamine of their compartment (conditioning on a synthetic
+# mushroom body, the memory file, CPU = GPU, and the PPL101 compartments of MaleCNS when the connectome is there)
+add_executable(myengine_flybrain_plasticity_tests
+  flybrain/FlyBrainPlasticityTests.cpp)
+
+target_link_libraries(myengine_flybrain_plasticity_tests PRIVATE myengine_flybrain myengine_engine)
+myengine_apply_compiler_options(myengine_flybrain_plasticity_tests)
+myengine_copy_runtime_assets(myengine_flybrain_plasticity_tests)
+set_property(TARGET myengine_flybrain_plasticity_tests PROPERTY FOLDER "Tests")
+add_test(NAME flybrain_plasticity COMMAND myengine_flybrain_plasticity_tests)
+set_tests_properties(flybrain_plasticity PROPERTIES TIMEOUT 300)
