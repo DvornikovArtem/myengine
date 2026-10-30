@@ -84,6 +84,12 @@
       "from": "assets/flybrain/malecns_v1.fbrain",
       "to": "assets/flybrain/malecns_v1.fbrain",
       "ifMissing": "the package has no fly (tools/flybrain/fetch_malecns.ps1 makes the file)"
+    },
+    {
+      "name": "the circuit of the flies of the swarm (a piece cut out of MaleCNS, 1 MB)",
+      "from": "assets/flybrain/swarm_circuit.fbrain",
+      "to": "assets/flybrain/swarm_circuit.fbrain",
+      "ifMissing": "the package has no mode Swarm (build/tests/RelWithDebInfo/myengine_flybrain_circuit.exe makes the file)"
     }
   ],
 

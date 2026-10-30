@@ -4,6 +4,7 @@
 
 #include <doomfly/FlyControls.h>
 #include <doomfly/FlyPlayer.h>
+#include <doomfly/FlySwarm.h>
 
 #include <imgui/imgui.h>
 
@@ -641,9 +642,12 @@ namespace doomfly
         DoomMode swarm;
         swarm.id = "swarm";
         swarm.title = "Swarm";
-        swarm.description = "8-32 flies hunt you.";
-        swarm.available = false;
-        swarm.unavailableReason = "soon";
+        swarm.description = "You play, 8-32 flies attack in waves; the brain of every fly is a piece of the connectome.";
+        std::string swarmReason;
+        swarm.available = SwarmAvailable(options, swarmReason);
+        swarm.unavailableReason = swarmReason;
+        swarm.doomArgs = SwarmDoomArgs();
+        swarm.make = [options](const DoomLaunchChoice& choice, std::string& error) { return MakeSwarmController(options, choice.flies, choice.backend, choice.seed, error); };
         modes.push_back(std::move(swarm));
         return modes;
     }

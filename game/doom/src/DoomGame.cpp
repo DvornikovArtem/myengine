@@ -3,6 +3,7 @@
 // DoomGame over doomgeneric: the callbacks DG_* that the platform part of the port must give, a virtual clock, the queue of keys.
 
 #include <doom/DoomGame.h>
+#include <doom/DoomSwarm.h>
 
 #include <algorithm>
 #include <cmath>
@@ -341,6 +342,14 @@ namespace doom
         for (const std::string& arg : config.extraArgs)
         {
             argStrings.push_back(arg);
+            if (arg == swarm::kStartArgument)
+            {
+                // the swarm of flies (D1c): the sprites and the buzz of a fly take the place of those of the Lost Soul; DOOM puts them in after the WADs are loaded
+                if (!swarm::PrepareAssets(config.iwad, error))
+                {
+                    return nullptr;
+                }
+            }
         }
         argv.clear();
         for (std::string& arg : argStrings)

@@ -793,13 +793,14 @@ namespace myengine::game
                 // the largest whole scale that fits; the picture is drawn at the size the window gives, so a window smaller than one scale shrinks it
                 const float viewHeightUnits = svc.squarePixels ? static_cast<float>(doom::kScreenHeight) : static_cast<float>(doom::kScreenHeight * 6 / 5);   // 240: the 4:3 of the monitors of 1993, in whole numbers
                 // a controller has a panel at the right of the picture (the brain of the fly); the human has the whole window
-                const float panelWidth = controller != nullptr ? std::max(240.0f, std::floor(static_cast<float>(width) * 0.26f)) : 0.0f;
+                const bool panelled = controller != nullptr && controller->HasPanel();   // the swarm leaves the whole window to the game
+                const float panelWidth = panelled ? std::max(240.0f, std::floor(static_cast<float>(width) * 0.26f)) : 0.0f;
                 const float pictureWidth = static_cast<float>(width) - panelWidth;
                 // a second picture (the eyes of the fly) shares the place of the picture: two views side by side
                 const SecondaryView* second = controller != nullptr ? controller->Secondary() : nullptr;
                 const float viewsAcross = second != nullptr ? 2.0f : 1.0f;
                 const float fit = std::min(pictureWidth / viewsAcross / doom::kScreenWidth, static_cast<float>(height) / viewHeightUnits);
-                const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(controller != nullptr ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
+                const std::uint32_t scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(panelled ? std::ceil(fit) : std::floor(fit)), 1u, 4u);
                 if (uploadedScale != scale)
                 {
                     Log("DOOM: the picture is drawn at x" + std::to_string(scale) + " in a window of " + std::to_string(width) + "x" + std::to_string(height));
@@ -820,7 +821,7 @@ namespace myengine::game
                 if (texture.IsValid())
                 {
                     // an integer factor on the screen when it fits, so that the sharp pixels of the texture stay sharp
-                    const float whole = (fit >= 1.0f && controller == nullptr) ? std::floor(fit) : fit;   // with a panel the picture fills the rest of the window
+                    const float whole = (fit >= 1.0f && !panelled) ? std::floor(fit) : fit;   // with a panel the picture fills the rest of the window
                     const float finalW = doom::kScreenWidth * whole;
                     const float finalH = viewHeightUnits * whole;
                     const float cell = pictureWidth / viewsAcross;
@@ -852,7 +853,11 @@ namespace myengine::game
                 }
                 if (controller != nullptr)
                 {
-                    controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
+                    if (panelled)
+                    {
+                        controller->DrawPanel(list, pictureWidth, 0.0f, panelWidth, static_cast<float>(height));
+                    }
+                    controller->DrawOverlay(list, static_cast<float>(width), static_cast<float>(height));
                 }
             }
             else if (state == State::Error)

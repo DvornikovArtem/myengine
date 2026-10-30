@@ -59,6 +59,9 @@ namespace myengine::game
         // The keyboard and the mouse play the console player although a controller runs the game (Human vs Fly: the human against the fly)
         virtual bool HumanPlays() const { return false; }
 
+        // false: the controller has no panel at the right of the picture and the game takes the whole window (the swarm: the human plays, the HUD is DrawOverlay)
+        virtual bool HasPanel() const { return true; }
+
         // The second picture next to the game's (nullptr: none). Valid until the next Advance.
         virtual const SecondaryView* Secondary() const { return nullptr; }
 
