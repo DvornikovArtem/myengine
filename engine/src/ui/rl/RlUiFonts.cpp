@@ -12,17 +12,36 @@ namespace myengine::rlui
     {
         constexpr int kStyleCount = static_cast<int>(FontStyle::Count);
 
-        const char* const kStyleFiles[kStyleCount] = {"exo2/Exo2-BlackItalic.ttf", "exo2/Exo2-ExtraBoldItalic.ttf", "exo2/Exo2-Bold.ttf", "exo2/Exo2-SemiBold.ttf"};
         const char* const kIconFile = "lucide.ttf";
 
         // The sizes of the spec (4.3) that every style needs. Black Italic: the digits, the headlines, the banners; Extra Bold Italic: the
         // buttons and the tabs; Bold and Semi Bold: the plates, the rows, the captions.
-        const std::vector<float> kSizes[kStyleCount] = {
-            {26.0f, 34.0f, 52.0f, 60.0f, 64.0f, 84.0f, 96.0f, 150.0f, 220.0f},
-            {16.0f, 18.0f, 22.0f, 26.0f, 34.0f, 38.0f},
-            {16.0f, 18.0f, 20.0f, 22.0f, 24.0f, 26.0f},
-            {16.0f, 18.0f, 20.0f, 22.0f, 24.0f, 26.0f},
-        };
+        FontSet MakeDefaultSet()
+        {
+            FontSet set;
+            const char* const files[kStyleCount] = {"exo2/Exo2-BlackItalic.ttf", "exo2/Exo2-ExtraBoldItalic.ttf", "exo2/Exo2-Bold.ttf", "exo2/Exo2-SemiBold.ttf"};
+            const std::vector<float> sizes[kStyleCount] = {
+                {26.0f, 34.0f, 52.0f, 60.0f, 64.0f, 84.0f, 96.0f, 150.0f, 220.0f},
+                {16.0f, 18.0f, 22.0f, 26.0f, 34.0f, 38.0f},
+                {16.0f, 18.0f, 20.0f, 22.0f, 24.0f, 26.0f},
+                {16.0f, 18.0f, 20.0f, 22.0f, 24.0f, 26.0f},
+            };
+            for (int s = 0; s < kStyleCount; ++s)
+            {
+                set.files[s] = files[s];
+                for (const float size : sizes[s])
+                {
+                    set.sizes[s].push_back({size, {}});
+                }
+            }
+            set.requiredFile = files[0];
+            return set;
+        }
+
+        FontSet g_set = MakeDefaultSet();   // the set in use
+        // the ranges of the set in the form ImGui keeps (pairs and the zero at the end): ImGui points into them until the atlas is built
+        std::vector<ImWchar> g_setRanges[kStyleCount];
+        std::vector<std::vector<ImWchar>> g_sizeRanges[kStyleCount];
         const std::vector<float> kIconSizes = {16.0f, 18.0f, 20.0f, 22.0f, 26.0f, 30.0f, 40.0f};
 
         // The Lucide icons the kit draws (Icon, in the order of the enum, None first): U+E140 play, E184 target, E158 settings, E112 log-out,
@@ -53,6 +72,28 @@ namespace myengine::rlui
                 return kRangesLatin;
             }
             return kRangesFull;
+        }
+
+        // "FLYDOM" -> the ranges of the characters (sorted, each a range of its own, the neighbours joined)
+        std::vector<ImWchar> RangesOfGlyphs(const std::string& glyphs)
+        {
+            std::vector<unsigned char> chars(glyphs.begin(), glyphs.end());
+            std::sort(chars.begin(), chars.end());
+            chars.erase(std::unique(chars.begin(), chars.end()), chars.end());
+            std::vector<ImWchar> ranges;
+            for (std::size_t i = 0; i < chars.size();)
+            {
+                std::size_t j = i;
+                while (j + 1 < chars.size() && chars[j + 1] == chars[j] + 1)
+                {
+                    ++j;
+                }
+                ranges.push_back(chars[i]);
+                ranges.push_back(chars[j]);
+                i = j + 1;
+            }
+            ranges.push_back(0);
+            return ranges;
         }
 
         // The files live as long as the process: ImGui 1.92 keeps pointing into the data of a font for the whole life of the atlas
@@ -132,11 +173,59 @@ namespace myengine::rlui
 
     const std::vector<std::string>& RequiredFontFiles()
     {
-        static const std::vector<std::string> files = {kStyleFiles[0], kStyleFiles[1], kStyleFiles[2], kStyleFiles[3], kIconFile};
+        static std::vector<std::string> files;
+        files.clear();
+        for (int s = 0; s < kStyleCount; ++s)
+        {
+            files.push_back(g_set.files[s]);
+        }
+        files.push_back(kIconFile);
         return files;
     }
 
-    const std::vector<float>& Fonts::DesignSizes(const FontStyle style) { return kSizes[static_cast<int>(style)]; }
+    const FontSet& DefaultFontSet()
+    {
+        static const FontSet set = MakeDefaultSet();
+        return set;
+    }
+
+    const FontSet& ActiveFontSet() { return g_set; }
+
+    void SetFontSet(const FontSet& set)
+    {
+        g_set = set;
+        for (int s = 0; s < kStyleCount; ++s)
+        {
+            // the data of the old files goes, the new ones are read by the next Bake
+            g_styleData[s] = FileData{};
+            g_setRanges[s].clear();
+            for (const std::uint32_t value : g_set.ranges[s])
+            {
+                g_setRanges[s].push_back(static_cast<ImWchar>(value));
+            }
+            if (!g_setRanges[s].empty())
+            {
+                g_setRanges[s].push_back(0);
+            }
+            g_sizeRanges[s].clear();
+            for (const FontSizeSpec& spec : g_set.sizes[s])
+            {
+                g_sizeRanges[s].push_back(spec.glyphs.empty() ? std::vector<ImWchar>() : RangesOfGlyphs(spec.glyphs));
+            }
+        }
+    }
+
+    const std::vector<float>& Fonts::DesignSizes(const FontStyle style)
+    {
+        static std::vector<float> sizes[kStyleCount];
+        std::vector<float>& list = sizes[static_cast<int>(style)];
+        list.clear();
+        for (const FontSizeSpec& spec : g_set.sizes[static_cast<int>(style)])
+        {
+            list.push_back(spec.size);
+        }
+        return list;
+    }
 
     void Fonts::Clear()
     {
@@ -170,11 +259,11 @@ namespace myengine::rlui
         atlas.SetFontLoader(ImGuiFreeType::GetFontLoader());
         for (int s = 0; s < kStyleCount; ++s)
         {
-            if (!LoadFile(fontDirectory / kStyleFiles[s], g_styleData[s]))
+            if (!LoadFile(fontDirectory / g_set.files[s], g_styleData[s]))
             {
                 if (error != nullptr)
                 {
-                    *error = "the font " + std::string(kStyleFiles[s]) + " is missing in " + fontDirectory.string();
+                    *error = "the font " + g_set.files[s] + " is missing in " + fontDirectory.string();
                 }
                 return false;
             }
@@ -183,12 +272,22 @@ namespace myengine::rlui
 
         for (int s = 0; s < kStyleCount; ++s)
         {
-            for (const float design : kSizes[s])
+            for (std::size_t k = 0; k < g_set.sizes[s].size(); ++k)
             {
+                const float design = g_set.sizes[s][k].size;
                 ImFontConfig config;
                 config.FontDataOwnedByAtlas = false;
                 const float pixels = Configure(config, design * scale_ * g_styleData[s].lineScale);
-                ImFont* font = atlas.AddFontFromMemoryTTF(g_styleData[s].bytes.data(), static_cast<int>(g_styleData[s].bytes.size()), pixels, &config, RangesFor(design));
+                const ImWchar* ranges = RangesFor(design);
+                if (k < g_sizeRanges[s].size() && !g_sizeRanges[s][k].empty())
+                {
+                    ranges = g_sizeRanges[s][k].data();
+                }
+                else if (!g_setRanges[s].empty())
+                {
+                    ranges = g_setRanges[s].data();
+                }
+                ImFont* font = atlas.AddFontFromMemoryTTF(g_styleData[s].bytes.data(), static_cast<int>(g_styleData[s].bytes.size()), pixels, &config, ranges);
                 Slot slot;
                 slot.style = static_cast<FontStyle>(s);
                 slot.designSize = design;

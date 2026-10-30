@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -27,6 +28,30 @@ namespace myengine::rlui
         SemiBold,            // 600: the text of the rows
         Count
     };
+
+    // The fonts of the four slots. Rocket Arena keeps the default (Exo 2: the italic styles for the headlines, the upright ones for the rows); another game names its own
+    // files before the Host bakes the atlas (rlui::SetFontSet in front of Host::Install) and so draws the same widgets and the same `paint::Text` calls with its own letters.
+    // The slots keep the names of the first set: BlackItalic is the biggest face (headlines), ExtraBoldItalic the second, Bold the strong text, SemiBold the plain text.
+    struct FontSizeSpec
+    {
+        float size = 0.0f;
+        std::string glyphs;   // not empty: only these characters are baked at this size (a headline of 220 px needs "FLYDOM" and nothing else)
+    };
+
+    struct FontSet
+    {
+        std::string files[static_cast<int>(FontStyle::Count)];                // relative to the font directory
+        std::vector<FontSizeSpec> sizes[static_cast<int>(FontStyle::Count)];
+        std::vector<std::uint32_t> ranges[static_cast<int>(FontStyle::Count)];   // pairs (first, last) baked at the sizes that name no glyphs; empty: the usual ranges of the kit
+        std::string requiredFile;                                              // a file whose presence says that this is the font directory ("exo2/Exo2-BlackItalic.ttf" by default)
+    };
+
+    // The default set of the kit: Exo 2
+    const FontSet& DefaultFontSet();
+    // Changes the set for every Fonts::Bake after it. Call it once, before Host::Install (the atlas of a window that is already baked keeps what it has).
+    void SetFontSet(const FontSet& set);
+    // The set that is in use
+    const FontSet& ActiveFontSet();
 
     // A baked font of a style at a design size. `font` is what the draw list needs; `pixelSize` is the size it was baked at (it is the
     // size to pass to ImDrawList::AddText together with `font`, scaled sizes are computed by the kit).

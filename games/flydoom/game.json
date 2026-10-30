@@ -125,7 +125,9 @@
       { "from": "external/freetype/docs/FTL.TXT", "to": "FreeType-FTL.txt" },
       { "from": "external/pybind11/LICENSE", "to": "pybind11-BSD-LICENSE.txt" },
       { "from": "assets/fonts/LICENSE-lucide.txt", "to": "Lucide-ISC-LICENSE.txt" },
-      { "from": "assets/fonts/exo2/OFL.txt", "to": "Exo2-OFL.txt" }
+      { "from": "assets/fonts/exo2/OFL.txt", "to": "Exo2-OFL.txt" },
+      { "from": "assets/fonts/bigshoulders/OFL.txt", "to": "BigShoulders-OFL.txt" },
+      { "from": "assets/fonts/jetbrainsmono/OFL.txt", "to": "JetBrainsMono-OFL.txt" }
     ],
     "generated": [
       { "template": "tools/package_flydoom/SOURCE.txt", "to": "SOURCE.txt", "root": true }

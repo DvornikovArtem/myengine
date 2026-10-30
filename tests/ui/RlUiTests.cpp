@@ -994,6 +994,41 @@ namespace
         Check(handle.Valid() && handle.font->IsGlyphInFont('W') && handle.font->IsGlyphInFont(0x0416), "the glyphs of the kit are in the atlas");
         ImGui::DestroyContext(context);
     }
+
+    // A game can name its own fonts (FlyDoom: Big Shoulders Display and JetBrains Mono): the sizes, the glyphs of a size and the file that says "this is the font directory" follow the set,
+    // and the default set (Exo 2, Rocket Arena) comes back when it is set again.
+    void TestFontSet()
+    {
+        Check(ActiveFontSet().files[0] == DefaultFontSet().files[0] && ActiveFontSet().requiredFile == "exo2/Exo2-BlackItalic.ttf", "the kit starts with Exo 2");
+        const std::vector<float> defaultSizes = Fonts::DesignSizes(FontStyle::SemiBold);
+        Check(!defaultSizes.empty() && defaultSizes.front() == 16.0f, "its sizes are those of the spec");
+
+        FontSet set;
+        for (int s = 0; s < static_cast<int>(FontStyle::Count); ++s)
+        {
+            set.files[s] = "exo2/Exo2-SemiBold.ttf";
+            set.sizes[s] = {{24.0f, "AB"}, {40.0f, {}}};
+        }
+        set.requiredFile = set.files[0];
+        SetFontSet(set);
+        Check(ActiveFontSet().sizes[0].size() == 2 && Fonts::DesignSizes(FontStyle::Bold).size() == 2 && Fonts::DesignSizes(FontStyle::Bold)[1] == 40.0f, "the sizes of the new set are the sizes of the kit");
+        Check(RequiredFontFiles().front() == "exo2/Exo2-SemiBold.ttf", "and its files are the files the kit needs");
+        {
+            Harness h(1920.0f, 1080.0f);
+            h.Run([](Frame& f)
+            {
+                const FontHandle small = f.fonts().Get(FontStyle::BlackItalic, 24.0f);
+                Check(small.Valid() && small.font->IsGlyphInFont('A') && small.font->IsGlyphInFont('B'), "a size with a list of glyphs has them");
+                const FontHandle big = f.fonts().Get(FontStyle::BlackItalic, 40.0f);
+                Check(big.Valid() && big.font->IsGlyphInFont('C'), "a size without a list has the usual glyphs");
+                Check(f.fonts().Get(FontStyle::BlackItalic, 220.0f).designSize == 40.0f, "a size that is not in the set takes the nearest one of the set");
+            }, RawInput{});
+        }
+        SetFontSet(DefaultFontSet());
+        Check(Fonts::DesignSizes(FontStyle::SemiBold) == defaultSizes && RequiredFontFiles().front() == "exo2/Exo2-BlackItalic.ttf", "the default set comes back");
+        Harness again(1920.0f, 1080.0f);
+        again.Run([](Frame& f) { Check(f.fonts().Get(FontStyle::ExtraBoldItalic, 22.0f).Valid(), "and bakes again"); }, RawInput{});
+    }
 }
 
 int main()
@@ -1012,6 +1047,7 @@ int main()
         TestGalleryDraw();
         TestSharpText();
         TestFontLoaderSwitch();
+        TestFontSet();
         TestCost();
     }
     catch (const std::exception& exception)

@@ -69,7 +69,7 @@ namespace myengine::rlui
             candidates.push_back(std::filesystem::current_path(ec) / "assets" / "fonts");
             for (const auto& candidate : candidates)
             {
-                if (std::filesystem::exists(candidate / "exo2" / "Exo2-BlackItalic.ttf", ec))
+                if (std::filesystem::exists(candidate / ActiveFontSet().requiredFile, ec))
                 {
                     return candidate;
                 }
