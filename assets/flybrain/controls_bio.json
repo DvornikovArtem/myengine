@@ -23,13 +23,18 @@
     "limit": 50.0
   },
   "fire": {
-    "terms": [
+    "spikeTerms": [
       { "type": "MN9", "side": "any", "weight": 1.0 }
     ],
     "windowMs": 100,
-    "minSpikes": 1,
-    "thresholdHz": 0.0
+    "minSpikes": 1
   },
+  "show": [
+    { "type": "LC4", "side": "left" },
+    { "type": "LC4", "side": "right" },
+    { "type": "DNp01", "side": "left" },
+    { "type": "DNp01", "side": "right" }
+  ],
   "use": {
     "everyTics": 35,
     "stuckTics": 12,

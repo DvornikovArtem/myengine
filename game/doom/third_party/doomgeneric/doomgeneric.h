@@ -51,6 +51,8 @@ void DG_Exit(int code, const char* message);
 // myengine: called by D_DoomMain once the WAD files are loaded and before the sprites are scanned (R_Init): the host may add lumps in memory with
 // W_InsertMemoryLumps (the swarm of flies, game/doom/src/DoomSwarm.c).
 void DG_AfterIwad(void);
+// myengine: how many players live in this process (-players N, 1..4): the console player and the ones that DG_TicCmdHook commands
+extern int dg_players;
 
 extern void (*DG_TicCmdHook)(int player, signed char* forwardmove, signed char* sidemove, short* angleturn, unsigned char* buttons);
 

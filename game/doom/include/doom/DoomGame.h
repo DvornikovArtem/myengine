@@ -49,6 +49,8 @@ namespace doom
         int kills = 0;
         int items = 0;
         int secrets = 0;
+        int frags = 0;                          // deathmatch: kills of the others minus suicides
+        int deaths = 0;                         // deathmatch: how many times the others killed this player
     };
 
     enum class GameState : std::uint8_t
@@ -133,8 +135,15 @@ namespace doom
         std::uint64_t FrameHash() const;
         // The title DOOM wants for the window ("DOOM Shareware", "Freedoom: Phase 1")
         const std::string& WindowTitle() const { return windowTitle_; }
-        // The view of `player` in a buffer of the host. Today only the console player (D0); the other players are D1's job.
+        // The view of `player` in a buffer of the host: the console player is what DOOM drew (with the status bar), any other player of the game
+        // ("-players N") is rendered through his eyes by an extra render pass (3D view only, the status bar is black). false: no such player or no level.
+        // Call it on the game's thread between tics.
         bool RenderView(int player, ViewBuffer& out);
+        // The 3D view of any player of the game (the console player too) drawn by the extra render pass: no status bar (those rows are black), the same
+        // picture for each player, so that two brains see the same way. false: no such player or no level.
+        bool RenderEyes(int player, ViewBuffer& out);
+        // Loads the level again at the next tic: all the players are born again, the frags are zero (a deathmatch round is over)
+        void RestartLevel();
 
         // ---- input ----
         // A key by the codes of DoomKeys.h (or the lower case ASCII of a letter, a digit, a symbol)

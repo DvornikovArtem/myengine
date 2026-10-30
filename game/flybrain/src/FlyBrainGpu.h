@@ -92,6 +92,7 @@ namespace flybrain
         const uint32_t* counts = nullptr;
         uint32_t lostSpikes = 0; // spikes beyond the capacity of the window list (not delivered): must stay 0
         const uint32_t* trackedTotals = nullptr; // spike totals of the tracked units at the end of the submission
+        bool callEnd = false;
     };
 
     class FlyBrainGpu
@@ -114,12 +115,21 @@ namespace flybrain
         // Units whose spike totals every submission copies back (sorted; consecutive units go in one copy)
         void SetTracked(const std::vector<uint32_t>& units);
 
+        // Plastic synapses (N3): per graph neuron the offset of its row into edgePlastic (UINT32_MAX: none), per edge of those
+        // rows the synapse or -1, the weights [synapse][replica] in 1/256 of a contact. Once, before the first window
+        void SetPlasticity(const std::vector<uint32_t>& rowOffset, const std::vector<int32_t>& edgePlastic, const std::vector<int32_t>& weights);
+        // Neurons whose spikes are not delivered (FlyBrain: ModelParams::fastModulatorySynapses = false), per graph neuron
+        void SetSilentOutputs(const std::vector<uint8_t>& silent);
+        // A learned weight that changed ([synapse][replica] index), applied at the start of the next window
+        void QueuePlasticWeight(uint32_t index, int32_t weight) { queuedPlastic_.push_back({ index, static_cast<uint32_t>(weight) }); }
+
         // Applied at the start of the next recorded window
         void QueueUpdate(const GpuNeuronUpdate& update);
         // Records one window into the open submission; a full submission is sent on its own
         void RecordWindow(uint64_t begin, uint32_t steps);
-        // Sends the open submission. Does not wait
-        void Submit();
+        // Sends the open submission. Does not wait. callEnd: the last submission of a call of FlyBrain::Advance (learning
+        // happens when such a submission is done)
+        void Submit(bool callEnd = false);
         // Receives the counts of every finished submission, in order (from Poll, Download and a full slot ring)
         void SetCompletionHandler(std::function<void(const GpuCompletedSteps&)> handler) { onCompleted_ = std::move(handler); }
         // Hands the finished submissions to the handler. wait: until all sent work is done
@@ -164,6 +174,7 @@ namespace flybrain
         Microsoft::WRL::ComPtr<ID3D12PipelineState> compactPso_;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> integratePso_;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> deliverPso_;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> plasticPso_;
 
         std::shared_ptr<SharedGraph> graph_;
         Microsoft::WRL::ComPtr<ID3D12Resource> model_; // constant buffer (upload heap)
@@ -178,6 +189,12 @@ namespace flybrain
         Microsoft::WRL::ComPtr<ID3D12Resource> ring_;
         Microsoft::WRL::ComPtr<ID3D12Resource> active_;
         Microsoft::WRL::ComPtr<ID3D12Resource> lastSpike_;
+        Microsoft::WRL::ComPtr<ID3D12Resource> silentOutput_;
+        Microsoft::WRL::ComPtr<ID3D12Resource> plasticRowOffset_;
+        Microsoft::WRL::ComPtr<ID3D12Resource> edgePlastic_;
+        Microsoft::WRL::ComPtr<ID3D12Resource> plasticWeights_;
+        std::vector<std::pair<uint32_t, uint32_t>> queuedPlastic_;
+        bool plastic_ = false;
         Microsoft::WRL::ComPtr<ID3D12Resource> powU_;
         Microsoft::WRL::ComPtr<ID3D12Resource> powG_;
 

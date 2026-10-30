@@ -109,14 +109,39 @@ namespace doomfly
             return false;
         }
         std::string fireError;
-        if (!root.contains("fire") || !root["fire"].is_object() || !root["fire"].contains("terms") || !ReadTerms(root["fire"]["terms"], controls.fire.terms, fireError))
+        if (!root.contains("fire") || !root["fire"].is_object())
         {
-            error = "fire: " + (fireError.empty() ? std::string("no terms") : fireError);
+            error = "no \"fire\" channel";
             return false;
         }
-        controls.fire.windowMs = root["fire"].value("windowMs", 100.0f);
-        controls.fire.minSpikes = root["fire"].value("minSpikes", 1u);
-        controls.fire.thresholdHz = root["fire"].value("thresholdHz", 0.0f);
+        const auto& fire = root["fire"];
+        if (fire.contains("terms") && !ReadTerms(fire["terms"], controls.fire.terms, fireError))
+        {
+            error = "fire: " + fireError;
+            return false;
+        }
+        if (fire.contains("spikeTerms") && !ReadTerms(fire["spikeTerms"], controls.fire.spikeTerms, fireError))
+        {
+            error = "fire: " + fireError;
+            return false;
+        }
+        if (controls.fire.terms.empty() && controls.fire.spikeTerms.empty())
+        {
+            error = "fire: no terms and no spikeTerms";
+            return false;
+        }
+        controls.fire.windowMs = fire.value("windowMs", 100.0f);
+        controls.fire.minSpikes = fire.value("minSpikes", 1u);
+        controls.fire.thresholdHz = fire.value("thresholdHz", 0.0f);
+        if (root.contains("show"))
+        {
+            std::string showError;
+            if (!ReadTerms(root["show"], controls.show, showError))
+            {
+                error = "show: " + showError;
+                return false;
+            }
+        }
         if (root.contains("use") && root["use"].is_object())
         {
             controls.use.everyTics = root["use"].value("everyTics", 35u);

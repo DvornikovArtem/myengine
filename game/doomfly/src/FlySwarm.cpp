@@ -782,8 +782,9 @@ namespace doomfly
 
     const std::vector<std::string>& SwarmDoomArgs()
     {
-        // no monsters of DOOM (only the flies attack), the sprites and the buzz of the flies in DOOM (game/doom DoomSwarm.h)
-        static const std::vector<std::string> args = {"-nomonsters", doom::swarm::kStartArgument};
+        // no monsters of DOOM (only the flies attack), the sprites and the buzz of the flies in DOOM (game/doom DoomSwarm.h), E1M1 at once (a -warp of the player
+        // in --doom-args comes first in the command line and wins)
+        static const std::vector<std::string> args = {"-nomonsters", doom::swarm::kStartArgument, "-warp", "1", "1"};
         return args;
     }
 

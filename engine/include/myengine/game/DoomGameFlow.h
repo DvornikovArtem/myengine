@@ -54,6 +54,7 @@ namespace myengine::game
         std::filesystem::path dataDirectory;                                                     // the saves and the config of DOOM
         // Who plays (DoomController.h). The first mode is the human. More than one mode: a menu in front of the game asks, unless initialMode says.
         std::vector<DoomMode> modes;
+        DoomLaunchChoice choice;                                                                 // what the player chose for the mode (the set of neurons, the backend of the brain, ...)
         int initialMode = -1;                                                                    // the index of the mode to start with, -1: ask when there are several
         bool squarePixels = false;                                                               // false: 4:3 as on the monitors of 1993 (320x200 stretched to 320x240)
         bool music = true;

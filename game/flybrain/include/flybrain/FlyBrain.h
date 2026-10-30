@@ -69,6 +69,36 @@ namespace flybrain
         bool selfTest = true;           // compare a small network with the CPU before trusting the GPU
     };
 
+    // Learning (N3): a synapse of a Kenyon cell onto an output neuron of the mushroom body (KC -> MBON) gets weaker when
+    // the KC was active (an eligibility trace) while the dopamine neurons of that MBON's compartment fire (the DANs that
+    // synapse onto it in the connectome). Punishment: PPL1 neurons, reward: PAM neurons. The weights change between the
+    // calls of Advance, from the spikes of the call, the same way on the CPU and the GPU. docs/flybrain/flybrain.md, "Обучение"
+    struct PlasticityRule
+    {
+        std::vector<std::string> preTypePrefixes{ "KC" };
+        std::vector<std::string> postTypePrefixes{ "MBON" };
+        std::vector<std::string> punishmentTypePrefixes{ "PPL1" };
+        std::vector<std::string> rewardTypePrefixes{ "PAM" };
+        double learningRate = 5e-4;   // eta: change of the scale of a synapse per (KC trace x dopamine spike of the compartment)
+        double traceTauMs = 2000.0;   // eligibility trace of a KC: spikes, decaying with this time constant
+        double forgetTauMs = 1.8e6;   // the scale relaxes back to 1 (30 minutes, as DOOMFLY); 0: never
+        double minScale = 0.1;        // of the synapse in the connectome
+        double maxScale = 2.0;
+        // A DAN belongs to the compartment of an MBON when it makes at least this many contacts onto it (a few stray
+        // contacts do not make a compartment)
+        uint32_t compartmentContacts = 10;
+    };
+
+    struct PlasticityInfo
+    {
+        uint32_t edges = 0;           // plastic synapses (of one fly)
+        uint32_t edgesWithDopamine = 0; // ... onto an MBON that some DAN reaches
+        uint32_t preNeurons = 0;
+        uint32_t postNeurons = 0;
+        uint32_t punishmentNeurons = 0;
+        uint32_t rewardNeurons = 0;
+    };
+
     // The last spikes on the GPU, for a view that draws them without a copy to the CPU. ring: uint2 (neuron, step) x
     // capacity; counters[0]: spikes written so far (the next index & (capacity - 1)); lastSpikeStep: uint per neuron, the
     // step of its last spike, 0xFFFFFFFF for none (age = (CompletedStep() - step) * dt). All are in COMMON state between
@@ -99,6 +129,11 @@ namespace flybrain
         // Shiu sets t_rfc = 0 for the neurons that get Poisson input, so their rate follows the input
         bool poissonWithoutRefractory = true;
         uint64_t seed = 1;
+        // true (Shiu, DOOMFLY): the synapses of dopamine, octopamine and serotonin neurons are fast and excitatory (+1).
+        // false: they carry no fast current (their neurons still fire, and dopamine still drives learning, N3). In MaleCNS
+        // two PPL101 neurons at 150 Hz are enough to start the self-sustained activity of the central brain when they are
+        // excitatory (docs/flybrain/flybrain.md, "Обучение")
+        bool fastModulatorySynapses = true;
     };
 
     struct SpikeEvent
@@ -176,6 +211,31 @@ namespace flybrain
         // Per-neuron Poisson input on top of the stimuli (an input that changes every frame, such as looming)
         void SetPoissonRate(uint32_t neuron, float rateHz);
 
+        // ---- learning (N3)
+        // Finds the plastic synapses and the compartments. Before SetBackend(Gpu); false: no KC -> MBON synapses
+        bool EnablePlasticity(const PlasticityRule& rule = {}, std::string* error = nullptr);
+        bool PlasticityEnabled() const { return plasticity_ != nullptr; }
+        const PlasticityInfo& GetPlasticityInfo() const;
+        // false: the weights stay as they are (the spikes still run through them): a test without learning
+        void SetLearning(bool learning);
+        bool IsLearning() const;
+        uint32_t PlasticEdgeCount() const;
+        uint32_t PlasticPre(uint32_t edge) const;   // neuron
+        uint32_t PlasticPost(uint32_t edge) const;
+        // Scale of a plastic synapse (1: as in the connectome), up to the last finished call of Advance
+        double PlasticScale(uint32_t edge, uint32_t replica = 0) const;
+        std::vector<double> GetPlasticScales() const; // [edge][replica]
+        void SetPlasticScales(const std::vector<double>& scales);
+        void ResetPlasticity();
+        // The dopamine neurons of punishment (PPL1) and reward (PAM) of the connectome
+        const Group& PunishmentNeurons() const;
+        const Group& RewardNeurons() const;
+        // The memory of the fly: the scales of all replicas, for this connectome only
+        bool SaveMemory(const std::string& path, std::string* error = nullptr) const;
+        bool LoadMemory(const std::string& path, std::string* error = nullptr);
+        // %LOCALAPPDATA%\FlyDoom\fly_memory.bin
+        static std::string DefaultMemoryPath();
+
         // Spike totals of chosen units that stay cheap to read on the GPU too (the outputs of a swarm: a copy of a few
         // values per submission instead of a read back of the whole state). TrackedSpikes is the total at CompletedStep()
         void Track(const Group& units);
@@ -241,6 +301,13 @@ namespace flybrain
         void Wake(uint32_t neuron);
         void ApplyStimulus(const Stimulus& stimulus, float sign);
         void UpdatePoisson(uint32_t neuron);
+        struct Plasticity;
+        // The learning step over the spikes of a finished call of Advance: totals(unit) gives the spike total of a unit
+        template <typename Totals>
+        void LearningStep(uint64_t step, const Totals& totals);
+        void LearnFromCpu();
+        void LearnFromGpu(uint64_t completedStep);
+        int32_t PlasticWeight(int32_t plastic, uint32_t replica) const;
         void ExpireStimuli();
         uint64_t NextStimulusEnd() const;
         bool CanFire(uint32_t neuron, double u, double g) const;
@@ -285,6 +352,7 @@ namespace flybrain
         std::vector<float> stimulusDrive_;
         std::vector<float> externalDrive_;
         std::vector<uint8_t> currentStimuli_; // active current stimuli per neuron, to reset the sum to exact 0
+        std::vector<uint8_t> silentOutput_; // per neuron of the connectome: 1 when its spikes are not delivered
         std::vector<uint32_t> poissonThreshold_; // P(event per step) * 2^32
         std::vector<uint8_t> poissonStimuli_;
         std::vector<double> stimulusPoisson_; // P(event per step) of the rate stimuli
@@ -320,5 +388,6 @@ namespace flybrain
         std::vector<uint32_t> trackedUnits_;
         std::vector<uint32_t> trackedTotals_; // GPU: as of completedStep_
         mutable bool gpuStatePulled_ = false;
+        std::unique_ptr<Plasticity> plasticity_;
     };
 }

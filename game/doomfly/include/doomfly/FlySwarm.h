@@ -73,6 +73,7 @@ namespace doomfly
         void DrawPanel(ImDrawList* list, float x, float y, float width, float height) override;
         void DrawOverlay(ImDrawList* list, float width, float height) override;
         bool HumanPlays() const override { return true; }
+        bool HasPanel() const override { return false; }
         std::string Status() const override;
 
         // One tic: the brain, the flies, one tic of DOOM. true: a new frame (the tests use this one and the ITicCmdSource of the game for the player)

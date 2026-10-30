@@ -47,6 +47,8 @@ namespace doomfly
         receptors_.clear();
         info_ = {};
         lamina_ = {};
+        columns_.clear();
+        columnByKey_.assign(2 * 64 * 64, -1);
 
         const flybrain::Group retina = connectome.Find("R1-R6");
         if (retina.Empty())
@@ -88,12 +90,33 @@ namespace doomfly
                 {
                     columnSeen[eye][key] = true;
                     ++info_.columns[eye];
+                    Column column;
+                    column.hex1 = connectome.Hex1(neuron);
+                    column.hex2 = connectome.Hex2(neuron);
+                    column.eye = static_cast<uint8_t>(eye);
+                    columns_.push_back(column);
                 }
             }
             if (info_.columns[eye] == 0)
             {
                 error = "the connectome has no lamina columns on one side";
                 return false;
+            }
+        }
+
+        // where each column looks
+        for (Column& column : columns_)
+        {
+            const Axes axes = ColumnAxes(column.hex1, column.hex2);
+            const Extent& e = extent[column.eye];
+            const float front = std::clamp((axes.front - e.frontMin) / std::max(e.frontMax - e.frontMin, 1e-3f), 0.0f, 1.0f);
+            const float up = std::clamp((axes.up - e.upMin) / std::max(e.upMax - e.upMin, 1e-3f), 0.0f, 1.0f);
+            column.x = column.eye == 0 ? config_.leftEyeFrom + front * (config_.leftEyeTo - config_.leftEyeFrom)
+                                       : config_.rightEyeTo - front * (config_.rightEyeTo - config_.rightEyeFrom);
+            column.y = 1.0f - up;
+            if (column.hex1 >= 0 && column.hex1 < 64 && column.hex2 >= 0 && column.hex2 < 64)
+            {
+                columnByKey_[(static_cast<size_t>(column.eye) * 64 + static_cast<size_t>(column.hex1)) * 64 + static_cast<size_t>(column.hex2)] = static_cast<int>(&column - columns_.data());
             }
         }
 
@@ -157,7 +180,30 @@ namespace doomfly
             error = "no photoreceptor has a column";
             return false;
         }
+
+        // the neurons of the motion channel that sit in columns (Mi1, Mi4, Mi9, Tm1, Tm2, Tm4, Tm9 have a column in the file; Tm3 and T4/T5 do not)
+        motion_.clear();
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            for (const std::string& type : pass == 0 ? config_.motionOnTypes : config_.motionOffTypes)
+            {
+                for (const uint32_t neuron : connectome.Find(type).neurons)
+                {
+                    const int column = ColumnOf(connectome, neuron);
+                    if (column >= 0)
+                    {
+                        motion_.push_back({neuron, column, pass == 0});
+                    }
+                }
+            }
+        }
         return true;
+    }
+
+    float FlyEyes::MotionDriveMv(const float luminance, const float slowLuminance, const bool on) const
+    {
+        const float contrast = std::clamp((luminance - slowLuminance) / (slowLuminance + 0.05f), -1.0f, 1.0f);
+        return on ? config_.motionOnGainMv * std::max(contrast, 0.0f) : config_.motionOffGainMv * std::max(-contrast, 0.0f);
     }
 
     float FlyEyes::ResponseMv(const float luminance) const
@@ -166,34 +212,58 @@ namespace doomfly
         return config_.maxDriveMv * l / (config_.halfLuminance + l);
     }
 
+    float FlyEyes::SampleAt(const uint32_t* frame, const int width, const int height, const float fx, const float fy) const
+    {
+        const int viewHeight = std::max(1, static_cast<int>(static_cast<float>(height) * config_.viewHeightFraction));
+        const int half = std::max(0, config_.boxPixels / 2);
+        const int cx = static_cast<int>(std::lround(fx * static_cast<float>(width - 1)));
+        const int cy = static_cast<int>(std::lround(fy * static_cast<float>(viewHeight - 1)));
+        float sum = 0.0f;
+        int count = 0;
+        for (int dy = -half; dy <= half; ++dy)
+        {
+            for (int dx = -half; dx <= half; ++dx)
+            {
+                const int x = std::clamp(cx + dx, 0, width - 1);
+                const int y = std::clamp(cy + dy, 0, viewHeight - 1);
+                const uint32_t pixel = frame[y * width + x];
+                const float r = Srgb8ToLinear(pixel >> 16);
+                const float g = Srgb8ToLinear(pixel >> 8);
+                const float b = Srgb8ToLinear(pixel);
+                sum += 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                ++count;
+            }
+        }
+        return sum / static_cast<float>(count);
+    }
+
     void FlyEyes::SampleLuminance(const uint32_t* frame, const int width, const int height, std::vector<float>& luminance) const
     {
         luminance.resize(receptors_.size());
-        const int viewHeight = std::max(1, static_cast<int>(static_cast<float>(height) * config_.viewHeightFraction));
-        const int half = std::max(0, config_.boxPixels / 2);
         for (size_t i = 0; i < receptors_.size(); ++i)
         {
-            const float px = receptors_[i].x * static_cast<float>(width - 1);
-            const float py = receptors_[i].y * static_cast<float>(viewHeight - 1);
-            const int cx = static_cast<int>(std::lround(px));
-            const int cy = static_cast<int>(std::lround(py));
-            float sum = 0.0f;
-            int count = 0;
-            for (int dy = -half; dy <= half; ++dy)
-            {
-                for (int dx = -half; dx <= half; ++dx)
-                {
-                    const int x = std::clamp(cx + dx, 0, width - 1);
-                    const int y = std::clamp(cy + dy, 0, viewHeight - 1);
-                    const uint32_t pixel = frame[y * width + x];
-                    const float r = Srgb8ToLinear(pixel >> 16);
-                    const float g = Srgb8ToLinear(pixel >> 8);
-                    const float b = Srgb8ToLinear(pixel);
-                    sum += 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                    ++count;
-                }
-            }
-            luminance[i] = sum / static_cast<float>(count);
+            luminance[i] = SampleAt(frame, width, height, receptors_[i].x, receptors_[i].y);
         }
+    }
+
+    void FlyEyes::SampleColumns(const uint32_t* frame, const int width, const int height, std::vector<float>& luminance) const
+    {
+        luminance.resize(columns_.size());
+        for (size_t i = 0; i < columns_.size(); ++i)
+        {
+            luminance[i] = SampleAt(frame, width, height, columns_[i].x, columns_[i].y);
+        }
+    }
+
+    int FlyEyes::ColumnOf(const flybrain::Connectome& connectome, const uint32_t neuron) const
+    {
+        const int16_t h1 = connectome.Hex1(neuron);
+        const int16_t h2 = connectome.Hex2(neuron);
+        const flybrain::Side side = connectome.NeuronSide(neuron);
+        if (h1 == flybrain::kNoHex || h1 < 0 || h1 >= 64 || h2 < 0 || h2 >= 64 || (side != flybrain::Side::Left && side != flybrain::Side::Right))
+        {
+            return -1;
+        }
+        return columnByKey_[(static_cast<size_t>(side == flybrain::Side::Left ? 0 : 1) * 64 + static_cast<size_t>(h1)) * 64 + static_cast<size_t>(h2)];
     }
 }

@@ -12,6 +12,8 @@ set(FLYBRAIN_SOURCES
   src/FlyBrain.cpp
   src/FlyBrainGpu.cpp
   src/FlyBrainGpu.h
+  src/FlyBrainPlasticity.cpp
+  src/FlyBrainPlasticity.h
   src/FlySwarmBrain.cpp
 )
 

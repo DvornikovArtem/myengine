@@ -59,6 +59,9 @@ typedef struct
 
 static ticcmd_set_t ticdata[BACKUPTICS];
 
+// myengine: the number of players that live in this process (-players N, doomgeneric.h)
+int dg_players = 1;
+
 // The index of the next tic to be made (with a call to BuildTiccmd).
 
 static int maketic;
@@ -187,6 +190,18 @@ static boolean BuildNewTic(void)
 #endif
     ticdata[maketic % BACKUPTICS].cmds[localplayer] = cmd;
     ticdata[maketic % BACKUPTICS].ingame[localplayer] = true;
+    // myengine: the other local players are in the game, their commands are empty until DG_TicCmdHook fills them in G_Ticker
+    {
+        int p;
+        for (p = 0; p < dg_players && p < NET_MAXPLAYERS; ++p)
+        {
+            if (p != localplayer)
+            {
+                memset(&ticdata[maketic % BACKUPTICS].cmds[p], 0, sizeof(ticcmd_t));
+                ticdata[maketic % BACKUPTICS].ingame[p] = true;
+            }
+        }
+    }
 
     ++maketic;
 
@@ -438,7 +453,14 @@ void D_StartNetGame(net_gamesettings_t *settings,
     //}
 #else
     settings->consoleplayer = 0;
-	settings->num_players = 1;
+	// myengine: -players N (2..4) puts N players into one process: the console player (the keyboard) and N-1 whose commands come from DG_TicCmdHook
+	{
+	    int p = M_CheckParmWithArgs("-players", 1);
+	    dg_players = p > 0 ? atoi(myargv[p + 1]) : 1;
+	    if (dg_players < 1) dg_players = 1;
+	    if (dg_players > 4) dg_players = 4;
+	}
+	settings->num_players = dg_players;
 	settings->player_classes[0] = player_class;
 	settings->new_sync = 0;
 	settings->extratics = 1;
@@ -692,7 +714,7 @@ static void SinglePlayerClear(ticcmd_set_t *set)
 
     for (i = 0; i < NET_MAXPLAYERS; ++i)
     {
-        if (i != localplayer)
+        if (i != localplayer && (int)i >= dg_players)   // myengine: the players of -players stay
         {
             set->ingame[i] = false;
         }
