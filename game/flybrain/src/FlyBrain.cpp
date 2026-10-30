@@ -734,11 +734,12 @@ namespace flybrain
 
     void FlyBrain::Advance(uint64_t steps)
     {
-        if (gpu_ != nullptr && plasticity_ != nullptr)
+        if (gpu_ != nullptr && plasticity_ != nullptr && learnWait_)
         {
             // The weights learned from the last call go into this one, as on the CPU: wait for its spikes
             gpu_->Poll(true);
         }
+        learnWait_ = false;
         while (steps > 0)
         {
             ExpireStimuli();
@@ -761,13 +762,25 @@ namespace flybrain
             steps -= window;
         }
         ExpireStimuli();
+        // Learning at the end of this call (PlasticityRule::learnEveryMs): the same calls on the CPU and the GPU
+        bool learn = false;
+        if (plasticity_ != nullptr)
+        {
+            const double every = plasticity_->rule.learnEveryMs;
+            learn = every <= 0.0 || double(step_ - learnedAtStep_) * params_.dtMs >= every - 1e-9;
+            if (learn)
+            {
+                learnedAtStep_ = step_;
+            }
+        }
         if (gpu_ != nullptr)
         {
             // Sent, not waited for: the counts of earlier submissions come in as the GPU finishes them
-            gpu_->Submit(true);
+            gpu_->Submit(learn);
+            learnWait_ = learn;
             gpu_->Poll(false);
         }
-        else
+        else if (learn)
         {
             LearnFromCpu();
         }

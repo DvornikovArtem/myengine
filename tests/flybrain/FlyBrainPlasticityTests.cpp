@@ -124,12 +124,15 @@ namespace
         std::vector<SpikeEvent> spikes;
     };
 
-    Conditioning RunConditioning(const std::shared_ptr<const Connectome>& cn, bool gpu, bool learning)
+    // learnEveryMs (N4): the weights change once in this many ms, not at every call of Advance
+    Conditioning RunConditioning(const std::shared_ptr<const Connectome>& cn, bool gpu, bool learning, double learnEveryMs = 0.0)
     {
         FlyBrain brain(cn);
         brain.SetSpikeRingCapacity(1u << 20);
         std::string error;
-        Check(brain.EnablePlasticity(PlasticityRule{}, &error), "plasticity: " + error);
+        PlasticityRule rule;
+        rule.learnEveryMs = learnEveryMs;
+        Check(brain.EnablePlasticity(rule, &error), "plasticity: " + error);
         if (gpu)
         {
             GpuOptions options;
@@ -240,6 +243,22 @@ namespace
                 Check(onGpu.spikes[k].neuron == learned.spikes[k].neuron && onGpu.spikes[k].step == learned.spikes[k].step, "spike " + std::to_string(k) + " on the GPU");
             }
             std::printf("  GPU: the same %zu spikes and %zu scales\n", onGpu.spikes.size(), onGpu.scales.size());
+        }
+
+        // N4: learning once in 3 calls of Advance learns as well, and the GPU (that then runs ahead between the changes) learns the same
+        const Conditioning sparse = RunConditioning(cn, false, true, 3.0 * kTick - 0.5);
+        std::printf("  learning every 3 calls: MBON01 to A: %u -> %u spikes\n", sparse.aBefore, sparse.aAfter);
+        Check(sparse.aAfter * 10 < sparse.aBefore * 7, "learning every 3 calls: MBON01 answers A at least 30 % less");
+        Check(sparse.scales != learned.scales, "learning every 3 calls changes the weights at other moments");
+        if (gGpu)
+        {
+            const Conditioning sparseGpu = RunConditioning(cn, true, true, 3.0 * kTick - 0.5);
+            Check(sparseGpu.scales == sparse.scales, "learning every 3 calls: the GPU learns the same scales, bit for bit");
+            Check(sparseGpu.spikes.size() == sparse.spikes.size(), "learning every 3 calls: the same number of spikes on the GPU");
+            for (size_t k = 0; k < sparseGpu.spikes.size() && k < sparse.spikes.size(); ++k)
+            {
+                Check(sparseGpu.spikes[k].neuron == sparse.spikes[k].neuron && sparseGpu.spikes[k].step == sparse.spikes[k].step, "learning every 3 calls: spike " + std::to_string(k) + " on the GPU");
+            }
         }
     }
 

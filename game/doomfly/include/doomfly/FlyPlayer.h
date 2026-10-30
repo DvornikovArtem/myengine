@@ -27,7 +27,9 @@
 #include <doomfly/FlyEyes.h>
 #include <flybrain/FlyBrain.h>
 #include <flybrain/KcVision.h>
+#include <doomfly/WallSense.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -71,8 +73,19 @@ namespace doomfly
             bool learning = true;               // false: the weights stay (the control arm of a measurement), everything else the same
             float punishmentMv = 15.0f;         // damage into every PPL1 for damageMs (their threshold is 7 mV), instead of damageMv into PPL101
             std::string memoryPath;             // what was learned, between the runs (flybrain::FlyBrain::DefaultMemoryPath()); empty: no file
+            bool saveMemory = true;             // false: memoryPath is only read (N4: the trained fly of the package, assets/flybrain/fly_trained.bin)
             flybrain::KcVisionConfig vision;    // the KCs see the change of the light of the columns: |L - slow| / (slow + 0.05), 0..1
+            double learningRate = 5e-4;         // flybrain::PlasticityRule::learningRate
+            // N4: pushing against a wall is punishment too (the same current into every PPL1 as damage): once when it starts, then every wallEveryTics while it lasts
+            bool wallPunishment = true;
+            uint32_t wallEveryTics = 35;
         } learning;
+        // N4: OUR learned layer on top of the brain (not the connectome, WallSense.h): it learns from the touches of the walls to see them coming, brakes and turns.
+        // Works with any brain. `wallSenseLoad`: the memories to start with, their places put together (the trained fly, assets/flybrain/fly_trained.bin);
+        // `wallSenseSave`: where the destructor saves the memory (empty: nowhere)
+        WallSenseConfig wallSense;
+        std::vector<std::string> wallSenseLoad;
+        std::string wallSenseSave;
     };
 
     struct RateReading
@@ -100,10 +113,19 @@ namespace doomfly
         float centralSpikesPerSecond = 0.0f;    // the central brain (what the guard against the runaway watches)
         float dopamineMv = 0.0f;                // the current PPL101 (with learning: every PPL1) gets now
         float kcSpikesPerSecond = 0.0f;         // learning: the Kenyon cells
-        double learnedScale = 1.0;              // learning: the mean scale of the KC -> MBON synapses (1: nothing learned), once a second
+        double learnedScale = 1.0;              // learning: the mean scale of the KC -> MBON synapses of the KCs that see (1: nothing learned), once a second
+        // N4, our layer (WallSense, not the connectome): the chance it sees of touching a wall soon, how much it brakes now, what it has learned from
+        bool wallSense = false;
+        float wallChance = 0.0f;
+        float wallBrake = 0.0f;
+        uint32_t wallPositives = 0;
         uint32_t resets = 0;                    // the brain was made again (all reasons)
         uint32_t seizures = 0;                  // ... because it ran away
         uint32_t damages = 0;
+        // N4: pushing against a wall: forward pressed (more than 3 units) and less than controls.use.stuckUnits of way in controls.use.stuckTics
+        uint32_t wallHits = 0;                  // the times it started
+        uint64_t wallTics = 0;                  // the tics it lasted
+        uint64_t levelTics = 0;                 // the tics in a level, alive (the clock of the rates)
         std::vector<RateReading> rates;         // the groups of the controls
         std::string controlsName;
     };
@@ -151,6 +173,7 @@ namespace doomfly
         const FlyControls& Controls() const { return config_.controls; }
         const flybrain::Connectome& GetConnectome() const { return *config_.connectome; }
         bool Learns() const { return config_.learning.enabled; }
+        bool WallSenseOn() const { return wallSense_.Enabled(); }   // N4: our layer WallSense plays (and learns, when it does)
 
         // For the tests: a current (mV) into every neuron of a type until the next reset, to make the brain run away
         void InjectCurrentForTest(const std::string& type, float currentMv);
@@ -161,6 +184,8 @@ namespace doomfly
         FlyStatus EvaluateSequenceForTest(const std::function<void(int, std::vector<uint32_t>&)>& makeFrame, int tics, std::vector<FlyStatus>* perTic = nullptr);
         // For the tests: the luminance per photoreceptor of the last tick
         std::vector<float> LastLuminance() const;
+        // The light of the columns of the eyes in the picture of the last tic (FlyEyes::Columns() order)
+        const std::vector<float>& LastColumns() const { return lastColumns_; }
         // doom::ITicCmdSource: the command of the player is the last one the brain gave
         void BuildTicCmd(int player, doom::TicCmd& cmd) override;
 
@@ -187,6 +212,7 @@ namespace doomfly
         {
             std::vector<float> luminance;       // per photoreceptor
             bool damage = false;
+            bool wall = false;                  // learning: punishment for pushing against a wall
             bool reward = false;
             bool reset = false;
             std::vector<float> columnLuminance; // per column of the eyes (the motion channel)
@@ -236,7 +262,12 @@ namespace doomfly
         flybrain::Group kcs_;
         flybrain::WatchId kcWatch_ = 0;
         std::vector<double> learned_;           // the scales of the last brain, for the next one
+        std::vector<uint32_t> visualEdges_;     // the KC -> MBON synapses of the KCs that the visual inputs reach (FlyStatus::learnedScale)
         uint64_t learnedTics_ = 0;
+        WallSense wallSense_;                   // N4: our layer (the thread of the game)
+        std::vector<float> lastColumns_;        // the light of the columns of the picture of the tick whose result comes next
+        int placeMap_ = -1;
+        int placeEpisode_ = -1;
 
         // the brain: touched by the worker thread only (and by the constructor before it runs)
         std::unique_ptr<flybrain::FlyBrain> brain_;
@@ -277,6 +308,8 @@ namespace doomfly
         double speedSmoothed_ = 0.0;            // brain time / wall time of the brain
         double ticIntervalSmoothed_ = 0.0;      // wall seconds between two tics of the game
         double wallSinceTic_ = 0.0;
+        std::chrono::steady_clock::time_point stepWindowStart_;   // StepBlocking: the speed of the game over a second of the clock
+        uint32_t stepWindowTics_ = 0;
         bool waiting_ = false;
         struct Position
         {
@@ -285,6 +318,12 @@ namespace doomfly
         std::vector<Position> history_;
         uint32_t useCooldown_ = 0;
         uint32_t stuckCount_ = 0;
+        bool atWall_ = false;
+        uint32_t wallTicsNow_ = 0;              // of the push that lasts now
+        bool wallPunish_ = false;               // for the next tick of the brain
+        uint32_t wallHits_ = 0;
+        uint64_t wallTics_ = 0;
+        uint64_t levelTics_ = 0;
         uint32_t reflexLeft_ = 0;
         float reflexSign_ = 1.0f;
         uint32_t screenCooldown_ = 0;

@@ -3,9 +3,11 @@
 #include <doomfly/FlyPlayer.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace doomfly
 {
@@ -117,6 +119,30 @@ namespace doomfly
             kcs_ = connectome.FindPrefix("KC");
         }
 
+        if (config_.wallSense.enabled)
+        {
+            std::vector<float> columnX, columnY;
+            for (const Column& column : eyes_.Columns())
+            {
+                columnX.push_back(column.x);
+                columnY.push_back(column.y);
+            }
+            wallSense_.Build(config_.wallSense, columnX, columnY);
+            std::string loadError;
+            for (const std::string& path : config_.wallSenseLoad)
+            {
+                if (!wallSense_.Load(path, &loadError, true))
+                {
+                    error = loadError;
+                    return false;
+                }
+                if (config_.log)
+                {
+                    config_.log("fly: our wall layer starts trained (" + path + ", " + std::to_string(wallSense_.Places()) + " places)");
+                }
+            }
+        }
+
         MakeBrain();
         history_.reserve(64);
         return true;
@@ -133,7 +159,15 @@ namespace doomfly
         {
             worker_.join();
         }
-        if (brain_ && config_.learning.enabled && !config_.learning.memoryPath.empty())
+        if (wallSense_.Enabled() && !config_.wallSenseSave.empty())
+        {
+            std::string error;
+            if (!wallSense_.Save(config_.wallSenseSave, &error) && config_.log)
+            {
+                config_.log("fly: our wall layer was not saved: " + error);
+            }
+        }
+        if (brain_ && config_.learning.enabled && config_.learning.saveMemory && !config_.learning.memoryPath.empty())
         {
             std::string error;
             if (!brain_->SaveMemory(config_.learning.memoryPath, &error) && config_.log)
@@ -168,7 +202,10 @@ namespace doomfly
         brain_->SetParallel(config_.parallel);
         if (config_.learning.enabled)
         {
-            brain_->EnablePlasticity();   // before the GPU takes it
+            flybrain::PlasticityRule rule;
+            rule.learningRate = config_.learning.learningRate;
+            rule.learnEveryMs = kTicMs - 0.5;   // once a tic, not at every substep: the GPU is not stopped 4 times a tic (N4)
+            brain_->EnablePlasticity(rule);   // before the GPU takes it
             std::string error;
             if (!learned_.empty())
             {
@@ -258,7 +295,7 @@ namespace doomfly
                 brain_->StimulateCurrent(config_.connectome->Find(item.first), item.second);
             }
         }
-        if (input.damage)
+        if (input.damage || input.wall)
         {
             if (config_.learning.enabled)
             {
@@ -389,13 +426,33 @@ namespace doomfly
             result.kcSpikesPerSecond = kcWatch_ != 0 ? static_cast<float>(static_cast<double>(brain_->SpikeCount(kcWatch_, static_cast<float>(kTicMs))) / (kTicMs / 1000.0)) : 0.0f;
             if (learnedTics_++ % 35 == 0)
             {
+                // N4: the mean over the synapses of the KCs that see (the others never learn: their mean said 0.98 when the seeing ones were at 0.6)
                 const std::vector<double> scales = brain_->GetPlasticScales();
-                double scaleSum = 0.0;
-                for (const double s : scales)
+                if (visualEdges_.empty())
                 {
-                    scaleSum += s;
+                    std::vector<uint8_t> seeing(config_.connectome->NeuronCount(), 0);
+                    const flybrain::Connectome& cn = *config_.connectome;
+                    for (const flybrain::KcVisionInput& in : kcVision_.Inputs())
+                    {
+                        for (uint32_t e = cn.EdgeBegin(in.neuron); e < cn.EdgeEnd(in.neuron); ++e)
+                        {
+                            seeing[cn.Targets()[e]] = cn.Weights()[e] > 0 ? 1 : seeing[cn.Targets()[e]];
+                        }
+                    }
+                    for (uint32_t k = 0; k < brain_->PlasticEdgeCount(); ++k)
+                    {
+                        if (seeing[brain_->PlasticPre(k)] != 0)
+                        {
+                            visualEdges_.push_back(k);
+                        }
+                    }
                 }
-                result.learnedScale = scales.empty() ? 1.0 : scaleSum / static_cast<double>(scales.size());
+                double scaleSum = 0.0;
+                for (const uint32_t k : visualEdges_)
+                {
+                    scaleSum += k < scales.size() ? scales[k] : 1.0;
+                }
+                result.learnedScale = visualEdges_.empty() ? 1.0 : scaleSum / static_cast<double>(visualEdges_.size());
             }
         }
 
@@ -512,6 +569,7 @@ namespace doomfly
         eyes_.SampleLuminance(picture, doom::kScreenWidth, doom::kScreenHeight, input.luminance);
         eyes_.SampleColumns(picture, doom::kScreenWidth, doom::kScreenHeight, input.columnLuminance);
         lastLuminance_ = input.luminance;
+        lastColumns_ = input.columnLuminance;
 
         if (player.inGame)
         {
@@ -520,6 +578,7 @@ namespace doomfly
             {
                 ++damages_;
             }
+            input.wall = wallPunish_ && config_.learning.enabled && config_.learning.wallPunishment;
             input.reward = config_.reward && (player.kills > prevKills_ || player.items > prevItems_);
             const bool died = prevHealth_ <= 0 && player.health > 0;
             const bool newLevel = prevMap_ >= 0 && (info.map != prevMap_ || info.episode != prevEpisode_);
@@ -531,6 +590,7 @@ namespace doomfly
             prevKills_ = player.kills;
             prevItems_ = player.items;
         }
+        wallPunish_ = false;
         prevMap_ = info.map;
         prevEpisode_ = info.episode;
         if (needReset_)
@@ -562,6 +622,27 @@ namespace doomfly
         if (inLevel)
         {
             Shape(result, turnDegrees, forwardUnits, fire);
+            // N4: our layer (not the connectome): it learns from the touch of the last tic, then brakes the walk and turns when it sees a wall coming
+            if (wallSense_.Enabled() && player.health > 0)
+            {
+                if (info.map != placeMap_ || info.episode != placeEpisode_)
+                {
+                    // a memory per WAD and map ("doom1 E1M1"): the layer learns the places of a map
+                    placeMap_ = info.map;
+                    placeEpisode_ = info.episode;
+                    std::string wad = game.Iwad().stem().u8string();
+                    std::transform(wad.begin(), wad.end(), wad.begin(), [](const char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+                    char place[96];
+                    std::snprintf(place, sizeof(place), "%s E%dM%d", wad.c_str(), info.episode, info.map);
+                    wallSense_.SetPlace(place);
+                }
+                wallSense_.Tick(lastColumns_, atWall_, forwardUnits > 3.0f && reflexLeft_ == 0);
+                if (wallSense_.Brake() > 0.0f)
+                {
+                    forwardUnits = forwardUnits > 0.0f ? forwardUnits * (1.0f - wallSense_.Brake()) : forwardUnits;
+                    turnDegrees = std::clamp(turnDegrees + wallSense_.TurnDegrees(), -controls.turn.limit, controls.turn.limit);
+                }
+            }
 
             // stuck at a door: pushing and not moving
             history_.push_back({player.x, player.y});
@@ -587,6 +668,27 @@ namespace doomfly
                 use = true;
                 fire = false;
             }
+
+            // N4: the metric of pushing against a wall, and its punishment (with learning)
+            const bool atWall = pushing && notMoving && player.health > 0;
+            if (player.health > 0)
+            {
+                ++levelTics_;
+            }
+            if (atWall)
+            {
+                ++wallTics_;
+                if (!atWall_)
+                {
+                    ++wallHits_;
+                    wallTicsNow_ = 0;
+                }
+                if (wallTicsNow_++ % std::max(1u, config_.learning.wallEveryTics) == 0)
+                {
+                    wallPunish_ = true;
+                }
+            }
+            atWall_ = atWall;
 
             // the reflex of the legs: pushing against a wall for a long time
             if (pushing && notMoving)
@@ -676,6 +778,10 @@ namespace doomfly
         status_.centralSpikesPerSecond = result.centralSpikesPerSecond;
         status_.dopamineMv = result.dopamineMv;
         status_.kcSpikesPerSecond = result.kcSpikesPerSecond;
+        status_.wallSense = wallSense_.Enabled();
+        status_.wallChance = wallSense_.Chance();
+        status_.wallBrake = wallSense_.Brake();
+        status_.wallPositives = wallSense_.Positives();
         if (result.learnedScale >= 0.0)
         {
             status_.learnedScale = result.learnedScale;
@@ -692,6 +798,7 @@ namespace doomfly
         const FlyControls& controls = config_.controls;
         turnDegrees = Shaped(result.turnHz, controls.turn);
         forwardUnits = Shaped(result.forwardHz, controls.forward);
+
         fire = result.fireSpikes || (controls.fire.thresholdHz > 0.0f && result.fireHz >= controls.fire.thresholdHz);
     }
 
@@ -785,6 +892,19 @@ namespace doomfly
         const bool frame = game.StepTic();
         commandReady_ = false;
         ++tics_;
+        // the speed of the game when a host steps it as fast as the brain goes (Fly learns, MAX): the tics of every second of the clock (the tics come in bursts,
+        // one burst a frame, so the interval between two of them says nothing)
+        const auto now = std::chrono::steady_clock::now();
+        if (stepWindowTics_++ == 0)
+        {
+            stepWindowStart_ = now;
+        }
+        const double window = std::chrono::duration<double>(now - stepWindowStart_).count();
+        if (window >= 1.0)
+        {
+            ticIntervalSmoothed_ = window / static_cast<double>(stepWindowTics_ - 1);
+            stepWindowTics_ = 0;
+        }
         return frame;
     }
 
@@ -853,6 +973,9 @@ namespace doomfly
         status.resets = resets_;
         status.seizures = seizures_;
         status.damages = damages_;
+        status.wallHits = wallHits_;
+        status.wallTics = wallTics_;
+        status.levelTics = levelTics_;
         status.controlsName = config_.controls.name;
         status.backend = backendText_;
         return status;

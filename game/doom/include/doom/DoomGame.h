@@ -162,6 +162,8 @@ namespace doom
         // ---- the state ----
         GameInfo Info() const;
         PlayerState Player(int player) const;
+        // The game data it plays (DoomConfig::iwad); N4: the trained fly keeps a memory per WAD and map
+        const std::filesystem::path& Iwad() const;
 
         // ---- the end ----
         // The player chose Quit in the menu (or a demo ended with -timedemo ...): the host closes the game

@@ -761,6 +761,16 @@ set_property(TARGET myengine_doom_frontend_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_frontend COMMAND myengine_doom_frontend_tests)
 set_tests_properties(doom_frontend PROPERTIES TIMEOUT 60)
 
+# N4: our layer WallSense of the fly (game/doomfly, not the connectome) without a game or a brain: it remembers what came before a touch of a wall, per map, in its file
+add_executable(myengine_doom_wallsense_tests
+  doomfly/WallSenseTests.cpp)
+
+target_link_libraries(myengine_doom_wallsense_tests PRIVATE myengine_doomfly)
+myengine_apply_compiler_options(myengine_doom_wallsense_tests)
+set_property(TARGET myengine_doom_wallsense_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_wallsense COMMAND myengine_doom_wallsense_tests)
+set_tests_properties(doom_wallsense PROPERTIES TIMEOUT 60)
+
 # D1c: the swarm of enemy flies (game/doomfly FlySwarm, game/doom DoomSwarm): the pictures of the fly, the brain of the circuit at looming, a game of E1M1 with waves.
 # The brain and the game need assets/flybrain/swarm_circuit.fbrain (build/tests/RelWithDebInfo/myengine_flybrain_circuit.exe) and the game a WAD
 # (tools/doom/fetch_freedoom.ps1, or the shareware doom1.wad); they are skipped without them

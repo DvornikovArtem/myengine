@@ -19,6 +19,7 @@
 
 #include <flybrain/Connectome.h>
 #include <flybrain/FlyBrain.h>
+#include <flybrain/KcVision.h>
 
 #include <myengine/jobs/JobSystem.h>
 
@@ -554,6 +555,89 @@ namespace
         std::printf("\n\n");
     }
 
+    // N4: which eye the visual KCs see, and which eye the MBONs of the controls hear through them. The eye of a visual input is the side of the
+    // columns of its field (KcVision); a KC gets the contacts of the inputs; an MBON the KC -> MBON contacts times the eye share of the KC.
+    void ReportLaterality(const Connectome& cn)
+    {
+        KcVision vision;
+        std::string error;
+        if (!vision.Build(cn, {}, &error))
+        {
+            std::printf("laterality: %s\n", error.c_str());
+            return;
+        }
+        const std::vector<KcVisionColumn>& columns = vision.Columns();
+        // the visual drive of every KC by eye: contacts of an input x the share of its field on that side
+        std::vector<double> kcLeft(cn.NeuronCount(), 0.0), kcRight(cn.NeuronCount(), 0.0);
+        double ipsi = 0.0, contra = 0.0, inputsLeft = 0.0, inputsRight = 0.0;
+        uint32_t inputsBoth = 0;
+        for (const KcVisionInput& input : vision.Inputs())
+        {
+            double left = 0.0, right = 0.0;
+            for (const auto& [c, w] : input.field)
+            {
+                (columns[c].side == Side::Left ? left : right) += w;
+            }
+            if (input.field.empty())
+            {
+                continue;
+            }
+            inputsLeft += left;
+            inputsRight += right;
+            inputsBoth += left > 0.2 && right > 0.2 ? 1 : 0;
+            for (uint32_t e = cn.EdgeBegin(input.neuron); e < cn.EdgeEnd(input.neuron); ++e)
+            {
+                const uint32_t kc = cn.Targets()[e];
+                if (!IsKc(cn.Type(kc)) || cn.Weights()[e] <= 0)
+                {
+                    continue;
+                }
+                const double contacts = cn.Weights()[e];
+                kcLeft[kc] += contacts * left;
+                kcRight[kc] += contacts * right;
+                const Side side = cn.NeuronSide(kc);
+                if (side == Side::Left || side == Side::Right)
+                {
+                    ipsi += contacts * (side == Side::Left ? left : right);
+                    contra += contacts * (side == Side::Left ? right : left);
+                }
+            }
+        }
+        std::printf("visual inputs of KCs: fields %.0f %% left eye, %.0f %% right; %u inputs see both eyes (> 20 %% each)\n", 100.0 * inputsLeft / (inputsLeft + inputsRight),
+            100.0 * inputsRight / (inputsLeft + inputsRight), inputsBoth);
+        std::printf("visual contacts onto KCs: from the eye of the KC's side %.1f %%, from the other eye %.1f %%\n", 100.0 * ipsi / (ipsi + contra), 100.0 * contra / (ipsi + contra));
+        // the MBONs: the eye they hear through the KCs (contacts KC -> MBON x the eye shares of the KC)
+        for (const char* type : { "MBON32", "MBON20", "MBON30", "MBON21" })
+        {
+            for (const Side side : { Side::Left, Side::Right })
+            {
+                const Group mbons = cn.Find(type, side);
+                double left = 0.0, right = 0.0;
+                uint64_t kcContacts = 0;
+                for (uint32_t kc = 0; kc < cn.NeuronCount(); ++kc)
+                {
+                    if (kcLeft[kc] + kcRight[kc] <= 0.0)
+                    {
+                        continue;
+                    }
+                    const double eyeLeft = kcLeft[kc] / (kcLeft[kc] + kcRight[kc]);
+                    for (uint32_t e = cn.EdgeBegin(kc); e < cn.EdgeEnd(kc); ++e)
+                    {
+                        if (cn.Weights()[e] > 0 && std::binary_search(mbons.neurons.begin(), mbons.neurons.end(), cn.Targets()[e]))
+                        {
+                            left += cn.Weights()[e] * eyeLeft;
+                            right += cn.Weights()[e] * (1.0 - eyeLeft);
+                            kcContacts += cn.Weights()[e];
+                        }
+                    }
+                }
+                std::printf("  %s %s (%zu): contacts from visual KCs %llu, they see the left eye %.0f %%, the right %.0f %%\n", type, side == Side::Left ? "L" : "R",
+                    mbons.neurons.size(), static_cast<unsigned long long>(kcContacts), kcContacts ? 100.0 * left / (left + right) : 0.0, kcContacts ? 100.0 * right / (left + right) : 0.0);
+            }
+        }
+        std::printf("\n");
+    }
+
     // PPL1 (punishment) under a constant current: the rates of every PPL1 type. The damage of FlyPlayer is a current
     void ReportPunishment(const std::shared_ptr<const Connectome>& cn, const std::vector<std::string>& currents)
     {
@@ -806,6 +890,7 @@ int main(int argc, char** argv)
     if (modes.count("inputs")) ReportInputs(*cn);
     if (modes.count("mbon")) ReportMbons(*cn);
     if (modes.count("fields")) ReportFields(*cn);
+    if (modes.count("laterality")) ReportLaterality(*cn);
     for (const std::string& type : who)
     {
         ReportWho(*cn, type);

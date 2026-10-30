@@ -10,6 +10,14 @@
 //                              [--controls controls_learn.json] [--plain] (the brain of D1a, without the learning mode: a reference)
 //                              [--kc-rate 120] (KcVisionConfig::maxRateHz; 0: the KCs see nothing)
 //                              [--calibrate] (the rates of the controls on even frames, for the offsets of the controls)
+// N4: pushing against a wall (FlyStatus::wallHits / wallTics) and the trained fly:
+//                              [--eta 5e-4] (the learning rate) [--wall 0|1] (pushing against a wall is punishment, default 1)
+//                              [--memory-in <file>] (start with these weights) [--memory-out <file>] (save the weights at the end)
+//                              [--bin-seconds 30] (a line every this many seconds of the game: wall hits per minute, wall tics, way, turns, lives)
+//                              --lives 0: no limit of lives, the run ends after --max-minutes of the game
+//                              [--wall-sense 0|1] (our layer WallSense, not the connectome) [--wall-learn 0|1] [--wall-in <file>]... (the places put together)
+//                              [--wall-out <file>] [--iwad <wad>] (default %LOCALAPPDATA%\FlyDoom\wads\doom1.wad); --max-minutes 0 only puts the --wall-in files together
+//                              [--substeps 4] (FlyPlayerConfig::substeps)
 
 #include <doom/DoomGame.h>
 #include <doomfly/FlyControls.h>
@@ -108,6 +116,17 @@ int main(int argc, char** argv)
     bool plain = false;
     bool calibrate = false;
     float kcRate = -1.0f;
+    double eta = -1.0;
+    int wallPunish = 1;
+    std::string memoryIn, memoryOut;
+    double binSeconds = 30.0;
+    int substeps = 0;
+    int wallSense = 0;
+    std::string dumpPath;
+    int wallLearn = 1;
+    std::vector<std::string> wallIn;
+    std::string wallOut;
+    std::string iwad;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg = argv[i];
@@ -124,6 +143,18 @@ int main(int argc, char** argv)
         else if (arg == "--plain") plain = true;
         else if (arg == "--calibrate") calibrate = true;
         else if (arg == "--kc-rate") kcRate = static_cast<float>(std::atof(next().c_str()));
+        else if (arg == "--eta") eta = std::atof(next().c_str());
+        else if (arg == "--wall") wallPunish = std::atoi(next().c_str());
+        else if (arg == "--memory-in") memoryIn = next();
+        else if (arg == "--memory-out") memoryOut = next();
+        else if (arg == "--bin-seconds") binSeconds = std::atof(next().c_str());
+        else if (arg == "--substeps") substeps = std::atoi(next().c_str());
+        else if (arg == "--wall-sense") wallSense = std::atoi(next().c_str());
+        else if (arg == "--dump") dumpPath = next();
+        else if (arg == "--wall-learn") wallLearn = std::atoi(next().c_str());
+        else if (arg == "--wall-in") wallIn.push_back(next());
+        else if (arg == "--iwad") iwad = next();
+        else if (arg == "--wall-out") wallOut = next();
     }
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     myengine::jobs::Initialize();
@@ -139,7 +170,7 @@ int main(int argc, char** argv)
     wchar_t* local = nullptr;
     size_t length = 0;
     _wdupenv_s(&local, &length, L"LOCALAPPDATA");
-    const fs::path wad = fs::path(local ? local : L"") / L"FlyDoom" / L"wads" / L"doom1.wad";
+    const fs::path wad = !iwad.empty() ? fs::u8path(iwad) : fs::path(local ? local : L"") / L"FlyDoom" / L"wads" / L"doom1.wad";
     std::free(local);
     if (!fs::exists(wad))
     {
@@ -159,7 +190,8 @@ int main(int argc, char** argv)
         std::printf("DOOM: %s\n", error.c_str());
         return 1;
     }
-    for (int i = 0; i < 10; ++i)
+    // the seed also shifts the start: the brain of D1a has no noise of its own, so the game must differ (the monsters have moved for 13 x (seed - 1) tics)
+    for (int i = 0; i < 10 + 13 * static_cast<int>(seed - 1); ++i)
     {
         game->StepTic();
     }
@@ -175,6 +207,28 @@ int main(int argc, char** argv)
     {
         fly.learning.vision.maxRateHz = kcRate;
     }
+    if (eta >= 0.0)
+    {
+        fly.learning.learningRate = eta;
+    }
+    fly.learning.wallPunishment = wallPunish != 0;
+    fly.wallSense.enabled = wallSense != 0;
+    fly.wallSense.learning = wallLearn != 0;
+    fly.wallSenseLoad = wallIn;
+    fly.wallSenseSave = wallOut;
+    if (substeps > 0)
+    {
+        fly.substeps = substeps;
+    }
+    // the player loads its memory with the first brain and saves it in its destructor: a copy of --memory-in in the data folder, so the input stays as it is
+    const fs::path memoryWork = config.dataDirectory / "fly_memory.bin";
+    fs::create_directories(config.dataDirectory, removed);
+    if (!memoryIn.empty() && !fs::copy_file(fs::u8path(memoryIn), memoryWork, fs::copy_options::overwrite_existing, removed))
+    {
+        std::printf("no memory at %s\n", memoryIn.c_str());
+        return 1;
+    }
+    fly.learning.memoryPath = memoryIn.empty() && memoryOut.empty() ? std::string() : memoryWork.u8string();
     fly.log = [](const std::string& line) { std::printf("%s\n", line.c_str()); };
     if (!doomfly::FlyControls::Load(source / "assets/flybrain" / controls, fly.controls, error))
     {
@@ -219,6 +273,48 @@ int main(int argc, char** argv)
     std::vector<Life> lives(1);
     doom::PlayerState prev = game->Player(0);
     const auto begin = std::chrono::steady_clock::now();
+    // N4: the bins of the game time
+    struct Bin
+    {
+        uint32_t wallHits = 0;
+        uint64_t wallTics = 0;
+        int aliveTics = 0;
+        double way = 0.0;
+        int left = 0, right = 0;   // tics of the brain's turn (not the reflex) to the left / right, more than 0.5 degrees
+        int standing = 0;          // alive tics when the player has gone less than 16 units in the last second (stands, at a wall or not)
+        int damage = 0;
+        int deaths = 0;
+    };
+    const int binTics = std::max(35, static_cast<int>(binSeconds * 35.0));
+    Bin bin, total;
+    uint32_t lastHits = 0;
+    uint64_t lastWallTics = 0;
+    auto addBin = [](Bin& to, const Bin& b)
+    {
+        to.wallHits += b.wallHits; to.wallTics += b.wallTics; to.aliveTics += b.aliveTics; to.way += b.way;
+        to.left += b.left; to.right += b.right; to.damage += b.damage; to.deaths += b.deaths; to.standing += b.standing;
+    };
+    auto printBin = [](const char* what, const Bin& b, double fromS, double toS, double scale)
+    {
+        const double minutes = b.aliveTics / 35.0 / 60.0;
+        std::printf("%s %.0f-%.0f s: wall hits %u (%.1f / min), wall tics %llu (%.1f %%), way %.0f (%.0f / min, %.1f wall hits per 1000), turns left %d right %d, standing %.1f %%, damage %d, deaths %d, mean scale %.5f\n",
+            what, fromS, toS, b.wallHits, minutes > 0 ? b.wallHits / minutes : 0.0, static_cast<unsigned long long>(b.wallTics),
+            b.aliveTics ? 100.0 * b.wallTics / b.aliveTics : 0.0, b.way, minutes > 0 ? b.way / minutes : 0.0, b.way > 0 ? 1000.0 * b.wallHits / b.way : 0.0, b.left, b.right, b.aliveTics ? 100.0 * b.standing / b.aliveTics : 0.0, b.damage, b.deaths, scale);
+    };
+    std::vector<std::pair<double, double>> lastSecond;   // the positions of the last 35 tics
+    // --dump: the columns (x, y as floats once), then per tic: alive, touching, walking (bytes), forward, turn (floats), the light of every column (bytes)
+    FILE* dump = nullptr;
+    if (!dumpPath.empty() && fopen_s(&dump, dumpPath.c_str(), "wb") == 0)
+    {
+        const uint32_t n = static_cast<uint32_t>(player->Eyes().Columns().size());
+        std::fwrite(&n, 4, 1, dump);
+        for (const doomfly::Column& c : player->Eyes().Columns())
+        {
+            std::fwrite(&c.x, 4, 1, dump);
+            std::fwrite(&c.y, 4, 1, dump);
+        }
+    }
+    uint64_t dumpWallTics = 0;
     int tic = 0;
     for (; tic < maxTics; ++tic)
     {
@@ -227,6 +323,54 @@ int main(int argc, char** argv)
         const doom::PlayerState p = game->Player(0);
         const doomfly::FlyStatus status = player->Status();
         Life& life = lives.back();
+        if (dump != nullptr)
+        {
+            const std::vector<float>& columns = player->LastColumns();
+            const uint8_t flags[3] = {static_cast<uint8_t>(!respawner.dead && p.health > 0), static_cast<uint8_t>(status.wallTics > dumpWallTics),
+                                      static_cast<uint8_t>(status.forwardUnits > 3.0f && !status.reflex)};
+            std::fwrite(flags, 1, 3, dump);
+            std::fwrite(&status.forwardUnits, 4, 1, dump);
+            std::fwrite(&status.turnDegrees, 4, 1, dump);
+            std::vector<uint8_t> bytes(player->Eyes().Columns().size(), 0);
+            for (size_t c = 0; c < bytes.size() && c < columns.size(); ++c)
+            {
+                bytes[c] = static_cast<uint8_t>(std::clamp(columns[c], 0.0f, 1.0f) * 255.0f + 0.5f);
+            }
+            std::fwrite(bytes.data(), 1, bytes.size(), dump);
+            dumpWallTics = status.wallTics;
+        }
+        bin.wallHits += status.wallHits - lastHits;
+        bin.wallTics += status.wallTics - lastWallTics;
+        lastHits = status.wallHits;
+        lastWallTics = status.wallTics;
+        if (!respawner.dead && p.health > 0)
+        {
+            ++bin.aliveTics;
+            lastSecond.push_back({p.x, p.y});
+            if (lastSecond.size() > 35)
+            {
+                lastSecond.erase(lastSecond.begin());
+            }
+            if (lastSecond.size() == 35 && std::hypot(lastSecond.back().first - lastSecond.front().first, lastSecond.back().second - lastSecond.front().second) < 16.0)
+            {
+                ++bin.standing;
+            }
+            bin.way += std::hypot(p.x - prev.x, p.y - prev.y) < 64.0 ? std::hypot(p.x - prev.x, p.y - prev.y) : 0.0;   // not a teleport or a respawn
+            if (!status.reflex && status.turnDegrees > 0.5f) ++bin.right;
+            if (!status.reflex && status.turnDegrees < -0.5f) ++bin.left;
+            bin.damage += std::max(0, prev.health - p.health);
+        }
+        if (!respawner.dead && p.health <= 0 && prev.health > 0)
+        {
+            lastSecond.clear();
+            ++bin.deaths;
+        }
+        if ((tic + 1) % binTics == 0)
+        {
+            printBin("bin", bin, (tic + 1 - binTics) / 35.0, (tic + 1) / 35.0, status.learnedScale);
+            addBin(total, bin);
+            bin = Bin{};
+        }
         if (trace != nullptr)
         {
             std::fprintf(trace, "%d hp %d pos %.4f %.4f ang %.4f cmd %d %d %u frame %016llx step %llu turnHz %.1f forwardHz %.1f central %.0f kc %.0f\n", tic, p.health, p.x,
@@ -269,7 +413,7 @@ int main(int argc, char** argv)
                 std::printf("life %zu: %.1f s, damage %d (%.2f / s), kills %d, KC %.0f spikes / s, turn away %+.1f deg over %d hits, mean scale %.5f\n", lives.size(),
                     seconds, life.damage, seconds > 0 ? life.damage / seconds : 0.0, life.kills, life.tics ? life.kcSum / life.tics : 0.0,
                     life.awayCount ? life.awaySum / life.awayCount : 0.0, life.awayCount, life.scale);
-                if (static_cast<int>(lives.size()) >= lifeTarget)
+                if (lifeTarget > 0 && static_cast<int>(lives.size()) >= lifeTarget)
                 {
                     break;
                 }
@@ -312,9 +456,25 @@ int main(int argc, char** argv)
         learning, skill.c_str(), map.c_str(), static_cast<unsigned long long>(seed), seconds.size(), Mean(seconds), sorted.empty() ? 0.0 : sorted[sorted.size() / 2],
         Mean(firstHalf), Mean(secondHalf), Mean(damageRate), awayCount ? awaySum / awayCount : 0.0, awayCount, player->Status().learnedScale, tic, wall,
         player->Status().resets, player->Status().seizures);
+    if (dump != nullptr)
+    {
+        std::fclose(dump);
+    }
+    addBin(total, bin);
+    printBin("TOTAL", total, 0.0, tic / 35.0, player->Status().learnedScale);
+    if (player->Status().wallSense)
+    {
+        std::printf("wall sense: learned from %u pictures before a touch, chance now %.2f\n", player->Status().wallPositives, player->Status().wallChance);
+    }
     game->SetTicCmdSource(nullptr);
     player->Detach(*game);
-    player.reset();
+    player.reset();   // saves the memory
+    if (!memoryOut.empty())
+    {
+        std::error_code copied;
+        fs::copy_file(memoryWork, fs::u8path(memoryOut), fs::copy_options::overwrite_existing, copied);
+        std::printf("memory -> %s%s\n", memoryOut.c_str(), copied ? (" FAILED: " + copied.message()).c_str() : "");
+    }
     game.reset();
     myengine::jobs::Shutdown();
     return 0;

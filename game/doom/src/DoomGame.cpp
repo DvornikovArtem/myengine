@@ -55,6 +55,7 @@ namespace doom
         int mouseDy = 0;
         bool frameDrawn = false;
         ITicCmdSource* ticCmdSource = nullptr;
+        std::filesystem::path iwad;
 
         IDoomAudioHost* audio = nullptr;
         std::unique_ptr<DoomMusic> music;
@@ -314,6 +315,7 @@ namespace doom
         std::unique_ptr<DoomGame> game(new DoomGame());
         Impl& impl = *game->impl_;
         g_impl = &impl;
+        impl.iwad = config.iwad;
         g_started = true;
 
         // The command line of DOOM. The strings live as long as the process: DOOM keeps the pointers.
@@ -536,6 +538,11 @@ namespace doom
     bool DoomGame::GetTicCmd(const int player, TicCmd& out) const
     {
         return dgb_GetTicCmd(player, &out.forwardMove, &out.sideMove, &out.angleTurn, &out.buttons) != 0;
+    }
+
+    const std::filesystem::path& DoomGame::Iwad() const
+    {
+        return impl_->iwad;
     }
 
     GameInfo DoomGame::Info() const

@@ -4,6 +4,7 @@ set(DOOMFLY_HEADERS
   include/doomfly/FlyModes.h
   include/doomfly/FlyPlayer.h
   include/doomfly/FlySwarm.h
+  include/doomfly/WallSense.h
 )
 
 set(DOOMFLY_SOURCES
@@ -12,6 +13,7 @@ set(DOOMFLY_SOURCES
   src/FlyModes.cpp
   src/FlyPlayer.cpp
   src/FlySwarm.cpp
+  src/WallSense.cpp
 )
 
 # The fly that plays DOOM (docs/game/flydoom-fly.md): the eyes (the frame to the photoreceptors), the controls (descending neurons to the tic command),
