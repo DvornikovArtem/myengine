@@ -358,14 +358,9 @@ namespace doomfly
                 out.debug.push_back(text);
                 std::snprintf(text, sizeof(text), "%.0f k spikes/s   resets %u   runaway %u   hurt %u", status.spikesPerSecond / 1000.0f, status.resets, status.seizures, status.damages);
                 out.debug.push_back(text);
-                if (status.waiting)
-                {
-                    out.debug.push_back("the game waits for the brain");
-                }
-                if (status.reflex)
-                {
-                    out.debug.push_back("a reflex of the legs, not the brain");
-                }
+                // These transient states have fixed slots: changing the footer height reflows every parameter row.
+                out.debug.push_back(status.waiting ? "the game waits for the brain" : "");
+                out.debug.push_back(status.reflex ? "a reflex of the legs, not the brain" : "");
                 // the line of the big brain: the neurons, the spikes, the speed
                 std::string neurons = std::to_string(player_.GetConnectome().NeuronCount());
                 for (std::size_t at = neurons.size(); at > 3; at -= 3)
