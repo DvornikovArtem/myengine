@@ -1344,7 +1344,7 @@ namespace myengine::game
                             scriptedMouseLast = flowFrame;
                         }
                     }
-                    const float scaled = static_cast<float>(raw) * settings.mouseSensitivity + mouseRemainder;
+                    const float scaled = static_cast<float>(raw) * kDoomMouseBaselineGain * settings.mouseSensitivity + mouseRemainder;
                     dx = static_cast<int>(std::trunc(scaled));
                     mouseRemainder = scaled - static_cast<float>(dx);
                 }

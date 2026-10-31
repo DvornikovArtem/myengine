@@ -1263,7 +1263,7 @@ namespace myengine::game
             fd::TextMid(f, fd::kMono, 12.0f, {trackX + 150.0f, 581.0f}, tone::kFaint, "1\xC3\x97", Align::Center);
             fd::TextMid(f, fd::kMono, 12.0f, {trackX + 300.0f, 581.0f}, tone::kFaint, "4\xC3\x97", Align::Center);
         }
-        // the test dial: the needle turns as DOOM turns (a raw count of the mouse x 8 / 65536 of a circle, 0.0439 degrees, times the setting)
+        // The test dial uses DOOM's native 8 / 65536 circle per count, the human baseline gain and the saved setting.
         {
             const Vec2 mouse = f.input().MousePosition();
             if (mouseFocused && f.input().MouseMoved() && time_ - dialRest_ < 10.0)
@@ -1272,8 +1272,9 @@ namespace myengine::game
                 const float counts = dx;   // a pixel of the pointer is a unit of the movement of the mouse, whatever the scale of the menu is
                 if (std::isfinite(counts) && std::fabs(counts) < 800.0f)   // the first position of the pointer is not a movement
                 {
-                    dialAngle_ += counts * settings.mouseSensitivity * 0.043945f;
-                    dialSweep_ += counts * settings.mouseSensitivity * 0.043945f;
+                    const float degrees = counts * kDoomMouseBaselineGain * settings.mouseSensitivity * (8.0f * 360.0f / 65536.0f);
+                    dialAngle_ += degrees;
+                    dialSweep_ += degrees;
                 }
                 dialRest_ = time_;
             }
@@ -1291,7 +1292,7 @@ namespace myengine::game
             {
                 fd::Dial(f, {166.0f, 662.0f}, 52.0f, dialAngle_);
                 fd::TextMid(f, fd::kMonoBold, 17.0f, {246.0f, 630.0f}, tone::kBone, "Move the mouse: the needle turns as DOOM will.");
-                fd::TextMid(f, fd::kMono, 16.0f, {246.0f, 657.0f}, tone::kDim, "At 1.00\xC3\x97 a sweep of 4096 counts turns 180\xC2\xB0.");
+                fd::TextMid(f, fd::kMono, 16.0f, {246.0f, 657.0f}, tone::kDim, "At 1.00\xC3\x97 a sweep of 4096 counts turns 270\xC2\xB0.");
                 fd::TextMid(f, fd::kMono, 16.0f, {246.0f, 683.0f}, tone::kFaint, Format("%.0f\xC2\xB0 \xC2\xB7 this sweep", std::fabs(dialSweep_)));
             }
         }

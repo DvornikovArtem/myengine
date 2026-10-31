@@ -27,6 +27,9 @@ namespace myengine::editor
 
 namespace myengine::game
 {
+    // Human mouse look baseline; the saved Turn speed slider remains a relative multiplier.
+    inline constexpr float kDoomMouseBaselineGain = 1.5f;
+
     // The numbers of the brain that runs behind the menu (0: not known yet)
     struct DoomBrainStats
     {
