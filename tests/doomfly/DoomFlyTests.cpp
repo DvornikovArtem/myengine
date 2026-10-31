@@ -620,8 +620,19 @@ namespace
         {
             game->StepTic();
         }
-        auto first = MakePlayer(connectome, "controls_doomfly.json", 1, [](doomfly::FlyPlayerConfig& c) { c.playerIndex = 0; c.ownView = true; c.pace = false; });
-        auto second = MakePlayer(connectome, "controls_doomfly.json", 1001, [](doomfly::FlyPlayerConfig& c) { c.playerIndex = 1; c.ownView = true; c.drivesScreens = false; c.pace = false; });
+        auto first = MakePlayer(connectome, "controls_doomfly.json", 1, [](doomfly::FlyPlayerConfig& c) {
+            c.playerIndex = 0;
+            c.ownView = true;
+            c.pace = false;
+            c.combatAssist.enabled = true;
+        });
+        auto second = MakePlayer(connectome, "controls_doomfly.json", 1001, [](doomfly::FlyPlayerConfig& c) {
+            c.playerIndex = 1;
+            c.ownView = true;
+            c.drivesScreens = false;
+            c.pace = false;
+            c.combatAssist.enabled = true;
+        });
         if (!first || !second)
         {
             return 1;
@@ -642,6 +653,7 @@ namespace
         const doom::PlayerState a0 = game->Player(0);
         const doom::PlayerState b0 = game->Player(1);
         std::uint64_t hashA = 1469598103934665603ull, hashB = hashA;
+        int targetA = 0, targetB = 0, brainFireA = 0, actualFireA = 0;
         int waits = 0;
         const auto begin = std::chrono::steady_clock::now();
         for (int tic = 0; tic < tics; ++tic)
@@ -669,6 +681,12 @@ namespace
             hashB = (hashB ^ static_cast<std::uint16_t>(c1.angleTurn)) * 1099511628211ull;
             first->EndTic(*game);
             second->EndTic(*game);
+            const doomfly::FlyStatus statusA = first->Status();
+            const doomfly::FlyStatus statusB = second->Status();
+            targetA += statusA.targetVisible ? 1 : 0;
+            targetB += statusB.targetVisible ? 1 : 0;
+            brainFireA += statusA.brainFire ? 1 : 0;
+            actualFireA += statusA.fire ? 1 : 0;
         }
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
         const doom::PlayerState a1 = game->Player(0);
@@ -683,6 +701,10 @@ namespace
         Result("eyes_a", first->EyesPicture().size() == static_cast<size_t>(doom::kScreenWidth) * doom::kScreenHeight ? "1" : "0");
         Result("eyes_b", second->EyesPicture().size() == static_cast<size_t>(doom::kScreenWidth) * doom::kScreenHeight ? "1" : "0");
         Result("eyes_differ", first->EyesPicture() != second->EyesPicture() ? "1" : "0");
+        Result("target_tics_a", targetA);
+        Result("target_tics_b", targetB);
+        Result("brain_fire_a", brainFireA);
+        Result("actual_fire_a", actualFireA);
         Result("speed", 1.0 / 35.0 * tics / seconds);
         Result("waits", waits);
         // the round is over: the level again, both players born again
@@ -726,7 +748,7 @@ namespace
         {
             game->StepTic();
         }
-        auto player = MakePlayer(connectome, "controls_doomfly.json", seed);
+        auto player = MakePlayer(connectome, "controls_doomfly.json", seed, [](doomfly::FlyPlayerConfig& c) { c.combatAssist.enabled = true; });
         if (!player)
         {
             return 1;
@@ -736,6 +758,9 @@ namespace
         std::map<int, int> turns;
         double forwardSum = 0.0;
         int fires = 0;
+        int brainFires = 0;
+        int targetTics = 0;
+        int alignedFires = 0;
         double startX = game->Player(0).x, startY = game->Player(0).y;
         double travelled = 0.0, lastX = startX, lastY = startY;
         const auto begin = std::chrono::steady_clock::now();
@@ -751,6 +776,10 @@ namespace
             forwardSum += cmd.forwardMove;
             fires += (cmd.buttons & doom::kButtonAttack) != 0;
             const doom::PlayerState p = game->Player(0);
+            const doomfly::FlyStatus tickStatus = player->Status();
+            brainFires += tickStatus.brainFire ? 1 : 0;
+            targetTics += tickStatus.targetVisible ? 1 : 0;
+            alignedFires += tickStatus.fire ? 1 : 0;
             travelled += std::hypot(p.x - lastX, p.y - lastY);
             lastX = p.x;
             lastY = p.y;
@@ -761,6 +790,9 @@ namespace
         Result("distinct_turns", static_cast<double>(turns.size()));
         Result("mean_forward", forwardSum / tics);
         Result("fires", fires);
+        Result("brain_fire_tics", brainFires);
+        Result("target_visible_tics", targetTics);
+        Result("aligned_fire_tics", alignedFires);
         Result("travelled", travelled);
         Result("net_distance", std::hypot(lastX - startX, lastY - startY));
         Result("final_x", lastX);
@@ -775,6 +807,254 @@ namespace
         player.reset();
         game.reset();
         myengine::jobs::Shutdown();
+        return 0;
+    }
+
+    // The authored combat helper may only report a living hostile that DOOM's native
+    // aim trace can hit in the current view cone.  Sweep the real deathmatch view so
+    // this exercises walls, vertical aim and the player-target filter, not a mock.
+    int ScenarioCombatProbe(const fs::path& wad)
+    {
+        doom::DoomConfig config;
+        config.iwad = wad;
+        config.dataDirectory = fs::temp_directory_path() / "myengine_doom_fly_combat_probe";
+        config.extraArgs = {"-warp", "1", "1", "-skill", "3", "-nomusic", "-deathmatch", "-players", "2"};
+        std::string error;
+        auto game = doom::DoomGame::Create(config, error);
+        if (!game)
+        {
+            std::printf("  DOOM: %s\n", error.c_str());
+            return 1;
+        }
+        struct SweepSource final : doom::ITicCmdSource
+        {
+            void BuildTicCmd(int player, doom::TicCmd& cmd) override
+            {
+                if (player == 0)
+                {
+                    cmd.forwardMove = 0;
+                    cmd.sideMove = 0;
+                    cmd.angleTurn = 1024;
+                    cmd.buttons = 0;
+                }
+            }
+        } source;
+        game->SetTicCmdSource(&source);
+        int visible = 0;
+        int left = 0;
+        int right = 0;
+        int center = 0;
+        int hiddenAlive = 0;
+        double maxAbsAngle = 0.0;
+        for (int tic = 0; tic < 240; ++tic)
+        {
+            game->PostMouse(0, 40, 0);
+            game->StepTic();
+            const doom::VisibleTarget target = game->FindVisibleTarget(0);
+            const doom::PlayerState other = game->Player(1);
+            if (other.inGame && other.health > 0 && !target.found)
+            {
+                ++hiddenAlive;
+            }
+            if (target.found)
+            {
+                ++visible;
+                maxAbsAngle = std::max(maxAbsAngle, std::fabs(target.angleDegrees));
+                if (target.angleDegrees < -1.0)
+                {
+                    ++right;
+                }
+                else if (target.angleDegrees > 1.0)
+                {
+                    ++left;
+                }
+                else
+                {
+                    ++center;
+                }
+            }
+        }
+        Result("visible_target_tics", visible);
+        Result("visible_target_left", left);
+        Result("visible_target_right", right);
+        Result("visible_target_center", center);
+        Result("visible_target_max_abs_angle", maxAbsAngle);
+        Result("alive_target_hidden_tics", hiddenAlive);
+        Result("other_health", game->Player(1).health);
+        Result("other_distance", std::hypot(game->Player(1).x - game->Player(0).x, game->Player(1).y - game->Player(0).y));
+        Result("final_angle", game->Player(0).angleDegrees);
+        game->SetTicCmdSource(nullptr);
+        // E1M1's deathmatch starts provide both a real native hit and samples
+        // rejected by the bounded ray fan (walls or an off-angle target).
+        return visible > 0 && hiddenAlive > 0 && maxAbsAngle <= 23.0 ? 0 : 1;
+    }
+
+    // A bounded integration proof for the authored helper: place a real hostile
+    // in the native ray sweep, then let the normal FlyPlayer command/weapon
+    // path run. The setup does not aim or fire for the fly.
+    int ScenarioCombatAssist(const fs::path& wad)
+    {
+        myengine::jobs::Initialize();
+        auto connectome = LoadBrain();
+        if (!connectome)
+        {
+            myengine::jobs::Shutdown();
+            return 1;
+        }
+        doom::DoomConfig config;
+        config.iwad = wad;
+        config.dataDirectory = fs::temp_directory_path() / "myengine_doom_fly_combat_assist";
+        config.extraArgs = {"-warp", "1", "1", "-skill", "3", "-nomusic", "-deathmatch", "-players", "2"};
+        std::string error;
+        auto game = doom::DoomGame::Create(config, error);
+        if (!game)
+        {
+            std::printf("  DOOM: %s\n", error.c_str());
+            myengine::jobs::Shutdown();
+            return 1;
+        }
+        struct SweepSource final : doom::ITicCmdSource
+        {
+            void BuildTicCmd(int player, doom::TicCmd& cmd) override
+            {
+                if (player == 0)
+                {
+                    cmd.forwardMove = 0;
+                    cmd.sideMove = 0;
+                    cmd.angleTurn = 1024;
+                    cmd.buttons = 0;
+                }
+            }
+        } sweep;
+        game->SetTicCmdSource(&sweep);
+        bool targetWasFound = false;
+        for (int tic = 0; tic < 240 && !targetWasFound; ++tic)
+        {
+            game->StepTic();
+            targetWasFound = game->FindVisibleTarget(0).found;
+        }
+        game->SetTicCmdSource(nullptr);
+        auto player = MakePlayer(connectome, "controls_doomfly.json", 1, [](doomfly::FlyPlayerConfig& c) {
+            c.playerIndex = 0;
+            c.ownView = true;
+            c.pace = false;
+            c.combatAssist.enabled = true;
+        });
+        if (!player || !targetWasFound)
+        {
+            game.reset();
+            myengine::jobs::Shutdown();
+            return 1;
+        }
+        player->Attach(*game);
+        int targetTics = 0;
+        int brainFire = 0;
+        int actualFire = 0;
+        double errorSum = 0.0;
+        double errorMax = 0.0;
+        double lastAbsAngle = 0.0;
+        for (int tic = 0; tic < 70; ++tic)
+        {
+            player->StepBlocking(*game);
+            const doomfly::FlyStatus status = player->Status();
+            if (status.targetVisible)
+            {
+                ++targetTics;
+                errorSum += std::fabs(status.targetAngleDegrees);
+                errorMax = std::max(errorMax, std::fabs(static_cast<double>(status.targetAngleDegrees)));
+                lastAbsAngle = std::fabs(status.targetAngleDegrees);
+            }
+            brainFire += status.brainFire ? 1 : 0;
+            actualFire += status.fire ? 1 : 0;
+        }
+        Result("combat_target_tics", targetTics);
+        Result("combat_brain_fire_tics", brainFire);
+        Result("combat_actual_fire_tics", actualFire);
+        Result("combat_mean_abs_angle", targetTics > 0 ? errorSum / targetTics : 0.0);
+        Result("combat_max_abs_angle", errorMax);
+        Result("combat_last_abs_angle", lastAbsAngle);
+        player->Detach(*game);
+        player.reset();
+        game.reset();
+        myengine::jobs::Shutdown();
+        return targetTics > 0 && actualFire > 0 && actualFire <= targetTics ? 0 : 1;
+    }
+
+    // N5: the native probes (the visible target, the whiskers) must not change the world. The same deathmatch of E1M1 with the same scripted commands (turning and walking, so the
+    // fan meets walls and the other player), with `probes` calls of FindVisibleTarget per tic (0: none): the players' state of every tic is hashed.
+    // RunAll runs it with 0 and with 3 probes in two processes and compares; the hash of the frames is printed for information only (the software
+    // renderer of two processes may differ in a few pixels after a while, docs/flybrain/flybrain.md "Детерминизм").
+    int ScenarioProbePure(const fs::path& wad, const int probes)
+    {
+        doom::DoomConfig config;
+        config.iwad = wad;
+        config.dataDirectory = fs::temp_directory_path() / ("myengine_doom_fly_probe_pure_" + std::to_string(probes));
+        std::error_code removed;
+        fs::remove_all(config.dataDirectory, removed);
+        config.extraArgs = {"-warp", "1", "1", "-skill", "3", "-nomusic", "-deathmatch", "-players", "2"};
+        std::string error;
+        auto game = doom::DoomGame::Create(config, error);
+        if (!game)
+        {
+            std::printf("  DOOM: %s\n", error.c_str());
+            return 1;
+        }
+        struct Script final : doom::ITicCmdSource
+        {
+            int tic = 0;
+            void BuildTicCmd(int player, doom::TicCmd& cmd) override
+            {
+                if (player == 0)
+                {
+                    cmd.forwardMove = static_cast<std::int8_t>((tic / 35) % 2 == 0 ? 25 : 0);
+                    cmd.sideMove = 0;
+                    cmd.angleTurn = static_cast<std::int16_t>((tic / 70) % 2 == 0 ? 700 : -400);
+                    cmd.buttons = static_cast<std::uint8_t>(tic % 20 == 0 ? doom::kButtonAttack : 0);
+                }
+            }
+        } script;
+        game->SetTicCmdSource(&script);
+        std::uint64_t state = 1469598103934665603ull;
+        std::uint64_t frames = 1469598103934665603ull;
+        auto mix = [](std::uint64_t h, const double v) {
+            std::uint64_t bits = 0;
+            std::memcpy(&bits, &v, sizeof(bits));
+            return (h ^ bits) * 1099511628211ull;
+        };
+        int found = 0;
+        int whiskersShort = 0;
+        for (int tic = 0; tic < 350; ++tic)
+        {
+            script.tic = tic;
+            for (int k = 0; k < probes; ++k)
+            {
+                found += game->FindVisibleTarget(0, k == 0 ? 0.0 : k == 1 ? 12.0 : -12.0).found ? 1 : 0;
+                game->FindVisibleTarget(1, 0.0);
+                for (const double d : game->Whiskers(0, {0.0, 30.0, -30.0, 60.0, -60.0}, 128.0))   // N5: the whiskers too
+                {
+                    whiskersShort += d < 64.0 ? 1 : 0;
+                }
+            }
+            game->StepTic();
+            for (int index = 0; index < 2; ++index)
+            {
+                const doom::PlayerState p = game->Player(index);
+                for (const double v : {p.x, p.y, p.z, p.angleDegrees, double(p.health), double(p.armor), double(p.kills), double(p.frags)})
+                {
+                    state = mix(state, v);
+                }
+            }
+            state = mix(state, double(game->Info().gameTic));
+            frames = mix(frames, double(game->FrameHash()));
+        }
+        char text[32];
+        std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(state));
+        Result("state_hash", std::string(text));
+        std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(frames));
+        Result("frame_hash", std::string(text));
+        Result("probe_found", found);
+        Result("whiskers_short", whiskersShort);
+        game->SetTicCmdSource(nullptr);
         return 0;
     }
 
@@ -1111,6 +1391,26 @@ namespace
             CHECK(Num(intermission, "use_pulses") >= 3.0);
             CHECK(Str(intermission, "advanced") == "1" && Num(intermission, "next_map") == 2.0 && Str(intermission, "next_level") == "1");
 
+            // 7c. N5: the native visible-target probe (the authored combat assist): it finds the other player in the fan and misses it behind walls, it does
+            // not change the world (the same state with and without probes), and the assist turns to a real target and fires only along the final aim
+            const ChildResult probe = RunChild(exe, "--scenario combat_probe");
+            CHECK(probe.exitCode == 0);
+            CHECK(Num(probe, "visible_target_tics") > 0.0 && Num(probe, "alive_target_hidden_tics") > 0.0);
+            CHECK(Num(probe, "visible_target_max_abs_angle") <= 23.0);
+            const ChildResult pureA = RunChild(exe, "--scenario probe_pure --tics 0");
+            const ChildResult pureB = RunChild(exe, "--scenario probe_pure --tics 3");
+            CHECK(pureA.exitCode == 0 && pureB.exitCode == 0);
+            CHECK(Num(pureB, "probe_found") > 0.0 && Num(pureB, "whiskers_short") > 0.0);
+            CHECK(!Str(pureA, "state_hash").empty() && Str(pureA, "state_hash") == Str(pureB, "state_hash"));
+            const ChildResult assist = RunChild(exe, "--scenario combat_assist");
+            CHECK(assist.exitCode == 0);
+            CHECK(Num(assist, "combat_actual_fire_tics") > 0.0 && Num(assist, "combat_actual_fire_tics") <= Num(assist, "combat_target_tics"));
+            std::printf("  visible target: %.0f of 240 tics seen, %.0f hidden; probe: state %s with / %s without (frames %s / %s, %.0f found); assist: %.0f tics on target, "
+                        "%.0f shots, brain fire %.0f, mean error %.1f deg\n",
+                        Num(probe, "visible_target_tics"), Num(probe, "alive_target_hidden_tics"), Str(pureB, "state_hash").c_str(), Str(pureA, "state_hash").c_str(),
+                        Str(pureB, "frame_hash").c_str(), Str(pureA, "frame_hash").c_str(), Num(pureB, "probe_found"), Num(assist, "combat_target_tics"),
+                        Num(assist, "combat_actual_fire_tics"), Num(assist, "combat_brain_fire_tics"), Num(assist, "combat_mean_abs_angle"));
+
             // 8. two brains in one game
             const ChildResult duel = RunChild(exe, "--scenario duel --tics 100");
             CHECK(duel.exitCode == 0);
@@ -1193,6 +1493,21 @@ int main(int argc, char** argv)
                 return 77;
             }
             return ScenarioPlay(wad, seed, tics);
+        }
+        if (scenario == "probe_pure")
+        {
+            const fs::path wad = FindWad();
+            return wad.empty() ? 77 : ScenarioProbePure(wad, tics);
+        }
+        if (scenario == "combat_probe")
+        {
+            const fs::path wad = FindWad();
+            return wad.empty() ? 77 : ScenarioCombatProbe(wad);
+        }
+        if (scenario == "combat_assist")
+        {
+            const fs::path wad = FindWad();
+            return wad.empty() ? 77 : ScenarioCombatAssist(wad);
         }
         if (scenario == "intermission")
         {

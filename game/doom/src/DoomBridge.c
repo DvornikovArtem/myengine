@@ -5,6 +5,7 @@
  */
 
 #include <setjmp.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,8 @@
 #include "d_main.h"
 #include "d_player.h"
 #include "doomstat.h"
+#include "p_local.h"
+#include "p_mobj.h"
 #include "i_video.h"
 #include "r_main.h"
 #include "tables.h"
@@ -23,6 +26,16 @@
 #include "z_zone.h"
 
 #include "DoomBridge.h"
+
+/* P_AimLineAttack keeps these in p_map.c/p_sight.c. The bridge saves and
+   restores them so a visibility probe cannot alter a later weapon trace. */
+extern mobj_t* shootthing;
+extern fixed_t shootz;
+extern int la_damage;
+extern fixed_t attackrange;
+extern fixed_t aimslope;
+extern fixed_t topslope;
+extern fixed_t bottomslope;
 
 void (*DG_TicCmdHook)(int player, signed char* forwardmove, signed char* sidemove, short* angleturn, unsigned char* buttons) = NULL;
 
@@ -109,6 +122,8 @@ void dgb_GetState(dgb_state* out)
     out->netGame = netgame ? 1 : 0;
 }
 
+int dgb_doorsOpened[MAXPLAYERS];   /* myengine N5 (measurement only): p_doors.c counts the doors a player opens with "use" */
+
 int dgb_GetPlayer(int player, dgb_player* out)
 {
     const player_t* p;
@@ -135,6 +150,33 @@ int dgb_GetPlayer(int player, dgb_player* out)
         out->attackerY = p->attacker->y;
     }
     out->readyWeapon = (int)p->readyweapon;
+    {
+        extern int dgb_attackShots[MAXPLAYERS];
+        extern int dgb_attackHits[MAXPLAYERS];
+        extern int dgb_attackDamage[MAXPLAYERS];
+        out->shots = dgb_attackShots[player];
+        out->hits = dgb_attackHits[player];
+        out->damageDealt = dgb_attackDamage[player];
+    }
+    out->doorsOpened = dgb_doorsOpened[player];
+    out->sector = -1;
+    if (p->mo != NULL && p->mo->subsector != NULL && p->mo->subsector->sector != NULL)
+    {
+        const sector_t* sector = p->mo->subsector->sector;
+        int line;
+        out->sector = (int)(sector - sectors);
+        for (line = 0; line < sector->linecount; ++line)
+        {
+            switch (sector->lines[line]->special)
+            {
+            case 1: case 26: case 27: case 28: case 31: case 32: case 33: case 34: case 117: case 118:
+                out->doorSector = 1;
+                break;
+            default:
+                break;
+            }
+        }
+    }
     out->kills = p->killcount;
     out->items = p->itemcount;
     out->secrets = p->secretcount;
@@ -153,6 +195,153 @@ int dgb_GetPlayer(int player, dgb_player* out)
             }
         }
     }
+    return 1;
+}
+
+static int dgb_IsVisibleHostile(const mobj_t* source, const mobj_t* target)
+{
+    if (target == NULL || target == source || target->health <= 0 || (target->flags & MF_SHOOTABLE) == 0)
+    {
+        return 0;
+    }
+    /* MF_COUNTKILL covers normal monsters. Lost Souls are shootable hostile
+       MT_SKULLs but this vendored DOOM does not mark them MF_COUNTKILL. The
+       other player is hostile in deathmatch only. Barrels and corpses are
+       deliberately not accepted by this authored combat sensor. */
+    return (target->flags & MF_COUNTKILL) != 0 || target->type == MT_SKULL ||
+           (deathmatch && target->type == MT_PLAYER);
+}
+
+int dgb_GetVisibleTarget(int player, int angleDelta, dgb_visible_target* out)
+{
+    static const int32_t offsets[] = {0, 1 << 26, -(1 << 26), 1 << 27, -(1 << 27), 3 << 26, -(3 << 26), 1 << 28, -(1 << 28)};
+    mobj_t* source;
+    mobj_t* savedLineTarget;
+    mobj_t* savedShootThing;
+    fixed_t savedShootz;
+    int savedDamage;
+    fixed_t savedAttackRange;
+    fixed_t savedAimSlope;
+    fixed_t savedTopSlope;
+    fixed_t savedBottomSlope;
+    int i;
+
+    if (out == NULL)
+    {
+        return 0;
+    }
+    memset(out, 0, sizeof(*out));
+    if (gamestate != GS_LEVEL || player < 0 || player >= MAXPLAYERS || !playeringame[player] ||
+        players[player].playerstate != PST_LIVE || players[player].mo == NULL || players[player].mo->health <= 0)
+    {
+        return 0;
+    }
+    source = players[player].mo;
+
+    /* P_AimLineAttack uses shared DOOM globals also used by the real weapon
+       code. Probe on the game thread, then restore every one before returning. */
+    savedLineTarget = linetarget;
+    savedShootThing = shootthing;
+    savedShootz = shootz;
+    savedDamage = la_damage;
+    savedAttackRange = attackrange;
+    savedAimSlope = aimslope;
+    savedTopSlope = topslope;
+    savedBottomSlope = bottomslope;
+    for (i = 0; i < (int)(sizeof(offsets) / sizeof(offsets[0])); ++i)
+    {
+        mobj_t* candidate;
+        P_SetPathTraverseSensor(1);
+        P_AimLineAttack(source, source->angle + (angle_t)(angleDelta + offsets[i]), MISSILERANGE);
+        P_SetPathTraverseSensor(0);
+        candidate = linetarget;
+        if (dgb_IsVisibleHostile(source, candidate))
+        {
+            out->found = 1;
+            out->angleDelta = offsets[i];
+            break;
+        }
+    }
+    linetarget = savedLineTarget;
+    shootthing = savedShootThing;
+    shootz = savedShootz;
+    la_damage = savedDamage;
+    attackrange = savedAttackRange;
+    aimslope = savedAimSlope;
+    topslope = savedTopSlope;
+    bottomslope = savedBottomSlope;
+    return out->found;
+}
+
+/* N5: the whiskers of the fly, an authored local sensor outside the connectome (like the antennae): short rays from the player that stop at the
+   first line the player cannot pass (one-sided, blocking, a step higher than 24 units, an opening lower than the player). Only lines are seen,
+   not things; the world is not changed (the line opening globals are restored, the intercept list is bounded like the target probe). */
+static mobj_t* g_whiskerMo;
+static fixed_t g_whiskerFrac;
+
+static boolean dgb_WhiskerTraverse(intercept_t* in)
+{
+    line_t* li;
+    if (!in->isaline)
+    {
+        return true;
+    }
+    li = in->d.line;
+    if ((li->flags & ML_TWOSIDED) == 0 || (li->flags & ML_BLOCKING) != 0)
+    {
+        g_whiskerFrac = in->frac;
+        return false;
+    }
+    P_LineOpening(li);
+    if (openrange < g_whiskerMo->height || opentop - g_whiskerMo->z < g_whiskerMo->height || openbottom - g_whiskerMo->z > 24 * FRACUNIT)
+    {
+        g_whiskerFrac = in->frac;
+        return false;
+    }
+    return true;
+}
+
+int dgb_GetWhiskers(int player, const int* angleDeltas, int count, int range, int* outDistance)
+{
+    mobj_t* source;
+    fixed_t savedTop, savedBottom, savedRange, savedLowFloor;
+    int i;
+    if (outDistance == NULL || angleDeltas == NULL || count <= 0)
+    {
+        return 0;
+    }
+    for (i = 0; i < count; ++i)
+    {
+        outDistance[i] = range;
+    }
+    if (gamestate != GS_LEVEL || player < 0 || player >= MAXPLAYERS || !playeringame[player] ||
+        players[player].playerstate != PST_LIVE || players[player].mo == NULL || players[player].mo->health <= 0)
+    {
+        return 0;
+    }
+    source = players[player].mo;
+    savedTop = opentop;
+    savedBottom = openbottom;
+    savedRange = openrange;
+    savedLowFloor = lowfloor;
+    g_whiskerMo = source;
+    for (i = 0; i < count; ++i)
+    {
+        const angle_t angle = source->angle + (angle_t)angleDeltas[i];
+        const fixed_t length = range * FRACUNIT;
+        const fixed_t x2 = source->x + FixedMul(length, finecosine[angle >> ANGLETOFINESHIFT]);
+        const fixed_t y2 = source->y + FixedMul(length, finesine[angle >> ANGLETOFINESHIFT]);
+        g_whiskerFrac = FRACUNIT;
+        P_SetPathTraverseSensor(1);
+        P_PathTraverse(source->x, source->y, x2, y2, PT_ADDLINES, dgb_WhiskerTraverse);
+        P_SetPathTraverseSensor(0);
+        outDistance[i] = FixedMul(range * FRACUNIT, g_whiskerFrac) / FRACUNIT;
+    }
+    g_whiskerMo = NULL;
+    opentop = savedTop;
+    openbottom = savedBottom;
+    openrange = savedRange;
+    lowfloor = savedLowFloor;
     return 1;
 }
 

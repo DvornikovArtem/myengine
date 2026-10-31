@@ -470,6 +470,11 @@ EV_VerticalDoor
 	
     
     // new door thinker
+    if (thing->player != NULL)
+    {
+        extern int dgb_doorsOpened[MAXPLAYERS];   /* myengine N5 (measurement only, DoomBridge.c) */
+        ++dgb_doorsOpened[thing->player - players];
+    }
     door = Z_Malloc (sizeof(*door), PU_LEVSPEC, 0);
     P_AddThinker (&door->thinker);
     sec->specialdata = door;

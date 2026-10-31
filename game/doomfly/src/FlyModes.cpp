@@ -10,11 +10,15 @@
 #include <brainview/PlayerBrainPanel.h>
 
 #include <imgui/imgui.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <map>
 #include <memory>
 #include <tuple>
 #include <chrono>
@@ -58,6 +62,58 @@ namespace doomfly
             FlyModeOptions options;
             std::shared_ptr<const flybrain::Connectome> connectome;
         };
+
+        // N5: what a fly WITHOUT our layer WallSense does in Fly learns, measured (assets/flybrain/learn_reference.json, tests/doomfly/FlyLearnMeasure.cpp
+        // --learning 1 --wall-sense 0, the same brain and reflex): the median % of the time at a wall in each 15 s, per place ("freedoom1 E1M1"). The curve of
+        // Fly learns draws it next to the fly that learns, as a recorded line, not live
+        struct LearnReference
+        {
+            int runs = 0;
+            std::map<std::string, std::vector<float>> places;
+
+            bool Load(const fs::path& path)
+            {
+                std::ifstream file(path);
+                if (!file)
+                {
+                    return false;
+                }
+                const nlohmann::json root = nlohmann::json::parse(file, nullptr, false);
+                if (root.is_discarded() || !root.contains("places") || !root["places"].is_object())
+                {
+                    return false;
+                }
+                runs = root.value("runs", 0);
+                for (const auto& [place, values] : root["places"].items())
+                {
+                    if (values.is_array())
+                    {
+                        places[place] = values.get<std::vector<float>>();
+                    }
+                }
+                return !places.empty();
+            }
+        };
+
+        // Who steers the command now, for the one fixed line of the panel (the rows do not move): the leg reflex, then the whiskers (N5), then the
+        // visible-target assist, else the brain. All three helpers are ours, outside the connectome.
+        std::string SteerLabel(const FlyStatus& status, const bool loud)
+        {
+            if (status.reflex)
+            {
+                return loud ? "REFLEX of the legs, not the brain" : "a reflex of the legs, not the brain";
+            }
+            if (status.whiskerTurn)
+            {
+                return loud ? "WHISKERS: authored sensor turns" : "whiskers: authored sensor turns";
+            }
+            if (status.authoredCombatAssist)
+            {
+                return status.targetVisible ? (loud ? "VISIBLE TARGET / authored assist" : "visible target / authored assist")
+                                            : (loud ? "target lost / authored fire gate" : "target lost / authored fire gate");
+            }
+            return loud ? "the brain steers" : "";
+        }
 
         // The panel of one brain: the neurons the controls read, what the player does, the health of the brain. `header` is the big title.
         void DrawFlyPanel(const FlyPlayer& fly, const std::string& header, ImDrawList* list, const float x, const float y, const float width, const float height)
@@ -138,8 +194,8 @@ namespace doomfly
             // what the player does
             signedBar("turn", status.turnDegrees, 6.0f, "deg/tic");
             bar("forward", std::fabs(status.forwardUnits), 50.0f, green);
-            line(std::string("fire ") + (status.fire ? "ON" : "off") + "   use " + (status.use ? "ON" : "off"), status.fire ? red : dim);
-            line(status.reflex ? "REFLEX of the legs, not the brain" : "the brain steers", status.reflex ? amber : dim);
+            line(std::string("fire ") + (status.fire ? "ON" : "off") + " / brain " + (status.brainFire ? "ON" : "off") + "   use " + (status.use ? "ON" : "off"), status.fire ? red : dim);
+            line(SteerLabel(status, true), status.reflex || status.whiskerTurn || status.authoredCombatAssist ? amber : dim);
             cursor += size * 0.3f;
 
             // the reinforcement and the health of the brain
@@ -360,7 +416,7 @@ namespace doomfly
                 out.debug.push_back(text);
                 // These transient states have fixed slots: changing the footer height reflows every parameter row.
                 out.debug.push_back(status.waiting ? "the game waits for the brain" : "");
-                out.debug.push_back(status.reflex ? "a reflex of the legs, not the brain" : "");
+                out.debug.push_back(SteerLabel(status, false));
                 // the line of the big brain: the neurons, the spikes, the speed
                 std::string neurons = std::to_string(player_.GetConnectome().NeuronCount());
                 for (std::size_t at = neurons.size(); at > 3; at -= 3)
@@ -397,7 +453,7 @@ namespace doomfly
                 action.bars.push_back(std::move(forward));
                 myengine::game::DoomPanelBar fire;
                 fire.label = "fire";
-                fire.text = status.fire ? "ON" : "off";
+                fire.text = status.fire ? "ON" : status.brainFire ? "gated" : "off";
                 fire.value = status.fire ? 1.0f : 0.0f;
                 fire.limit = 1.0f;
                 fire.rgb = Rgb(brainview::kColorFire);
@@ -536,8 +592,10 @@ namespace doomfly
             // `fastest` (N4, Fly learns, the speed MAX): the game runs as fast as the brain can (still one tic of the brain per tic of the game), the speed it reaches
             // is shown; `mark`: the line over the curve of learning on the picture ("LEARNS from scratch", "TRAINED"), empty: no curve
             FlyController(std::unique_ptr<FlyPlayer> player, std::string title, std::function<void(const std::string&)> log, myengine::render::IRenderAdapter* render,
-                          myengine::editor::ThumbnailService* thumbnails, const bool fastest = false, std::string mark = {})
-                : player_(std::move(player)), title_(std::move(title)), log_(std::move(log)), fastest_(fastest), mark_(std::move(mark))
+                          myengine::editor::ThumbnailService* thumbnails, const bool fastest = false, std::string mark = {},
+                          std::shared_ptr<const LearnReference> reference = nullptr)
+                : player_(std::move(player)), title_(std::move(title)), log_(std::move(log)), fastest_(fastest), mark_(std::move(mark)),
+                  reference_(std::move(reference))
             {
                 view_ = std::make_unique<FlyBrainView>(*player_, render, thumbnails, "fly-brain");
             }
@@ -636,6 +694,23 @@ namespace doomfly
             {
                 const FlyStatus status = player_->Status();
                 const doom::PlayerState player = game.Player(game.Info().consolePlayer);
+                const doom::GameInfo info = game.Info();
+                if (reference_ && info.state == doom::GameState::Level && (info.map != referenceMap_ || info.episode != referenceEpisode_))
+                {
+                    // the recorded line of this place, if it was measured (the same key as WallSense: the WAD and the map)
+                    referenceMap_ = info.map;
+                    referenceEpisode_ = info.episode;
+                    std::string wad = game.Iwad().stem().u8string();
+                    std::transform(wad.begin(), wad.end(), wad.begin(), [](const char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
+                    char place[96];
+                    std::snprintf(place, sizeof(place), "%s E%dM%d", wad.c_str(), info.episode, info.map);
+                    const auto found = reference_->places.find(place);
+                    referenceLine_ = found != reference_->places.end() ? found->second : std::vector<float>();
+                    if (log_)
+                    {
+                        log_(std::string("fly: the recorded line for ") + place + (referenceLine_.empty() ? ": not measured" : ": shown"));
+                    }
+                }
                 if (player.inGame && player.health > 0)
                 {
                     ++lifeTics_;
@@ -670,7 +745,7 @@ namespace doomfly
                 const float graph = size * 3.6f;
                 const float x0 = size * 0.8f;
                 const float y0 = size * 0.8f;
-                const float h = size * 4.2f + 2.0f * (graph + size * 1.6f);
+                const float h = size * 4.2f + 2.0f * (graph + size * 1.6f) + (referenceLine_.empty() ? 0.0f : size * 0.6f);
                 const ImU32 text = IM_COL32(230, 230, 230, 255);
                 const ImU32 dim = IM_COL32(150, 150, 160, 255);
                 const ImU32 amber = IM_COL32(240, 180, 60, 255);
@@ -686,7 +761,7 @@ namespace doomfly
                 std::snprintf(line, sizeof(line), "%s   %.1f min of the game", mark_.c_str(), status.levelTics / 35.0 / 60.0);
                 list->AddText(font, size, ImVec2(x0 + size * 0.6f, cursor), text, line);
                 cursor += size * 1.5f;
-                auto plot = [&](const char* title, const std::vector<float>& values, const ImU32 color)
+                auto plot = [&](const char* title, const std::vector<float>& values, const ImU32 color, const std::vector<float>* recorded)
                 {
                     const float left = x0 + size * 0.6f;
                     const float right = x0 + w - size * 0.6f;
@@ -694,6 +769,13 @@ namespace doomfly
                     for (const float v : values)
                     {
                         top = std::max(top, v);
+                    }
+                    if (recorded != nullptr)
+                    {
+                        for (const float v : *recorded)
+                        {
+                            top = std::max(top, v);
+                        }
                     }
                     std::snprintf(line, sizeof(line), "%s (max %.0f)", title, top);
                     list->AddText(font, size * 0.85f, ImVec2(left, cursor), dim, line);
@@ -705,10 +787,31 @@ namespace doomfly
                         const float bar = graph * std::clamp(values[i] / top, 0.0f, 1.0f);
                         list->AddRectFilled(ImVec2(left + step * i + 1.0f, cursor + graph - bar), ImVec2(left + step * (i + 1), cursor + graph), color);
                     }
+                    if (recorded != nullptr && !recorded->empty())
+                    {
+                        // N5: the recorded line of a fly without the layer, over the same bins (a step line: one level per 15 s)
+                        const ImU32 white = IM_COL32(235, 235, 245, 230);
+                        for (std::size_t i = 0; i < recorded->size() && i < kCurvePoints; ++i)
+                        {
+                            const float y = cursor + graph - graph * std::clamp((*recorded)[i] / top, 0.0f, 1.0f);
+                            list->AddLine(ImVec2(left + step * i, y), ImVec2(left + step * (i + 1), y), white, 2.0f);
+                            if (i + 1 < recorded->size() && i + 1 < kCurvePoints)
+                            {
+                                const float next = cursor + graph - graph * std::clamp((*recorded)[i + 1] / top, 0.0f, 1.0f);
+                                list->AddLine(ImVec2(left + step * (i + 1), y), ImVec2(left + step * (i + 1), next), white, 2.0f);
+                            }
+                        }
+                    }
                     cursor += graph + size * 0.5f;
                 };
-                plot("% of the time at a wall, every 15 s", atWall_, IM_COL32(230, 90, 60, 255));
-                plot("life, s, every life", lives_, IM_COL32(90, 200, 110, 255));
+                plot("% of the time at a wall, every 15 s", atWall_, IM_COL32(230, 90, 60, 255), referenceLine_.empty() ? nullptr : &referenceLine_);
+                if (!referenceLine_.empty())
+                {
+                    std::snprintf(line, sizeof(line), "white line: a fly without the layer, measured (median of %d runs), not live", reference_->runs);
+                    list->AddText(font, size * 0.75f, ImVec2(x0 + size * 0.6f, cursor - size * 0.45f), dim, line);
+                    cursor += size * 0.6f;
+                }
+                plot("life, s, every life", lives_, IM_COL32(90, 200, 110, 255), nullptr);
             }
 
             std::unique_ptr<FlyPlayer> player_;
@@ -723,6 +826,10 @@ namespace doomfly
             std::vector<float> lives_;
             std::uint64_t curveWallTics_ = 0;
             std::uint64_t curveLevelTics_ = 0;
+            std::shared_ptr<const LearnReference> reference_;   // N5: Fly learns
+            std::vector<float> referenceLine_;                  // ... of this place (empty: not measured here)
+            int referenceMap_ = -1;
+            int referenceEpisode_ = -1;
             int lifeTics_ = 0;
         };
 
@@ -774,6 +881,13 @@ namespace doomfly
                 return nullptr;
             }
             config.renderDevice = options.renderDevice ? options.renderDevice() : nullptr;
+            // This is an authored safety/targeting layer outside the connectome.
+            // It is deliberately shared by Fly plays/learns/duel modes; Swarm
+            // has a different controller and does not use this path.
+            config.combatAssist.enabled = true;
+            // N5: the whiskers, an authored local sensor (rays to the walls around the fly, no map): the fly turns away from a wall before it touches it.
+            // Not in Fly learns: there the fly starts untrained and the wall curve shows it learning (with whiskers it would not touch walls to learn from)
+            config.whiskers.enabled = !learns;
             if (learns)
             {
                 // N3b: the KC -> MBON synapses learn; N4: Fly learns always starts from scratch (no memory file) and our layer WallSense learns next to them
@@ -810,6 +924,8 @@ namespace doomfly
                 options.log(std::string("fly: ") + (learns ? "learning DOOMFLY + MBON" : bio ? "Bio" : "DOOMFLY") + " neurons, controls " + controls.string() + "; photoreceptors " + std::to_string(info.receptors[0]) +
                             " left / " + std::to_string(info.receptors[1]) + " right, columns covered " + std::to_string(info.columnsCovered[0]) + " of " + std::to_string(info.columns[0]) +
                             " / " + std::to_string(info.columnsCovered[1]) + " of " + std::to_string(info.columns[1]));
+                options.log("fly: authored visible-target combat assist ON (outside connectome; neural fire intent is gated separately)");
+                options.log(std::string("fly: authored whiskers ") + (learns ? "OFF (Fly learns starts untrained)" : "ON (rays 0 / +-30 / +-60 degrees to the walls, outside connectome)"));
             }
             return player;
         }
@@ -827,7 +943,24 @@ namespace doomfly
             // N4: the curve of learning over the picture: Fly learns (from scratch, MAX speed with --fly-fast), and the trained fly
             const bool trained = player->WallSenseOn() && !learns;
             const std::string mark = learns ? "LEARNS from scratch (our layer + KC -> MBON)" : trained ? "BUNDLED MEMORY (per map, WallSense)" : "";
-            return std::make_unique<FlyController>(std::move(player), title, shared->options.log, choice.render, choice.thumbnails, learns && (shared->options.fastest || choice.fastest), mark);
+            // N5: Fly learns draws the recorded line of a fly without our layer next to its own curve (where it was measured)
+            std::shared_ptr<LearnReference> reference;
+            if (learns)
+            {
+                auto loaded = std::make_shared<LearnReference>();
+                const fs::path referencePath = FindFile(shared->options, {}, "learn_reference.json");
+                if (loaded->Load(referencePath))
+                {
+                    reference = loaded;
+                }
+                if (shared->options.log)
+                {
+                    shared->options.log("fly: the recorded line of a fly without the layer: " + (reference ? std::to_string(reference->places.size()) + " places from " : std::string("none, ")) +
+                                        referencePath.string());
+                }
+            }
+            return std::make_unique<FlyController>(std::move(player), title, shared->options.log, choice.render, choice.thumbnails, learns && (shared->options.fastest || choice.fastest), mark,
+                                                   reference);
         }
 
         // ---------------------------------------------------------------------------------------------------------------------------------------
@@ -993,6 +1126,13 @@ namespace doomfly
                 out.debug.push_back(text);
                 std::snprintf(text, sizeof(text), "brain %.2fx", flies_.back()->Status().brainSpeed);
                 out.debug.push_back(text);
+                // N5: who steers each fly now (the leg reflex, the whiskers, the visible-target assist: ours, outside the connectome); one fixed line per fly
+                for (std::size_t i = 0; i < flies_.size(); ++i)
+                {
+                    const std::string steer = SteerLabel(flies_[i]->Status(), false);
+                    out.debug.push_back(flies_.size() > 1 ? (i == 0 ? "fly 1: " : "fly 2: ") + (steer.empty() ? std::string("the brain steers") : steer)
+                                                          : (steer.empty() ? std::string("the brain steers") : steer));
+                }
                 std::snprintf(text, sizeof(text), "%zu brains", views_.size());
                 out.brainLine = text;
                 return true;

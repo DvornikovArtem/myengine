@@ -50,6 +50,7 @@
     "assets/flybrain/controls_bio.json",
     "assets/flybrain/controls_learn.json",
     "assets/flybrain/fly_trained.bin",
+    "assets/flybrain/learn_reference.json",
     "assets/shaders",
     "assets/fonts"
   ],

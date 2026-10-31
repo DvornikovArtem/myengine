@@ -455,6 +455,9 @@ A_GunFlash
 //
 // A_Punch
 //
+// myengine N5 (measurement only): the attacks of each player (a bullet or pellet, a punch, a saw tick; missiles in p_mobj.c)
+int dgb_attackShots[MAXPLAYERS];
+
 void
 A_Punch
 ( player_t*	player,
@@ -464,6 +467,7 @@ A_Punch
     int		damage;
     int		slope;
 	
+    ++dgb_attackShots[player - players];
     damage = (P_Random ()%10+1)<<1;
 
     if (player->powers[pw_strength])	
@@ -498,6 +502,7 @@ A_Saw
     int		damage;
     int		slope;
 
+    ++dgb_attackShots[player - players];
     damage = 2*(P_Random ()%10+1);
     angle = player->mo->angle;
     angle += (P_Random()-P_Random())<<18;
@@ -639,6 +644,10 @@ P_GunShot
     angle_t	angle;
     int		damage;
 	
+    if (mo->player != NULL)
+    {
+        ++dgb_attackShots[mo->player - players];
+    }
     damage = 5*(P_Random ()%3+1);
     angle = mo->angle;
 
