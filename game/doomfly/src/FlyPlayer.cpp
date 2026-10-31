@@ -772,6 +772,11 @@ namespace doomfly
                     game.PostKey(doom::key::kEscape, true);
                     game.PostKey(doom::key::kEscape, false);
                 }
+                else if ((info.state == doom::GameState::Intermission || info.state == doom::GameState::Finale) && !info.menuActive)
+                {
+                    // WI/F_Ticker read BT_USE/BT_ATTACK from the tic command; PostKey(Enter) is not visible to a FlyPlayer source.
+                    use = true;
+                }
                 else
                 {
                     game.PostKey(doom::key::kEnter, true);
