@@ -54,6 +54,24 @@ namespace doom
         bool hasAttacker = false;               // the monster (or player) that hurt this player last, while it exists (the turn away from it, N3b)
         double attackerX = 0.0;
         double attackerY = 0.0;
+        // N5, measurement only: the attacks of this player since the game started (bullets and pellets, punches, saw tics, missiles), the ones that hurt
+        // a living hostile (a monster, a Lost Soul, the other player of a deathmatch) and their damage
+        int shots = 0;
+        int hits = 0;
+        int damageDealt = 0;
+        int doorsOpened = 0;                    // N5, measurement only: the doors the player opened with "use"
+        int sector = -1;                        // the sector the player is in
+        bool inDoorSector = false;              // ... a door sector (a line of it is a manual door)
+    };
+
+    // A copy of the result of DOOM's native aim trace in a bounded +/-22.5 degree
+    // combat-assist cone around the player's current view.
+    // It never exposes an mobj pointer: the fly may use this only as a visible-target
+    // signal for its explicitly authored combat-assist layer.
+    struct VisibleTarget
+    {
+        bool found = false;
+        double angleDegrees = 0.0;                 // signed ray offset from the view; positive is DOOM's left
     };
 
     enum class GameState : std::uint8_t
@@ -162,6 +180,14 @@ namespace doom
         // ---- the state ----
         GameInfo Info() const;
         PlayerState Player(int player) const;
+        // Probes only living hostile things that a native DOOM aim ray can hit in a
+        // narrow cone around the player's current view. The game thread owns DOOM.
+        // `angleOffsetDegrees` probes a hypothetical final yaw without
+        // changing game state; the normal value is zero.
+        VisibleTarget FindVisibleTarget(int player, double angleOffsetDegrees = 0.0) const;
+        // N5: the whiskers, an authored local sensor outside the connectome (FlyPlayer, "WHISKERS"): for each angle from the view (degrees, positive is
+        // DOOM's left) the distance to the first line the player cannot pass, up to `range` map units. Lines only, no things; the world is not changed
+        std::vector<double> Whiskers(int player, const std::vector<double>& anglesDegrees, double range) const;
         // The game data it plays (DoomConfig::iwad); N4: the trained fly keeps a memory per WAD and map
         const std::filesystem::path& Iwad() const;
 

@@ -1005,6 +1005,11 @@ P_SpawnPlayerMissile
     fixed_t	z;
     fixed_t	slope;
     
+    if (source->player != NULL)
+    {
+        extern int dgb_attackShots[MAXPLAYERS];   /* myengine N5 (measurement only, p_pspr.c): a player missile is an attack */
+        ++dgb_attackShots[source->player - players];
+    }
     // see which target is to be aimed at
     an = source->angle;
     slope = P_AimLineAttack (source, an, 16*64*FRACUNIT);

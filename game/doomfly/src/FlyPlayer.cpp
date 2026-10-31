@@ -621,6 +621,11 @@ namespace doomfly
                 wallTicsNow_ = 0;
                 stuckCount_ = 0;
                 history_.clear();
+                commandColumns_.clear();
+                whiskerActive_ = false;
+                lastCommandWantedForward_ = 0.0f;
+                lastCommandForward_ = 0.0f;
+                lastCommandReflex_ = false;
             }
             prevHealth_ = player.health;
             prevKills_ = player.kills;
@@ -658,7 +663,54 @@ namespace doomfly
         if (inLevel)
         {
             Shape(result, turnDegrees, forwardUnits, fire);
-            // N4: our layer (not the connectome): it learns from the touch of the last tic, then brakes the walk and turns when it sees a wall coming
+            const bool brainFire = fire;
+            status_.brainFire = brainFire;
+            status_.targetVisible = false;
+            status_.authoredCombatAssist = config_.combatAssist.enabled;
+            status_.targetAngleDegrees = 0.0f;
+            if (config_.combatAssist.enabled && player.health > 0)
+            {
+                // Authored helper only: the native game thread returns a copied
+                // target angle from wall/vertical-aware P_AimLineAttack probes.
+                const doom::VisibleTarget target = game.FindVisibleTarget(PlayerIndex(game));
+                status_.targetVisible = target.found;
+                status_.targetAngleDegrees = static_cast<float>(target.angleDegrees);
+                if (target.found)
+                {
+                    const float correction = std::clamp(-static_cast<float>(target.angleDegrees), -config_.combatAssist.steerDegreesPerTic,
+                                                        config_.combatAssist.steerDegreesPerTic);
+                    // Once a real target is in the native ray fan, let this
+                    // explicitly-authored assist own the small turn command;
+                    // adding it to an opposite brain turn can cancel the aid.
+                    turnDegrees = std::clamp(correction, -controls.turn.limit, controls.turn.limit);
+                }
+            }
+            const float wantedForwardUnits = forwardUnits;
+
+            // Measure the command that actually ran during the previous game tic before
+            // deciding what this result should do.  The old code compared the current
+            // brain command with the current position, so a WallSense brake/reflex could
+            // hide the push that caused the stall and feed the picture label one tic late.
+            history_.push_back({player.x, player.y});
+            while (history_.size() > controls.use.stuckTics + 1)
+            {
+                history_.erase(history_.begin());
+            }
+            const bool notMoving = history_.size() > controls.use.stuckTics &&
+                                   std::hypot(history_.back().x - history_.front().x, history_.back().y - history_.front().y) < controls.use.stuckUnits;
+            const bool previousPushing = lastCommandWantedForward_ > 3.0f && !lastCommandReflex_;
+            const bool previousWalking = lastCommandForward_ > 3.0f && !lastCommandReflex_;
+            // Keep the public wall metric/learning label comparable to the old
+            // meaning: the command actually sent forward while not moving.
+            // `previousPushing` remains the raw intent used only to trigger
+            // escape when WallSense had already braked the command.
+            const bool previousAtWall = previousWalking && notMoving && player.health > 0;
+            const bool previousBlocked = notMoving && (previousPushing || previousWalking) && player.health > 0;
+
+            // N4: our layer (not the connectome): label the picture that produced the
+            // previous command with its measured collision outcome, then steer the new
+            // command from the current picture.  Braking does not erase the original
+            // forward intent used by the escape reflex.
             if (wallSense_.Enabled() && player.health > 0)
             {
                 if (info.map != placeMap_ || info.episode != placeEpisode_)
@@ -672,7 +724,8 @@ namespace doomfly
                     std::snprintf(place, sizeof(place), "%s E%dM%d", wad.c_str(), info.episode, info.map);
                     wallSense_.SetPlace(place);
                 }
-                wallSense_.Tick(lastColumns_, atWall_, forwardUnits > 3.0f && reflexLeft_ == 0);
+                const std::vector<float>& picture = commandColumns_.empty() ? lastColumns_ : commandColumns_;
+                wallSense_.Tick(picture, previousAtWall, previousWalking);
                 if (wallSense_.Brake() > 0.0f)
                 {
                     forwardUnits = forwardUnits > 0.0f ? forwardUnits * (1.0f - wallSense_.Brake()) : forwardUnits;
@@ -680,20 +733,57 @@ namespace doomfly
                 }
             }
 
-            // stuck at a door: pushing and not moving
-            history_.push_back({player.x, player.y});
-            while (history_.size() > controls.use.stuckTics + 1)
+            // N5: the whiskers (authored local sensor, not the connectome): the walls of now around the fly, before it touches them
+            status_.whiskersOn = config_.whiskers.enabled;
+            if (config_.whiskers.enabled && player.health > 0)
             {
-                history_.erase(history_.begin());
+                const FlyPlayerConfig::Whiskers& w = config_.whiskers;
+                static const std::vector<double> kAngles = {0.0, 30.0, -30.0, 60.0, -60.0};   // degrees from the view, DOOM's positive is left
+                const std::vector<double> d = game.Whiskers(PlayerIndex(game), kAngles, w.range);
+                const float ahead = static_cast<float>(d[0]);
+                const float leftOpen = static_cast<float>(d[1] + d[3]);
+                const float rightOpen = static_cast<float>(d[2] + d[4]);
+                if (!whiskerActive_ && ahead < w.stopUnits)
+                {
+                    whiskerActive_ = true;
+                    whiskerTics_ = 0;
+                    whiskerSign_ = leftOpen > rightOpen ? -1.0f : 1.0f;   // to the more open side (turnDegrees: + is right)
+                }
+                else if (whiskerActive_ && (ahead >= w.clearUnits || whiskerTics_ >= w.maxTics))
+                {
+                    whiskerActive_ = false;
+                }
+                if (whiskerActive_)
+                {
+                    ++whiskerTics_;
+                    forwardUnits = std::min(forwardUnits, 0.0f);
+                    turnDegrees = whiskerSign_ * w.turnDegrees;
+                }
+                else
+                {
+                    if (ahead < w.slowUnits && forwardUnits > 0.0f)
+                    {
+                        forwardUnits *= std::clamp((ahead - w.stopUnits) / std::max(w.slowUnits - w.stopUnits, 1.0f), 0.25f, 1.0f);
+                    }
+                    if (d[1] < w.sideUnits)
+                    {
+                        turnDegrees += w.sideTurnDegrees;   // a wall close on the left: a little to the right
+                    }
+                    if (d[2] < w.sideUnits)
+                    {
+                        turnDegrees -= w.sideTurnDegrees;
+                    }
+                    turnDegrees = std::clamp(turnDegrees, -controls.turn.limit, controls.turn.limit);
+                }
+                status_.whiskerTurn = whiskerActive_;
+                status_.whiskerAhead = ahead;
             }
-            const bool pushing = forwardUnits > 3.0f;
-            const bool notMoving = history_.size() > controls.use.stuckTics &&
-                                   std::hypot(history_.back().x - history_.front().x, history_.back().y - history_.front().y) < controls.use.stuckUnits;
+
             if (useCooldown_ > 0)
             {
                 --useCooldown_;
             }
-            if (pushing && notMoving && useCooldown_ == 0)
+            if (previousBlocked && useCooldown_ == 0)
             {
                 use = true;
                 useCooldown_ = controls.use.everyTics;
@@ -706,12 +796,11 @@ namespace doomfly
             }
 
             // N4: the metric of pushing against a wall, and its punishment (with learning)
-            const bool atWall = pushing && notMoving && player.health > 0;
             if (player.health > 0)
             {
                 ++levelTics_;
             }
-            if (atWall)
+            if (previousAtWall)
             {
                 ++wallTics_;
                 if (!atWall_)
@@ -724,10 +813,10 @@ namespace doomfly
                     wallPunish_ = true;
                 }
             }
-            atWall_ = atWall;
+            atWall_ = previousAtWall;
 
             // the reflex of the legs: pushing against a wall for a long time
-            if (pushing && notMoving)
+            if (previousBlocked)
             {
                 ++stuckCount_;
             }
@@ -735,24 +824,68 @@ namespace doomfly
             {
                 stuckCount_ = 0;
             }
+            if (reflexLeft_ == 0 && sinceReflex_ < 1000000)
+            {
+                ++sinceReflex_;
+            }
             if (controls.unstick.afterTics > 0 && reflexLeft_ == 0 && stuckCount_ >= controls.unstick.afterTics)
             {
-                reflexLeft_ = controls.unstick.forTics;
-                reflexSign_ = -reflexSign_;
+                // N5: a new wall turns the other way than the last one; the same wall again soon after (the brain walked straight back into it)
+                // keeps the side and turns further, so that the fly does not swing between the same two directions
+                if (sinceReflex_ > kReflexRepeatTics)
+                {
+                    reflexSign_ = -reflexSign_;
+                    reflexRepeat_ = 0;
+                }
+                else
+                {
+                    reflexRepeat_ = std::min(reflexRepeat_ + 1, 2u);
+                }
+                reflexLeft_ = controls.unstick.forTics + controls.unstick.forTics * reflexRepeat_ / 2;
                 stuckCount_ = 0;
+                sinceReflex_ = 0;
             }
+            bool reflexCommand = false;
             if (reflexLeft_ > 0)
             {
                 --reflexLeft_;
                 turnDegrees = reflexSign_ * controls.unstick.turnDegrees;
                 forwardUnits = -controls.unstick.backUnits;
                 fire = false;
+                reflexCommand = true;
             }
+            if (config_.combatAssist.enabled && player.health > 0)
+            {
+                // Validate the shot along the yaw that DOOM will apply for this
+                // command, after WallSense and leg escape have had their say.
+                // A visible target alone is not enough: the final native ray
+                // must still be aligned with the actual weapon direction.
+                const doom::VisibleTarget firingTarget = game.FindVisibleTarget(PlayerIndex(game), -turnDegrees);
+                status_.targetVisible = firingTarget.found;
+                status_.targetAngleDegrees = static_cast<float>(firingTarget.angleDegrees);
+                // The fan is useful for steering, but a side-ray hit is not a
+                // proof that P_GunShot will hit. Actual fire requires the
+                // center ray of the final weapon yaw exactly.
+                fire = !reflexCommand && firingTarget.found && std::fabs(static_cast<float>(firingTarget.angleDegrees)) < 0.001f;
+            }
+            lastCommandWantedForward_ = wantedForwardUnits;
+            lastCommandForward_ = forwardUnits;
+            lastCommandReflex_ = reflexCommand;
+            commandColumns_ = lastColumns_;
         }
         else
         {
             history_.clear();
             useCooldown_ = 0;
+            commandColumns_.clear();
+            whiskerActive_ = false;
+            lastCommandWantedForward_ = 0.0f;
+            lastCommandForward_ = 0.0f;
+            lastCommandReflex_ = false;
+            status_.brainFire = false;
+            status_.targetVisible = false;
+            status_.authoredCombatAssist = false;
+            status_.targetAngleDegrees = 0.0f;
         }
 
         // the screens that wait for a key: the title, the intermission, the finale (the player of DOOM has no keyboard)
@@ -814,7 +947,7 @@ namespace doomfly
         status_.forwardUnits = forwardUnits;
         status_.fire = fire;
         status_.use = use;
-        status_.reflex = reflexLeft_ > 0 || use;
+        status_.reflex = lastCommandReflex_ || reflexLeft_ > 0 || use;
         status_.spikesPerSecond = result.spikesPerSecond;
         status_.centralSpikesPerSecond = result.centralSpikesPerSecond;
         status_.dopamineMv = result.dopamineMv;

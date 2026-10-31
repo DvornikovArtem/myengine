@@ -87,6 +87,29 @@ namespace doomfly
         WallSenseConfig wallSense;
         std::vector<std::string> wallSenseLoad;
         std::string wallSenseSave;
+        // Authored visible-target helper, outside the connectome. It uses only
+        // DoomGame::FindVisibleTarget's copied native ray result.
+        struct VisibleCombatAssist
+        {
+            bool enabled = false;
+            float steerDegreesPerTic = 6.0f;
+        } combatAssist;
+        // N5: the whiskers, an authored local sensor outside the connectome (like antennae; DoomGame::Whiskers): rays ahead, +-30 and +-60 degrees to the
+        // first wall the player cannot pass. A wall ahead closer than stopUnits: the walk is taken away and the fly turns to the more open side until
+        // the way ahead is clear (one side for the whole turn: no swinging between two walls of a corner); closer than slowUnits: it slows down; a wall
+        // close at the side turns it away a little. No map, no route: only these five distances of now.
+        struct Whiskers
+        {
+            bool enabled = false;
+            double range = 128.0;
+            float stopUnits = 48.0f;            // from the centre of the player (its radius is 16)
+            float slowUnits = 96.0f;
+            float clearUnits = 112.0f;          // the turn ends when the way ahead is this far
+            float sideUnits = 28.0f;
+            float sideTurnDegrees = 2.0f;
+            float turnDegrees = 6.0f;
+            uint32_t maxTics = 60;              // a turn this long ends anyway (then the brain and the leg reflex)
+        } whiskers;
     };
 
     struct RateReading
@@ -107,7 +130,14 @@ namespace doomfly
         float fireHz = 0.0f;
         float turnDegrees = 0.0f;               // what the player does now
         float forwardUnits = 0.0f;
+        bool brainFire = false;                 // connectome intent before authored gating
         bool fire = false;
+        bool targetVisible = false;             // copied native LOS result
+        bool authoredCombatAssist = false;      // helper changed/validated this command
+        float targetAngleDegrees = 0.0f;
+        bool whiskersOn = false;                // N5: the whiskers (authored sensor) are on
+        bool whiskerTurn = false;               // ... and turn the fly away from a wall now
+        float whiskerAhead = 0.0f;              // the distance to the wall ahead (map units, up to the range)
         bool use = false;
         bool reflex = false;                    // the command is a reflex outside the brain now (turning away from a wall, the use button at a door), not what the neurons say
         float spikesPerSecond = 0.0f;           // the whole brain
@@ -267,6 +297,7 @@ namespace doomfly
         uint64_t learnedTics_ = 0;
         WallSense wallSense_;                   // N4: our layer (the thread of the game)
         std::vector<float> lastColumns_;        // the light of the columns of the picture of the tick whose result comes next
+        std::vector<float> commandColumns_;     // the picture that produced the command whose movement is measured now
         int placeMap_ = -1;
         int placeEpisode_ = -1;
 
@@ -321,6 +352,9 @@ namespace doomfly
         uint32_t useCooldown_ = 0;
         uint32_t stuckCount_ = 0;
         bool atWall_ = false;
+        float lastCommandWantedForward_ = 0.0f; // brain forward before WallSense/reflex
+        float lastCommandForward_ = 0.0f;       // command actually sent to DOOM
+        bool lastCommandReflex_ = false;
         uint32_t wallTicsNow_ = 0;              // of the push that lasts now
         bool wallPunish_ = false;               // for the next tick of the brain
         uint32_t wallHits_ = 0;
@@ -328,6 +362,12 @@ namespace doomfly
         uint64_t levelTics_ = 0;
         uint32_t reflexLeft_ = 0;
         float reflexSign_ = 1.0f;
+        static constexpr uint32_t kReflexRepeatTics = 105;   // N5: a stall this soon after the last reflex is the same wall again (3 s)
+        uint32_t sinceReflex_ = 1000000;        // tics since the last reflex ended
+        uint32_t reflexRepeat_ = 0;             // the same wall again: 0, 1, 2 (the turn lasts 1, 1.5, 2 times forTics)
+        bool whiskerActive_ = false;            // N5: the whiskers turn the fly away from a wall now
+        float whiskerSign_ = 1.0f;              // + right
+        uint32_t whiskerTics_ = 0;
         uint32_t screenCooldown_ = 0;
         FlyStatus status_;
         BrainSnapshot snapshot_;

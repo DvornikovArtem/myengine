@@ -542,6 +542,12 @@ intercept_t*	intercept_p;
 divline_t 	trace;
 boolean 	earlyout;
 int		ptflags;
+static boolean pathTraverseSensor = false;
+
+void P_SetPathTraverseSensor(const boolean enabled)
+{
+    pathTraverseSensor = enabled;
+}
 
 static void InterceptsOverrun(int num_intercepts, intercept_t *intercept);
 
@@ -597,6 +603,12 @@ PIT_AddLineIntercepts (line_t* ld)
     }
     
 	
+    if (pathTraverseSensor && intercept_p >= intercepts + MAXINTERCEPTS_ORIGINAL)
+    {
+        // Do not enter InterceptsOverrun: that compatibility path deliberately
+        // writes into persistent DOOM globals for normal weapon/demo behavior.
+        return false;
+    }
     intercept_p->frac = frac;
     intercept_p->isaline = true;
     intercept_p->d.line = ld;
@@ -663,6 +675,11 @@ boolean PIT_AddThingIntercepts (mobj_t* thing)
     if (frac < 0)
 	return true;		// behind source
 
+    if (pathTraverseSensor && intercept_p >= intercepts + MAXINTERCEPTS_ORIGINAL)
+    {
+        // Abort the bounded sensor before compatibility overrun emulation.
+        return false;
+    }
     intercept_p->frac = frac;
     intercept_p->isaline = false;
     intercept_p->d.thing = thing;

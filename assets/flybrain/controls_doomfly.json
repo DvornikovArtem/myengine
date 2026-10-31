@@ -45,7 +45,7 @@
     "stuckUnits": 6.0
   },
   "unstick": {
-    "afterTics": 50,
+    "afterTics": 15,
     "turnDegrees": 5.0,
     "forTics": 18,
     "backUnits": 10.0

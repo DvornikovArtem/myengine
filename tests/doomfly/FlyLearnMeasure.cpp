@@ -122,6 +122,8 @@ int main(int argc, char** argv)
     double binSeconds = 30.0;
     int substeps = 0;
     int wallSense = 0;
+    int whiskers = 0;   // N5: the whiskers (authored sensor)
+    int assist = 1;     // the authored visible-target combat assist (on, as in the Fly modes)
     std::string dumpPath;
     int wallLearn = 1;
     std::vector<std::string> wallIn;
@@ -150,6 +152,8 @@ int main(int argc, char** argv)
         else if (arg == "--bin-seconds") binSeconds = std::atof(next().c_str());
         else if (arg == "--substeps") substeps = std::atoi(next().c_str());
         else if (arg == "--wall-sense") wallSense = std::atoi(next().c_str());
+        else if (arg == "--whiskers") whiskers = std::atoi(next().c_str());
+        else if (arg == "--assist") assist = std::atoi(next().c_str());
         else if (arg == "--dump") dumpPath = next();
         else if (arg == "--wall-learn") wallLearn = std::atoi(next().c_str());
         else if (arg == "--wall-in") wallIn.push_back(next());
@@ -216,6 +220,10 @@ int main(int argc, char** argv)
     fly.wallSense.learning = wallLearn != 0;
     fly.wallSenseLoad = wallIn;
     fly.wallSenseSave = wallOut;
+    // Match interactive Fly modes: this authored target gate/steering is
+    // outside the connectome and is reported separately below.
+    fly.combatAssist.enabled = assist != 0;
+    fly.whiskers.enabled = whiskers != 0;
     if (substeps > 0)
     {
         fly.substeps = substeps;
@@ -315,6 +323,13 @@ int main(int argc, char** argv)
         }
     }
     uint64_t dumpWallTics = 0;
+    int brainFireTics = 0;
+    int targetVisibleTics = 0;
+    int actualFireTics = 0;
+    // N5: the attacks of the player over the run (DoomGame counts them natively: bullets and pellets, punches, missiles; hits on living hostiles)
+    const doom::PlayerState combatStart = game->Player(0);
+    int killsAll = 0;
+    int doorPasses = 0;      // N5: the times the player walked into a door sector (out of another sector)
     int tic = 0;
     for (; tic < maxTics; ++tic)
     {
@@ -322,6 +337,9 @@ int main(int argc, char** argv)
         player->StepBlocking(*game);
         const doom::PlayerState p = game->Player(0);
         const doomfly::FlyStatus status = player->Status();
+        brainFireTics += status.brainFire ? 1 : 0;
+        targetVisibleTics += status.targetVisible ? 1 : 0;
+        actualFireTics += status.fire ? 1 : 0;
         Life& life = lives.back();
         if (dump != nullptr)
         {
@@ -376,6 +394,10 @@ int main(int argc, char** argv)
             std::fprintf(trace, "%d hp %d pos %.4f %.4f ang %.4f cmd %d %d %u frame %016llx step %llu turnHz %.1f forwardHz %.1f central %.0f kc %.0f\n", tic, p.health, p.x,
                 p.y, p.angleDegrees, respawner.last.forwardMove, respawner.last.angleTurn, respawner.last.buttons, static_cast<unsigned long long>(frame),
                 static_cast<unsigned long long>(player->Snapshot().step), status.turnHz, status.forwardHz, status.centralSpikesPerSecond, status.kcSpikesPerSecond);
+            // N5: what steered this tic: the brain, our layer WallSense (chance, brake), the reflex of the legs, the push against a wall
+            std::fprintf(trace, "%d n5 turnDeg %.2f fwdUnits %.1f reflex %d wallChance %.2f wallBrake %.0f wallTics %llu target %d fire %d brainFire %d whisker %d ahead %.0f\n", tic, status.turnDegrees,
+                status.forwardUnits, status.reflex ? 1 : 0, status.wallChance, status.wallBrake, static_cast<unsigned long long>(status.wallTics), status.targetVisible ? 1 : 0,
+                status.fire ? 1 : 0, status.brainFire ? 1 : 0, status.whiskerTurn ? 1 : 0, status.whiskerAhead);
         }
         if (!respawner.dead)
         {
@@ -424,6 +446,8 @@ int main(int argc, char** argv)
             respawner.dead = false;
             lives.push_back(Life{});
         }
+        killsAll += std::max(0, p.kills - prev.kills);
+        doorPasses += p.inDoorSector && p.sector != prev.sector && prev.sector >= 0 && p.health > 0 ? 1 : 0;
         prev = p;
     }
     const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
@@ -460,8 +484,18 @@ int main(int argc, char** argv)
     {
         std::fclose(dump);
     }
+    {
+        const doom::PlayerState combatEnd = game->Player(0);
+        const int shots = combatEnd.shots - combatStart.shots;
+        const int hits = combatEnd.hits - combatStart.hits;
+        std::printf("ATTACKS shots %d hits %d (%.1f %%) damage %d kills %d\n", shots, hits, shots > 0 ? 100.0 * hits / shots : 0.0,
+                    combatEnd.damageDealt - combatStart.damageDealt, killsAll);
+        std::printf("DOORS opened %d passes %d\n", combatEnd.doorsOpened - combatStart.doorsOpened, doorPasses);
+    }
     addBin(total, bin);
     printBin("TOTAL", total, 0.0, tic / 35.0, player->Status().learnedScale);
+    std::printf("COMBAT authored_visible_target: brain_fire_intent %d, visible_target %d, actual_aligned_fire %d (outside connectome)\n",
+                brainFireTics, targetVisibleTics, actualFireTics);
     if (player->Status().wallSense)
     {
         std::printf("wall sense: learned from %u pictures before a touch, chance now %.2f\n", player->Status().wallPositives, player->Status().wallChance);

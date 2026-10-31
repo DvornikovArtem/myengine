@@ -1,0 +1,27 @@
+{
+  "description": "N5: a fly WITHOUT our layer WallSense in Fly learns, measured (not live): the learning brain of Fly learns (controls_learn.json, the leg reflex after 50 tics, the authored visible-target assist), Freedoom, skill 3, 2 minutes per run; per place (the WAD and the map, as WallSense keys them) the median over the runs of the % of the time pushing against a wall in each 15 s. tests/doomfly/FlyLearnMeasure.cpp --learning 1 --wall-sense 0 --iwad freedoom1.wad --map <m> --seed 1..5 --skill 3 --bin-seconds 15 --max-minutes 2. The curve of Fly learns draws it as the white line next to the fly that learns.",
+  "binSeconds": 15,
+  "runs": 5,
+  "places": {
+    "freedoom1 E1M1": [
+      22.1,
+      33.3,
+      30.5,
+      36.4,
+      41.3,
+      33.6,
+      16.6,
+      34.7
+    ],
+    "freedoom1 E1M2": [
+      12.0,
+      35.4,
+      44.0,
+      55.4,
+      45.0,
+      34.1,
+      52.8,
+      45.5
+    ]
+  }
+}

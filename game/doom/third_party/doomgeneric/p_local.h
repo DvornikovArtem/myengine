@@ -182,6 +182,10 @@ boolean P_BlockThingsIterator (int x, int y, boolean(*func)(mobj_t*) );
 
 extern divline_t	trace;
 
+// The authored Fly sensor must stop before the compatibility overrun path.
+// Normal weapon traversal leaves this disabled and keeps vanilla behavior.
+void P_SetPathTraverseSensor(boolean enabled);
+
 boolean
 P_PathTraverse
 ( fixed_t	x1,

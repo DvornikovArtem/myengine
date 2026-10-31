@@ -775,6 +775,11 @@ P_KillMobj
 // Source can be NULL for slime, barrel explosions
 // and other environmental stuff.
 //
+// myengine N5 (measurement only, DoomGame::Player): the attacks of a player that hurt a living hostile
+// (a monster that counts as a kill, a Lost Soul, the other player of a deathmatch) and their damage
+int dgb_attackHits[MAXPLAYERS];
+int dgb_attackDamage[MAXPLAYERS];
+
 void
 P_DamageMobj
 ( mobj_t*	target,
@@ -793,6 +798,13 @@ P_DamageMobj
 		
     if (target->health <= 0)
 	return;
+
+    if (source != NULL && source != target && source->player != NULL && source->player >= players && source->player < players + MAXPLAYERS
+        && ((target->flags & MF_COUNTKILL) || target->type == MT_SKULL || (deathmatch && target->type == MT_PLAYER)))
+    {
+        ++dgb_attackHits[source->player - players];
+        dgb_attackDamage[source->player - players] += damage;
+    }
 
     if ( target->flags & MF_SKULLFLY )
     {

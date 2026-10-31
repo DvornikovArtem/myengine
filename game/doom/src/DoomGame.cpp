@@ -588,7 +588,41 @@ namespace doom
         state.hasAttacker = raw.hasAttacker != 0;
         state.attackerX = raw.attackerX / 65536.0;
         state.attackerY = raw.attackerY / 65536.0;
+        state.shots = raw.shots;
+        state.hits = raw.hits;
+        state.damageDealt = raw.damageDealt;
+        state.doorsOpened = raw.doorsOpened;
+        state.sector = raw.sector;
+        state.inDoorSector = raw.doorSector != 0;
         return state;
+    }
+
+    std::vector<double> DoomGame::Whiskers(const int player, const std::vector<double>& anglesDegrees, const double range) const
+    {
+        std::vector<int> angles(anglesDegrees.size());
+        std::vector<int> distances(anglesDegrees.size(), static_cast<int>(range));
+        for (std::size_t i = 0; i < angles.size(); ++i)
+        {
+            angles[i] = static_cast<int>(static_cast<std::int64_t>(std::llround(anglesDegrees[i] * (4294967296.0 / 360.0))));
+        }
+        if (!angles.empty())
+        {
+            dgb_GetWhiskers(player, angles.data(), static_cast<int>(angles.size()), static_cast<int>(range), distances.data());
+        }
+        return std::vector<double>(distances.begin(), distances.end());
+    }
+
+    VisibleTarget DoomGame::FindVisibleTarget(const int player, const double angleOffsetDegrees) const
+    {
+        dgb_visible_target raw{};
+        VisibleTarget target;
+        const int angleOffset = static_cast<int>(std::llround(angleOffsetDegrees * (4294967296.0 / 360.0)));
+        if (dgb_GetVisibleTarget(player, angleOffset, &raw) != 0)
+        {
+            target.found = true;
+            target.angleDegrees = static_cast<double>(raw.angleDelta) * (360.0 / 4294967296.0);
+        }
+        return target;
     }
 }
 

@@ -133,8 +133,10 @@ function Test-PackageFiles([string]$folder) {
     $versionText = Read-Text (Join-Path $folder 'version.txt')
     foreach ($line in @(Get-ChildItem -Path $folder -Recurse -File | Where-Object { $_.FullName -match '\\wads\\' -or $_.FullName -match '\\assets\\(doom|flybrain)\\' })) {
         $relative = (Get-RelativePath $folder $line.FullName).Replace('\', '/')
-        # the controls of the fly (controls_*.json) and the trained fly (fly_trained.bin, N4) travel as assets of the manifest, not as data files: version.txt does not list them
-        if ($relative -notlike '*.license.txt' -and $relative -notlike 'assets/flybrain/controls_*.json' -and $relative -ne 'assets/flybrain/fly_trained.bin' -and $versionText.IndexOf("file $relative") -lt 0) { Fail "version.txt does not list the data file $relative" }
+        # the controls of the fly (controls_*.json), the trained fly (fly_trained.bin, N4) and the recorded line of Fly learns (learn_reference.json, N5) travel as assets of
+        # the manifest, not as data files: version.txt does not list them
+        if ($relative -notlike '*.license.txt' -and $relative -notlike 'assets/flybrain/controls_*.json' -and $relative -ne 'assets/flybrain/fly_trained.bin' -and
+            $relative -ne 'assets/flybrain/learn_reference.json' -and $versionText.IndexOf("file $relative") -lt 0) { Fail "version.txt does not list the data file $relative" }
     }
     # N4: the trained fly (the memory of our layer WallSense) is in the package and is that file
     $trained = Join-Path $folder 'assets\flybrain\fly_trained.bin'

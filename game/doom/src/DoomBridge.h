@@ -36,7 +36,19 @@ typedef struct dgb_player
     int deaths;           /* the times the others killed this player */
     int hasAttacker;      /* the thing that hurt the player last (player_t::attacker), when it is still there */
     int attackerX, attackerY;
+    int shots;            /* myengine N5, measurement: the attacks of this player since the start (bullets and pellets, punches, saw tics, missiles) */
+    int hits;             /* ... that hurt a living hostile */
+    int damageDealt;
+    int doorsOpened;      /* myengine N5, measurement: the doors this player opened with "use" */
+    int sector;           /* the sector the player is in (-1: none) */
+    int doorSector;       /* 1: a line of that sector is a door the player can use */
 } dgb_player;
+
+typedef struct dgb_visible_target
+{
+    int found;
+    int angleDelta;       /* signed DOOM angle units from the player's current view */
+} dgb_visible_target;
 
 typedef struct dgb_state
 {
@@ -56,6 +68,11 @@ typedef struct dgb_state
 void dgb_GetState(dgb_state* out);
 /* 0: no such player in the game */
 int dgb_GetPlayer(int player, dgb_player* out);
+/* A copied, wall-respecting native aim result in the bounded +/-22.5 degree assist cone. */
+int dgb_GetVisibleTarget(int player, int angleDelta, dgb_visible_target* out);
+/* N5: the whiskers (an authored local sensor): for each angle (DOOM angle units from the view, positive left) the distance in map units to the first
+   line the player cannot pass, `range` when there is none. 0: no live player in a level (the distances are `range`) */
+int dgb_GetWhiskers(int player, const int* angleDeltas, int count, int range, int* outDistance);
 /* Loads the level again at the next tic (from the level or from the intermission after its exit): every player of the game is born again at a start, the frags go to zero. The players of "-players N" stay in the game (a new game would send them out). */
 void dgb_RestartLevel(void);
 /* The 3D view of a player of the game drawn as it is seen through his eyes, into out (320 x 200, 0x00RRGGBB, the status bar black). 0: no such player or no level */
