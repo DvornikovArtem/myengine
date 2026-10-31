@@ -1,7 +1,7 @@
 // DoomMenuBackdrop.h
 // The brain behind the menu of FlyDoom (docs/game/doom.md, "The laboratory"): a hologram of the real brain of the fly that turns slowly and is alive, because a fly at rest is
 // (the lamina hums: the "Rest" stimulus of the brain view). It loads the connectome on its own thread while the menu is already there, runs the brain on the GPU when it
-// can (on the device of the renderer, so the cloud reads the spikes without a copy) and on the CPU when it cannot, draws the cloud into a texture of the live-view service
+// can (on the device of the renderer, so the cloud reads a GPU snapshot without a CPU copy) and on the CPU when it cannot, draws the cloud into a texture of the live-view service
 // and puts it behind the menu with scan lines and a vignette over it. The engine knows it as myengine::game::IDoomBrainView.
 
 #pragma once

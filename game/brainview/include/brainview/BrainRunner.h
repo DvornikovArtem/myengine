@@ -50,12 +50,13 @@ namespace brainview
             uint64_t totalSpikes = 0;
             double spikesPerSecond = 0.0;     // of the whole brain, over the last second
             uint32_t awakeNeurons = 0;
+            std::string error;
         };
 
         struct Options
         {
             flybrain::BackendChoice backend = flybrain::BackendChoice::Cpu;
-            void* renderDevice = nullptr;              // the ID3D12Device* of the renderer: a brain on it can be drawn without a copy (IRenderAdapter::GetNativeDevice)
+            void* renderDevice = nullptr;              // the renderer's ID3D12Device*: snapshots stay on this GPU (IRenderAdapter::GetNativeDevice)
             std::vector<flybrain::Group> watchGroups;  // the groups of the HUD: on the GPU their spikes are counted per slice (there are no spike events to read without waiting)
         };
         // The spikes of a group in one slice of the simulation (the GPU backend: RecentSpikes would wait for the GPU)

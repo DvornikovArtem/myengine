@@ -143,6 +143,7 @@ namespace flybrain
         ID3D12Resource* RingBuffer() const { return ring_.Get(); }
         ID3D12Resource* CountersBuffer() const { return counters_.Get(); }
         ID3D12Resource* LastSpikeBuffer() const { return lastSpike_.Get(); }
+        std::shared_ptr<ID3D12Resource> SnapshotLastSpike();
         ID3D12Fence* Fence() const { return fence_.Get(); }
         uint64_t LastSubmittedFenceValue() const { return fenceValue_; }
 

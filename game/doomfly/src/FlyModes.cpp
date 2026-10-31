@@ -235,8 +235,7 @@ namespace doomfly
                     frame.gpu = true;
                     frame.backend = "GPU";
                     frame.gpuFlash.buffer = feed.ring.lastSpikeStep;
-                    frame.gpuFlash.fence = feed.ring.fence;
-                    frame.gpuFlash.fenceValue = feed.ring.fenceValue;
+                    frame.gpuFlash.bufferLifetime = feed.ring.lastSpikeOwner;
                     frame.gpuFlash.stepWhole = static_cast<std::uint32_t>(feed.step);
                     frame.gpuFlash.stepSeconds = static_cast<float>(dtSeconds);
                     // the step was known `since` seconds ago: the flashes go on fading between two tics of the game

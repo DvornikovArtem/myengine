@@ -103,18 +103,12 @@ namespace flybrain
         uint32_t rewardNeurons = 0;
     };
 
-    // The last spikes on the GPU, for a view that draws them without a copy to the CPU. ring: uint2 (neuron, step) x
-    // capacity; counters[0]: spikes written so far (the next index & (capacity - 1)); lastSpikeStep: uint per neuron, the
-    // step of its last spike, 0xFFFFFFFF for none (age = (CompletedStep() - step) * dt). All are in COMMON state between
-    // submissions; a graphics queue waits for fence >= fenceValue before reading
+    // Immutable GPU snapshot: uint per neuron, the last spike step or 0xFFFFFFFF for none.
+    // The GPU-to-GPU copy is complete in COMMON state when returned. Keep the owner until drawing is submitted.
     struct GpuSpikeRing
     {
-        ID3D12Resource* ring = nullptr;
-        ID3D12Resource* counters = nullptr;
         ID3D12Resource* lastSpikeStep = nullptr;
-        uint32_t capacity = 0;
-        ID3D12Fence* fence = nullptr;
-        uint64_t fenceValue = 0;
+        std::shared_ptr<ID3D12Resource> lastSpikeOwner; // immutable snapshot; keeps it alive until the consumer is done
     };
 
     // Shiu et al. 2024, model.py default_params. dt is the Brian2 default

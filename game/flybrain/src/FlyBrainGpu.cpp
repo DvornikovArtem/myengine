@@ -683,6 +683,30 @@ namespace flybrain
         readback->Unmap(0, &nothing);
     }
 
+    std::shared_ptr<ID3D12Resource> FlyBrainGpu::SnapshotLastSpike()
+    {
+        Submit();
+        Poll(true);
+        const uint64_t bytes = uint64_t(neuronCount_) * sizeof(uint32_t);
+        auto snapshot = CreateBuffer(bytes, D3D12_HEAP_TYPE_DEFAULT, false, D3D12_RESOURCE_STATE_COMMON);
+        if (!snapshot) throw std::runtime_error("Fly brain GPU: snapshot buffer allocation failed");
+        ComPtr<ID3D12CommandAllocator> allocator;
+        CheckGpu(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)), "create snapshot allocator", device_.Get());
+        CheckGpu(list_->Reset(allocator.Get(), nullptr), "reset snapshot command list", device_.Get());
+        // Both buffers are COMMON. The copy promotes them and they decay to COMMON on completion.
+        list_->CopyBufferRegion(snapshot.Get(), 0, lastSpike_.Get(), 0, bytes);
+        CheckGpu(list_->Close(), "close snapshot command list", device_.Get());
+        ID3D12CommandList* lists[] = { list_.Get() };
+        queue_->ExecuteCommandLists(1, lists);
+        detail::ProtectSubmitted([&] { Quarantine(snapshot.Get(), allocator.Get(), lastSpike_.Get()); }, [&]
+        {
+            CheckGpu(queue_->Signal(fence_.Get(), fenceValue_ + 1), "signal snapshot fence", device_.Get());
+            ++fenceValue_;
+            WaitIdle();
+        });
+        return std::shared_ptr<ID3D12Resource>(snapshot.Detach(), [](ID3D12Resource* resource) { resource->Release(); });
+    }
+
     void FlyBrainGpu::Upload(const GpuStateImage& image)
     {
         Submit();

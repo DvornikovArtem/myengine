@@ -20,6 +20,9 @@
 #include "SyntheticGraph.h"
 #include "../../game/flybrain/src/GpuFailure.h"
 
+#include <d3d12.h>
+#include <wrl/client.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -90,11 +93,78 @@ namespace
 
     std::string gAdapter;
 
+    std::vector<uint32_t> ReadSnapshot(ID3D12Resource* source, uint32_t count)
+    {
+        using Microsoft::WRL::ComPtr;
+        ComPtr<ID3D12Device> device;
+        Check(SUCCEEDED(source->GetDevice(IID_PPV_ARGS(&device))), "snapshot device");
+        D3D12_COMMAND_QUEUE_DESC queueDesc{};
+        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+        ComPtr<ID3D12CommandQueue> queue;
+        ComPtr<ID3D12CommandAllocator> allocator;
+        ComPtr<ID3D12GraphicsCommandList> list;
+        Check(SUCCEEDED(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue))), "snapshot read queue");
+        Check(SUCCEEDED(device->CreateCommandAllocator(queueDesc.Type, IID_PPV_ARGS(&allocator))), "snapshot read allocator");
+        Check(SUCCEEDED(device->CreateCommandList(0, queueDesc.Type, allocator.Get(), nullptr, IID_PPV_ARGS(&list))), "snapshot read list");
+        D3D12_HEAP_PROPERTIES heap{};
+        heap.Type = D3D12_HEAP_TYPE_READBACK;
+        heap.CreationNodeMask = heap.VisibleNodeMask = 1;
+        auto desc = source->GetDesc();
+        desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        ComPtr<ID3D12Resource> readback;
+        Check(SUCCEEDED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback))), "snapshot readback");
+        list->CopyBufferRegion(readback.Get(), 0, source, 0, uint64_t(count) * 4);
+        Check(SUCCEEDED(list->Close()), "snapshot read close");
+        ID3D12CommandList* lists[] = {list.Get()};
+        queue->ExecuteCommandLists(1, lists);
+        ComPtr<ID3D12Fence> fence;
+        Check(SUCCEEDED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))), "snapshot read fence");
+        HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        Check(event != nullptr, "snapshot read event");
+        Check(SUCCEEDED(queue->Signal(fence.Get(), 1)) && SUCCEEDED(fence->SetEventOnCompletion(1, event)), "snapshot read signal");
+        const DWORD waited = WaitForSingleObject(event, 30000);
+        CloseHandle(event);
+        Check(waited == WAIT_OBJECT_0, "snapshot read completed");
+        const D3D12_RANGE range{0, size_t(count) * 4};
+        void* mapped = nullptr;
+        Check(SUCCEEDED(readback->Map(0, &range, &mapped)) && mapped != nullptr, "snapshot read map");
+        std::vector<uint32_t> data(count);
+        std::memcpy(data.data(), mapped, size_t(count) * 4);
+        const D3D12_RANGE empty{0, 0};
+        readback->Unmap(0, &empty);
+        return data;
+    }
+
+    void TestSnapshotLifetime()
+    {
+        test::SyntheticOptions options;
+        options.neurons = 100;
+        auto connectome = test::MakeSyntheticConnectome(options);
+        GpuSpikeRing first;
+        std::vector<uint32_t> before;
+        {
+            FlyBrain brain(connectome);
+            Check(brain.SetBackend(BackendChoice::Gpu, Options()) == Backend::Gpu, "snapshot GPU backend");
+            first = brain.GetGpuSpikeRing();
+            Check(first.lastSpikeOwner && first.lastSpikeOwner.get() == first.lastSpikeStep, "snapshot has an owner");
+            before = ReadSnapshot(first.lastSpikeStep, options.neurons);
+            for (uint32_t i = 0; i < options.neurons; ++i) brain.SetDrive(i, 30.0f);
+            brain.Advance(3000);
+            auto second = brain.GetGpuSpikeRing();
+            Check(second.lastSpikeStep != first.lastSpikeStep, "later snapshot has its own buffer");
+            Check(ReadSnapshot(second.lastSpikeStep, options.neurons) != before, "later snapshot reflects new spikes");
+            Check(ReadSnapshot(first.lastSpikeStep, options.neurons) == before, "first snapshot remains unchanged after advance");
+            Check(brain.SetBackend(BackendChoice::Cpu) == Backend::Cpu, "reset to CPU backend");
+            Check(ReadSnapshot(first.lastSpikeStep, options.neurons) == before, "snapshot survives GPU backend reset");
+        }
+        Check(ReadSnapshot(first.lastSpikeStep, options.neurons) == before, "snapshot remains readable after brain destruction");
+    }
+
     void TestAvailableAndSelfTest()
     {
-        test::SyntheticOptions small;
-        small.neurons = 100;
-        auto connectome = test::MakeSyntheticConnectome(small);
+        test::SyntheticOptions graphOptions;
+        graphOptions.neurons = 100;
+        auto connectome = test::MakeSyntheticConnectome(graphOptions);
         FlyBrain brain(connectome);
         std::string error;
         if (brain.SetBackend(BackendChoice::Gpu, Options(), &error) != Backend::Gpu)
@@ -420,6 +490,8 @@ int main(int argc, char** argv)
         Check(completed.refs == 0, "confirmed completion does not retain resources");
         TestAvailableAndSelfTest();
         std::cout << "available, self-test: ok\n";
+        TestSnapshotLifetime();
+        std::cout << "GPU snapshot lifetime: ok\n";
         TestSyntheticSameAsCpu();
         std::cout << "synthetic graph, GPU = CPU spike for spike: ok\n";
         TestSilentTypesSameAsCpu();
