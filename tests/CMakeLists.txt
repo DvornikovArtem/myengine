@@ -403,6 +403,16 @@ set_property(TARGET myengine_doom_core_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_core COMMAND myengine_doom_core_tests)
 set_tests_properties(doom_core PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+# D0d: identical CPU/headless DOOM processes must keep both simulation and rendered frame hashes bit-identical.
+add_executable(myengine_doom_determinism_tests
+  doom/DoomDeterminismTests.cpp)
+target_link_libraries(myengine_doom_determinism_tests PRIVATE myengine_doom)
+target_compile_definitions(myengine_doom_determinism_tests PRIVATE DOOM_TEST_WAD_DIR="${CMAKE_SOURCE_DIR}/assets/doom")
+myengine_apply_compiler_options(myengine_doom_determinism_tests)
+set_property(TARGET myengine_doom_determinism_tests PROPERTY FOLDER "Tests")
+add_test(NAME doom_determinism COMMAND myengine_doom_determinism_tests)
+set_tests_properties(doom_determinism PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
 # G3: the Rocket League physics (Jolt) without a window
 add_executable(myengine_rl_physics_tests
   rl/RlPhysicsTests.cpp)
@@ -766,6 +776,7 @@ add_executable(myengine_doom_wallsense_tests
   doomfly/WallSenseTests.cpp)
 
 target_link_libraries(myengine_doom_wallsense_tests PRIVATE myengine_doomfly)
+target_compile_definitions(myengine_doom_wallsense_tests PRIVATE FLY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 myengine_apply_compiler_options(myengine_doom_wallsense_tests)
 set_property(TARGET myengine_doom_wallsense_tests PROPERTY FOLDER "Tests")
 add_test(NAME doom_wallsense COMMAND myengine_doom_wallsense_tests)

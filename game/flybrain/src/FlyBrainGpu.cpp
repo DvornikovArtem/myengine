@@ -1,6 +1,7 @@
 // FlyBrainGpu.cpp
 
 #include "FlyBrainGpu.h"
+#include "GpuFailure.h"
 
 #include "ShaderCompiler.h"
 
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <stdexcept>
 
 namespace flybrain
 {
@@ -91,6 +93,22 @@ namespace flybrain
                 *error = message;
             }
             return false;
+        }
+
+        void CheckGpu(HRESULT result, const char* operation, ID3D12Device* device)
+        {
+            if (SUCCEEDED(result)) return;
+            const HRESULT removed = device ? device->GetDeviceRemovedReason() : S_OK;
+            detail::CheckGpuResult(result, operation, removed);
+        }
+
+        void MapBuffer(ID3D12Resource* buffer, const D3D12_RANGE* range, void** mapped, ID3D12Device* device)
+        {
+            if (!buffer) throw std::runtime_error("Fly brain GPU: buffer allocation failed");
+            *mapped = nullptr;
+            CheckGpu(buffer->Map(0, range, mapped), "Map", device);
+            if (!*mapped && device) CheckGpu(device->GetDeviceRemovedReason(), "Map", device);
+            detail::CheckMappedPointer(*mapped);
         }
 
         uint32_t NextPowerOfTwo(uint32_t value)
@@ -228,6 +246,8 @@ namespace flybrain
         std::unique_ptr<FlyBrainGpu> gpu(new FlyBrainGpu());
         if (!gpu->Initialize(device, allowWarp, connectome, replicas, constants, ringCapacity, error))
         {
+            if (gpu->device_)
+                CheckGpu(gpu->device_->GetDeviceRemovedReason(), "initialize device", gpu->device_.Get());
             return nullptr;
         }
         return gpu;
@@ -235,25 +255,66 @@ namespace flybrain
 
     FlyBrainGpu::~FlyBrainGpu()
     {
-        if (fence_ != nullptr)
+        if (fence_ != nullptr && !waitFailed_ && !quarantined_)
         {
-            WaitIdle();
+            try { WaitIdle(); } catch (...) { Quarantine(); }
         }
+        if (waitFailed_) Quarantine();
         for (auto& slot : slots_)
         {
-            if (slot->updates != nullptr)
+            if (!quarantined_ && slot->updates != nullptr && slot->updatesMapped != nullptr)
             {
                 slot->updates->Unmap(0, nullptr);
             }
-            if (slot->plasticUpdates != nullptr)
+            if (!quarantined_ && slot->plasticUpdates != nullptr && slot->plasticMapped != nullptr)
             {
                 slot->plasticUpdates->Unmap(0, nullptr);
             }
         }
-        if (fenceEvent_ != nullptr)
+        if (fenceEvent_ != nullptr && !quarantined_)
         {
             CloseHandle(fenceEvent_);
         }
+    }
+
+    void FlyBrainGpu::Quarantine(IUnknown* extraResource, IUnknown* extraAllocator, IUnknown* extraSourceOrDestination) noexcept
+    {
+        // No fence proves the submitted commands finished. Keep every object they can reference alive until
+        // process exit; in particular a timeout is not proof of device removal. This is an exceptional exit path.
+        detail::RetainForProcess(extraResource);
+        detail::RetainForProcess(extraAllocator);
+        detail::RetainForProcess(extraSourceOrDestination);
+        if (quarantined_) return;
+        quarantined_ = true;
+        detail::RetainForProcess(device_.Get());
+        detail::RetainForProcess(queue_.Get());
+        detail::RetainForProcess(list_.Get());
+        detail::RetainForProcess(fence_.Get());
+        detail::RetainForProcess(rootSignature_.Get());
+        detail::RetainForProcess(resetPso_.Get());
+        detail::RetainForProcess(updatePso_.Get());
+        detail::RetainForProcess(compactPso_.Get());
+        detail::RetainForProcess(integratePso_.Get());
+        detail::RetainForProcess(deliverPso_.Get());
+        detail::RetainForProcess(plasticPso_.Get());
+        ID3D12Resource* buffers[] = {model_.Get(), state_.Get(), params_.Get(), pending_.Get(), spikeTotals_.Get(), arrivals_.Get(),
+            spikeList_.Get(), counters_.Get(), watchCounts_.Get(), ring_.Get(), active_.Get(), lastSpike_.Get(), silentOutput_.Get(),
+            plasticRowOffset_.Get(), edgePlastic_.Get(), plasticWeights_.Get(), powU_.Get(), powG_.Get()};
+        for (auto* buffer : buffers) detail::RetainForProcess(buffer);
+        if (graph_)
+        {
+            detail::RetainForProcess(graph_->rowStart.Get());
+            detail::RetainForProcess(graph_->targets.Get());
+            detail::RetainForProcess(graph_->weights.Get());
+        }
+        for (auto& slot : slots_)
+        {
+            detail::RetainForProcess(slot->allocator.Get());
+            detail::RetainForProcess(slot->updates.Get());
+            detail::RetainForProcess(slot->readback.Get());
+            detail::RetainForProcess(slot->plasticUpdates.Get());
+        }
+        // fenceEvent_ stays open too: an outstanding SetEventOnCompletion may still signal it.
     }
 
     ComPtr<ID3D12Resource> FlyBrainGpu::CreateBuffer(uint64_t size, D3D12_HEAP_TYPE heap, bool unordered, D3D12_RESOURCE_STATES state)
@@ -274,11 +335,11 @@ namespace flybrain
     {
         if (device != nullptr)
         {
+            device_ = device;
             if (!SupportsDoubles(device))
             {
                 return Fail(error, "the device has no double precision in compute shaders");
             }
-            device_ = device;
             adapterName_ = "the device of the application";
         }
         else
@@ -394,6 +455,7 @@ namespace flybrain
         }
         queue_->SetName(L"FlyBrain compute");
         fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!fenceEvent_) return Fail(error, "cannot create the GPU fence event");
         const uint32_t updateCapacity = std::max(4096u, neuronCount_);
         for (uint32_t k = 0; k < kSlots; ++k)
         {
@@ -409,11 +471,11 @@ namespace flybrain
                 return Fail(error, "out of GPU memory (submission buffers)");
             }
             const D3D12_RANGE nothing{ 0, 0 };
-            slot->updates->Map(0, &nothing, reinterpret_cast<void**>(&slot->updatesMapped));
+            MapBuffer(slot->updates.Get(), &nothing, reinterpret_cast<void**>(&slot->updatesMapped), device_.Get());
             slot->updateCapacity = updateCapacity;
             // Bound even without plasticity; SetPlasticity makes it as large as the learned weights
             slot->plasticUpdates = CreateBuffer(256, D3D12_HEAP_TYPE_UPLOAD, false, D3D12_RESOURCE_STATE_GENERIC_READ);
-            slot->plasticUpdates->Map(0, &nothing, reinterpret_cast<void**>(&slot->plasticMapped));
+            MapBuffer(slot->plasticUpdates.Get(), &nothing, reinterpret_cast<void**>(&slot->plasticMapped), device_.Get());
             slot->plasticCapacity = 32;
             slots_.push_back(std::move(slot));
         }
@@ -442,7 +504,8 @@ namespace flybrain
         edgePlastic_ = CreateBuffer(256, D3D12_HEAP_TYPE_DEFAULT, false, D3D12_RESOURCE_STATE_COMMON);
         plasticWeights_ = CreateBuffer(256, D3D12_HEAP_TYPE_DEFAULT, true, D3D12_RESOURCE_STATE_COMMON);
         model_ = CreateBuffer(256, D3D12_HEAP_TYPE_UPLOAD, false, D3D12_RESOURCE_STATE_GENERIC_READ);
-        if (!state_ || !params_ || !pending_ || !spikeTotals_ || !arrivals_ || !spikeList_ || !counters_ || !watchCounts_ || !ring_ || !active_ || !lastSpike_ || !model_)
+        if (!state_ || !params_ || !pending_ || !spikeTotals_ || !arrivals_ || !spikeList_ || !counters_ || !watchCounts_ || !ring_ || !active_ || !lastSpike_ || !model_
+            || !plasticRowOffset_ || !edgePlastic_ || !plasticWeights_)
         {
             return Fail(error, "out of GPU memory (neuron state)");
         }
@@ -468,7 +531,7 @@ namespace flybrain
         cb.maxWindows = kMaxWindows;
         cb.replicas = replicas;
         void* mapped = nullptr;
-        model_->Map(0, nullptr, &mapped);
+        MapBuffer(model_.Get(), nullptr, &mapped, device_.Get());
         std::memcpy(mapped, &cb, sizeof(cb));
         model_->Unmap(0, nullptr);
 
@@ -528,48 +591,93 @@ namespace flybrain
 
     void FlyBrainGpu::WaitIdle()
     {
-        if (fence_->GetCompletedValue() < fenceValue_)
+        WaitFence(fenceValue_);
+    }
+
+    void FlyBrainGpu::WaitFence(uint64_t value)
+    {
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
+        try
         {
-            fence_->SetEventOnCompletion(fenceValue_, fenceEvent_);
-            WaitForSingleObject(fenceEvent_, INFINITE);
+            uint64_t completed = fence_->GetCompletedValue();
+            if (detail::FenceDeviceLost(completed))
+            {
+                CheckGpu(device_->GetDeviceRemovedReason(), "device removed", device_.Get());
+                throw std::runtime_error("Fly brain GPU: device removed");
+            }
+            if (completed < value)
+            {
+                CheckGpu(fence_->SetEventOnCompletion(value, fenceEvent_), "fence event", device_.Get());
+                const DWORD result = WaitForSingleObject(fenceEvent_, 120000);
+                if (result != WAIT_OBJECT_0)
+                {
+                    CheckGpu(device_->GetDeviceRemovedReason(), "wait for GPU", device_.Get());
+                    throw std::runtime_error("Fly brain GPU: waiting for the GPU failed or timed out");
+                }
+                completed = fence_->GetCompletedValue();
+                if (detail::FenceDeviceLost(completed))
+                {
+                    CheckGpu(device_->GetDeviceRemovedReason(), "device removed", device_.Get());
+                    throw std::runtime_error("Fly brain GPU: device removed");
+                }
+                if (completed < value) throw std::runtime_error("Fly brain GPU: fence event signalled before completion");
+            }
+        }
+        catch (...)
+        {
+            waitFailed_ = true;
+            throw;
         }
     }
 
     void FlyBrainGpu::UploadTo(ID3D12Resource* destination, const void* data, uint64_t size)
     {
         // Once per brain: a temporary upload buffer and a wait
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
+        if (!destination) throw std::runtime_error("Fly brain GPU: destination buffer allocation failed");
         ComPtr<ID3D12Resource> upload = CreateBuffer(size, D3D12_HEAP_TYPE_UPLOAD, false, D3D12_RESOURCE_STATE_GENERIC_READ);
         void* mapped = nullptr;
-        upload->Map(0, nullptr, &mapped);
+        MapBuffer(upload.Get(), nullptr, &mapped, device_.Get());
         std::memcpy(mapped, data, static_cast<size_t>(size));
         upload->Unmap(0, nullptr);
         ComPtr<ID3D12CommandAllocator> allocator;
-        device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator));
-        list_->Reset(allocator.Get(), nullptr);
+        CheckGpu(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)), "create allocator", device_.Get());
+        CheckGpu(list_->Reset(allocator.Get(), nullptr), "reset command list", device_.Get());
         // Buffers in COMMON are promoted to COPY_DEST by the copy and decay back after the submission
         list_->CopyBufferRegion(destination, 0, upload.Get(), 0, size);
-        list_->Close();
+        CheckGpu(list_->Close(), "close command list", device_.Get());
         ID3D12CommandList* lists[] = { list_.Get() };
         queue_->ExecuteCommandLists(1, lists);
-        queue_->Signal(fence_.Get(), ++fenceValue_);
-        WaitIdle();
+        detail::ProtectSubmitted([&] { Quarantine(upload.Get(), allocator.Get(), destination); }, [&]
+        {
+            CheckGpu(queue_->Signal(fence_.Get(), fenceValue_ + 1), "signal fence", device_.Get());
+            ++fenceValue_;
+            WaitIdle();
+        });
     }
 
     void FlyBrainGpu::ReadBack(ID3D12Resource* source, void* data, uint64_t size)
     {
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
+        if (!source) throw std::runtime_error("Fly brain GPU: missing source buffer");
         ComPtr<ID3D12Resource> readback = CreateBuffer(size, D3D12_HEAP_TYPE_READBACK, false, D3D12_RESOURCE_STATE_COPY_DEST);
         ComPtr<ID3D12CommandAllocator> allocator;
-        device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator));
-        list_->Reset(allocator.Get(), nullptr);
+        if (!readback) throw std::runtime_error("Fly brain GPU: readback buffer allocation failed");
+        CheckGpu(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)), "create allocator", device_.Get());
+        CheckGpu(list_->Reset(allocator.Get(), nullptr), "reset command list", device_.Get());
         list_->CopyBufferRegion(readback.Get(), 0, source, 0, size);
-        list_->Close();
+        CheckGpu(list_->Close(), "close command list", device_.Get());
         ID3D12CommandList* lists[] = { list_.Get() };
         queue_->ExecuteCommandLists(1, lists);
-        queue_->Signal(fence_.Get(), ++fenceValue_);
-        WaitIdle();
+        detail::ProtectSubmitted([&] { Quarantine(readback.Get(), allocator.Get(), source); }, [&]
+        {
+            CheckGpu(queue_->Signal(fence_.Get(), fenceValue_ + 1), "signal fence", device_.Get());
+            ++fenceValue_;
+            WaitIdle();
+        });
         void* mapped = nullptr;
         const D3D12_RANGE range{ 0, static_cast<SIZE_T>(size) };
-        readback->Map(0, &range, &mapped);
+        MapBuffer(readback.Get(), &range, &mapped, device_.Get());
         std::memcpy(data, mapped, static_cast<size_t>(size));
         const D3D12_RANGE nothing{ 0, 0 };
         readback->Unmap(0, &nothing);
@@ -638,11 +746,12 @@ namespace flybrain
             }
             slot->plasticCapacity = static_cast<uint32_t>(std::max<size_t>(weights.size(), 256));
             slot->plasticUpdates = CreateBuffer(uint64_t(slot->plasticCapacity) * 8, D3D12_HEAP_TYPE_UPLOAD, false, D3D12_RESOURCE_STATE_GENERIC_READ);
+            slot->plasticMapped = nullptr;
             const D3D12_RANGE nothing{ 0, 0 };
-            slot->plasticUpdates->Map(0, &nothing, reinterpret_cast<void**>(&slot->plasticMapped));
+            MapBuffer(slot->plasticUpdates.Get(), &nothing, reinterpret_cast<void**>(&slot->plasticMapped), device_.Get());
         }
         ModelCb* cb = nullptr;
-        model_->Map(0, nullptr, reinterpret_cast<void**>(&cb));
+        MapBuffer(model_.Get(), nullptr, reinterpret_cast<void**>(&cb), device_.Get());
         cb->plastic = 1;
         model_->Unmap(0, nullptr);
         plastic_ = true;
@@ -699,6 +808,7 @@ namespace flybrain
 
     bool FlyBrainGpu::BeginSubmission()
     {
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
         Slot& slot = *slots_[nextSlot_];
         if (slot.fenceValue != 0)
         {
@@ -707,8 +817,8 @@ namespace flybrain
         }
         nextSlot_ = (nextSlot_ + 1) % kSlots;
         open_ = &slot;
-        slot.allocator->Reset();
-        list_->Reset(slot.allocator.Get(), resetPso_.Get());
+        CheckGpu(slot.allocator->Reset(), "reset allocator", device_.Get());
+        CheckGpu(list_->Reset(slot.allocator.Get(), resetPso_.Get()), "reset command list", device_.Get());
         slot.updateCount = 0;
         slot.plasticCount = 0;
         slot.callEnd = false;
@@ -730,6 +840,7 @@ namespace flybrain
 
     void FlyBrainGpu::RecordWindow(uint64_t begin, uint32_t steps)
     {
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
         if (open_ != nullptr && (open_->updateCount + queuedUpdates_.size() > open_->updateCapacity
             || open_->plasticCount + queuedPlastic_.size() > open_->plasticCapacity))
         {
@@ -808,6 +919,7 @@ namespace flybrain
 
     void FlyBrainGpu::Submit(bool callEnd)
     {
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
         if (open_ == nullptr)
         {
             return;
@@ -830,10 +942,14 @@ namespace flybrain
         const uint64_t countBytes = uint64_t(std::max(slot.steps, 1u)) * kWatchStride * 4;
         list_->CopyBufferRegion(slot.readback.Get(), 0, watchCounts_.Get(), 0, countBytes);
         list_->CopyBufferRegion(slot.readback.Get(), uint64_t(kMaxSteps) * kWatchStride * 4, counters_.Get(), 4, 4);
-        list_->Close();
+        CheckGpu(list_->Close(), "close command list", device_.Get());
         ID3D12CommandList* lists[] = { list_.Get() };
         queue_->ExecuteCommandLists(1, lists);
-        queue_->Signal(fence_.Get(), ++fenceValue_);
+        detail::ProtectSubmitted([&] { Quarantine(); }, [&]
+        {
+            CheckGpu(queue_->Signal(fence_.Get(), fenceValue_ + 1), "signal fence", device_.Get());
+            ++fenceValue_;
+        });
         slot.fenceValue = fenceValue_;
         submitted_.push_back(&slot);
         open_ = nullptr;
@@ -841,22 +957,24 @@ namespace flybrain
 
     void FlyBrainGpu::Poll(bool wait)
     {
+        if (waitFailed_ || quarantined_) throw std::runtime_error("Fly brain GPU: backend is unavailable after a GPU failure");
         while (!submitted_.empty())
         {
             Slot& slot = *submitted_.front();
-            if (fence_->GetCompletedValue() < slot.fenceValue)
+            const uint64_t finished = fence_->GetCompletedValue();
+            if (detail::FenceDeviceLost(finished)) WaitFence(slot.fenceValue);
+            if (finished < slot.fenceValue)
             {
                 if (!wait)
                 {
                     return;
                 }
-                fence_->SetEventOnCompletion(slot.fenceValue, fenceEvent_);
-                WaitForSingleObject(fenceEvent_, INFINITE);
+                WaitFence(slot.fenceValue);
             }
             const uint64_t bytes = kReadbackTracked + uint64_t(trackedCount_) * 4;
             const D3D12_RANGE range{ 0, static_cast<SIZE_T>(bytes) };
             uint8_t* mapped = nullptr;
-            slot.readback->Map(0, &range, reinterpret_cast<void**>(&mapped));
+            MapBuffer(slot.readback.Get(), &range, reinterpret_cast<void**>(&mapped), device_.Get());
             GpuCompletedSteps completed;
             completed.firstStep = slot.firstStep;
             completed.steps = slot.steps;

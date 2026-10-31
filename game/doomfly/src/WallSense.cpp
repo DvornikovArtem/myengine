@@ -56,10 +56,16 @@ namespace doomfly
         }
         place_ = place;
         memory_ = &memories_[place];
+        ResetTransient();
+    }
+
+    void WallSense::ResetTransient()
+    {
         recent_.clear();
         avoidTics_ = 0;
         restTics_ = 0;
         touched_ = false;
+        chance_ = brake_ = turn_ = 0.0f;
     }
 
     uint32_t WallSense::Positives() const

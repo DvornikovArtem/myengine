@@ -747,7 +747,7 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
     void TestAMaterialWithoutTexturesLoads(const fs::path& directory)
     {
         const fs::path shader = SourceDirectory() / "assets/shaders/textured_lit.shader.json";
-        json bare = {{"shader", fs::relative(shader, directory / "bare").generic_u8string()}};
+        json bare = {{"shader", shader.generic_u8string()}};
         WriteText(directory / "bare" / "bare.material.json", bare.dump(2));
         Harness harness;
         const auto material = harness.resources.Load<resource::MaterialAsset>(directory / "bare" / "bare.material.json");
@@ -781,14 +781,16 @@ float4 PSMain(float4 position : SV_POSITION) : SV_TARGET { return gTint * gStren
     {
         const fs::path shader = SourceDirectory() / "assets/shaders/textured_lit.shader.json";
         const fs::path texture = SourceDirectory() / "assets/textures/debug.bmp";
-        const auto relative = [&directory](const fs::path& path) { return fs::relative(path, directory / "mixed").generic_u8string(); };
+        // The output may be on another volume than the checkout. Absolute asset references remain valid there;
+        // fs::relative throws across Windows volumes and cannot represent these paths relatively.
+        const auto assetPath = [](const fs::path& path) { return path.generic_u8string(); };
 
         // Only the new keys: 'textures' and 'params', no 'texture' and no 'tint'
-        json onlyNew = {{"shader", relative(shader)}, {"textures", {{"gTexture", relative(texture)}}}, {"params", {{"gColor", {1.0, 0.5, 0.25, 1.0}}, {"gRoughness", 0.4}}}};
+        json onlyNew = {{"shader", assetPath(shader)}, {"textures", {{"gTexture", assetPath(texture)}}}, {"params", {{"gColor", {1.0, 0.5, 0.25, 1.0}}, {"gRoughness", 0.4}}}};
         WriteText(directory / "mixed" / "new.material.json", onlyNew.dump(2));
         // The old and the new keys together, and entries that do not read
-        json mixed = {{"shader", relative(shader)}, {"texture", relative(texture)}, {"tint", {0.1, 0.2, 0.3, 1.0}},
-            {"textures", {{"gDetail", relative(SourceDirectory() / "assets/textures/african_head_diffuse.dds")}, {"gBad", 5}}},
+        json mixed = {{"shader", assetPath(shader)}, {"texture", assetPath(texture)}, {"tint", {0.1, 0.2, 0.3, 1.0}},
+            {"textures", {{"gDetail", assetPath(SourceDirectory() / "assets/textures/african_head_diffuse.dds")}, {"gBad", 5}}},
             {"params", {{"gColor", {1.0, 0.0, 0.0, 1.0}}, {"gRoughness", "high"}, {"gSeven", {1, 2, 3, 4, 5, 6, 7}}, {"gOk", true}}}};
         WriteText(directory / "mixed" / "mixed.material.json", mixed.dump(2));
 

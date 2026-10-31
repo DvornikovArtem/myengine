@@ -106,6 +106,10 @@ DOOM рисует 320×200 (`DOOMGENERIC_RESX/RESY`) в 32-битный буфе
 
 `ctest --test-dir build -C RelWithDebInfo -R doom_core` (цель `myengine_doom_core_tests`, без окна, без звука). Нужен WAD: берётся `--wad`, переменная `FLYDOOM_WAD`, затем shareware `%LOCALAPPDATA%\FlyDoom\wads\doom1.wad`, затем `assets/doom/doom1.wad`, затем Freedoom `assets/doom/freedoom1.wad`; проверенные хэши кадра зашиты для двух файлов: shareware doom1.wad 1.9 и Freedoom 0.13.0; **без WAD тест пропускается** (код 77, `SKIP_RETURN_CODE`) — один раз выполните `tools/doom/fetch_freedoom.ps1`. DOOM нельзя запустить дважды в одном процессе, поэтому тест перезапускает сам себя на каждый сценарий (`--scenario <имя>`) и читает строки `RESULT ключ=значение` из вывода:
 
+`ctest --test-dir build -C RelWithDebInfo -R doom_determinism` запускает отдельный headless-тест: два свежих CPU-процесса получают один и тот же seeded ticcmd и сравниваются по хэшу наблюдаемого состояния (`Info`, `PlayerState`, ticcmd) и 320×200 кадра на каждом из 2200 тиков (62,9 секунды). Первая несовпавшая строка печатается как `first divergence tic ... world ... frame ...`, поэтому расхождение симуляции и рендера не смешивается. Для ручного replay trace от `myengine_fly_learn_measure` можно задать `DOOM_DETERMINISM_TRACE=<trace>`; тест воспроизводит первые 2200 команд после тех же десяти начальных тиков Fly learns. В обычном CI переменная не нужна: используется встроенный фиксированный маршрут.
+
+Для исторической проверки Fly learns два независимых CPU trace с одним seed на Freedoom (по 4200 тиков каждый) совпали построчно, включая команды, состояние игрока, frame hash и brain step. Replay одного такого trace в двух свежих DOOM-процессах также стабилен. Это снимает гипотезы о расхождении ticcmd/brain scheduling и обычного DOOM replay для данного набора данных, но не доказывает исправление старого отчёта и не является основанием для renderer tolerance или speculative-патча.
+
 | Сценарий | Что проверяет |
 | --- | --- |
 | `demo` (дважды, два процесса) | 35 тактов демо `DEMO1`: хэш кадра одинаков в двух процессах и равен зафиксированному для Freedoom 0.13.0 (хэш проверяется, когда размер WAD совпадает с известным), демо проигрывается, кадры идут |
@@ -174,6 +178,6 @@ START затемняет меню (≈ 0,5 с), создаёт игру с вы�
 - DOOM (doomgeneric, Chocolate Doom): **GNU GPL v2** — исходники игры вместе с нашими правками открыты, `COPYING` лежит в `game/doom/third_party/doomgeneric/`. Пакет FlyDoom, распространяемый кому-то, содержит `COPYING` и `SOURCE.txt` (репозиторий, хэш коммита сборки, где код DOOM и как собрать то же самое): их кладёт `package_game.ps1`.
 - Nuked OPL3: **GNU LGPL v2.1 или новее**, текст в `game/doom/third_party/opl/COPYING-nuked-opl3.txt`.
 - Freedoom: модифицированная BSD (в `assets/doom/COPYING-freedoom.txt` после скачивания).
-- Оригинальные данные DOOM: собственность владельцев, в репозиторий и в сборку не входят.
+- Полные WAD оригинальной игры в комплект не входят. Неизменённый shareware `doom1.wad` опционально включается в пакет вместе с его лицензией; его наличие перечислено в `version.txt`.
 - Значок FlyDoom — свой, рисунок мухи (`tools/gen_flydoom_icon.py`).
 - Шрифты меню: **Big Shoulders Display** (The Big Shoulders Project Authors) и **JetBrains Mono** (The JetBrains Mono Project Authors) — SIL Open Font License 1.1; `OFL.txt` лежат рядом с файлами в `assets/fonts/bigshoulders/` и `assets/fonts/jetbrainsmono/`, в пакете — `BigShoulders-OFL.txt` и `JetBrainsMono-OFL.txt`. В Big Shoulders нет кириллицы, поэтому всё, что приходит из файла или пути (имена WAD, пути), набрано JetBrains Mono, а крупными буквами — только фиксированные английские слова меню.

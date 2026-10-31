@@ -21,7 +21,7 @@ namespace myengine::core::crash
 
     // Sets the filter of the unhandled exceptions (and std::terminate, abort, a pure virtual call, a bad CRT parameter) of the process.
     // `crashDirectory` is created at the crash; `logFile` is read for its last lines.
-    void Install(const std::filesystem::path& crashDirectory, const std::filesystem::path& logFile);
+    void Install(const std::filesystem::path& crashDirectory, const std::filesystem::path& logFile, const wchar_t* productName = L"Rocket Arena");
 
     // The crash of the previous run if it has not been reported yet (the marker is removed: it is told once)
     std::optional<Report> TakePending(const std::filesystem::path& crashDirectory);

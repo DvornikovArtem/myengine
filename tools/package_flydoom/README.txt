@@ -2,10 +2,9 @@ FLYDOOM  {VERSION}
 ==================
 
 Классический DOOM (1993) на учебном движке myengine (ИТМО, курс по архитектуре игровых движков): настоящий код игры id Software
-(порт doomgeneric), кадр рисуется через DirectX 12. Дальше в серии у игры появится муха с настоящим мозгом (коннектом взрослой дрозофилы).
+(порт doomgeneric), кадр рисуется через DirectX 12. Мухой управляет модель мозга на основе коннектома взрослой дрозофилы.
 The classic DOOM (1993) on the educational engine myengine (ITMO, a course on game engine architecture): the real code of id Software
-(the doomgeneric port), the frame is drawn through DirectX 12. In the next steps of the series the game gets a fly with a real brain
-(the connectome of an adult fruit fly).
+(the doomgeneric port), the frame is drawn through DirectX 12. A simulated fruit-fly brain steers the fly using its connectome.
 
 Содержание / Contents
   1. Русский
@@ -41,8 +40,13 @@ DOOM из вашей библиотеки Steam; переменная DOOMWADDIR
   A D                           боковые шаги            Shift           бег
   стрелки влево/вправо или мышь поворот                 1 ... 7         оружие
   Ctrl или левая кнопка мыши    огонь                   Tab             карта
-  Esc                           меню (стрелки, Enter, Y/N)
-Выход: Esc > Quit Game > Y. Размер экрана и яркость: - = F11, остальные F1...F12 как в DOOM.
+  Esc                           пауза / меню (стрелки, Enter)
+В паузе можно вернуться к игре, в главное меню или выйти. Размер экрана и яркость: - = F11, остальные F1...F12 как в DOOM.
+В PLAY доступны Human plays, Fly plays, Fly learns, Human vs Fly, Fly vs Fly и Swarm.
+В Human vs Fly клавиша Tab открывает большой мозг мухи, M — карту. В обычном Human карта остаётся на Tab.
+Обученная муха использует WallSense — нашу память картинок, отдельную от коннектома. Она запоминает места на карте и доучивается в игре;
+коннектом не делает её разумным противником. Fly learns начинает с нуля; Speed MAX запускает игру так быстро, как успевает мозг,
+а фактическая скорость показана на экране. Fly brain: FROM SCRATCH отключает предобученную память в остальных режимах.
 Ключи командной строки: --iwad <файл.wad>; --doom-args "-warp 1 1 -skill 3" (командная строка самого DOOM: уровень, сложность, -nomonsters,
 -playdemo demo1); --doom-square-pixels (квадратные пиксели вместо растянутых до 4:3); --doom-no-music (без музыки).
 
@@ -90,8 +94,13 @@ To name a WAD yourself: FlyDoom.exe --iwad "D:\Games\DOOM2.WAD".
   A D                            strafe                  Shift           run
   left/right arrows or the mouse turn                    1 ... 7         weapon
   Ctrl or the left mouse button  fire                    Tab             map
-  Esc                            menu (arrows, Enter, Y/N)
-Quit: Esc > Quit Game > Y. Screen size and brightness: - = F11, the other F1...F12 as in DOOM.
+  Esc                            pause / menu (arrows, Enter)
+The pause menu can resume the game, return to the main menu or quit. Screen size and brightness: - = F11, the other F1...F12 as in DOOM.
+PLAY offers Human plays, Fly plays, Fly learns, Human vs Fly, Fly vs Fly and Swarm.
+In Human vs Fly, Tab shows the enlarged fly brain and M opens the map. In Human, Tab remains the map key.
+The trained fly uses WallSense, our picture-memory layer separate from the connectome. It remembers places on a map and keeps learning during play;
+the connectome does not make it an intelligent opponent. Fly learns starts from scratch; Speed MAX runs as fast as the brain can,
+and the actual speed is shown on screen. Fly brain: FROM SCRATCH disables the trained memory in the other modes.
 Command line: --iwad <file.wad>; --doom-args "-warp 1 1 -skill 3" (the command line of DOOM itself: level, skill, -nomonsters, -playdemo demo1);
 --doom-square-pixels (square pixels instead of the 4:3 stretch); --doom-no-music (no music).
 

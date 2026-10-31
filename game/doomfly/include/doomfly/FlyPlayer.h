@@ -31,6 +31,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -290,6 +291,7 @@ namespace doomfly
         std::condition_variable done_;
         TickInput job_;
         TickResult result_;
+        std::exception_ptr workerError_;
         bool quit_ = false;
         bool pending_ = false;                  // a tick was submitted and its result is not taken yet
         bool brainBusy_ = false;

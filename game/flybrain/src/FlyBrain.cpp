@@ -3,6 +3,7 @@
 #include <flybrain/FlyBrain.h>
 
 #include "FlyBrainGpu.h"
+#include "GpuFailure.h"
 #include "FlyBrainPlasticity.h"
 
 #include <myengine/jobs/JobSystem.h>
@@ -312,6 +313,8 @@ namespace flybrain
         }
         if (options.selfTest && !GpuSelfTest(gpu->Device(), error))
         {
+            const HRESULT removed = gpu->Device()->GetDeviceRemovedReason();
+            detail::CheckGpuResult(removed, "GPU self-test", removed);
             return Backend::Cpu;
         }
 

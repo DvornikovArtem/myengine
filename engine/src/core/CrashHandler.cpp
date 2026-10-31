@@ -32,6 +32,7 @@ namespace myengine::core::crash
         // Everything the filter needs is prepared in Install: in a crashed process nothing may allocate more than it has to
         wchar_t g_directory[MAX_PATH]{};
         wchar_t g_logFile[MAX_PATH]{};
+        wchar_t g_productName[128] = L"Rocket Arena";
         volatile LONG g_entered = 0;
 
         using MiniDumpWriteDumpFn = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION,
@@ -194,7 +195,8 @@ namespace myengine::core::crash
             char head[1024]{};
             const int headLength = std::snprintf(
                 head, sizeof(head),
-                "Rocket Arena %s (%s)\r\nTime: %04d-%02d-%02d %02d:%02d:%02d\r\nException: %s 0x%08lX at %s\r\nDump: %s\r\n\r\nThe end of the log:\r\n",
+                "%S %s (%s)\r\nTime: %04d-%02d-%02d %02d:%02d:%02d\r\nException: %s 0x%08lX at %s\r\nDump: %s\r\n\r\nThe end of the log:\r\n",
+                g_productName,
                 MYENGINE_VERSION_STRING, MYENGINE_GIT_COMMIT, now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, ExceptionName(code),
                 static_cast<unsigned long>(code), where, dumped ? "written (the .dmp next to this file)" : "NOT written");
             HANDLE text = CreateFileW(textPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -222,8 +224,8 @@ namespace myengine::core::crash
             wchar_t message[MAX_PATH * 2 + 256]{};
             if (GetEnvironmentVariableW(L"MYENGINE_CRASH_NO_DIALOG", message, 8) == 0)
             {
-                _snwprintf_s(message, _TRUNCATE, L"Rocket Arena has stopped working.\n\nThe crash report was saved to:\n%s\n\nPlease send the .txt and .dmp files to the person who gave you the game.", g_directory);
-                MessageBoxW(nullptr, message, L"Rocket Arena", MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
+                _snwprintf_s(message, _TRUNCATE, L"%s has stopped working.\n\nThe crash report was saved to:\n%s\n\nPlease send the .txt and .dmp files to the person who gave you the game.", g_productName, g_directory);
+                MessageBoxW(nullptr, message, g_productName, MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
             }
             return EXCEPTION_EXECUTE_HANDLER;
         }
@@ -277,10 +279,11 @@ namespace myengine::core::crash
         }
     }
 
-    void Install(const std::filesystem::path& crashDirectory, const std::filesystem::path& logFile)
+    void Install(const std::filesystem::path& crashDirectory, const std::filesystem::path& logFile, const wchar_t* productName)
     {
         CopyPath(g_directory, crashDirectory);
         CopyPath(g_logFile, logFile);
+        wcsncpy_s(g_productName, productName != nullptr ? productName : L"myengine", _TRUNCATE);
         SetHandlers();
     }
 

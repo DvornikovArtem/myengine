@@ -18,6 +18,7 @@
 #include <myengine/jobs/JobSystem.h>
 
 #include "SyntheticGraph.h"
+#include "../../game/flybrain/src/GpuFailure.h"
 
 #include <algorithm>
 #include <chrono>
@@ -371,6 +372,52 @@ int main(int argc, char** argv)
     int result = 0;
     try
     {
+        bool rejectedNull = false;
+        try { flybrain::detail::CheckMappedPointer(nullptr); }
+        catch (const std::runtime_error&) { rejectedNull = true; }
+        Check(rejectedNull, "a successful Map with a null pointer must be rejected");
+        int mapped = 0;
+        flybrain::detail::CheckMappedPointer(&mapped);
+        bool rejectedFailure = false;
+        try { flybrain::detail::CheckGpuResult(-1, "Map", static_cast<int32_t>(0x887A0005u)); }
+        catch (const std::runtime_error& error)
+        {
+            const std::string message = error.what();
+            rejectedFailure = message.find("Map") != std::string::npos && message.find("device lost") != std::string::npos;
+        }
+        Check(rejectedFailure, "failed Map reports the operation and lost device");
+        flybrain::detail::CheckGpuResult(0, "Map");
+        Check(flybrain::detail::FenceDeviceLost(UINT64_MAX), "removed-device fence sentinel must be recognized");
+        Check(!flybrain::detail::FenceDeviceLost(0), "an incomplete fence is not a removed device");
+        struct FakeResource
+        {
+            int refs = 1;
+            void AddRef() { ++refs; }
+            void Release() { --refs; }
+        };
+        for (const char* failure : { "signal failed", "wait timed out" })
+        {
+            FakeResource buffer, allocator, sourceOrDestination;
+            bool threw = false;
+            try
+            {
+                flybrain::detail::ProtectSubmitted([&] {
+                    flybrain::detail::RetainForProcess(&buffer);
+                    flybrain::detail::RetainForProcess(&allocator);
+                    flybrain::detail::RetainForProcess(&sourceOrDestination);
+                }, [&] { throw std::runtime_error(failure); });
+            }
+            catch (const std::runtime_error&) { threw = true; }
+            buffer.Release();
+            allocator.Release();
+            sourceOrDestination.Release();
+            Check(threw && buffer.refs == 1 && allocator.refs == 1 && sourceOrDestination.refs == 1,
+                std::string(failure) + ": submitted buffers and allocator outlive local owners");
+        }
+        FakeResource completed;
+        flybrain::detail::ProtectSubmitted([&] { flybrain::detail::RetainForProcess(&completed); }, [] {});
+        completed.Release();
+        Check(completed.refs == 0, "confirmed completion does not retain resources");
         TestAvailableAndSelfTest();
         std::cout << "available, self-test: ok\n";
         TestSyntheticSameAsCpu();

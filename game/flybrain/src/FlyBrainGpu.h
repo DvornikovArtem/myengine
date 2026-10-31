@@ -159,6 +159,8 @@ namespace flybrain
         void UploadTo(ID3D12Resource* destination, const void* data, uint64_t size);
         void ReadBack(ID3D12Resource* source, void* data, uint64_t size);
         void WaitIdle();
+        void WaitFence(uint64_t value);
+        void Quarantine(IUnknown* extraResource = nullptr, IUnknown* extraAllocator = nullptr, IUnknown* extraSourceOrDestination = nullptr) noexcept;
 
         Microsoft::WRL::ComPtr<ID3D12Device> device_;
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue_;
@@ -166,6 +168,8 @@ namespace flybrain
         Microsoft::WRL::ComPtr<ID3D12Fence> fence_;
         HANDLE fenceEvent_ = nullptr;
         uint64_t fenceValue_ = 0;
+        bool waitFailed_ = false;
+        bool quarantined_ = false;
         std::string adapterName_;
 
         Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature_;
