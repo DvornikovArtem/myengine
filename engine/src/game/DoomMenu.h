@@ -105,6 +105,7 @@ namespace myengine::game
         {
             None,
             Resume,
+            Continue,     // advance the native DOOM intermission
             DoomMenu,      // the menu of DOOM itself (save, load, options)
             Laboratory,
             Quit,
@@ -115,6 +116,8 @@ namespace myengine::game
             std::string backend;    // "GPU" / "CPU" in the modes of the fly; empty: none
             std::string speed;      // "1.7x real time": the speed of the brain; empty: none
             bool reduceMotion = false;
+            bool progressScreen = false; // the native DOOM intermission or finale is behind the pause
+            bool canContinue = false;    // a human can send the native advance edge; fly controllers keep their own round behavior
             float rightEdge = 1824.0f;   // where the right of the top line ends (a panel of the game stands at the right: the line stops before it)
             float frameRight = 0.0f;     // > 0: the right marks of the corners stand at this x of the window (design px), not at its edge
         };

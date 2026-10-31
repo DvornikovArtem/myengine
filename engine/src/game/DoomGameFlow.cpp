@@ -298,6 +298,9 @@ namespace myengine::game
         bool labPause = false;                           // the pause of Esc is open: the game stands, the player chooses (docs/game/doom.md)
         bool escWas = false;                             // Esc was down in the last frame (the edge opens the pause)
         bool escSwallow = false;                         // Esc was down when the pause opened or closed: DOOM does not get it until it is up
+        bool progressContinueHeld = false;               // one native use edge selected from the intermission pause
+        bool progressContinueKeyDown = false;            // the queued key stays down until DOOM has consumed a tic
+        int progressContinueTic = -1;                    // gameTic at the moment CONTINUE was selected
         bool tabHeld = false;                            // the key of the big brain, for the edge
         float mouseRemainder = 0.0f;                     // the part of a unit of the scaled mouse movement that was not sent yet
         std::unique_ptr<DoomAudioHost> audioHost;
@@ -1231,7 +1234,9 @@ namespace myengine::game
             else if (state == State::Game)
             {
                 const doom::GameInfo before = game->Info();
-                const bool doomMenu = before.menuActive || before.state != doom::GameState::Level;
+                // Only DOOM's own menu uses menu-letter routing. Intermission/finale still consume the game's use/fire buttons;
+                // treating every non-Level state as a menu made Space/E/Ctrl invisible to WI_checkForAccelerate/F_Ticker.
+                const bool doomMenu = before.menuActive;
                 // Esc opens the pause (not when the menu of DOOM is open: there it closes the menu, as in DOOM)
                 const bool escDown = scriptedRaw ? rawKeys[VK_ESCAPE] : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
                 bool openPause = escDown && !escWas && !before.menuActive;
@@ -1302,6 +1307,12 @@ namespace myengine::game
                             }
                         }
                     }
+                    if (progressContinueHeld && !progressContinueKeyDown)
+                    {
+                        // Inject after physical/scripted keyboard routing so a held real key cannot replace this native edge.
+                        game->PostKey(doom::key::kUse, true);
+                        progressContinueKeyDown = true;
+                    }
                     ++flowFrame;
 
                 // the mouse: the left button fires, the movement turns; the cursor is the game's only while the level plays
@@ -1346,6 +1357,14 @@ namespace myengine::game
                 else
                 {
                     game->Advance(std::min(static_cast<double>(deltaTime), kMaxFrameSeconds));
+                }
+                if (progressContinueHeld && game->Info().gameTic != progressContinueTic)
+                {
+                    // A render frame may advance zero native tics. Release only after DOOM has consumed one.
+                    game->PostKey(doom::key::kUse, false);
+                    progressContinueHeld = false;
+                    progressContinueKeyDown = false;
+                    progressContinueTic = -1;
                 }
                 if (scriptedMouseLog && flowFrame < scriptedMouseLast + 120)
                 {
@@ -1469,10 +1488,28 @@ namespace myengine::game
                         DrawBigBrainLegend(frame, data, static_cast<float>(width), static_cast<float>(height), controller->HumanPlays());
                     }
                 }
+                const doom::GameInfo displayed = game->Info();
+                const bool intermissionScreen = !displayed.menuActive && displayed.state == doom::GameState::Intermission;
+                const bool progressScreen = !displayed.menuActive &&
+                    (intermissionScreen || displayed.state == doom::GameState::Finale);
+                const bool humanPlays = controller == nullptr || controller->HumanPlays();
+                if (progressScreen && !labPause)
+                {
+                    frame.SetSpace(rlui::Space::Menu);
+                    std::vector<fd::Hint> hints;
+                    if (intermissionScreen && humanPlays)
+                    {
+                        hints.push_back({{"SPACE", "CTRL", "E"}, "CONTINUE"});
+                    }
+                    hints.push_back({{"ESC"}, "PAUSE / MAIN MENU"});
+                    fd::Hints(frame, hints);
+                }
                 if (labPause)
                 {
                     DoomMenu::PauseInfo pauseInfo;
                     pauseInfo.reduceMotion = settings.menuMotion != 0;
+                    pauseInfo.progressScreen = progressScreen;
+                    pauseInfo.canContinue = intermissionScreen && humanPlays;
                     pauseInfo.line = PauseLine();
                     if (controller == nullptr || (controller->HumanPlays() && !controller->HasPanel()))
                     {
@@ -1501,6 +1538,14 @@ namespace myengine::game
                     {
                         labPause = false;
                         escSwallow = escWas;
+                    }
+                    else if (choice == DoomMenu::PauseResult::Continue)
+                    {
+                        labPause = false;
+                        escSwallow = escWas;
+                        progressContinueHeld = true;
+                        progressContinueKeyDown = false;
+                        progressContinueTic = game->Info().gameTic;
                     }
                     else if (choice == DoomMenu::PauseResult::DoomMenu)
                     {

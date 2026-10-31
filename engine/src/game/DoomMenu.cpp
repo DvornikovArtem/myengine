@@ -1622,10 +1622,20 @@ namespace myengine::game
             const char* sub;
             PauseResult action;
         };
-        std::vector<Item> items = {{"fd/pause-resume", "01", "RESUME", "", PauseResult::Resume}, {"fd/pause-doom", "02", "DOOM MENU", "Save, load, options of DOOM", PauseResult::DoomMenu}};
+        std::vector<Item> items;
+        if (info.progressScreen && info.canContinue)
+        {
+            items.push_back({"fd/pause-continue", "01", "CONTINUE", "Advance the DOOM results", PauseResult::Continue});
+        }
+        else
+        {
+            items.push_back({"fd/pause-resume", "01", "RESUME", "", PauseResult::Resume});
+        }
+        items.push_back({"fd/pause-doom", "02", "DOOM MENU", "Save, load, options of DOOM", PauseResult::DoomMenu});
         if (canGoBack)
         {
-            items.push_back({"fd/pause-lab", "03", "LABORATORY", "Starts FlyDoom again: DOOM runs once per process", PauseResult::Laboratory});
+            items.push_back({"fd/pause-lab", "03", info.progressScreen ? "MAIN MENU" : "LABORATORY",
+                             info.progressScreen ? "Return to the FlyDoom main menu" : "Starts FlyDoom again: DOOM runs once per process", PauseResult::Laboratory});
         }
         items.push_back({"fd/pause-exit", canGoBack ? "04" : "03", "EXIT", "", PauseResult::Quit});
         float y = 420.0f;
