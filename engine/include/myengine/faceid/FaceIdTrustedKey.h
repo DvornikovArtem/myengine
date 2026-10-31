@@ -11,5 +11,5 @@
 
 namespace myengine::faceid
 {
-    inline constexpr char kTrustedPublicKeyHex[] = "";
+    inline constexpr char kTrustedPublicKeyHex[] = "2d813624a95e45a17a3555c8907bbbde4bc0fd0a6d1b8f3579d65f8b43ec5daae0005b1165b1a0d22bdf1762c5a8acd90491885972f238c89411d407908824cd";
 }
