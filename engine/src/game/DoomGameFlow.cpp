@@ -779,10 +779,22 @@ namespace myengine::game
             list->AddRectFilled(ImVec2(xPixels, yPixels), ImVec2(xPixels + wPixels, yPixels + hPixels), IM_COL32(9, 20, 46, 224));
             list->AddRectFilled(ImVec2(xPixels, yPixels), ImVec2(xPixels + 2.0f, yPixels + hPixels), IM_COL32(53, 214, 255, 255));
 
+            const float footHeight = static_cast<float>(data.debug.size()) * 19.0f + 8.0f;
+            std::size_t rows = 0;
+            std::size_t groups = 0;
+            for (const DoomPanelGroup& group : data.groups)
+            {
+                rows += group.bars.size();
+                groups += group.bars.empty() ? 0 : 1;
+            }
+            const float titles = static_cast<float>(groups) * 26.0f;
+
             // the picture of the brain
             const float cloudWidth = w - 2.0f * pad;
             const float cloudTop = y + 84.0f;
-            const float cloudHeight = std::min(cloudWidth * 1.15f, h * 0.38f);
+            // Dense modes keep their parameter rows: spend spare height on the cloud, rather than hiding more rows.
+            const float cloudBudget = h - 84.0f - 14.0f - footHeight - titles - static_cast<float>(rows) * 25.0f;
+            const float cloudHeight = std::min({cloudWidth * 1.15f, h * 0.38f, std::max(64.0f, cloudBudget)});
             list->AddRectFilled(ImVec2((x + pad) * px, cloudTop * px), ImVec2((x + pad + cloudWidth) * px, (cloudTop + cloudHeight) * px), IM_COL32(3, 6, 14, 255));
             controller->DrawBrain(list, (x + pad) * px, cloudTop * px, cloudWidth * px, cloudHeight * px);
 
@@ -798,22 +810,16 @@ namespace myengine::game
             cursor = cloudTop + cloudHeight + 14.0f;
 
             // the bars by group; the rows get what the foot leaves
-            const float footHeight = static_cast<float>(data.debug.size()) * 19.0f + 8.0f;
-            std::size_t rows = 0;
-            for (const DoomPanelGroup& group : data.groups)
-            {
-                rows += group.bars.size();
-            }
-            const float titles = static_cast<float>(data.groups.size()) * 26.0f;
             const float room = y + h - footHeight - cursor - titles;
             const float pitch = std::clamp(room / static_cast<float>(std::max<std::size_t>(rows, 1)), 25.0f, 36.0f);
+            const float rowTextSize = std::min(20.0f, pitch - 10.0f);
             for (const DoomPanelGroup& group : data.groups)
             {
                 if (group.bars.empty() || cursor + 26.0f + pitch > y + h - footHeight)
                 {
                     break;   // a title with no row under it (the foot is there) is not drawn
                 }
-                paint::Text(f, FontStyle::ExtraBoldItalic, 16.0f, {x + pad, cursor}, style::kTextFaint, group.title, Align::Left, 0.1f);
+                fd::DrawFitted(f, FontStyle::ExtraBoldItalic, 16.0f, {x + pad, cursor}, style::kTextFaint, group.title, w - 2.0f * pad, Align::Left, 0.1f);
                 cursor += 26.0f;
                 for (const DoomPanelBar& bar : group.bars)
                 {
@@ -822,11 +828,13 @@ namespace myengine::game
                         break;
                     }
                     const Color color = Color::Hex(bar.rgb);
-                    const float textWidth = paint::TextWidth(f, FontStyle::Bold, 20.0f, bar.text);
-                    fd::DrawFitted(f, FontStyle::SemiBold, 20.0f, {x + pad, cursor - 2.0f}, style::kText, bar.label, w - 2.0f * pad - textWidth - 12.0f);
-                    paint::Text(f, FontStyle::Bold, 20.0f, {x + w - pad, cursor - 2.0f}, style::kText, bar.text, Align::Right);
-                    const float barY = cursor + 24.0f;
-                    const float barHeight = 5.0f;
+                    // Stable columns: digit/sign/unit changes must not resize the label beside a live value.
+                    const float columnWidth = (w - 2.0f * pad - 12.0f) * 0.5f;
+                    fd::DrawFitted(f, FontStyle::SemiBold, rowTextSize, {x + pad, cursor - 2.0f}, style::kText, bar.label, columnWidth);
+                    fd::DrawFitted(f, FontStyle::Bold, rowTextSize, {x + w - pad, cursor - 2.0f}, style::kText, bar.text, columnWidth, Align::Right);
+                    // Even at the compact pitch, the bar ends before the next row's text begins.
+                    const float barY = cursor + pitch - 9.0f;
+                    const float barHeight = 4.0f;
                     const float barWidth = w - 2.0f * pad;
                     paint::FillRect(f, {x + pad, barY, barWidth, barHeight}, Color::Hex(0x1c3466));
                     const float fraction = std::clamp(bar.value / std::max(bar.limit, 1e-6f), bar.centered ? -1.0f : 0.0f, 1.0f);
