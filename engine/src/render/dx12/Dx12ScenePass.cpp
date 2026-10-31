@@ -74,7 +74,7 @@ namespace myengine::render::dx12
 
     bool Dx12RenderAdapter::RequestScreenshot(const std::string& path)
     {
-        screenshotPath_ = path;
+        screenshotPath_ = std::filesystem::u8path(path); // the adapter API receives UTF-8 from the editor and UI script
         return !path.empty();
     }
 

@@ -540,7 +540,7 @@ namespace myengine::render::dx12
         UINT shadowSrv_ = 0;
         std::uint32_t shadowMapSize_ = 0;
         bool shadowMapReady_ = false;          // a map was rendered this frame and holds depth
-        std::string screenshotPath_;           // RequestScreenshot: the next presented frame is saved here
+        std::filesystem::path screenshotPath_; // RequestScreenshot: the next presented frame is saved here
         std::uint64_t screenshotFrame_ = 1;    // ... from this frame on
         std::uint32_t frameDraws_ = 0;         // diagnostic counters of the last flush
         std::uint32_t frameInstanced_ = 0;
