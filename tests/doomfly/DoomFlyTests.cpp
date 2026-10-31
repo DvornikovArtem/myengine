@@ -32,6 +32,8 @@
 #endif
 #include <windows.h>
 
+extern "C" void G_ExitLevel(void);
+
 namespace
 {
     namespace fs = std::filesystem;
@@ -776,6 +778,73 @@ namespace
         return 0;
     }
 
+    // A real FlyPlayer owns the tic-command source here. A native intermission only observes BT_USE/BT_ATTACK
+    // in that command, so this catches the regression where drivesScreens posts Enter but leaves buttons clear.
+    int ScenarioIntermission(const fs::path& wad)
+    {
+        myengine::jobs::Initialize();
+        auto connectome = LoadBrain();
+        if (!connectome)
+        {
+            return 1;
+        }
+        doom::DoomConfig config;
+        config.iwad = wad;
+        config.dataDirectory = fs::temp_directory_path() / "myengine_doom_fly_intermission_test";
+        config.extraArgs = {"-warp", "1", "1", "-skill", "3", "-nomusic", "-nomonsters"};
+        std::string error;
+        auto game = doom::DoomGame::Create(config, error);
+        if (!game)
+        {
+            std::printf("  DOOM: %s\n", error.c_str());
+            myengine::jobs::Shutdown();
+            return 1;
+        }
+        for (int tic = 0; tic < 35; ++tic)
+        {
+            game->StepTic();
+        }
+        G_ExitLevel();
+        game->StepTic();
+        const bool entered = game->Info().state == doom::GameState::Intermission;
+        auto player = MakePlayer(connectome, "controls_doomfly.json", 1, [](doomfly::FlyPlayerConfig& c) {
+            c.pace = false;
+            c.playerIndex = 0;
+            c.ownView = true;
+            c.drivesScreens = true;
+        });
+        if (!player)
+        {
+            game.reset();
+            myengine::jobs::Shutdown();
+            return 1;
+        }
+        player->Attach(*game);
+        int usePulses = 0;
+        int attackPulses = 0;
+        constexpr int kMaxTics = 900;
+        for (int tic = 0; tic < kMaxTics && game->Info().state == doom::GameState::Intermission; ++tic)
+        {
+            player->StepBlocking(*game);
+            doom::TicCmd command;
+            game->GetTicCmd(0, command);
+            usePulses += (command.buttons & doom::kButtonUse) != 0 ? 1 : 0;
+            attackPulses += (command.buttons & doom::kButtonAttack) != 0 ? 1 : 0;
+        }
+        const bool advanced = game->Info().state == doom::GameState::Level && game->Info().map == 2;
+        Result("entered", entered ? "1" : "0");
+        Result("use_pulses", usePulses);
+        Result("attack_pulses", attackPulses);
+        Result("advanced", advanced ? "1" : "0");
+        Result("next_map", game->Info().map);
+        Result("next_level", game->Info().state == doom::GameState::Level ? "1" : "0");
+        player->Detach(*game);
+        player.reset();
+        game.reset();
+        myengine::jobs::Shutdown();
+        return entered && usePulses >= 3 && advanced ? 0 : 1;
+    }
+
     // ---------------------------------------------------------------------------------------------------------------------
     // the parent
 
@@ -1035,6 +1104,13 @@ namespace
 
         if (!wad.empty())
         {
+            // 7b. a real FlyPlayer drives native intermission through BT_USE pulses, not keyboard Enter
+            const ChildResult intermission = RunChild(exe, "--scenario intermission");
+            CHECK(intermission.exitCode == 0);
+            CHECK(Str(intermission, "entered") == "1");
+            CHECK(Num(intermission, "use_pulses") >= 3.0);
+            CHECK(Str(intermission, "advanced") == "1" && Num(intermission, "next_map") == 2.0 && Str(intermission, "next_level") == "1");
+
             // 8. two brains in one game
             const ChildResult duel = RunChild(exe, "--scenario duel --tics 100");
             CHECK(duel.exitCode == 0);
@@ -1117,6 +1193,11 @@ int main(int argc, char** argv)
                 return 77;
             }
             return ScenarioPlay(wad, seed, tics);
+        }
+        if (scenario == "intermission")
+        {
+            const fs::path wad = FindWad();
+            return wad.empty() ? 77 : ScenarioIntermission(wad);
         }
         std::printf("unknown scenario %s\n", scenario.c_str());
         return 2;

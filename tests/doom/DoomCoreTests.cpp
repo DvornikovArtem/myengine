@@ -28,6 +28,8 @@
 #endif
 #include <windows.h>
 
+extern "C" void G_ExitLevel(void);
+
 namespace
 {
     namespace fs = std::filesystem;
@@ -208,6 +210,60 @@ namespace
         Result("menu1", game->Info().menuActive ? "1" : "0");
         Result("frames", static_cast<double>(game->FrameCount()));
         Result("pixels", game->Pixels() != nullptr ? "1" : "0");
+        return 0;
+    }
+
+    // Native contract coverage only: this deliberately bypasses DoomGameFlow and posts kUse directly.
+    // A UI frame can be much shorter than a DOOM tic, so the Flow's intermission CONTINUE action must
+    // keep its use edge until a tic is actually consumed, then release it. Frontend routing is proved
+    // separately by the bounded hidden-desktop GUI evidence run.
+    int ScenarioIntermission(const fs::path& wad)
+    {
+        auto game = Start(wad, {"-warp", "1", "1", "-skill", "3", "-nomonsters", "-nomusic"});
+        if (!game)
+        {
+            return 1;
+        }
+        Run(*game, 35);
+        G_ExitLevel();
+        game->Advance(kTic);
+        Result("entered", game->Info().state == doom::GameState::Intermission ? "1" : "0");
+
+        // Let the real intermission stat stages reach the normal continuation point.
+        Run(*game, 280);
+        Result("stats", game->Info().state == doom::GameState::Intermission ? "1" : "0");
+        for (int press = 0; press < 3; ++press)
+        {
+            const int startTic = game->Info().gameTic;
+            bool keyDown = false;
+            bool consumed = false;
+            for (int frame = 0; frame < 240 && !consumed; ++frame)
+            {
+                if (!keyDown)
+                {
+                    game->PostKey(doom::key::kUse, true);
+                    keyDown = true;
+                }
+                game->Advance(1.0 / 240.0);
+                if (game->Info().gameTic != startTic)
+                {
+                    game->PostKey(doom::key::kUse, false);
+                    keyDown = false;
+                    consumed = true;
+                }
+            }
+            if (keyDown)
+            {
+                game->PostKey(doom::key::kUse, false);
+            }
+            for (int frame = 0; frame < 100; ++frame)
+            {
+                game->Advance(1.0 / 240.0);
+            }
+            Result((std::string("continue") + std::to_string(press + 1)).c_str(), consumed ? "1" : "0");
+        }
+        Result("next_map", game->Info().map);
+        Result("next_level", game->Info().state == doom::GameState::Level ? "1" : "0");
         return 0;
     }
 
@@ -658,6 +714,15 @@ namespace
         CHECK(std::fabs(Num(mouse, "back_and_forth")) < 0.01);
         CHECK(std::fabs(Num(mouse, "still")) < 0.01);
 
+        // 2c. native intermission contract: real level exit, sub-tic cadence, three direct native edges, E1M2.
+        // This is not a DoomGameFlow/rlui routing regression test; the frontend seam is GUI-only today.
+        const ChildResult intermission = RunChild(exe, "intermission", wad);
+        CHECK(intermission.exitCode == 0);
+        CHECK(Str(intermission, "entered") == "1");
+        CHECK(Str(intermission, "stats") == "1");
+        CHECK(Str(intermission, "continue1") == "1" && Str(intermission, "continue2") == "1" && Str(intermission, "continue3") == "1");
+        CHECK(Num(intermission, "next_map") == 2.0 && Str(intermission, "next_level") == "1");
+
         // 3. the source of tic commands (the point of extension for a brain)
         const ChildResult hook = RunChild(exe, "hook", wad);
         CHECK(hook.exitCode == 0);
@@ -758,6 +823,7 @@ int main(int argc, char** argv)
     {
         if (scenario == "demo") return ScenarioDemo(wad);
         if (scenario == "input") return ScenarioInput(wad);
+        if (scenario == "intermission") return ScenarioIntermission(wad);
         if (scenario == "mouse") return ScenarioMouse(wad);
         if (scenario == "hook") return ScenarioHook(wad);
         if (scenario == "players") return ScenarioPlayers(wad);
