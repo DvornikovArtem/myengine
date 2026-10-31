@@ -111,6 +111,9 @@ int main()
     std::printf("  chance: the wall on the left %.2f, the corridor %.2f\n", wall, corridor);
     Check(wall >= config.avoidFrom && corridor < config.avoidUntil, "the wall that came before a touch is seen coming, the corridor is not");
     Check(sense.Brake() == 1.0f && sense.TurnDegrees() > 0.0f, "it stops and turns right, away from the wall on the left");
+    const uint32_t rememberedBeforeReset = sense.Remembered();
+    sense.ResetTransient();
+    Check(sense.Remembered() == rememberedBeforeReset && sense.Brake() == 0.0f, "reset keeps learned pictures and clears the steering state");
     for (int t = 0; t < 3; ++t)
     {
         sense.Tick(Corridor(0.5f), false, false);
@@ -158,6 +161,29 @@ int main()
     frozen.SetPlace("test E1M1");
     Teach(frozen);
     Check(frozen.Remembered() == 0 && frozen.Brake() == 0.0f, "a layer that does not learn remembers nothing and never brakes");
+
+    doomfly::WallSense lifeBoundary;
+    lifeBoundary.Build(config, x, y);
+    lifeBoundary.SetPlace("test E1M1");
+    for (int t = 0; t < 10; ++t) lifeBoundary.Tick(Corridor(0.1f * t), false, true);
+    lifeBoundary.ResetTransient();
+    lifeBoundary.Tick(Picture(0, 1.3f, 0.3f), true, false);
+    Check(lifeBoundary.Positives() == 0, "a touch after respawn does not label pictures from the previous life");
+
+    doomfly::WallSense bundled;
+    bundled.Build(config, x, y);
+    const std::filesystem::path trained = std::filesystem::path(FLY_SOURCE_DIR) / "assets/flybrain/fly_trained.bin";
+    Check(bundled.Load(trained.u8string(), &error), "bundled trained memory loads: " + error);
+    Check(bundled.Places() == 18, "bundled memory has the 18 episode-one places");
+    for (const char* wad : { "doom1", "freedoom1" })
+    {
+        for (int map = 1; map <= 9; ++map)
+        {
+            const std::string place = std::string(wad) + " E1M" + std::to_string(map);
+            bundled.SetPlace(place);
+            Check(bundled.Remembered() > 0 && bundled.Positives() > 0, "trained samples are active for " + place);
+        }
+    }
 
     std::printf(g_failures == 0 ? "OK: WallSense remembers what came before a touch, per place, in its file\n" : "FAILED: %d checks\n", g_failures);
     return g_failures == 0 ? 0 : 1;

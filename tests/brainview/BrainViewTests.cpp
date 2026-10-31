@@ -619,6 +619,16 @@ namespace
             runner.Stop();
             Check(!runner.Running(), "Stop joins the thread");
             runner.Stop();   // twice is fine
+            runner.Start();
+            runner.Post([](flybrain::FlyBrain&) { throw std::runtime_error("injected runner failure"); });
+            for (int i = 0; i < 200 && runner.Running(); ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            Check(!runner.Running(), "runner stops after a worker exception");
+            Check(runner.GetStats().error == "injected runner failure", "runner exposes the worker error");
+            Check(runner.BackendText().find("injected runner failure") != std::string::npos, "runner exposes the error to the UI");
+            runner.Stop();
         }
         myengine::jobs::Shutdown();
     }

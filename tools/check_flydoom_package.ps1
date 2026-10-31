@@ -17,8 +17,8 @@
       - every WAD of the package is taken by --iwad and the game plays from it to the first level (-warp 1 1);
       - nothing is created or changed next to the exe, nothing is written to APPDATA;
       - a deliberate crash (MYENGINE_CRASH_TEST=1) leaves a minidump, a report and the marker in <LOCALAPPDATA>\FlyDoom\crashes, and the next start tells about it once.
-    The fly brain is only checked as a file: FlyDoom does not read it yet (the player of the brain is the task N1); when the log says anything about the fly brain, it must
-    not be an error. docs/game/packaging.md describes the checks.
+    This package check validates the fly brain file; separate fly-mode tests exercise its simulation. When the log mentions the brain it must not report an error.
+    docs/game/packaging.md describes the checks.
 
 .PARAMETER Dist
     The folder of the package (relative to the repository root, or a full path: the zip unpacked somewhere).

@@ -235,8 +235,7 @@ namespace doomfly
                     frame.gpu = true;
                     frame.backend = "GPU";
                     frame.gpuFlash.buffer = feed.ring.lastSpikeStep;
-                    frame.gpuFlash.fence = feed.ring.fence;
-                    frame.gpuFlash.fenceValue = feed.ring.fenceValue;
+                    frame.gpuFlash.bufferLifetime = feed.ring.lastSpikeOwner;
                     frame.gpuFlash.stepWhole = static_cast<std::uint32_t>(feed.step);
                     frame.gpuFlash.stepSeconds = static_cast<float>(dtSeconds);
                     // the step was known `since` seconds ago: the flashes go on fading between two tics of the game
@@ -832,7 +831,7 @@ namespace doomfly
             const char* title = learns ? "Fly learns" : bio ? "Fly plays (Bio neurons)" : "Fly plays (DOOMFLY neurons)";
             // N4: the curve of learning over the picture: Fly learns (from scratch, MAX speed with --fly-fast), and the trained fly
             const bool trained = player->WallSenseOn() && !learns;
-            const std::string mark = learns ? "LEARNS from scratch (our layer + KC -> MBON)" : trained ? "TRAINED (our layer, fly_trained.bin)" : "";
+            const std::string mark = learns ? "LEARNS from scratch (our layer + KC -> MBON)" : trained ? "BUNDLED MEMORY (per map, WallSense)" : "";
             return std::make_unique<FlyController>(std::move(player), title, shared->options.log, choice.render, choice.thumbnails, learns && (shared->options.fastest || choice.fastest), mark);
         }
 
@@ -1236,8 +1235,8 @@ namespace doomfly
         DoomMode learn;
         learn.id = "fly-learn";
         learn.title = "Fly learns";
-        learn.description = "The fly plays and learns: what it saw when it was hurt weakens in its mushroom body, and it keeps that between the runs. "
-                            "Our bridge: picture -> visual inputs of the Kenyon cells; MBON in the turn: our weight.";
+        learn.description = "The fly starts from scratch: WallSense, our picture-memory layer, learns from wall contacts. "
+                            "KC -> MBON synapses also learn, but have not been shown to improve wall avoidance.";
         learn.available = withFly;
         learn.unavailableReason = withFly ? "" : noBrain;
         learn.make = [shared](const DoomLaunchChoice& choice, std::string& error) { return MakeFly(shared, choice, error, true); };

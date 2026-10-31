@@ -291,11 +291,10 @@ namespace myengine::game
         float fade = 0.0f;                               // 0 .. 1: the black over the menu while it leaves; the black over the game while it comes (1 .. 0)
         float fadeIn = 0.0f;                             // 1 -> 0 after the game was made
         bool menuBuilt = false;
-        // The scripted input of the tests (MYENGINE_UI_SCRIPT): Tab and Esc of the script reach the game too (the real keys are read with GetAsyncKeyState, a script cannot press them)
+        // The scripted input of the tests (MYENGINE_UI_SCRIPT): the raw hook snapshot feeds the same key edge path as physical input
         std::function<void(rlui::RawInput&)> scriptHook;
         bool scriptedRaw = false;
-        bool rawTab = false;
-        bool rawEsc = false;
+        std::array<bool, 256> rawKeys{};
         bool labPause = false;                           // the pause of Esc is open: the game stands, the player chooses (docs/game/doom.md)
         bool escWas = false;                             // Esc was down in the last frame (the edge opens the pause)
         bool escSwallow = false;                         // Esc was down when the pause opened or closed: DOOM does not get it until it is up
@@ -321,7 +320,7 @@ namespace myengine::game
         std::string title;
 
         // MYENGINE_DOOM_KEYS="60:esc,64:-esc,90:down": keys pressed (and released with "-") at a frame of the flow, for the captures and the tests
-        // that cannot press a key on the screen of a hidden desktop. Names: esc enter up down left right fire use y n.
+        // that cannot press a key on the screen of a hidden desktop. Names: esc enter up down left right fire use y n tab.
         struct ScriptedKey
         {
             std::uint64_t frame;
@@ -512,7 +511,7 @@ namespace myengine::game
             static const Slot slots[] = {
                 {"human", "HUMAN", "Classic DOOM", "You play DOOM with the keyboard and the mouse."},
                 {"fly", "FLY PLAYS", "A brain plays", "The picture goes through the eyes into a fly brain; its descending neurons steer. The game waits for the brain."},
-                {"fly-learn", "FLY LEARNS", "A brain learns", "The fly plays and learns from the damage; it keeps what it learned between the runs (--fly-forget starts again)."},
+                {"fly-learn", "FLY LEARNS", "Learning from scratch", "WallSense is our picture-memory layer: it learns from wall contacts during this run."},
                 {"human-vs-fly", "HUMAN VS FLY", "Deathmatch", "You against a fly in one game."},
                 {"fly-vs-fly", "FLY VS FLY", "Spectator", "Two flies fight, you watch their brains."},
                 {"swarm", "SWARM", "Monsters are flies", "Every monster is a fly with a small brain."},
@@ -854,7 +853,7 @@ namespace myengine::game
         }
 
         // The big brain: the legend on a plate at the left over the picture of the brain (the panel is hidden), the hint at the foot
-        void DrawBigBrainLegend(rlui::Frame& f, const DoomPanelData& data, const float widthPixels, const float heightPixels)
+        void DrawBigBrainLegend(rlui::Frame& f, const DoomPanelData& data, const float widthPixels, const float heightPixels, const bool humanPlays)
         {
             using namespace rlui;
             const float px = f.metrics().scale;
@@ -916,16 +915,24 @@ namespace myengine::game
                 paint::Text(f, FontStyle::Bold, 20.0f, {left + inner, cursor}, style::kText, bar->text, Align::Right);
                 cursor += rowPitch;
             }
-            paint::Text(f, FontStyle::SemiBold, 20.0f, {width * 0.5f, height - 46.0f}, style::kTextDim, "Tab: back to the game", Align::Center);
+            paint::Text(f, FontStyle::SemiBold, 20.0f, {width * 0.5f, height - 46.0f}, style::kTextDim,
+                        humanPlays ? "Tab: back to the game  |  M: DOOM map" : "Tab: back to the game", Align::Center);
             f.SetSpace(Space::Menu);
         }
 
         // The keyboard into DOOM: a key that goes down (or up) since the last frame is one event
-        void PollKeyboard(const bool active, const bool doomMenu, const bool controlled = false)
+        void PollKeyboard(const bool active, const bool doomMenu, const bool controlled = false, const bool suppressTab = false)
         {
             BYTE keys[256] = {};
             const bool haveKeys = active && GetKeyboardState(keys) != FALSE;
-            auto down = [&](const int vk) { return haveKeys && (keys[vk] & 0x80) != 0; };
+            auto down = [&](const int vk)
+            {
+                if (scriptedRaw)
+                {
+                    return vk >= 0 && vk < static_cast<int>(rawKeys.size()) && rawKeys[static_cast<std::size_t>(vk)];
+                }
+                return haveKeys && (keys[vk] & 0x80) != 0;
+            };
 
             auto send = [&](const int vk, const int doomKey)
             {
@@ -973,16 +980,24 @@ namespace myengine::game
             {
                 for (const KeyMap& entry : kGameKeys)
                 {
+                    if (suppressTab && entry.vk == VK_TAB)
+                    {
+                        continue;
+                    }
                     send(entry.vk, entry.doomKey);
+                }
+                if (suppressTab)
+                {
+                    send('M', doom::key::kTab);
                 }
                 for (int vk = '1'; vk <= '9'; ++vk)
                 {
                     send(vk, vk);
                 }
-                // the letters the game itself answers to: the cheats of DOOM are typed letters, the map (Tab), Y and N of the questions
+                // the letters the game itself answers to: the cheats of DOOM are typed letters, Y and N of the questions
                 for (int vk = 'A'; vk <= 'Z'; ++vk)
                 {
-                    if (vk != 'W' && vk != 'S' && vk != 'A' && vk != 'D' && vk != 'E')
+                    if (vk != 'W' && vk != 'S' && vk != 'A' && vk != 'D' && vk != 'E' && (!suppressTab || vk != 'M'))
                     {
                         send(vk, vk - 'A' + 'a');
                     }
@@ -1203,19 +1218,22 @@ namespace myengine::game
                 {
                     svc.takeMouseDelta();
                 }
-                const bool escDown = scriptedRaw ? rawEsc : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+                const bool escDown = scriptedRaw ? rawKeys[VK_ESCAPE] : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
                 if (!escDown)
                 {
                     escSwallow = false;
                 }
                 escWas = escDown;
+                const bool brainToggle = controller != nullptr && controller->HasPanel();
+                const bool tabDown = scriptedRaw ? rawKeys[VK_TAB] : (active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0);
+                tabHeld = brainToggle && tabDown;
             }
             else if (state == State::Game)
             {
                 const doom::GameInfo before = game->Info();
                 const bool doomMenu = before.menuActive || before.state != doom::GameState::Level;
                 // Esc opens the pause (not when the menu of DOOM is open: there it closes the menu, as in DOOM)
-                const bool escDown = scriptedRaw ? rawEsc : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+                const bool escDown = scriptedRaw ? rawKeys[VK_ESCAPE] : (active && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
                 bool openPause = escDown && !escWas && !before.menuActive;
                 escWas = escDown;
                 if (!escDown)
@@ -1250,37 +1268,41 @@ namespace myengine::game
                 }
                 else
                 {
-                const bool humanPlays = controller == nullptr || controller->HumanPlays();
-                PollKeyboard(active, doomMenu, !humanPlays);
-                if (controller != nullptr && !humanPlays)
-                {
-                    // Tab is free when a controller plays (the map of DOOM is the human's): it shows the big brain
-                    const bool tab = scriptedRaw ? rawTab : (active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0);
-                    if (tab && !tabHeld)
+                    const bool humanPlays = controller == nullptr || controller->HumanPlays();
+                    const bool brainToggle = controller != nullptr && controller->HasPanel();
+                    const bool tabDown = scriptedRaw ? rawKeys[VK_TAB] : (active && (GetAsyncKeyState(VK_TAB) & 0x8000) != 0);
+                    PollKeyboard(active, doomMenu, !humanPlays, brainToggle && humanPlays);
+                    if (brainToggle && tabDown && !tabHeld)
                     {
                         controller->ToggleBigBrain();
                     }
-                    tabHeld = tab;
-                }
-                for (const ScriptedKey& key : scriptedKeys)
-                {
-                    if (key.frame == flowFrame)
+                    tabHeld = brainToggle && tabDown;
+                    for (const ScriptedKey& key : scriptedKeys)
                     {
-                        if (key.key == doom::key::kTab && controller != nullptr)
+                        if (key.frame == flowFrame)
                         {
-                            // the scripted Tab of a controller: the big brain, as the real key does
-                            if (key.pressed)
+                            if (key.key == doom::key::kTab && brainToggle)
                             {
-                                controller->ToggleBigBrain();
+                                if (key.pressed)
+                                {
+                                    if (!tabHeld)
+                                    {
+                                        controller->ToggleBigBrain();
+                                    }
+                                    tabHeld = true;
+                                }
+                                else
+                                {
+                                    tabHeld = false;
+                                }
+                            }
+                            else
+                            {
+                                game->PostKey(key.key, key.pressed);
                             }
                         }
-                        else
-                        {
-                            game->PostKey(key.key, key.pressed);
-                        }
                     }
-                }
-                ++flowFrame;
+                    ++flowFrame;
 
                 // the mouse: the left button fires, the movement turns; the cursor is the game's only while the level plays
                 const bool playing = humanPlays && active && !before.menuActive && !before.paused && before.state == doom::GameState::Level;
@@ -1444,7 +1466,7 @@ namespace myengine::game
                     controller->DrawOverlay(list, static_cast<float>(width), static_cast<float>(height));
                     if (described && big)
                     {
-                        DrawBigBrainLegend(frame, data, static_cast<float>(width), static_cast<float>(height));
+                        DrawBigBrainLegend(frame, data, static_cast<float>(width), static_cast<float>(height), controller->HumanPlays());
                     }
                 }
                 if (labPause)
@@ -1452,6 +1474,14 @@ namespace myengine::game
                     DoomMenu::PauseInfo pauseInfo;
                     pauseInfo.reduceMotion = settings.menuMotion != 0;
                     pauseInfo.line = PauseLine();
+                    if (controller == nullptr || (controller->HumanPlays() && !controller->HasPanel()))
+                    {
+                        pauseInfo.line += "  |  TAB: MAP";
+                    }
+                    else if (controller->HumanPlays() && controller->HasPanel())
+                    {
+                        pauseInfo.line += "  |  TAB: BRAIN  ·  M: MAP";
+                    }
                     if (panelWidth > 0.0f)
                     {
                         pauseInfo.rightEdge = (pictureWidth - frame.metrics().menu.x) / frame.metrics().scale - 28.0f;
@@ -1550,8 +1580,7 @@ namespace myengine::game
                                        if (impl->scriptHook)
                                        {
                                            impl->scriptHook(input);
-                                           impl->rawTab = input.keys[VK_TAB];
-                                           impl->rawEsc = input.keys[VK_ESCAPE];
+                                           std::copy(input.keys, input.keys + impl->rawKeys.size(), impl->rawKeys.begin());
                                        }
                                    });
     }

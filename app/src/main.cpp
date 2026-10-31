@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -30,6 +31,12 @@
 
 namespace
 {
+    void ShowRuntimeError(const char* title, const char* message)
+    {
+        if (GetEnvironmentVariableW(L"MYENGINE_CRASH_NO_DIALOG", nullptr, 0) == 0)
+            MessageBoxA(nullptr, message, title, MB_OK | MB_ICONERROR);
+    }
+
     struct LaunchOptions
     {
         std::filesystem::path scenePath;
@@ -476,14 +483,11 @@ namespace
 }
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
+try
 {
 #ifdef MYENGINE_FLYDOOM
     myengine::core::apppaths::SetProductFolder(L"FlyDoom");   // the files of FlyDoom: %LOCALAPPDATA%\FlyDoom
 #endif
-    // A crash leaves a minidump and a short report in <UserData>\crashes; the next start says so (docs/game/packaging.md)
-    myengine::core::crash::Install(myengine::core::apppaths::UserDataDirectory() / L"crashes", myengine::core::apppaths::LogDirectory() / L"myengine.log");
-    myengine::core::crash::CrashIfRequested();
-
     LaunchOptions options;
 #ifdef MYENGINE_FLYDOOM
     // FlyDoom.exe is this program with the game fixed to DOOM
@@ -507,6 +511,11 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
             MB_OK | MB_ICONERROR);
         return -1;
     }
+
+    // The crash report identifies the product that was actually launched, after command-line mode selection.
+    const wchar_t* crashProductName = options.doomMode ? L"FlyDoom" : (options.gameMode ? L"Rocket Arena" : L"myengine editor");
+    myengine::core::crash::Install(myengine::core::apppaths::UserDataDirectory() / L"crashes", myengine::core::apppaths::LogDirectory() / L"myengine.log", crashProductName);
+    myengine::core::crash::CrashIfRequested();
 
     if (!options.dumpShaderLayouts.empty())
     {
@@ -611,9 +620,39 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ PWSTR, _I
         app.AddEditorToolWindow("Fly Brain", [window = flyBrainWindow.get()](bool& open, const double deltaSeconds) { window->Draw(open, deltaSeconds); }, options.openFlyBrain);
     }
 
-    const int exitCode = app.Run();
+    const char* productName = options.doomMode ? "FlyDoom" : options.gameMode ? "Rocket Arena" : "myengine";
+    int exitCode = 0;
+    try
+    {
+        exitCode = app.Run();
+    }
+    catch (const std::exception& error)
+    {
+        app.GetLogger().Error(std::string(productName) + " stopped: " + error.what());
+        const std::string title = std::string(productName) + ": error";
+        ShowRuntimeError(title.c_str(), error.what());
+        exitCode = 1;
+    }
 
     flyBrainWindow.reset();   // its GPU objects go back before the renderer shuts down
     app.Shutdown();
     return exitCode;
+}
+catch (const std::exception& error)
+{
+    try
+    {
+        const auto directory = myengine::core::apppaths::LogDirectory();
+        std::error_code ignored;
+        std::filesystem::create_directories(directory, ignored);
+        std::ofstream log(directory / "myengine.log", std::ios::app);
+        log << "[ERROR] Application stopped: " << error.what() << '\n';
+    }
+    catch (...) { }
+#ifdef MYENGINE_FLYDOOM
+    ShowRuntimeError("FlyDoom: error", error.what());
+#else
+    ShowRuntimeError("myengine: error", error.what());
+#endif
+    return 1;
 }

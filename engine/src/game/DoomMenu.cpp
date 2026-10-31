@@ -93,13 +93,13 @@ namespace myengine::game
             const char* hint;     // above START
         };
         constexpr ModeInfo kModes[] = {
-            {"human", "HUMAN", "Classic DOOM", "You play DOOM with the keyboard and the mouse. Nothing stands between you and the game.", "Esc pauses the game. DOOM's own menu is in the pause."},
+            {"human", "HUMAN", "Classic DOOM", "You play DOOM with the keyboard and the mouse. Nothing stands between you and the game.", "Esc pauses. Tab opens the DOOM map."},
             {"fly", "FLY PLAYS", "A brain plays",
              "The frame of DOOM goes into the eyes of a fly brain. Its descending neurons press the keys. The game waits for the brain.", "Esc in the game pauses. Tab shows the brain big."},
-            {"fly-learn", "FLY LEARNS", "From bumping to skill",
-             "The fly starts untrained and learns from pain: walls and monsters hurt, the mushroom bodies remember. About two minutes from bumping into walls to walking round them.",
-             "Shown on screen: the real speed, bumps per minute, life time."},
-            {"human-vs-fly", "HUMAN VS FLY", "Deathmatch", "You against a fly in one deathmatch. The fly sees its own screen and plays with its own brain.", "Esc in the game pauses. Tab is the map of DOOM."},
+            {"fly-learn", "FLY LEARNS", "Learning from walls",
+             "The fly starts from scratch. WallSense learns from pictures seen before wall contact; mushroom-body activity is shown separately.",
+             "Shown on screen: actual speed, time against walls, and lifetime."},
+            {"human-vs-fly", "HUMAN VS FLY", "Deathmatch", "You against a fly in one deathmatch. The fly sees its own screen and plays with its own brain.", "Esc pauses. Tab shows the fly brain; M opens the DOOM map."},
             {"fly-vs-fly", "FLY VS FLY", "You watch", "Two flies fight each other. You watch both brains at work; Tab shows them big.", "Esc in the game pauses. Tab shows both brains big."},
             {"swarm", "SWARM", "Monsters are flies", "Every monster gets a small fly brain of its own. You play against the swarm.", "Esc in the game pauses."},
         };
@@ -1341,8 +1341,8 @@ namespace myengine::game
                 std::vector<std::string> keys;
                 const char* text;
             };
-            const std::vector<Control> first = {{{"W", "UP"}, "forward"}, {{"A", "D"}, "step aside"}, {{"CTRL", "LMB"}, "fire"}, {{"SHIFT"}, "run"}, {{"ALT"}, "strafe with the turn"}, {{"TAB"}, "map / the big brain"}};
-            const std::vector<Control> second = {{{"S", "DOWN"}, "back"}, {{"LEFT", "RIGHT", "MOUSE"}, "turn"}, {{"SPACE", "E"}, "use, open"}, {{"1", "-", "7"}, "weapon"}, {{"ESC"}, "pause"}};
+            const std::vector<Control> first = {{{"W", "UP"}, "forward"}, {{"A", "D"}, "step aside"}, {{"CTRL", "LMB"}, "fire"}, {{"SHIFT"}, "run"}, {{"ALT"}, "strafe with the turn"}, {{"TAB"}, "map / big brain in fly modes"}};
+            const std::vector<Control> second = {{{"S", "DOWN"}, "back"}, {{"LEFT", "RIGHT", "MOUSE"}, "turn"}, {{"SPACE", "E"}, "use, open"}, {{"1", "-", "7"}, "weapon"}, {{"ESC"}, "pause"}, {{"M"}, "map in Human vs Fly"}};
             for (int column = 0; column < 2; ++column)
             {
                 const std::vector<Control>& controls = column == 0 ? first : second;

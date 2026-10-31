@@ -48,8 +48,36 @@ namespace brainview
         {
             return;
         }
+        if (thread_.joinable()) thread_.join();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stats_.error.clear();
+        }
         quit_.store(false);
-        thread_ = std::thread([this]() { Loop(); });
+        try
+        {
+            thread_ = std::thread([this]() {
+                try { Loop(); }
+                catch (const std::exception& error)
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    stats_.error = error.what();
+                    backendText_ = "Brain stopped: " + stats_.error;
+                    gpuFlash_ = {};
+                    onGpu_.store(false);
+                }
+                catch (...)
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    stats_.error = "unknown brain error";
+                    backendText_ = "Brain stopped: " + stats_.error;
+                    gpuFlash_ = {};
+                    onGpu_.store(false);
+                }
+                running_.store(false);
+            });
+        }
+        catch (...) { running_.store(false); throw; }
     }
 
     void BrainRunner::Stop()
@@ -316,8 +344,7 @@ namespace brainview
                     }
                     const flybrain::GpuSpikeRing ring = brain.GetGpuSpikeRing();
                     gpuFlash_.buffer = ring.lastSpikeStep;
-                    gpuFlash_.fence = ring.fence;
-                    gpuFlash_.fenceValue = ring.fenceValue;
+                    gpuFlash_.bufferLifetime = ring.lastSpikeOwner;
                     gpuFlash_.stepWhole = static_cast<uint32_t>(brain.Step());
                     gpuFlash_.stepSeconds = static_cast<float>(dtSeconds);
                     gpuFlashTaken_ = std::chrono::steady_clock::now();

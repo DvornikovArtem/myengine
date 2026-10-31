@@ -1852,7 +1852,13 @@ namespace myengine::render::dx12
             logger_.Info("Render settings from the environment: shadows " + std::to_string(settings_.shadowQuality) + ", msaa " + std::to_string(settings_.msaaSamples) +
                 ", bloom " + std::to_string(settings_.bloom ? 1 : 0) + ", instancing " + std::to_string(settings_.instancing ? 1 : 0));
         }
-        screenshotPath_ = read("MYENGINE_SCREENSHOT");
+        wchar_t* screenshotPath = nullptr;
+        std::size_t screenshotPathLength = 0;
+        if (_wdupenv_s(&screenshotPath, &screenshotPathLength, L"MYENGINE_SCREENSHOT") == 0 && screenshotPath != nullptr)
+        {
+            screenshotPath_ = std::filesystem::path(screenshotPath);
+            std::free(screenshotPath);
+        }
         const std::string frame = read("MYENGINE_SCREENSHOT_FRAME");
         screenshotFrame_ = frame.empty() ? 1 : static_cast<std::uint64_t>(std::atoll(frame.c_str()));
     }
@@ -1888,14 +1894,14 @@ namespace myengine::render::dx12
             }
         }
         readback->Unmap(0, nullptr);
-        std::ofstream stream(std::filesystem::path(screenshotPath_), std::ios::binary); // the path came through the environment: the ANSI code page
+        std::ofstream stream(screenshotPath_, std::ios::binary); // a native path from the wide environment preserves Unicode outside the ANSI code page
         if (!stream.is_open())
         {
-            logger_.Error("Screenshot: cannot write " + screenshotPath_);
+            logger_.Error("Screenshot: cannot write " + screenshotPath_.u8string());
             return;
         }
         stream.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
-        logger_.Info("Screenshot saved: " + screenshotPath_ + " (frame " + std::to_string(frameCounter_) + ")");
+        logger_.Info("Screenshot saved: " + screenshotPath_.u8string() + " (frame " + std::to_string(frameCounter_) + ")");
     }
 
     RenderTargetHandle Dx12RenderAdapter::CreateRenderTarget(const std::uint32_t width, const std::uint32_t height)

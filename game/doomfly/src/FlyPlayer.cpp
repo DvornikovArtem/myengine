@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 namespace doomfly
 {
@@ -167,12 +168,17 @@ namespace doomfly
                 config_.log("fly: our wall layer was not saved: " + error);
             }
         }
-        if (brain_ && config_.learning.enabled && config_.learning.saveMemory && !config_.learning.memoryPath.empty())
+        if (!workerError_ && brain_ && config_.learning.enabled && config_.learning.saveMemory && !config_.learning.memoryPath.empty())
         {
-            std::string error;
-            if (!brain_->SaveMemory(config_.learning.memoryPath, &error) && config_.log)
+            try
             {
-                config_.log("fly: the memory was not saved: " + error);
+                std::string error;
+                if (!brain_->SaveMemory(config_.learning.memoryPath, &error) && config_.log)
+                    config_.log("fly: the memory was not saved: " + error);
+            }
+            catch (const std::exception& error)
+            {
+                if (config_.log) config_.log(std::string("fly: the memory was not saved: ") + error.what());
             }
         }
     }
@@ -490,6 +496,12 @@ namespace doomfly
 
     void FlyPlayer::WorkerLoop()
     {
+#ifndef MYENGINE_SHIPPING
+        char* inject = nullptr;
+        std::size_t injectSize = 0;
+        const bool injectFailure = _dupenv_s(&inject, &injectSize, "MYENGINE_FLY_TEST_WORKER_ERROR") == 0 && inject && inject[0] == '1';
+        std::free(inject);
+#endif
         for (;;)
         {
             TickInput input;
@@ -504,7 +516,24 @@ namespace doomfly
                 job_ = {};
                 brainBusy_ = true;
             }
-            TickResult result = RunTick(input);
+            TickResult result;
+            try
+            {
+#ifndef MYENGINE_SHIPPING
+                if (injectFailure) throw std::runtime_error("fly worker injected failure");
+#endif
+                result = RunTick(input);
+            }
+            catch (...)
+            {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    workerError_ = std::current_exception();
+                    brainBusy_ = false;
+                }
+                done_.notify_all();
+                return;
+            }
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 result_ = std::move(result);
@@ -535,8 +564,9 @@ namespace doomfly
         std::unique_lock<std::mutex> lock(mutex_);
         if (block)
         {
-            done_.wait(lock, [this] { return result_.valid; });
+            done_.wait(lock, [this] { return result_.valid || workerError_; });
         }
+        if (workerError_) std::rethrow_exception(workerError_);
         if (!result_.valid)
         {
             return false;
@@ -585,14 +615,20 @@ namespace doomfly
             if (died || newLevel)
             {
                 needReset_ = true;
+                wallSense_.ResetTransient();
+                input.wall = false;
+                atWall_ = false;
+                wallTicsNow_ = 0;
+                stuckCount_ = 0;
+                history_.clear();
             }
             prevHealth_ = player.health;
             prevKills_ = player.kills;
             prevItems_ = player.items;
+            prevMap_ = info.map;
+            prevEpisode_ = info.episode;
         }
         wallPunish_ = false;
-        prevMap_ = info.map;
-        prevEpisode_ = info.episode;
         if (needReset_)
         {
             input.reset = true;

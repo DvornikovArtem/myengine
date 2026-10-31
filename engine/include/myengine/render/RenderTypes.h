@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -262,6 +263,7 @@ namespace myengine::render
     struct GpuFlashSource
     {
         void* buffer = nullptr;               // ID3D12Resource* of the device of the renderer, in the COMMON state between the submissions of its owner
+        std::shared_ptr<void> bufferLifetime;  // optional owner while the source is waiting to be submitted for drawing
         void* fence = nullptr;                // ID3D12Fence* that the owner signals; the graphics queue waits for fenceValue before it reads (null: no wait)
         std::uint64_t fenceValue = 0;
         std::uint32_t stepWhole = 0;          // the step "now" on the clock of the simulation

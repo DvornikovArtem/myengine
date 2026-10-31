@@ -3,6 +3,7 @@
 #include <flybrain/FlyBrain.h>
 
 #include "FlyBrainGpu.h"
+#include "GpuFailure.h"
 #include "FlyBrainPlasticity.h"
 
 #include <myengine/jobs/JobSystem.h>
@@ -312,6 +313,8 @@ namespace flybrain
         }
         if (options.selfTest && !GpuSelfTest(gpu->Device(), error))
         {
+            const HRESULT removed = gpu->Device()->GetDeviceRemovedReason();
+            detail::CheckGpuResult(removed, "GPU self-test", removed);
             return Backend::Cpu;
         }
 
@@ -365,12 +368,9 @@ namespace flybrain
         GpuSpikeRing ring;
         if (gpu_ != nullptr)
         {
-            ring.ring = gpu_->RingBuffer();
-            ring.counters = gpu_->CountersBuffer();
-            ring.lastSpikeStep = gpu_->LastSpikeBuffer();
-            ring.capacity = gpu_->RingCapacity();
-            ring.fence = gpu_->Fence();
-            ring.fenceValue = gpu_->LastSubmittedFenceValue();
+            ring.lastSpikeOwner = gpu_->SnapshotLastSpike();
+            ring.lastSpikeStep = ring.lastSpikeOwner.get();
+            // SnapshotLastSpike waits for the copy; this immutable buffer needs no graphics queue wait.
         }
         return ring;
     }

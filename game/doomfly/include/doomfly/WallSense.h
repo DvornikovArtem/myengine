@@ -44,6 +44,8 @@ namespace doomfly
         bool Enabled() const { return config_.enabled; }
         // The place the fly is in now ("doom1 E1M1"): its own memory (a new place starts empty)
         void SetPlace(const std::string& place);
+        // Discard the pending pictures and steering state at a life boundary, keeping learned places.
+        void ResetTransient();
         const std::string& Place() const { return place_; }
         // One tic: the light of every column; `touching`: the legs push against a wall now (the mark of the pictures before); `walking`: the fly walks
         // forward (only such pictures are remembered: backing away from a wall or turning on the spot says nothing of what lies ahead)
