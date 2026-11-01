@@ -553,11 +553,18 @@ static size_t MemoryFileRead(wad_file_t *file, unsigned int offset, void *buffer
 
 static wad_file_class_t memory_file_class = { NULL, NULL, MemoryFileRead };
 
-void W_RenameLumps(const char *prefix, char replaceFirst)
+void W_RenameLumps(const char *first, const char *last, const char *prefix, char replaceFirst)
 {
-    unsigned int i;
+    int from = W_CheckNumForName((char *) first);
+    int to = W_CheckNumForName((char *) last);
+    int i;
 
-    for (i = 0; i < numlumps; ++i)
+    // only the lumps between the markers: a wall patch of the same prefix (SKULFACE of Freedoom, in P_START..P_END) must keep its name for R_InitTextures
+    if (from < 0 || to < 0)
+    {
+        return;
+    }
+    for (i = from + 1; i < to; ++i)
     {
         if (strncasecmp(lumpinfo[i].name, prefix, 4) == 0)
         {

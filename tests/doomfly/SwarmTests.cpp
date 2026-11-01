@@ -114,6 +114,27 @@ namespace
         return {};
     }
 
+    // a WAD of assets/doom by its name (doom1.wad, freedoom1.wad), the shareware one also from %LOCALAPPDATA%/FlyDoom/wads
+    fs::path FindNamedWad(const std::string& name)
+    {
+        std::error_code ec;
+        const fs::path candidate = SourceDirectory() / "assets" / "doom" / name;
+        if (fs::is_regular_file(candidate, ec))
+        {
+            return candidate;
+        }
+        wchar_t local[MAX_PATH * 2] = {};
+        if (name == "doom1.wad" && GetEnvironmentVariableW(L"LOCALAPPDATA", local, static_cast<DWORD>(sizeof(local) / sizeof(local[0]))) > 0)
+        {
+            const fs::path shareware = fs::path(local) / L"FlyDoom" / L"wads" / L"doom1.wad";
+            if (fs::is_regular_file(shareware, ec))
+            {
+                return shareware;
+            }
+        }
+        return {};
+    }
+
     // ---------------------------------------------------------------- sprites
 
     int ScenarioSprites()
@@ -321,6 +342,64 @@ namespace
             }
         }
     };
+
+    // N6: DOOM starts with the swarm on the WAD (on Freedoom the renaming of the sprites of the Lost Soul once took the wall patch SKULFACE and R_InitTextures
+    // stopped), and the first wave comes
+    int ScenarioStart(const fs::path& wad)
+    {
+        myengine::jobs::Initialize();
+        auto circuit = LoadCircuit();
+        if (!circuit)
+        {
+            return 1;
+        }
+        doom::DoomConfig config;
+        config.iwad = wad;
+        config.dataDirectory = fs::temp_directory_path() / "myengine_doom_swarm_test";
+        config.extraArgs = {"-warp", "1", "1", "-skill", "3", "-nomusic", "-nomonsters", doom::swarm::kStartArgument};
+        std::string error;
+        auto game = doom::DoomGame::Create(config, error);
+        Result("doom_started", game ? 1.0 : 0.0);
+        if (!game)
+        {
+            std::printf("  DOOM: %s\n", error.c_str());
+            myengine::jobs::Shutdown();
+            return 0;
+        }
+        doomfly::SwarmConfig swarmConfig;
+        swarmConfig.circuit = circuit;
+        swarmConfig.seed = 7;
+        auto swarm = doomfly::FlySwarm::Create(swarmConfig, error);
+        if (!swarm)
+        {
+            std::printf("  the swarm: %s\n", error.c_str());
+            return 1;
+        }
+        TestPlayer human;
+        game->SetTicCmdSource(&human);
+        int firstWaveTic = -1;
+        int alive = 0;
+        for (int tic = 0; tic < 300 && firstWaveTic < 0; ++tic)
+        {
+            swarm->StepTic(*game);   // steps the game too
+            if (swarm->Stats().wave == 1 && swarm->Stats().flies > 0)
+            {
+                firstWaveTic = tic;
+                for (const auto& fly : swarm->Flies())
+                {
+                    alive += fly.alive ? 1 : 0;
+                }
+            }
+        }
+        Result("first_wave_tic", firstWaveTic);
+        Result("wave1_size", swarm->Stats().waveSize);
+        Result("wave1_alive", alive);
+        game->SetTicCmdSource(nullptr);
+        swarm.reset();
+        myengine::jobs::Shutdown();
+        game.reset();
+        return 0;
+    }
 
     // `flies` and `backend` for a measurement of a big swarm (--flies 32 --wave 7 --backend gpu); the checks of the waves are for the defaults
     int ScenarioGame(const fs::path& wad, const int maxTics, const int flies, const int startWave, const flybrain::BackendChoice backend)
@@ -635,6 +714,21 @@ namespace
             CHECK(Num(brain, "left_100_turn") > 0.2);   // looming on the left turns the fly to the right, away from it
             CHECK(Num(brain, "left_100_escape_spikes") >= Num(brain, "left_25_escape_spikes"));
         }
+        for (const char* name : {"doom1.wad", "freedoom1.wad"})
+        {
+            if (!haveCircuit || FindNamedWad(name).empty())
+            {
+                std::printf("doom_fly_swarm: the start on %s is skipped (%s)\n", name, !haveCircuit ? "no circuit" : "no such WAD in assets/doom: tools/doom/fetch_freedoom.ps1");
+                continue;
+            }
+            const ChildResult start = RunChild(exe, std::string("--scenario start --wad-name ") + name);
+            CHECK(start.exitCode == 0);
+            std::printf("start on %s: DOOM started %.0f, wave 1 of %.0f flies at tic %.0f, %.0f alive\n", name, Num(start, "doom_started"), Num(start, "wave1_size"),
+                        Num(start, "first_wave_tic"), Num(start, "wave1_alive"));
+            CHECK(Num(start, "doom_started") == 1.0);
+            CHECK(Num(start, "first_wave_tic") >= 0.0);
+            CHECK(Num(start, "wave1_size") == 8.0 && Num(start, "wave1_alive") == 8.0);
+        }
         if (!haveCircuit || !haveWad)
         {
             std::printf("doom_fly_swarm: the game is skipped (%s)\n", !haveCircuit ? "no circuit" : "no WAD: tools/doom/fetch_freedoom.ps1");
@@ -670,6 +764,7 @@ namespace
 int main(const int argc, char** argv)
 {
     std::string scenario;
+    std::string wadName;
     int tics = 3500;
     int flies = 16;
     int startWave = 1;
@@ -696,6 +791,10 @@ int main(const int argc, char** argv)
         {
             flybrain::ParseBackendChoice(argv[++i], backend);
         }
+        else if (std::strcmp(argv[i], "--wad-name") == 0 && i + 1 < argc)
+        {
+            wadName = argv[++i];
+        }
         else if (std::strcmp(argv[i], "--verbose") == 0)
         {
             g_verbose = true;
@@ -706,6 +805,11 @@ int main(const int argc, char** argv)
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         if (scenario == "sprites") return ScenarioSprites();
         if (scenario == "brain") return ScenarioBrain();
+        if (scenario == "start")
+        {
+            const fs::path wad = FindNamedWad(wadName);
+            return wad.empty() ? 77 : ScenarioStart(wad);
+        }
         if (scenario == "game")
         {
             const fs::path wad = FindWad();
