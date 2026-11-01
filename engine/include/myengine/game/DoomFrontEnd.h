@@ -92,7 +92,7 @@ namespace myengine::game
         std::string lastMode = "human";  // the id of the mode
         std::string controlSet = "doomfly";
         std::string backend = "auto";
-        std::string iwad;                // the path of the WAD that was chosen, empty: the best found
+        std::string iwad;                // the path of the WAD that was chosen, in UTF-8; empty: the best found
         int episode = 0;                 // 0: the title screen of DOOM
         int map = 1;
         int skill = 3;

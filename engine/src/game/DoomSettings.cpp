@@ -128,7 +128,8 @@ namespace myengine::game
         const std::filesystem::path temporary = file.wstring() + L".tmp";
         {
             std::ofstream stream(temporary, std::ios::trunc);
-            stream << root.dump(2) << "\n";
+            // a text that is not UTF-8 (a path in the code page of Windows) must not stop the game: its bad bytes become U+FFFD
+            stream << root.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) << "\n";
             if (!stream)
             {
                 return false;
