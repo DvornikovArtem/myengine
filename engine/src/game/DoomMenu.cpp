@@ -448,7 +448,7 @@ namespace myengine::game
         {
             for (const DoomWadEntry& wad : model.wads)
             {
-                if (!settings.iwad.empty() && wad.path.string() != settings.iwad)
+                if (!settings.iwad.empty() && wad.path.u8string() != settings.iwad)
                 {
                     continue;
                 }
@@ -483,7 +483,7 @@ namespace myengine::game
             }
             for (std::size_t i = 0; i < model.wads.size(); ++i)
             {
-                if (!settings.iwad.empty() && model.wads[i].path.string() == settings.iwad)
+                if (!settings.iwad.empty() && model.wads[i].path.u8string() == settings.iwad)
                 {
                     wadIndex_ = static_cast<int>(i);
                 }
@@ -1126,7 +1126,7 @@ namespace myengine::game
                 request.iwad = wad.path;
                 request.doomArgs = WarpArguments(wad.path, level, settings.skill);
                 settings.lastMode = chosen->id;
-                settings.iwad = wad.path.string();
+                settings.iwad = wad.path.u8string();   // UTF-8: the JSON of the settings takes nothing else (a WAD in a folder with a Russian name made the save throw)
                 settings.episode = level.episode;
                 settings.map = level.map;
                 Sound(fd::Sfx::Start);

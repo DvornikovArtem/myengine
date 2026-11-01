@@ -98,6 +98,21 @@ namespace
         Check(settings.Save(file) && !fs::exists(file.wstring() + L".tmp"), "no temporary file is left");
         // a place that cannot be written: false, not a crash
         Check(!settings.Save(directory / "FlyDoom" / "settings.json" / "inside-a-file.json"), "a path inside a file cannot be written");
+
+        // the game in a folder with a Russian name ("C:\Users\...\Рабочий стол\FlyDoom"): the menu keeps the WAD in UTF-8 and it comes back as it was
+        const fs::path russian = fs::path(L"C:\\Users\\ivan\\OneDrive\\\u0420\u0430\u0431\u043e\u0447\u0438\u0439 \u0441\u0442\u043e\u043b\\FlyDoom\\assets\\doom\\freedoom1.wad");
+        DoomSettings utf8 = settings;
+        utf8.iwad = russian.u8string();
+        Check(utf8.Save(file), "a WAD under a Russian folder is saved");
+        DoomSettings utf8Back;
+        Check(utf8Back.Load(file) && fs::u8path(utf8Back.iwad) == russian, "and read back as the same path");
+        // the same path in the code page of Windows (what path.string() gave before): the save does not throw and writes the rest
+        DoomSettings ansi = settings;
+        ansi.iwad = "C:\\Users\\ivan\\OneDrive\\\xD0\xE0\xE1\xEE\xF7\xE8\xE9 \xF1\xF2\xEE\xEB\\FlyDoom\\assets\\doom\\freedoom1.wad";
+        ansi.skill = 2;
+        Check(ansi.Save(file), "a path that is not UTF-8 does not stop the save (it used to throw json type_error 316)");
+        DoomSettings ansiBack;
+        Check(ansiBack.Load(file) && ansiBack.skill == 2, "and the other settings are there");
     }
 
     void TestLevels()
