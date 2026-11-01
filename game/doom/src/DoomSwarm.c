@@ -108,8 +108,9 @@ void DG_AfterIwad(void)
     {
         return;
     }
-    /* the sprites of the Lost Soul of the WAD (Freedoom has them, the shareware DOOM has none) go out of the way of the sprite scan, ours come in */
-    W_RenameLumps("SKUL", 'X');
+    /* the sprites of the Lost Soul of the WAD (Freedoom has them, the shareware DOOM has none) go out of the way of the sprite scan, ours come in; only in
+     * the sprite section: the wall patch SKULFACE of Freedoom (texture A-BROWN4) keeps its name */
+    W_RenameLumps("S_START", "S_END", "SKUL", 'X');
     W_InsertMemoryLumps("S_END", g_spriteCount, (const char(*)[8]) g_spriteNames, (const unsigned char* const*) g_spriteData, g_spriteSizes);
     if (g_soundCount > 0)
     {
