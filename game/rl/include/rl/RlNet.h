@@ -23,6 +23,9 @@
 #include <rl/RlNetProtocol.h>
 #include <rl/net/NetTransport.h>
 
+#include <myengine/net/NetLog.h>
+#include <myengine/net/NetRpc.h>
+
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -52,6 +55,23 @@ namespace rl
         double lastRollbackMs = 0.0;      // CPU time of the thread, like the next one
         double maxRollbackMs = 0.0;
         double stepMsMax = 0.0;           // slowest single tick (host or client); CPU time of the thread (RlClock.h), not wall time
+        uint64_t snapshotsMissed = 0;     // client: snapshots that never came (gaps in their ticks): the losses of the unreliable stream
+        uint64_t unknownMessages = 0;     // messages of a type nobody handles, thrown away (logged)
+        uint64_t malformedMessages = 0;   // messages that did not decode, thrown away (logged)
+
+        // client: the share of the snapshots that were lost, in percent
+        double SnapshotLossPercent() const
+        {
+            const uint64_t expected = snapshots + snapshotsMissed;
+            return expected == 0 ? 0.0 : 100.0 * static_cast<double>(snapshotsMissed) / static_cast<double>(expected);
+        }
+    };
+
+    // A quick chat that the host accepted (RlRpcMethod::QuickChat): every machine shows it in the feed
+    struct RlQuickChat
+    {
+        int slot = -1;
+        int phrase = 0;
     };
 
     // ------------------------------------------------------------------------------------------------------------------------------
@@ -103,6 +123,16 @@ namespace rl
         // After each simulated tick: the tick that was just simulated and the match (tests)
         void SetTickObserver(std::function<void(uint32_t, const RlMatch&)> observer);
 
+        // ---- RPC (myengine/net/NetRpc.h). The host serves the methods of RlRpcMethod to its guests; its own player calls the same methods
+        // without the network, through the same checks. Every call gives one result in TakeRpcResults.
+        uint32_t Call(uint16_t method, const std::vector<uint8_t>& args, const std::string& name = {});
+        uint32_t QuickChat(int phrase);
+        std::vector<net::RpcResult> TakeRpcResults();
+        std::vector<RlQuickChat> TakeQuickChats();          // the accepted quick chats of everybody, the host's included
+        const net::RpcCounters& RpcServerCounters() const;  // the calls of the guests and of the host's player
+        const net::NetBadMessages& BadMessages() const;     // what the host received and threw away
+        const std::string& LastRpcLine() const;             // the last call it served: "QuickChat #3 from peer 2: OK - ..."
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl_;
@@ -153,6 +183,21 @@ namespace rl
         // The time scale and margin debug (tests)
         double TimeScale() const;
         void SetTickObserver(std::function<void(uint32_t, const RlMatch&)> observer);
+
+        // ---- RPC (myengine/net/NetRpc.h): calls of the methods of the host (RlRpcMethod). Every call gives one result in TakeRpcResults: the
+        // reply of the host, a Timeout after 3 s without it, or Closed when the connection ends first.
+        uint32_t Call(uint16_t method, const std::vector<uint8_t>& args, const std::string& name = {});
+        uint32_t QuickChat(int phrase);
+        std::vector<net::RpcResult> TakeRpcResults();
+        std::vector<RlQuickChat> TakeQuickChats();       // the quick chats the host accepted (ours included)
+        const net::RpcCounters& RpcClientCounters() const;
+        const net::NetBadMessages& BadMessages() const;  // what this client received and threw away
+
+        // ---- the checks of the defense (docs/network/lab4-demo.md)
+        // Sends what the host cannot use: a message of an unknown type, a cut Input and a cut RpcCall. The host counts and logs them and goes on.
+        void SendBrokenMessages();
+        // The protocol version the Join says (0: kNetProtocolVersion), before Connect: a host of another version refuses the client
+        void SetProtocolVersion(uint16_t version);
 
     private:
         struct Impl;

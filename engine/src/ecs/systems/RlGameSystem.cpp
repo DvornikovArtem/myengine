@@ -87,7 +87,7 @@ namespace myengine::ecs::systems
 
         std::string Format(const char* format, ...)
         {
-            char buffer[200];
+            char buffer[400];
             va_list args;
             va_start(args, format);
             std::vsnprintf(buffer, sizeof(buffer), format, args);
@@ -252,6 +252,21 @@ namespace myengine::ecs::systems
         int localSlot = 0;
         std::string onlineStatus;
         std::chrono::steady_clock::time_point onlineEpoch = std::chrono::steady_clock::now();
+
+        // LR4 (docs/network/lab4-demo.md): the network panel (F2), the results of the RPC calls and the traffic per second
+        struct RpcLine
+        {
+            std::string text;
+            float age = 0.0f;
+        };
+        bool netPanel = false;
+        std::deque<RpcLine> rpcLines;
+        rl::net::NetTransportStats rateFrom;
+        double rateTime = -1.0;
+        double upKBs = 0.0;
+        double downKBs = 0.0;
+        double upPackets = 0.0;
+        double downPackets = 0.0;
 
         // rl_tuning.json is read again when it changes on disk (and the RL Tuning window edits the same numbers and writes them back)
         std::filesystem::path tuningPath;
@@ -853,6 +868,7 @@ namespace myengine::ecs::systems
             const bool menuPressed = edge(rl::RlButtonAction::Menu);
             edge(rl::RlButtonAction::Scoreboard);
             scoreboard = state.Down(rl::RlButtonAction::Scoreboard);
+            NetFrame(windowActive, deltaTime);
 
             if (gameMode)
             {
@@ -1321,6 +1337,7 @@ namespace myengine::ecs::systems
             {
                 netClient = std::make_unique<rl::RlNetClient>(*transport, tuning, &game::SimCars());
                 netClient->SetCar(game::SimCarIndex(selectedCar));
+                netClient->SetProtocolVersion(online.protocolVersion);
                 if (!netClient->Connect(online.address, "player", error))
                 {
                     onlineStatus = error;
@@ -1330,6 +1347,195 @@ namespace myengine::ecs::systems
                 onlineStatus = "connecting to " + online.address;
             }
             return true;
+        }
+
+        // ---- the network of LR4: the keys of the checks, the results of the calls, the panel ------------------------------------------------
+
+        // Once a frame while a host or a client exists (the game mode and the Play of the editor)
+        void NetFrame(const bool windowActive, const float deltaTime)
+        {
+            if (netHost == nullptr && netClient == nullptr)
+            {
+                rpcLines.clear();
+                rateTime = -1.0;
+                status_.hud.netLines.clear();
+                return;
+            }
+            if (windowActive)
+            {
+                const auto call = [this](std::uint16_t method, const std::vector<std::uint8_t>& args, const char* name)
+                {
+                    if (netHost != nullptr)
+                    {
+                        netHost->Call(method, args, name);
+                    }
+                    else
+                    {
+                        netClient->Call(method, args, name);
+                    }
+                };
+                for (int n = 1; n <= 4; ++n)
+                {
+                    if (input.WasKeyPressed(static_cast<std::uint32_t>('0' + n)))
+                    {
+                        call(static_cast<std::uint16_t>(rl::RlRpcMethod::QuickChat), {static_cast<std::uint8_t>(n - 1)}, "QuickChat");
+                    }
+                }
+                if (input.WasKeyPressed(VK_F2))
+                {
+                    netPanel = !netPanel;
+                }
+                if (input.WasKeyPressed(VK_F6))
+                {
+                    call(999, {}, "");  // a method the host does not have
+                }
+                if (input.WasKeyPressed(VK_F7))
+                {
+                    call(static_cast<std::uint16_t>(rl::RlRpcMethod::QuickChat), {200}, "QuickChat");  // a phrase that does not exist
+                }
+                if (input.WasKeyPressed(VK_F8))
+                {
+                    call(static_cast<std::uint16_t>(rl::RlRpcMethod::StartMatch), {}, "StartMatch");  // a guest may not start the match
+                }
+                if (input.WasKeyPressed(VK_F9) && netClient != nullptr)
+                {
+                    netClient->SendBrokenMessages();
+                    PushRpcLine("sent 4 broken messages to the host: see its panel and log");
+                }
+            }
+
+            std::vector<myengine::net::RpcResult> results = netHost != nullptr ? netHost->TakeRpcResults() : netClient->TakeRpcResults();
+            for (const myengine::net::RpcResult& r : results)
+            {
+                std::string line = Format("RPC %s #%u: %s", r.methodName.c_str(), r.request, myengine::net::RpcStatusName(r.status));
+                if (r.status == myengine::net::RpcStatus::Ok || r.status == myengine::net::RpcStatus::Timeout)
+                {
+                    line += Format(" in %.0f ms", r.latencyMs);
+                }
+                if (!r.text.empty())
+                {
+                    line += " - " + r.text;
+                }
+                PushRpcLine(line);
+            }
+            for (const rl::RlQuickChat& chat : netHost != nullptr ? netHost->TakeQuickChats() : netClient->TakeQuickChats())
+            {
+                if (gameMode)
+                {
+                    rlui::HudEvent event;
+                    event.type = rlui::HudEventType::QuickChat;
+                    event.player = chat.slot;
+                    event.text = rl::RlQuickChatText(chat.phrase);
+                    hudEvents.push_back(event);
+                }
+                else
+                {
+                    PushRpcLine(Format("CHAT slot %d: %s", chat.slot, rl::RlQuickChatText(chat.phrase)));
+                }
+            }
+            // the events of the protocol reach the screen through the match (the feed) and the observer: here they are only let go
+            if (netHost != nullptr)
+            {
+                netHost->TakeEvents();
+            }
+            else
+            {
+                netClient->TakeEvents();
+            }
+
+            for (RpcLine& line : rpcLines)
+            {
+                line.age += deltaTime;
+            }
+            while (!rpcLines.empty() && rpcLines.front().age > 8.0f)
+            {
+                rpcLines.pop_front();
+            }
+
+            // the traffic per second: two readings of the counters of the transport a second apart
+            if (transport != nullptr)
+            {
+                const double now = OnlineNow();
+                const rl::net::NetTransportStats current = transport->Stats();
+                if (rateTime < 0.0 || current.packetsSent < rateFrom.packetsSent)
+                {
+                    rateFrom = current;
+                    rateTime = now;
+                }
+                else if (now - rateTime >= 1.0)
+                {
+                    const double seconds = now - rateTime;
+                    upKBs = static_cast<double>(current.bytesSent - rateFrom.bytesSent) / 1024.0 / seconds;
+                    downKBs = static_cast<double>(current.bytesReceived - rateFrom.bytesReceived) / 1024.0 / seconds;
+                    upPackets = static_cast<double>(current.packetsSent - rateFrom.packetsSent) / seconds;
+                    downPackets = static_cast<double>(current.packetsReceived - rateFrom.packetsReceived) / seconds;
+                    rateFrom = current;
+                    rateTime = now;
+                }
+            }
+            status_.hud.netLines = NetLines();
+        }
+
+        void PushRpcLine(const std::string& text)
+        {
+            rpcLines.push_back({text, 0.0f});
+            while (rpcLines.size() > 4)
+            {
+                rpcLines.pop_front();
+            }
+        }
+
+        // The panel (when F2 turned it on) and the results of the last calls (always, for 8 s)
+        std::vector<std::string> NetLines() const
+        {
+            std::vector<std::string> lines;
+            if (netPanel && transport != nullptr)
+            {
+                const rl::RlNetStats& stats = netHost != nullptr ? netHost->Stats() : netClient->Stats();
+                const rl::net::NetTransportStats t = transport->Stats();
+                const myengine::net::NetBadMessages& bad = netHost != nullptr ? netHost->BadMessages() : netClient->BadMessages();
+                if (netHost != nullptr)
+                {
+                    lines.push_back(Format("NET HOST  port %u   guests %d   connections %d   tick %u", static_cast<unsigned>(transport->LocalPort()), netHost->ClientCount(), t.peers, stats.tick));
+                }
+                else
+                {
+                    lines.push_back(Format("NET CLIENT  slot %d   tick %u   lead %d   rollbacks %llu   hard corrections %llu", localSlot, stats.tick, stats.lead,
+                                           static_cast<unsigned long long>(stats.rollbacks), static_cast<unsigned long long>(stats.hardCorrections)));
+                }
+                lines.push_back(Format("RTT %.0f ms   up %.1f kB/s (%.0f packets/s)   down %.1f kB/s (%.0f packets/s)", stats.rttMs, upKBs, upPackets, downKBs, downPackets));
+                lines.push_back(Format("packets sent %llu / received %llu   bytes %.1f / %.1f MB   resent %llu (%.1f%% of reliable)   dropped %llu",
+                                       static_cast<unsigned long long>(t.packetsSent), static_cast<unsigned long long>(t.packetsReceived),
+                                       static_cast<double>(t.bytesSent) / 1048576.0, static_cast<double>(t.bytesReceived) / 1048576.0,
+                                       static_cast<unsigned long long>(t.retransmits), t.RetransmitPercent(), static_cast<unsigned long long>(t.droppedPackets)));
+                if (netClient != nullptr)
+                {
+                    lines.push_back(Format("snapshots received %llu   lost %llu (%.1f%%)", static_cast<unsigned long long>(stats.snapshots),
+                                           static_cast<unsigned long long>(stats.snapshotsMissed), stats.SnapshotLossPercent()));
+                    const myengine::net::RpcCounters& c = netClient->RpcClientCounters();
+                    lines.push_back(Format("RPC calls %llu   ok %llu   refused %llu   timeouts %llu   waiting %d", static_cast<unsigned long long>(c.calls),
+                                           static_cast<unsigned long long>(c.ok), static_cast<unsigned long long>(c.refused), static_cast<unsigned long long>(c.timeouts), c.pending));
+                }
+                else
+                {
+                    lines.push_back(Format("snapshots sent %llu   late inputs %llu", static_cast<unsigned long long>(stats.snapshots), static_cast<unsigned long long>(stats.lateInputs)));
+                    const myengine::net::RpcCounters& c = netHost->RpcServerCounters();
+                    lines.push_back(Format("RPC served %llu   ok %llu   refused %llu   broken %llu", static_cast<unsigned long long>(c.calls), static_cast<unsigned long long>(c.ok),
+                                           static_cast<unsigned long long>(c.refused), static_cast<unsigned long long>(c.malformed)));
+                }
+                lines.push_back(Format("bad messages: unknown %llu   broken %llu", static_cast<unsigned long long>(bad.unknown), static_cast<unsigned long long>(bad.malformed)));
+                if (!bad.last.empty())
+                {
+                    lines.push_back("  last: " + bad.last);
+                }
+                lines.push_back(netClient != nullptr ? "keys: 1-4 quick chat   F6 unknown RPC   F7 bad argument   F8 StartMatch (not allowed)   F9 broken messages   F2 hide"
+                                                     : "keys: 1-4 quick chat   F6 unknown RPC   F7 bad argument   F2 hide");
+            }
+            for (const RpcLine& line : rpcLines)
+            {
+                lines.push_back(line.text);
+            }
+            return lines;
         }
 
         void BuildOnlineWaitHud(const std::string& line)
@@ -1444,6 +1650,10 @@ namespace myengine::ecs::systems
             {
                 hud.push_back(Format("NET host   guests %d   ping %.0f ms   tick %u   late inputs %llu", netHost->ClientCount(), stats.rttMs, stats.tick,
                                      static_cast<unsigned long long>(stats.lateInputs)));
+            }
+            for (const std::string& line : NetLines())
+            {
+                hud.push_back(line);
             }
         }
 
@@ -1684,6 +1894,7 @@ namespace myengine::ecs::systems
             {
                 netClient = std::make_unique<rl::RlNetClient>(*transport, tuning, &game::SimCars());
                 netClient->SetCar(game::SimCarIndex(selectedCar));
+                netClient->SetProtocolVersion(online.protocolVersion);
                 if (!netClient->Connect(setup.address, playerName, error))
                 {
                     netClient.reset();

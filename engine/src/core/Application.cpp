@@ -44,6 +44,7 @@
 #include <myengine/game/RlGameFlow.h>
 #include <myengine/game/RlGameSettings.h>
 #include <myengine/jobs/JobSystem.h>
+#include <myengine/net/NetLog.h>
 #include <myengine/physics/PhysicsEvents.h>
 #include <myengine/render/dx12/Dx12RenderAdapter.h>
 #include <myengine/scene/SceneEvents.h>
@@ -259,6 +260,13 @@ namespace myengine::core
         }
 
         logger_.Info("Application initialization started");
+
+        // The diagnostics of the network subsystem (refused RPC calls, broken messages, refused clients) go into this log
+        net::SetNetLogSink(
+            [this](net::NetLogLevel level, const std::string& text)
+            {
+                logger_.Log(level == net::NetLogLevel::Error ? LogLevel::Error : (level == net::NetLogLevel::Warning ? LogLevel::Warning : LogLevel::Info), text);
+            });
 
         if (config_.windows.empty())
         {
@@ -1344,6 +1352,7 @@ namespace myengine::core
 
         // After ResourceManager: it waits for its loading jobs in the destructor
         jobs::Shutdown();
+        net::SetNetLogSink({});  // the logger it writes to goes away with the application
 
         if (renderAdapter_)
         {

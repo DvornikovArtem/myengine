@@ -250,6 +250,8 @@ namespace
             const bool isRlClients = argument == L"--rl-clients";
             const bool isRlMode = argument == L"--rl-mode";
             const bool isNetSim = argument == L"--net-sim";
+            // LR4: --net-protocol N makes the Join of a client say protocol N (the refusal of an incompatible client, shown with one build)
+            const bool isNetProtocol = argument == L"--net-protocol";
             // FlyDoom: --iwad <file.wad> names the game data, --doom-args "<the command line of DOOM>" is given to DOOM as it is (-warp 1 1 -skill 3)
             const bool isIwad = argument == L"--iwad";
             const bool isFbrain = argument == L"--fbrain";
@@ -262,7 +264,7 @@ namespace
             const bool isScreenshot = argument == L"--screenshot";
             const bool isScreenshotFrame = argument == L"--screenshot-frame";
             if (!isScene && !isProject && !isWait && !isCaptureFrame && !isFrameStats && !isFrameStatsOut && !isFrames && !isDumpLayouts && !isRlJoin &&
-                !isRlClients && !isRlMode && !isNetSim && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed && !isFlybrain && !isFlyMode)
+                !isRlClients && !isRlMode && !isNetSim && !isNetProtocol && !isRenderSettings && !isScreenshot && !isScreenshotFrame && !isIwad && !isDoomArgs && !isFbrain && !isFlySeed && !isFlybrain && !isFlyMode)
             {
                 valid = false;
                 break;
@@ -374,6 +376,12 @@ namespace
                 const unsigned long number = IsDigits(value) ? std::wcstoul(std::wstring(value).c_str(), nullptr, 10) : 0;
                 valid = number >= 1 && number <= (isRlMode ? 4ul : 7ul);
                 (isRlMode ? options.rlOnline.playersPerTeam : options.rlOnline.expectedClients) = static_cast<int>(number);
+            }
+            else if (isNetProtocol)
+            {
+                const unsigned long number = IsDigits(value) ? std::wcstoul(std::wstring(value).c_str(), nullptr, 10) : 0;
+                valid = number >= 1 && number <= 65535ul;
+                options.rlOnline.protocolVersion = static_cast<std::uint16_t>(number);
             }
             else if (isNetSim && options.rlOnline.netSim.empty())
             {
@@ -506,7 +514,7 @@ try
             L"       [--renderdoc] [--pix] [--dx12-debug] [--dx12-gbv] [--dx12-dred]\n"
             L"  Other: [--exit-after-frames <n>] [--dump-shader-layouts <file>]\n"
             L"  Render: [--render-settings shadows=0..2,msaa=1|4,bloom=0|1,instancing=0|1] [--screenshot <file.tga> [--screenshot-frame N]]\n"
-            L"  Rocket League online: --rl-host [port] [--rl-clients N] [--rl-mode 1..4] | --rl-join ip[:port]   [--net-sim latency=100,jitter=20,loss=5]",
+            L"  Rocket League online: --rl-host [port] [--rl-clients N] [--rl-mode 1..4] | --rl-join ip[:port] [--net-protocol N]   [--net-sim latency=100,jitter=20,loss=5]",
             L"myengine",
             MB_OK | MB_ICONERROR);
         return -1;

@@ -343,6 +343,28 @@ else()
   list(APPEND ENGINE_SOURCES src/faceid/FaceModelsStub.cpp)
 endif()
 
+# The network subsystem (LR4, docs/network/architecture.md): the transport (UDP, the loopback of the tests, the network simulation), reliable delivery,
+# RPC, the counters and the diagnostics. A library of its own, so that the game libraries (game/rl) use it without the rest of the engine; the engine
+# links it through myengine_rl. No DX12, ImGui or ECS in here.
+set(NET_HEADERS
+  include/myengine/net/NetLink.h
+  include/myengine/net/NetLog.h
+  include/myengine/net/NetReliable.h
+  include/myengine/net/NetRng.h
+  include/myengine/net/NetRpc.h
+  include/myengine/net/NetTransport.h)
+set(NET_SOURCES
+  src/net/NetLink.cpp
+  src/net/NetLog.cpp
+  src/net/NetReliable.cpp
+  src/net/NetRpc.cpp)
+add_library(myengine_net STATIC ${NET_HEADERS} ${NET_SOURCES})
+target_include_directories(myengine_net PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(myengine_net PRIVATE TracyClient PUBLIC ws2_32)
+myengine_apply_compiler_options(myengine_net)
+set_property(TARGET myengine_net PROPERTY FOLDER "Engine")
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${NET_HEADERS} ${NET_SOURCES})
+
 add_library(myengine_engine STATIC ${ENGINE_HEADERS} ${ENGINE_SOURCES})
 
 target_include_directories(myengine_engine

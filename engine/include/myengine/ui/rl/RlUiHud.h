@@ -143,6 +143,7 @@ namespace myengine::rlui
         std::string ballCamKey = "Space"; // what is shown on the key cap of the hint (the binding of the player)
         bool showFps = false;
         float fps = 0.0f;
+        std::vector<std::string> netLines;  // the network panel of an online match (F2) and the results of the last RPC calls; empty: nothing
         HudReplay replay;
         HudTraining training;
     };
@@ -155,6 +156,7 @@ namespace myengine::rlui
         Save,
         Shot,
         Demo,
+        QuickChat,  // `player` said `text` (an RPC of the network, RlRpcMethod::QuickChat)
     };
 
     struct HudEvent
@@ -162,6 +164,7 @@ namespace myengine::rlui
         HudEventType type = HudEventType::Goal;
         int player = -1;       // the index in HudState::players: who scored / assisted / saved / shot / demolished
         int other = -1;        // the victim of a demolition
+        std::string text;      // QuickChat: the phrase
     };
 
     class Hud

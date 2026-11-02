@@ -52,6 +52,7 @@ namespace myengine::ecs::systems
         int expectedClients = 1;   // host: the match starts when this many guests have joined (Enter starts it earlier)
         int playersPerTeam = 2;    // host: 1..4
         std::string netSim;        // "latency=100,jitter=20,loss=5": delay and losses added to everything this window sends
+        std::uint16_t protocolVersion = 0;  // client: the protocol version its Join says (--net-protocol, the check of the refusal); 0 = the real one
     };
 
     // ---- the game mode: what the screens ask for and what they see ---------------------------------------------------------------------
