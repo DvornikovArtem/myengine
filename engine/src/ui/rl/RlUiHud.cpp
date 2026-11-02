@@ -200,6 +200,7 @@ namespace myengine::rlui
         case HudEventType::Assist: line.text[1] = " assisted"; break;
         case HudEventType::Save: line.text[1] = " saved"; break;
         case HudEventType::Shot: line.text[1] = " shot"; break;
+        case HudEventType::QuickChat: line.text[1] = ": " + event.text; break;
         case HudEventType::Demo:
             line.text[1] = " demolished ";
             if (other != nullptr)
@@ -452,6 +453,7 @@ namespace myengine::rlui
             case HudEventType::Assist: icon = Icon::Ball; break;
             case HudEventType::Save: icon = Icon::Shield; break;
             case HudEventType::Demo: icon = Icon::Bolt; iconColor = style::TeamHi(line.team[0]); break;
+            case HudEventType::QuickChat: icon = Icon::Info; break;
             }
             IconGlyph(f, icon, 20.0f, {plate.x + 30.0f, y + 22.0f}, iconColor);
             float x = plate.x + 52.0f;
@@ -818,6 +820,28 @@ namespace myengine::rlui
             char text[32];
             std::snprintf(text, sizeof(text), "%.0f FPS", static_cast<double>(state_.fps));
             Text(f, FontStyle::Bold, 20.0f, {40.0f, y}, style::kTextDim, text);
+            y += 36.0f;
+        }
+        // the network panel: a dark plate under the lines so that they read over the stadium
+        if (!state_.netLines.empty())
+        {
+            float width = 0.0f;
+            for (const std::string& line : state_.netLines)
+            {
+                width = std::max(width, TextWidth(f, FontStyle::SemiBold, 17.0f, line));
+            }
+            const float lineHeight = 24.0f;
+            FillRect(f, {30.0f, y, width + 24.0f, lineHeight * static_cast<float>(state_.netLines.size()) + 12.0f}, Color::Hex(0x030814, 0.72f));
+            y += 6.0f;
+            for (const std::string& line : state_.netLines)
+            {
+                const bool alarm = line.find("REFUSED") != std::string::npos || line.find("TIMEOUT") != std::string::npos || line.find("NOT ALLOWED") != std::string::npos ||
+                                   line.find("UNKNOWN") != std::string::npos || line.find("BAD ARG") != std::string::npos || line.find("TOO FAST") != std::string::npos ||
+                                   line.find("thrown away") != std::string::npos;
+                const bool ok = line.find(" OK") != std::string::npos;
+                Text(f, FontStyle::SemiBold, 17.0f, {42.0f, y}, alarm ? style::kBad : (ok ? style::kGood : style::kText), line);
+                y += lineHeight;
+            }
         }
     }
 

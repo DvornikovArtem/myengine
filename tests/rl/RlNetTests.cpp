@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1709,6 +1710,219 @@ namespace
         CHECK(worstRollback < 6.0 * kBudgetScale);
         Note("size of a saved state: %zu bytes", saved.size());
     }
+
+    // ------------------------------------------------------------------------------------------------------------------------------
+    // LR4 (docs/network/architecture.md): RPC, the diagnostics of bad messages, the counters of the transport, the version of the protocol
+    // ------------------------------------------------------------------------------------------------------------------------------
+
+    bool ClientPlaying(Rig& rig) { return rig.clients[0]->State() == RlNetClientState::Playing; }
+
+    const char* StatusName(net::RpcStatus status) { return net::RpcStatusName(status); }
+
+    void TestRpc()
+    {
+        std::printf("LR4: RPC calls, the checks of the host and their results\n");
+        net::NetSimParams sim;
+        sim.latencyMs = 30.0f;
+        sim.lossPercent = 10.0f;
+        Rig rig(sim, 1);
+        RlNetClient& client = rig.AddClient();
+        CHECK(rig.RunUntil(10.0, &AllInLobby));
+
+        // the right of the caller: a guest may not start the match
+        client.Call(static_cast<uint16_t>(RlRpcMethod::StartMatch), {}, "StartMatch");
+        rig.Run(1.0);
+        std::vector<net::RpcResult> results = client.TakeRpcResults();
+        CHECK(results.size() == 1);
+        if (results.size() == 1)
+        {
+            CHECK(results[0].status == net::RpcStatus::NotAllowed);
+            Note("StartMatch from a guest: %s - %s", StatusName(results[0].status), results[0].text.c_str());
+        }
+        CHECK(!rig.host->Started());
+        CHECK(rig.host->StartMatch(rig.now));
+        CHECK(rig.RunUntil(10.0, &ClientPlaying));
+
+        // a quick chat: OK, and every machine has it
+        const uint32_t request = client.QuickChat(2);
+        rig.Run(1.0);
+        results = client.TakeRpcResults();
+        CHECK(results.size() == 1);
+        if (results.size() == 1)
+        {
+            CHECK(results[0].request == request);
+            CHECK(results[0].status == net::RpcStatus::Ok);
+            Note("QuickChat #%u: %s in %.0f ms - %s", results[0].request, StatusName(results[0].status), results[0].latencyMs, results[0].text.c_str());
+        }
+        std::vector<RlQuickChat> hostChats = rig.host->TakeQuickChats();
+        std::vector<RlQuickChat> clientChats = client.TakeQuickChats();
+        CHECK(hostChats.size() == 1 && hostChats[0].slot == client.Slot() && hostChats[0].phrase == 2);
+        CHECK(clientChats.size() == 1 && clientChats[0].slot == client.Slot() && clientChats[0].phrase == 2);
+
+        // two at once: the second is too fast; then the wrong calls, each with its own refusal
+        rig.Run(1.2);
+        client.QuickChat(3);
+        client.QuickChat(4);
+        client.Call(999, {}, "");
+        client.QuickChat(200);
+        client.Call(static_cast<uint16_t>(RlRpcMethod::QuickChat), {1, 2}, "QuickChat");
+        rig.Run(1.0);
+        results = client.TakeRpcResults();
+        const net::RpcStatus expected[] = {net::RpcStatus::Ok, net::RpcStatus::TooFast, net::RpcStatus::UnknownMethod, net::RpcStatus::BadArguments,
+                                           net::RpcStatus::BadArguments};
+        CHECK(results.size() == 5);
+        for (size_t i = 0; i < results.size() && i < 5; ++i)
+        {
+            CHECK(results[i].status == expected[i]);
+            Note("%s #%u: %s - %s", results[i].methodName.c_str(), results[i].request, StatusName(results[i].status), results[i].text.c_str());
+        }
+        CHECK(rig.host->TakeQuickChats().size() == 1);
+        client.TakeQuickChats();
+
+        // the player of the host calls the same method without the network; the guest sees the chat
+        rig.host->QuickChat(0);
+        results = rig.host->TakeRpcResults();
+        CHECK(results.size() == 1 && results[0].status == net::RpcStatus::Ok);
+        rig.Run(1.0);
+        clientChats = client.TakeQuickChats();
+        CHECK(clientChats.size() == 1 && clientChats[0].slot == 0 && clientChats[0].phrase == 0);
+
+        const net::RpcCounters& served = rig.host->RpcServerCounters();
+        const net::RpcCounters& called = client.RpcClientCounters();
+        Note("host served %llu calls: %llu ok, %llu refused; client: %llu calls, %llu ok, %llu refused, %d waiting", static_cast<unsigned long long>(served.calls),
+             static_cast<unsigned long long>(served.ok), static_cast<unsigned long long>(served.refused), static_cast<unsigned long long>(called.calls),
+             static_cast<unsigned long long>(called.ok), static_cast<unsigned long long>(called.refused), called.pending);
+        CHECK(served.calls == 8 && served.ok == 3 && served.refused == 5);
+        CHECK(called.calls == 7 && called.ok == 2 && called.refused == 5 && called.pending == 0);
+        CHECK(client.State() == RlNetClientState::Playing);
+        CHECK(rig.host->ClientCount() == 1);
+    }
+
+    // A call without a reply ends as Timeout; a connection that ends takes the waiting calls with it; the host forgets the client
+    void TestRpcTimeoutAndClose()
+    {
+        std::printf("LR4: an RPC without a reply, and a connection that is lost\n");
+        Rig rig(net::NetSimParams{}, 1);
+        RlNetClient& client = rig.AddClient();
+        CHECK(rig.RunUntil(5.0, &AllInLobby));
+
+        // the host stops answering (its window hangs): only the client runs
+        const auto clientOnly = [&](double seconds)
+        {
+            const double end = rig.now + seconds;
+            while (rig.now < end)
+            {
+                rig.now += 1.0 / 120.0;
+                client.Update(rig.now);
+            }
+        };
+        client.QuickChat(1);
+        clientOnly(3.5);
+        std::vector<net::RpcResult> results = client.TakeRpcResults();
+        CHECK(results.size() == 1 && results[0].status == net::RpcStatus::Timeout);
+        if (!results.empty())
+        {
+            Note("no reply: %s - %s", StatusName(results[0].status), results[0].text.c_str());
+        }
+        client.QuickChat(1);
+        clientOnly(3.0);  // 6.5 s without a packet of the host: the transport gives up
+        results = client.TakeRpcResults();
+        CHECK(client.State() == RlNetClientState::Disconnected);
+        CHECK(results.size() == 1 && results[0].status == net::RpcStatus::Closed);
+        Note("client: \"%s\", the waiting call: %s", client.Error().c_str(), results.empty() ? "-" : StatusName(results[0].status));
+        CHECK(client.RpcClientCounters().pending == 0);
+        client.Call(static_cast<uint16_t>(RlRpcMethod::QuickChat), {0}, "QuickChat");  // no connection: refused at once, nothing sent
+        results = client.TakeRpcResults();
+        CHECK(results.size() == 1 && results[0].status == net::RpcStatus::Closed);
+
+        // the host comes back: the lost client is gone from it, no ghost in its slot
+        rig.clientActive[0] = false;
+        rig.Run(7.0);
+        CHECK(rig.host->ClientCount() == 0);
+        CHECK(rig.hostTransport->Stats().peers == 0);
+    }
+
+    // Messages the host cannot use are counted and logged, the match goes on
+    void TestBrokenMessages()
+    {
+        std::printf("LR4: unknown and broken messages are counted and logged, the host goes on\n");
+        std::vector<std::string> log;
+        net::SetNetLogSink([&log](net::NetLogLevel, const std::string& text) { log.push_back(text); });
+        Rig rig(net::NetSimParams{}, 1);
+        RlNetClient& client = rig.AddClient();
+        CHECK(rig.RunUntil(5.0, &AllInLobby));
+        CHECK(rig.host->StartMatch(rig.now));
+        CHECK(rig.RunUntil(5.0, &ClientPlaying));
+        const uint32_t tickBefore = rig.host->Stats().tick;
+        client.SendBrokenMessages();
+        rig.Run(1.0);
+        const net::NetBadMessages& bad = rig.host->BadMessages();
+        Note("host: %llu unknown, %llu broken; last: %s", static_cast<unsigned long long>(bad.unknown), static_cast<unsigned long long>(bad.malformed), bad.last.c_str());
+        CHECK(bad.unknown == 1);
+        CHECK(bad.malformed == 3);
+        CHECK(rig.host->Stats().unknownMessages == 1 && rig.host->Stats().malformedMessages == 3);
+        const auto logged = [&log](const char* text) { return std::any_of(log.begin(), log.end(), [text](const std::string& line) { return line.find(text) != std::string::npos; }); };
+        CHECK(logged("unknown message type 238"));
+        CHECK(logged("a broken Input"));
+        CHECK(logged("a broken RpcCall"));
+        CHECK(logged("a broken CarSelect"));
+        CHECK(rig.host->Stats().tick > tickBefore + 100);
+        CHECK(client.State() == RlNetClientState::Playing);
+        CHECK(rig.host->ClientCount() == 1);
+        net::SetNetLogSink({});
+    }
+
+    // The counters of the transport and the losses of the snapshots
+    void TestTransportCounters()
+    {
+        std::printf("LR4: the counters of the transport\n");
+        net::NetSimParams sim;
+        sim.latencyMs = 40.0f;
+        sim.lossPercent = 10.0f;
+        Rig rig(sim, 1);
+        RlNetClient& client = rig.AddClient();
+        CHECK(rig.RunUntil(10.0, &AllInLobby));
+        CHECK(rig.host->StartMatch(rig.now));
+        rig.Run(10.0);
+        const net::NetTransportStats host = rig.hostTransport->Stats();
+        const net::NetTransportStats guest = rig.clientTransports[0]->Stats();
+        Note("host: sent %llu packets / %llu bytes, received %llu / %llu, reliable %llu, resent %llu (%.1f%%), peers %d", static_cast<unsigned long long>(host.packetsSent),
+             static_cast<unsigned long long>(host.bytesSent), static_cast<unsigned long long>(host.packetsReceived), static_cast<unsigned long long>(host.bytesReceived),
+             static_cast<unsigned long long>(host.reliableSent), static_cast<unsigned long long>(host.retransmits), host.RetransmitPercent(), host.peers);
+        CHECK(host.packetsSent > 500 && host.bytesSent > host.packetsSent * 6);
+        CHECK(guest.packetsReceived > 0 && guest.packetsReceived < host.packetsSent);  // 10% of them were lost
+        CHECK(host.reliableSent > 0 && host.retransmits > 0);
+        CHECK(host.peers == 1 && guest.peers == 1);
+        const RlNetStats& stats = client.Stats();
+        Note("client: %llu snapshots, %llu lost (%.1f%%)", static_cast<unsigned long long>(stats.snapshots), static_cast<unsigned long long>(stats.snapshotsMissed),
+             stats.SnapshotLossPercent());
+        CHECK(stats.SnapshotLossPercent() > 4.0 && stats.SnapshotLossPercent() < 18.0);
+
+        // a stray datagram (not ours) is counted and thrown away
+        const uint64_t droppedBefore = rig.hostTransport->Stats().droppedPackets;
+        const uint8_t junk[] = {1, 2, 3, 4, 5, 6, 7, 8};
+        rig.hub.Deliver(5000, 4242, junk, sizeof(junk));
+        rig.Run(0.1);
+        CHECK(rig.hostTransport->Stats().droppedPackets == droppedBefore + 1);
+    }
+
+    // A client of another protocol version is refused with a clear reason (the check of the defense: --net-protocol 4)
+    void TestProtocolVersion()
+    {
+        std::printf("LR4: a client of another protocol version\n");
+        std::vector<std::string> log;
+        net::SetNetLogSink([&log](net::NetLogLevel, const std::string& text) { log.push_back(text); });
+        Rig rig(net::NetSimParams{}, 1);
+        RlNetClient& client = rig.AddClient();
+        client.SetProtocolVersion(kNetProtocolVersion - 1);
+        rig.Run(3.0);
+        CHECK(client.State() == RlNetClientState::Failed);
+        CHECK(client.Error().find("version") != std::string::npos);
+        CHECK(rig.host->ClientCount() == 0);
+        CHECK(std::any_of(log.begin(), log.end(), [](const std::string& line) { return line.find("its protocol is 4, ours is 5") != std::string::npos; }));
+        Note("refused: \"%s\"", client.Error().c_str());
+        net::SetNetLogSink({});
+    }
 }
 
 int main(int argc, char** argv)
@@ -1773,6 +1987,11 @@ int main(int argc, char** argv)
     TestSteamWithoutSdk();
     TestUdp();
     TestRollbackBudget();
+    TestRpc();
+    TestRpcTimeoutAndClose();
+    TestBrokenMessages();
+    TestTransportCounters();
+    TestProtocolVersion();
 
     std::printf("%s: %d checks, %d failures\n", g_failures == 0 ? "OK" : "FAILED", g_checks, g_failures);
     (void)g_verbose;

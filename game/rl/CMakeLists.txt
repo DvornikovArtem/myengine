@@ -51,8 +51,6 @@ set(RL_SOURCES
   src/RlClock.cpp
   src/RlReplay.cpp
   src/RlV3.h
-  src/net/NetLink.cpp
-  src/net/NetReliable.cpp
   src/RlSim.cpp
   src/RlTraining.cpp
   src/RlTrainingAutopilot.cpp
@@ -70,6 +68,9 @@ target_include_directories(myengine_rl
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(myengine_rl
+  PUBLIC
+    # the network subsystem of the engine (engine/net): the transport, RPC and the counters of the online match
+    myengine_net
   PRIVATE
     Jolt
     TracyClient

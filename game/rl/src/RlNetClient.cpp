@@ -151,6 +151,14 @@ namespace rl
         std::vector<uint8_t> packet;
         std::vector<uint8_t> scratch;
 
+        // RPC and the diagnostics
+        net::RpcClient rpc;
+        std::vector<net::RpcResult> rpcResults;
+        std::vector<RlQuickChat> chats;
+        net::NetBadMessages bad;
+        uint16_t protocolVersion = kNetProtocolVersion;
+        uint32_t lastSnapshotTick = kNoTick;  // the newest snapshot so far: a gap after it is a lost one
+
         Impl(net::INetTransport& t, const RlTuning& tn, const RlCarCatalog* catalog)
             : transport(t)
             , tuning(tn)
@@ -398,7 +406,12 @@ namespace rl
         void OnWelcome(const std::vector<uint8_t>& data)
         {
             RlWelcomeMsg welcome;
-            if (!RlDecode(data.data(), data.size(), welcome) || state != RlNetClientState::Joining)
+            if (!RlDecode(data.data(), data.size(), welcome))
+            {
+                bad.Malformed("client", "Welcome", host, data.size());
+                return;
+            }
+            if (state != RlNetClientState::Joining)
             {
                 return;
             }
@@ -453,7 +466,12 @@ namespace rl
         void OnStateChunk(const std::vector<uint8_t>& data)
         {
             RlStateChunkMsg chunk;
-            if (state != RlNetClientState::Syncing || !RlDecode(data.data(), data.size(), chunk))
+            if (!RlDecode(data.data(), data.size(), chunk))
+            {
+                bad.Malformed("client", "StateChunk", host, data.size());
+                return;
+            }
+            if (state != RlNetClientState::Syncing)
             {
                 return;
             }
@@ -500,6 +518,7 @@ namespace rl
             RlInputHistoryMsg msg;
             if (!RlDecode(data.data(), data.size(), msg))
             {
+                bad.Malformed("client", "InputHistory", host, data.size());
                 return;
             }
             for (int t = 0; t < msg.count; ++t)
@@ -582,6 +601,12 @@ namespace rl
             events.push_back(event);
             switch (event.kind)
             {
+            case RlEventKind::QuickChat:
+                if (event.a < kQuickChatCount && event.slot >= 0 && event.slot < kMaxCars)
+                {
+                    chats.push_back({event.slot, event.a});
+                }
+                break;
             case RlEventKind::MatchStart:
                 if (state == RlNetClientState::Lobby)
                 {
@@ -667,9 +692,19 @@ namespace rl
             RlSnapshotMsg msg;
             if (!RlDecode(data.data(), data.size(), msg))
             {
+                bad.Malformed("client", "Snapshot", host, data.size());
                 return;
             }
             ZoneScopedN("Rl::Net::Snapshot");
+            // the host sends one every kSnapshotInterval ticks: a gap after the newest one so far is snapshots that were lost on the way
+            if (lastSnapshotTick == kNoTick || static_cast<int32_t>(msg.tick - lastSnapshotTick) > 0)
+            {
+                if (lastSnapshotTick != kNoTick && msg.tick - lastSnapshotTick > static_cast<uint32_t>(kSnapshotInterval))
+                {
+                    stats.snapshotsMissed += (msg.tick - lastSnapshotTick) / static_cast<uint32_t>(kSnapshotInterval) - 1;
+                }
+                lastSnapshotTick = msg.tick;
+            }
             if (catchUp)
             {
                 OnSnapshotWhileCatchingUp(msg, now);
@@ -873,6 +908,7 @@ namespace rl
                     {
                         state = RlNetClientState::Joining;
                         RlJoinMsg join;
+                        join.version = protocolVersion;
                         join.tuningHash = tuningHash;
                         join.carsHash = carsHash;
                         join.car = static_cast<uint8_t>(cars->Valid(wantedCar));
@@ -882,6 +918,7 @@ namespace rl
                     }
                     break;
                 case net::NetEventType::Disconnected:
+                    rpc.CloseAll(rpcResults);  // calls that wait for a reply end now, not at their timeout
                     if (state != RlNetClientState::Failed && state != RlNetClientState::Disconnected)
                     {
                         state = RlNetClientState::Disconnected;
@@ -901,13 +938,21 @@ namespace rl
                         {
                             Fail(RlRejectText(reason));
                         }
+                        else
+                        {
+                            bad.Malformed("client", "Reject", host, event.data.size());
+                        }
                         break;
                     }
                     case RlMsg::Snapshot: OnSnapshot(event.data, now); break;
                     case RlMsg::Names:
                     {
                         RlNamesMsg names;
-                        if (state == RlNetClientState::Lobby && RlDecode(event.data.data(), event.data.size(), names))
+                        if (!RlDecode(event.data.data(), event.data.size(), names))
+                        {
+                            bad.Malformed("client", "Names", host, event.data.size());
+                        }
+                        else if (state == RlNetClientState::Lobby)
                         {
                             for (int i = 0; i < kMaxCars; ++i)
                             {
@@ -927,9 +972,26 @@ namespace rl
                         {
                             OnEvent(msg, now);
                         }
+                        else
+                        {
+                            bad.Malformed("client", "Event", host, event.data.size());
+                        }
                         break;
                     }
-                    default: break;
+                    case RlMsg::RpcReply:
+                    {
+                        net::RpcResult result;
+                        if (rpc.OnReply(event.data.data(), event.data.size(), now, result))
+                        {
+                            rpcResults.push_back(std::move(result));
+                        }
+                        else
+                        {
+                            bad.Malformed("client", "RpcReply", host, event.data.size());
+                        }
+                        break;
+                    }
+                    default: bad.Unknown("client", host, event.data.data(), event.data.size()); break;
                     }
                     break;
                 }
@@ -939,6 +1001,9 @@ namespace rl
         void Update(double now)
         {
             Pump(now);
+            rpc.Expire(now, rpcResults);
+            stats.unknownMessages = bad.unknown;
+            stats.malformedMessages = bad.malformed;
             const double dt = lastNow < 0.0 ? 0.0 : std::max(0.0, now - lastNow);
             lastNow = now;
             stats.rttMs = host != net::kInvalidPeer ? transport.RoundTripSeconds(host) * 1000.0 : 0.0;
@@ -1075,4 +1140,61 @@ namespace rl
     }
     double RlNetClient::TimeScale() const { return impl_->scale; }
     void RlNetClient::SetTickObserver(std::function<void(uint32_t, const RlMatch&)> observer) { impl_->observer = std::move(observer); }
+
+    uint32_t RlNetClient::Call(uint16_t method, const std::vector<uint8_t>& args, const std::string& name)
+    {
+        Impl& d = *impl_;
+        if (d.host == net::kInvalidPeer || !d.transport.IsConnected(d.host))
+        {
+            net::RpcResult result;
+            result.method = method;
+            result.methodName = name.empty() ? "#" + std::to_string(method) : name;
+            result.status = net::RpcStatus::Closed;
+            result.text = "not connected to a host";
+            d.rpcResults.push_back(std::move(result));
+            return 0;
+        }
+        const uint32_t request = d.rpc.Call(static_cast<uint8_t>(RlMsg::RpcCall), method, name, args, d.lastNow < 0.0 ? 0.0 : d.lastNow, d.packet);
+        d.transport.Send(d.host, d.packet.data(), d.packet.size(), true);
+        return request;
+    }
+    uint32_t RlNetClient::QuickChat(int phrase)
+    {
+        return Call(static_cast<uint16_t>(RlRpcMethod::QuickChat), {static_cast<uint8_t>(std::clamp(phrase, 0, 255))}, "QuickChat");
+    }
+    std::vector<net::RpcResult> RlNetClient::TakeRpcResults()
+    {
+        std::vector<net::RpcResult> result;
+        result.swap(impl_->rpcResults);
+        return result;
+    }
+    std::vector<RlQuickChat> RlNetClient::TakeQuickChats()
+    {
+        std::vector<RlQuickChat> result;
+        result.swap(impl_->chats);
+        return result;
+    }
+    const net::RpcCounters& RlNetClient::RpcClientCounters() const { return impl_->rpc.Counters(); }
+    const net::NetBadMessages& RlNetClient::BadMessages() const { return impl_->bad; }
+
+    void RlNetClient::SendBrokenMessages()
+    {
+        Impl& d = *impl_;
+        if (d.host == net::kInvalidPeer || !d.transport.IsConnected(d.host))
+        {
+            return;
+        }
+        const std::vector<uint8_t> broken[] = {
+            {0xEE, 0x01, 0x02, 0x03},                               // a type the protocol does not have
+            {static_cast<uint8_t>(RlMsg::Input), 0x05},             // an Input cut after its first byte
+            {static_cast<uint8_t>(RlMsg::RpcCall), 0x07, 0x00},     // a call cut before its request number ends
+            {static_cast<uint8_t>(RlMsg::CarSelect)},               // a CarSelect without its car
+        };
+        for (const std::vector<uint8_t>& message : broken)
+        {
+            d.transport.Send(d.host, message.data(), message.size(), true);
+        }
+        net::NetLog(net::NetLogLevel::Info, "net client: sent 4 broken messages to the host (the check of its diagnostics)");
+    }
+    void RlNetClient::SetProtocolVersion(uint16_t version) { impl_->protocolVersion = version == 0 ? kNetProtocolVersion : version; }
 }
