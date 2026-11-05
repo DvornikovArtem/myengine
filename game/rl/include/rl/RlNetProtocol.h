@@ -8,7 +8,10 @@
 //   Snapshot  host -> clients  unreliable  60 Hz: tick, match, ball, cars, pads, the inputs the host really used, a hash of the full state
 //   Names     host -> clients  reliable    the names and the cars of the table (before MatchStart: they are part of the state)
 //   CarSelect client -> host   reliable    the car of the player changed in the lobby
-//   Event     host -> clients  reliable    match start, a slot that took a player / went to a bot, goal, assist, save, shot, demolition, match end
+//   Event     host -> clients  reliable    match start, a slot that took a player / went to a bot, goal, assist, save, shot, demolition, match end,
+//                                          a quick chat of a player (the visible result of the QuickChat call)
+//   RpcCall   client -> host   reliable    a call of a method of the host (myengine/net/NetRpc.h): QuickChat, StartMatch
+//   RpcReply  host -> client   reliable    what came of it: OK or why not (unknown method, bad arguments, not allowed, too fast)
 //
 // Inputs are quantized to bytes before the simulation takes them, on both sides, so that the numbers the host and the client simulate are
 // the same ones.
@@ -24,7 +27,9 @@
 
 namespace rl
 {
-    constexpr uint16_t kNetProtocolVersion = 4;  // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: a car per slot (G4i); 4: names up to 32 bytes (G1n, kNameBytes 33)
+    // 2: statistics of the table (G1.0): Names, Event extras, stats in the Snapshot; 3: a car per slot (G4i); 4: names up to 32 bytes (G1n, kNameBytes 33);
+    // 5: RpcCall / RpcReply and the QuickChat event (LR4)
+    constexpr uint16_t kNetProtocolVersion = 5;
     constexpr int kNetInputBytes = 5;
     constexpr int kNetInputWindow = 8;   // ticks of input carried by one Input and one Snapshot message
     constexpr int kSnapshotInterval = 2; // ticks between snapshots: 60 Hz
@@ -42,7 +47,23 @@ namespace rl
         InputHistory = 9,   // host -> client, reliable: the answer
         Names = 10,         // host -> clients, reliable: the names and the cars of the table, before MatchStart (they are part of the state)
         CarSelect = 11,     // client -> host, reliable: the car of the player (the lobby)
+        RpcCall = 12,       // client -> host, reliable: a call (myengine::net::RpcClient)
+        RpcReply = 13,      // host -> client, reliable: its result (myengine::net::RpcServer)
     };
+
+    // "Input", "Snapshot", ...; "unknown" for a byte that is no message type
+    const char* RlMessageName(uint8_t type);
+
+    // The methods of the host that a client may call (RlMsg::RpcCall)
+    enum class RlRpcMethod : uint16_t
+    {
+        QuickChat = 1,   // u8 phrase (0 .. kQuickChatCount - 1): every player sees it in the feed; one per kQuickChatInterval per player
+        StartMatch = 2,  // no arguments: only the player of the host may start the match, a guest is refused (NotAllowed)
+    };
+
+    constexpr int kQuickChatCount = 8;
+    constexpr double kQuickChatInterval = 1.0;  // seconds between two quick chats of one player
+    const char* RlQuickChatText(int phrase);    // "I got it!", "Nice shot!", ...; "" out of range
 
     enum class RlRejectReason : uint8_t
     {
@@ -109,6 +130,7 @@ namespace rl
         Assist = 6,      // `slot` assisted the goal of `other`
         Save = 7,        // `slot` saved a shot
         Shot = 8,        // `slot` shot at the goal
+        QuickChat = 9,   // `slot` said phrase `a` (RlQuickChatText); not a part of the simulation
     };
 
     struct RlEventMsg

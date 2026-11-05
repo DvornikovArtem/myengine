@@ -1,8 +1,8 @@
 // NetLink.cpp
 
-#include <rl/net/NetLink.h>
+#include <myengine/net/NetLink.h>
 
-#include <rl/RlRng.h>
+#include <myengine/net/NetRng.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,7 +17,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-namespace rl::net
+namespace myengine::net
 {
     bool NetSimParams::Parse(const std::string& text, NetSimParams& out, std::string* error)
     {
@@ -347,7 +347,7 @@ namespace rl::net
 
             std::unique_ptr<IDatagramLink> inner_;
             NetSimParams params_;
-            rl::RlRng rng_;
+            NetRng rng_;
             std::vector<Held> queue_;
             uint64_t counter_ = 0;
         };

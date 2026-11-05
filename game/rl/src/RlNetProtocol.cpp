@@ -263,6 +263,33 @@ namespace rl
         float DequantizeAxis(int8_t q) { return static_cast<float>(q) / 127.0f; }
     }
 
+    const char* RlMessageName(uint8_t type)
+    {
+        switch (static_cast<RlMsg>(type))
+        {
+        case RlMsg::Join: return "Join";
+        case RlMsg::Welcome: return "Welcome";
+        case RlMsg::Reject: return "Reject";
+        case RlMsg::Input: return "Input";
+        case RlMsg::Snapshot: return "Snapshot";
+        case RlMsg::Event: return "Event";
+        case RlMsg::StateChunk: return "StateChunk";
+        case RlMsg::InputRequest: return "InputRequest";
+        case RlMsg::InputHistory: return "InputHistory";
+        case RlMsg::Names: return "Names";
+        case RlMsg::CarSelect: return "CarSelect";
+        case RlMsg::RpcCall: return "RpcCall";
+        case RlMsg::RpcReply: return "RpcReply";
+        }
+        return "unknown";
+    }
+
+    const char* RlQuickChatText(int phrase)
+    {
+        static const char* const kPhrases[kQuickChatCount] = {"I got it!", "Nice shot!", "What a save!", "Great pass!", "Thanks!", "Sorry!", "Centering!", "Defending..."};
+        return phrase >= 0 && phrase < kQuickChatCount ? kPhrases[phrase] : "";
+    }
+
     const char* RlRejectText(RlRejectReason reason)
     {
         switch (reason)

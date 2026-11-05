@@ -95,6 +95,14 @@ namespace rl
         std::vector<uint8_t> scratch;
         std::vector<uint8_t> packet;
 
+        // RPC: the methods the guests (and the player of the host, without the network) may call
+        net::RpcServer rpc;
+        net::RpcClient localRpc;  // the calls of the player of the host: the same bytes, handed to `rpc` directly
+        std::vector<net::RpcResult> rpcResults;
+        std::vector<RlQuickChat> chats;
+        double lastChat[kMaxCars];
+        net::NetBadMessages bad;
+
         Impl(net::INetTransport& t, const RlTuning& tn, const RlNetHostOptions& o)
             : transport(t)
             , tuning(tn)
@@ -107,6 +115,108 @@ namespace rl
             if (options.hostPlays)
             {
                 humanMask = 1u;
+            }
+            std::fill(std::begin(lastChat), std::end(lastChat), -1.0e9);
+            RegisterMethods();
+        }
+
+        // The slot of a caller: kInvalidPeer is the player of the host
+        int SlotOf(net::PeerId caller) const
+        {
+            if (caller == net::kInvalidPeer)
+            {
+                return options.hostPlays ? 0 : -1;
+            }
+            const auto it = clients.find(caller);
+            return it == clients.end() ? -1 : it->second.slot;
+        }
+
+        void RegisterMethods()
+        {
+            rpc.Register(static_cast<uint16_t>(RlRpcMethod::QuickChat), "QuickChat",
+                         [this](net::PeerId caller, net::ByteReader& args, std::string& text)
+                         {
+                             const int phrase = args.U8();
+                             if (!args.Ok() || !args.AtEnd())
+                             {
+                                 text = "QuickChat takes one byte: the number of the phrase";
+                                 return net::RpcStatus::BadArguments;
+                             }
+                             if (phrase >= kQuickChatCount)
+                             {
+                                 text = "there is no phrase " + std::to_string(phrase) + " (0.." + std::to_string(kQuickChatCount - 1) + ")";
+                                 return net::RpcStatus::BadArguments;
+                             }
+                             const int slot = SlotOf(caller);
+                             if (slot < 0)
+                             {
+                                 text = "the caller has no slot in this match";
+                                 return net::RpcStatus::NotAllowed;
+                             }
+                             if (lastNow - lastChat[slot] < kQuickChatInterval)
+                             {
+                                 text = "one quick chat a second";
+                                 return net::RpcStatus::TooFast;
+                             }
+                             lastChat[slot] = lastNow;
+                             chats.push_back({slot, phrase});
+                             RlEventMsg event;
+                             event.kind = RlEventKind::QuickChat;
+                             event.tick = tick;
+                             event.slot = static_cast<int8_t>(slot);
+                             event.a = static_cast<uint8_t>(phrase);
+                             BroadcastEvent(event);
+                             text = std::string("'") + RlQuickChatText(phrase) + "' sent to every player";
+                             return net::RpcStatus::Ok;
+                         });
+            rpc.Register(static_cast<uint16_t>(RlRpcMethod::StartMatch), "StartMatch",
+                         [this](net::PeerId caller, net::ByteReader& args, std::string& text)
+                         {
+                             if (!args.AtEnd())
+                             {
+                                 text = "StartMatch takes no arguments";
+                                 return net::RpcStatus::BadArguments;
+                             }
+                             if (caller != net::kInvalidPeer)
+                             {
+                                 text = "only the host starts the match";
+                                 return net::RpcStatus::NotAllowed;
+                             }
+                             if (started)
+                             {
+                                 text = "the match is on already";
+                                 return net::RpcStatus::NotAllowed;
+                             }
+                             Start(lastNow);
+                             text = "the match starts";
+                             return net::RpcStatus::Ok;
+                         });
+        }
+
+        uint32_t CallLocal(uint16_t method, const std::vector<uint8_t>& args, const std::string& name)
+        {
+            std::vector<uint8_t> call;
+            std::vector<uint8_t> reply;
+            const uint32_t request = localRpc.Call(static_cast<uint8_t>(RlMsg::RpcCall), method, name, args, lastNow, call);
+            net::RpcResult result;
+            if (rpc.Handle(net::kInvalidPeer, call.data(), call.size(), static_cast<uint8_t>(RlMsg::RpcReply), reply) &&
+                localRpc.OnReply(reply.data(), reply.size(), lastNow, result))
+            {
+                rpcResults.push_back(std::move(result));
+            }
+            return request;
+        }
+
+        void OnRpcCall(net::PeerId peer, const std::vector<uint8_t>& data)
+        {
+            std::vector<uint8_t> reply;
+            if (rpc.Handle(peer, data.data(), data.size(), static_cast<uint8_t>(RlMsg::RpcReply), reply))
+            {
+                Send(peer, reply, true);
+            }
+            else
+            {
+                bad.Malformed("host", "RpcCall", peer, data.size());
             }
         }
 
@@ -182,10 +292,13 @@ namespace rl
             RlJoinMsg join;
             if (!RlDecode(data.data(), data.size(), join))
             {
+                bad.Malformed("host", "Join", peer, data.size());
                 return;
             }
             if (join.version != kNetProtocolVersion)
             {
+                net::NetLog(net::NetLogLevel::Warning, "net host: refused peer " + std::to_string(peer) + ": its protocol is " + std::to_string(join.version) + ", ours is " +
+                                                           std::to_string(kNetProtocolVersion));
                 Reject(peer, RlRejectReason::Version, now);
                 return;
             }
@@ -240,7 +353,12 @@ namespace rl
         {
             const auto it = clients.find(peer);
             RlCarMsg msg;
-            if (it == clients.end() || it->second.slot < 0 || started || !RlDecode(data.data(), data.size(), msg))
+            if (!RlDecode(data.data(), data.size(), msg))
+            {
+                bad.Malformed("host", "CarSelect", peer, data.size());
+                return;
+            }
+            if (it == clients.end() || it->second.slot < 0 || started)
             {
                 return;
             }
@@ -280,7 +398,12 @@ namespace rl
         {
             const auto it = clients.find(peer);
             RlInputRequestMsg request;
-            if (it == clients.end() || it->second.slot < 0 || !started || !RlDecode(data.data(), data.size(), request))
+            if (!RlDecode(data.data(), data.size(), request))
+            {
+                bad.Malformed("host", "InputRequest", peer, data.size());
+                return;
+            }
+            if (it == clients.end() || it->second.slot < 0 || !started)
             {
                 return;
             }
@@ -313,6 +436,7 @@ namespace rl
             RlInputMsg msg;
             if (!RlDecode(data.data(), data.size(), msg) || msg.count == 0)
             {
+                bad.Malformed("host", "Input", peer, data.size());
                 return;
             }
             Client& client = it->second;
@@ -391,11 +515,14 @@ namespace rl
                     case RlMsg::Input: OnInput(event.peer, event.data); break;
                     case RlMsg::InputRequest: OnInputRequest(event.peer, event.data); break;
                     case RlMsg::CarSelect: OnCarSelect(event.peer, event.data); break;
-                    default: break;
+                    case RlMsg::RpcCall: OnRpcCall(event.peer, event.data); break;
+                    default: bad.Unknown("host", event.peer, event.data.data(), event.data.size()); break;
                     }
                     break;
                 }
             }
+            stats.unknownMessages = bad.unknown;
+            stats.malformedMessages = bad.malformed;
             for (size_t i = 0; i < kicks.size();)
             {
                 if (now >= kicks[i].when)
@@ -711,4 +838,25 @@ namespace rl
     }
     const RlNetStats& RlNetHost::Stats() const { return impl_->stats; }
     void RlNetHost::SetTickObserver(std::function<void(uint32_t, const RlMatch&)> observer) { impl_->observer = std::move(observer); }
+
+    uint32_t RlNetHost::Call(uint16_t method, const std::vector<uint8_t>& args, const std::string& name) { return impl_->CallLocal(method, args, name); }
+    uint32_t RlNetHost::QuickChat(int phrase)
+    {
+        return impl_->CallLocal(static_cast<uint16_t>(RlRpcMethod::QuickChat), {static_cast<uint8_t>(std::clamp(phrase, 0, 255))}, "QuickChat");
+    }
+    std::vector<net::RpcResult> RlNetHost::TakeRpcResults()
+    {
+        std::vector<net::RpcResult> result;
+        result.swap(impl_->rpcResults);
+        return result;
+    }
+    std::vector<RlQuickChat> RlNetHost::TakeQuickChats()
+    {
+        std::vector<RlQuickChat> result;
+        result.swap(impl_->chats);
+        return result;
+    }
+    const net::RpcCounters& RlNetHost::RpcServerCounters() const { return impl_->rpc.Counters(); }
+    const net::NetBadMessages& RlNetHost::BadMessages() const { return impl_->bad; }
+    const std::string& RlNetHost::LastRpcLine() const { return impl_->rpc.LastLine(); }
 }

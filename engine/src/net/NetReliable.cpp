@@ -1,8 +1,8 @@
 // NetReliable.cpp
 
-#include <rl/net/NetReliable.h>
+#include <myengine/net/NetReliable.h>
 
-#include <rl/RlRng.h>
+#include <myengine/net/NetRng.h>
 
 #include <tracy/Tracy.hpp>
 
@@ -12,7 +12,7 @@
 #include <deque>
 #include <map>
 
-namespace rl::net
+namespace myengine::net
 {
     namespace
     {
@@ -125,7 +125,7 @@ namespace rl::net
 
             void Poll(double now, std::vector<NetEvent>& events) override
             {
-                ZoneScopedN("Rl::Net::Poll");
+                ZoneScopedN("Net::Poll");
                 lastNow_ = now;
                 events.insert(events.end(), std::make_move_iterator(deferred_.begin()), std::make_move_iterator(deferred_.end()));
                 deferred_.clear();
@@ -134,6 +134,8 @@ namespace rl::net
                 std::vector<uint8_t> packet;
                 for (int guard = 0; guard < 8192 && link_->Receive(from, packet, now); ++guard)
                 {
+                    ++stats_.packetsReceived;
+                    stats_.bytesReceived += packet.size();
                     HandlePacket(from, packet, now, events);
                 }
 
@@ -159,7 +161,7 @@ namespace rl::net
                                 peer.lastConnectTry = now;
                                 std::vector<uint8_t> hello = MakePacket(kConnect, peer.clientNonce);
                                 Put16(hello, kTransportVersion);
-                                link_->Send(peer.addr, hello.data(), hello.size(), now);
+                                Emit(peer.addr, hello, now);
                             }
                         }
                         continue;
@@ -198,7 +200,7 @@ namespace rl::net
                     std::vector<uint8_t> bye = MakePacket(kDisconnect, peer->token);
                     for (int i = 0; i < 3; ++i)
                     {
-                        link_->Send(peer->addr, bye.data(), bye.size(), lastNow_);
+                        Emit(peer->addr, bye, lastNow_);
                     }
                 }
                 peers_.erase(id);
@@ -232,6 +234,15 @@ namespace rl::net
             {
                 const auto it = peers_.find(id);
                 return it != peers_.end() && it->second.connected;
+            }
+            NetTransportStats Stats() const override
+            {
+                NetTransportStats stats = stats_;
+                for (const auto& entry : peers_)
+                {
+                    stats.peers += entry.second.connected ? 1 : 0;
+                }
+                return stats;
             }
 
         private:
@@ -315,7 +326,15 @@ namespace rl::net
             void SendPacket(Peer& peer, const std::vector<uint8_t>& packet, double now)
             {
                 peer.lastSend = now;
-                link_->Send(peer.addr, packet.data(), packet.size(), now);
+                Emit(peer.addr, packet, now);
+            }
+
+            // Every datagram leaves through here, so the counters see all of them
+            void Emit(NetAddress to, const std::vector<uint8_t>& packet, double now)
+            {
+                ++stats_.packetsSent;
+                stats_.bytesSent += packet.size();
+                link_->Send(to, packet.data(), packet.size(), now);
             }
 
             void SendReliableNow(Peer& peer, Outgoing& message, double now)
@@ -326,6 +345,11 @@ namespace rl::net
                 if (message.sends == 0)
                 {
                     message.firstSent = now;
+                    ++stats_.reliableSent;
+                }
+                else
+                {
+                    ++stats_.retransmits;
                 }
                 message.lastSent = now;
                 ++message.sends;
@@ -424,6 +448,7 @@ namespace rl::net
             {
                 if (packet.size() < kHeaderBytes || packet[0] != kMagic)
                 {
+                    ++stats_.droppedPackets;  // not ours (or cut)
                     return;
                 }
                 const uint8_t type = packet[1];
@@ -440,6 +465,7 @@ namespace rl::net
                 Peer* peer = FindByAddress(from);
                 if (peer == nullptr)
                 {
+                    ++stats_.droppedPackets;  // a sender we have no connection with (an old one, a stray packet)
                     return;
                 }
                 if (type == kAccept)
@@ -468,6 +494,7 @@ namespace rl::net
                 }
                 if (!peer->connected || token != peer->token)
                 {
+                    ++stats_.droppedPackets;  // a packet of an earlier connection from the same address
                     return;
                 }
                 peer->lastRecv = now;
@@ -488,6 +515,7 @@ namespace rl::net
                 {
                     if (bodySize < 2)
                     {
+                        ++stats_.droppedPackets;
                         break;
                     }
                     const uint16_t seq = Get16(body);
@@ -555,7 +583,7 @@ namespace rl::net
                 if (bodySize < 2 || Get16(body) != kTransportVersion)
                 {
                     std::vector<uint8_t> reject = MakePacket(kReject, clientNonce);
-                    link_->Send(from, reject.data(), reject.size(), now);
+                    Emit(from, reject, now);
                     return;
                 }
                 Peer* existing = FindByAddress(from);
@@ -573,7 +601,7 @@ namespace rl::net
                 if (peers_.size() >= kMaxPeers)
                 {
                     std::vector<uint8_t> reject = MakePacket(kReject, clientNonce);
-                    link_->Send(from, reject.data(), reject.size(), now);
+                    Emit(from, reject, now);
                     return;
                 }
                 Peer& peer = AddPeer(from);
@@ -599,12 +627,13 @@ namespace rl::net
             }
 
             std::unique_ptr<IDatagramLink> link_;
-            rl::RlRng rng_;
+            NetRng rng_;
             std::map<PeerId, Peer> peers_;
             std::vector<NetEvent> deferred_;
             PeerId nextPeer_ = 1;
             bool listening_ = false;
             double lastNow_ = 0.0;
+            NetTransportStats stats_;
         };
     }
 
