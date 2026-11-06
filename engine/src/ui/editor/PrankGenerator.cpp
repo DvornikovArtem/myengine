@@ -128,18 +128,34 @@ namespace myengine::ui::prank
                 }
                 case MiniScene::Hardcore:
                 {
-                    list->AddRectFilled(a, b, Rgb(0x0B0B0F));
-                    for (int i = 0; i < 12; ++i)
+                    // an arena from above: the player in the middle, the red crates come for it, the coins lie around (the same kind of picture as the other games)
+                    GradientV(list, a, b, Rgb(0x2B3A55), Rgb(0x16202F));
+                    for (int i = 1; i < 8; ++i)
                     {
-                        const float x = a.x + static_cast<float>(i) * (w / 12.0f);
-                        list->AddTriangleFilled(ImVec2(x, b.y), ImVec2(x + w / 24.0f, b.y - 40.0f), ImVec2(x + w / 12.0f, b.y), Rgb(0xB0B4BC));
+                        list->AddLine(ImVec2(a.x + w * static_cast<float>(i) / 8.0f, a.y), ImVec2(a.x + w * static_cast<float>(i) / 8.0f, b.y), Rgb(0x3A4A68), 1.0f);
                     }
+                    for (int i = 1; i < 5; ++i)
                     {
-                        const ImVec2 c(a.x + w * 0.5f, a.y + h * 0.42f);
-                        list->AddLine(ImVec2(c.x - 50.0f, c.y - 50.0f), ImVec2(c.x + 50.0f, c.y + 50.0f), kRed, 14.0f);
-                        list->AddLine(ImVec2(c.x - 50.0f, c.y + 50.0f), ImVec2(c.x + 50.0f, c.y - 50.0f), kRed, 14.0f);
-                        TextCentered(list, ImVec2(c.x, a.y + h * 0.8f), 22.0f, Rgb(0xE8E8E8), "1 / 1");
+                        list->AddLine(ImVec2(a.x, a.y + h * static_cast<float>(i) / 5.0f), ImVec2(b.x, a.y + h * static_cast<float>(i) / 5.0f), Rgb(0x3A4A68), 1.0f);
                     }
+                    const ImVec2 c(a.x + w * 0.5f + std::sin(t * 1.5f) * 22.0f, a.y + h * 0.55f);
+                    for (int i = 0; i < 5; ++i)
+                    {
+                        const ImVec2 coin(a.x + 60.0f + static_cast<float>(i) * 82.0f, a.y + 50.0f + static_cast<float>((i * 37) % 70));
+                        list->AddCircleFilled(coin, 9.0f, kGold, 20);
+                        list->AddCircle(coin, 9.0f, Rgb(0xC9961A), 20, 2.0f);
+                    }
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        const float angle = static_cast<float>(i) * 1.5708f + 0.6f + t * 0.35f;
+                        const float distance = 120.0f + std::sin(t * 2.0f + static_cast<float>(i)) * 14.0f;
+                        const ImVec2 chaser(c.x + std::cos(angle) * distance * 1.5f, c.y + std::sin(angle) * distance * 0.7f);
+                        list->AddRectFilled(ImVec2(chaser.x - 13.0f, chaser.y - 13.0f), ImVec2(chaser.x + 13.0f, chaser.y + 13.0f), Rgb(0xE0553A), 3.0f);
+                        list->AddRect(ImVec2(chaser.x - 13.0f, chaser.y - 13.0f), ImVec2(chaser.x + 13.0f, chaser.y + 13.0f), Rgb(0x8F2C1A), 3.0f, 0, 2.0f);
+                    }
+                    list->AddRectFilled(ImVec2(c.x - 15.0f, c.y - 15.0f), ImVec2(c.x + 15.0f, c.y + 15.0f), Rgb(0x6FB3FF), 3.0f);
+                    list->AddRect(ImVec2(c.x - 15.0f, c.y - 15.0f), ImVec2(c.x + 15.0f, c.y + 15.0f), Rgb(0x2E6FC4), 3.0f, 0, 2.0f);
+                    Text(list, ImVec2(a.x + 12.0f, a.y + 10.0f), 16.0f, Rgb(0xE8E8E8), "1 / 1");
                     break;
                 }
                 case MiniScene::NakedCars:

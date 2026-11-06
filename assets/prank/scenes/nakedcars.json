@@ -51,7 +51,7 @@
         "type": "box"
       },
       "MeshRenderer": {
-        "materialPath": "assets/materials/warm.material.json",
+        "materialPath": "assets/materials/prank_warm.material.json",
         "meshPath": "assets/models/rl_wheel.obj",
         "visible": true
       },
@@ -204,7 +204,7 @@
             "class": "CoinSpawner",
             "props": {
               "max_coins": 0,
-              "prefab_name": "coin",
+              "prefab_name": "prank_coin",
               "spawn_interval": 999.0,
               "spawn_radius": 1.0
             }
@@ -242,7 +242,7 @@
             "props": {
               "initial_delay": 9999.0,
               "max_enemies": 0,
-              "prefab_name": "chaser",
+              "prefab_name": "prank_chaser",
               "spawn_radius": 1.5,
               "wave_growth": 0,
               "wave_interval": 10.0,
@@ -375,7 +375,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -420,7 +420,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -465,7 +465,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -510,7 +510,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -555,7 +555,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -600,7 +600,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -645,7 +645,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/crate.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -690,7 +690,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl_wheel.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -753,7 +753,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl_wheel.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {
@@ -816,7 +816,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/rl_wheel.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       },
       "Collider": {

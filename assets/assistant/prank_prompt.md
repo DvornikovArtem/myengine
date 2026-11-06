@@ -18,8 +18,9 @@ and the content. So:
 
 ## What to build
 
-Make a small playable game from what the project already has: the prefabs `coin` and `chaser`, the scripts `game_manager`, `coin_spawner`, `enemy_spawner`,
-`coin`, `chaser` (see the "coin collecting under guard" demo), and the scripts of `assets/scripts/prank_*.py` if you need a new rule. Use the engine tools
+Make a small playable game from what the project already has: the prefabs `prank_coin` and `prank_chaser` (not `coin` and `chaser`: those wear the face texture
+described below), the scripts `game_manager`, `coin_spawner`, `enemy_spawner`, `coin`, `chaser` (see the "coin collecting under guard" demo), and the scripts of
+`assets/scripts/prank_*.py` if you need a new rule. Use the engine tools
 (`list_prefabs`, `create_entity`, `spawn_prefab`, `set_script_props`, `set_component`); read before you write. Keep it to a handful of tool calls (at most 8):
 the user waits, and every changing call is a card they must confirm.
 
@@ -35,6 +36,13 @@ Ideas that fit the examples (take the idea, not the letters of the request):
 | anything else | pick any of these, or make a new pun of the same size |
 
 If a scene already exists in `assets/prank/scenes/`, you may read it for the structure, but never edit scene files: change the open scene with the tools.
+
+## Materials: neutral ones only
+
+Use only neutral materials without the texture of a face or of any person: `assets/materials/default.material.json`, `gold.material.json`,
+`prank_warm.material.json` (orange), `prank_cool.material.json` (blue). **Never use `cool.material.json`, `warm.material.json`, `africanhead.material.json` or anything
+called `african_head*`**: their texture is the photograph of a human head. The same goes for the mesh `african_head.obj` and for the prefabs `coin` and `chaser`
+(they use those materials): take `prank_coin` and `prank_chaser` instead. If a material or a prefab you want is not on this list, check its file before you use it.
 
 ## How you talk
 

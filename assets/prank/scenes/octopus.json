@@ -123,7 +123,7 @@
         "type": "box"
       },
       "MeshRenderer": {
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/default.material.json",
         "meshPath": "assets/models/crate.obj",
         "visible": true
       },
@@ -204,7 +204,7 @@
             "class": "CoinSpawner",
             "props": {
               "max_coins": 6,
-              "prefab_name": "coin",
+              "prefab_name": "prank_coin",
               "spawn_interval": 1.2,
               "spawn_radius": 5.0
             }
@@ -242,7 +242,7 @@
             "props": {
               "initial_delay": 2.5,
               "max_enemies": 10,
-              "prefab_name": "chaser",
+              "prefab_name": "prank_chaser",
               "spawn_radius": 3.5,
               "wave_growth": 1,
               "wave_interval": 7.0,
@@ -276,7 +276,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/sphere.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -322,7 +322,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -350,7 +350,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -378,7 +378,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -406,7 +406,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -434,7 +434,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -462,7 +462,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -490,7 +490,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     },
@@ -518,7 +518,7 @@
       },
       "MeshRenderer": {
         "meshPath": "assets/models/pyramid.obj",
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/prank_cool.material.json",
         "visible": true
       }
     }

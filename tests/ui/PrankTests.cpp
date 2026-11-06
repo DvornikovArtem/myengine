@@ -254,6 +254,15 @@ namespace
     {
         const fs::path root = SourceRoot();
         const char* const banned[] = {"порно", "хентай", "секс", "голы", "18+", "обнаж", "эрот"};
+        // The materials with the photograph of a human head (the texture african_head_diffuse): not in a mini-scene, not in a prefab it spawns, not in a material it uses
+        const char* const faces[] = {"/cool.material", "/warm.material", "africanhead", "african_head"};   // the slash: prank_cool.material is not cool.material
+        auto noFaces = [&](const std::string& text, const std::string& what)
+        {
+            for (const char* face : faces)
+            {
+                Check(text.find(face) == std::string::npos, what + " has no \"" + face + "\"");
+            }
+        };
         std::set<std::string> modules;
         for (int i = 0; i < prank::kMiniSceneCount; ++i)
         {
@@ -284,6 +293,44 @@ namespace
                 }
             }
             Check(camera && controlled && manager, std::string("the scene has a camera, the controlled player and the game manager: ") + prank::SceneId(scene));
+            noFaces(text, std::string("the scene ") + prank::SceneId(scene));
+            // the prefabs that its spawners ask for, and the materials of those prefabs and of the scene
+            std::set<std::string> prefabs;
+            for (const auto& entity : json.at("entities"))
+            {
+                if (!entity.contains("Script"))
+                {
+                    continue;
+                }
+                for (const auto& script : entity.at("Script").at("scripts"))
+                {
+                    if (script.contains("props") && script.at("props").contains("prefab_name"))
+                    {
+                        prefabs.insert(script.at("props").at("prefab_name").get<std::string>());
+                    }
+                }
+            }
+            for (const std::string& prefab : prefabs)
+            {
+                const fs::path prefabFile = root / "assets" / "prefabs" / (prefab + ".prefab.json");
+                Check(fs::is_regular_file(prefabFile), "the prefab of a spawner exists: " + prefab);
+                const std::string prefabText = ReadAll(prefabFile);
+                noFaces(prefabText, "the prefab " + prefab);
+                for (std::size_t at = prefabText.find("assets/materials/"); at != std::string::npos; at = prefabText.find("assets/materials/", at + 1))
+                {
+                    const std::size_t end = prefabText.find('"', at);
+                    const fs::path material = root / prefabText.substr(at, end - at);
+                    Check(fs::is_regular_file(material), "the material exists: " + material.string());
+                    Check(ReadAll(material).find("african_head") == std::string::npos, "the material has no face texture: " + material.string());
+                }
+            }
+            for (std::size_t at = text.find("assets/materials/"); at != std::string::npos; at = text.find("assets/materials/", at + 1))
+            {
+                const std::size_t end = text.find('"', at);
+                const fs::path material = root / text.substr(at, end - at);
+                Check(fs::is_regular_file(material), "the material exists: " + material.string());
+                Check(ReadAll(material).find("african_head") == std::string::npos, "the material has no face texture: " + material.string());
+            }
             // No adult content: not in a name, not in a text
             const std::string folded = prank::FoldCase(text);
             for (const char* word : banned)
@@ -305,6 +352,9 @@ namespace
         // The prompt keeps the rule
         const std::string prompt = ReadAll(root / "assets" / "assistant" / "prank_prompt.md");
         Check(!prompt.empty() && prompt.find("Never write, draw, name or describe anything sexual") != std::string::npos, "the prompt of the generator has the rule");
+        // The prompt names the forbidden materials (that is its job) and sends to the neutral ones
+        Check(prompt.find("cool.material.json") != std::string::npos && prompt.find("african_head") != std::string::npos && prompt.find("prank_coin") != std::string::npos &&
+                  prompt.find("prank_cool.material.json") != std::string::npos, "the prompt forbids the face materials and names the neutral ones");
         std::cout << "  scenes: 5 files, " << modules.size() << " scripts, no adult words\n";
     }
 }

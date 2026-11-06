@@ -123,7 +123,7 @@
         "type": "box"
       },
       "MeshRenderer": {
-        "materialPath": "assets/materials/cool.material.json",
+        "materialPath": "assets/materials/default.material.json",
         "meshPath": "assets/models/crate.obj",
         "visible": true
       },
@@ -204,7 +204,7 @@
             "class": "CoinSpawner",
             "props": {
               "max_coins": 6,
-              "prefab_name": "coin",
+              "prefab_name": "prank_coin",
               "spawn_interval": 1.0,
               "spawn_radius": 5.0
             }
@@ -242,7 +242,7 @@
             "props": {
               "initial_delay": 2.0,
               "max_enemies": 9,
-              "prefab_name": "chaser",
+              "prefab_name": "prank_chaser",
               "spawn_radius": 5.0,
               "wave_growth": 1,
               "wave_interval": 5.0,
