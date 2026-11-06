@@ -134,6 +134,16 @@ namespace myengine::ui
             return std::make_unique<AssistantPanel>(config);
         };
         prankTab_ = std::make_unique<prank::PrankTab>(std::move(scene), prank::AgeCheckFace{});
+        // The first tab of the process is the one of the start; a later one was switched back on while the editor runs
+        static bool madeBefore = false;
+        const bool switchedBackOn = madeBefore;
+        madeBefore = true;
+        if (switchedBackOn)
+        {
+            // Switched back on while the editor runs (Ctrl+Shift+H, the Window menu): the person asked for it, so it comes to the front
+            prankTab_->SkipStartup();
+            prankTab_->RequestFocus();
+        }
 #endif
     }
 
@@ -179,6 +189,10 @@ namespace myengine::ui
         {
             // The cross on the tab: the same as taking the check mark off (the setting is saved, the window goes away next frame)
             prank::SetEnabled(false);
+        }
+        if (prankTab_->StartupFrame())
+        {
+            ImGui::SetWindowFocus(kViewportWindowName);   // the editor opens on the Viewport, the tab waits next to it
         }
     }
 

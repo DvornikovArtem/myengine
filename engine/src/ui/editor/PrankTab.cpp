@@ -19,7 +19,8 @@ namespace myengine::ui::prank
     PrankTab::PrankTab(PrankSceneServices scene, AgeCheckFace face) : generator_(std::move(scene))
     {
         gags_.SetAgeCheckFace(std::move(face));
-        focusFrames_ = 4;   // the first thing a person sees when the editor opens
+        // The editor opens on the Viewport: the tab sits next to it and pulses, but is not in front (the editor focuses the
+        // Viewport for the first frames, see StartupFrame)
     }
 
     PrankTab::~PrankTab() = default;
