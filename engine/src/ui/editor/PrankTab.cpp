@@ -13,7 +13,6 @@ namespace myengine::ui::prank
     namespace
     {
         constexpr float kTabPulsePeriod = 1.2f;
-        constexpr float kMenuBlinkPeriod = 1.0f;
         constexpr float kBadgeHideAfter = 2.0f;
     }
 
@@ -49,37 +48,6 @@ namespace myengine::ui::prank
         }
     }
 
-    // ---- the menu button (spec 1.2) ----
-
-    float PrankTab::MenuButtonWidth() const
-    {
-        return 18.0f + TextWidth(14.0f, str::kMenuButton) + 22.0f;
-    }
-
-    void PrankTab::DrawMenuButton(const ImVec2 position)
-    {
-        const float w = MenuButtonWidth();
-        const ImVec2 a(position.x, position.y);
-        const ImVec2 b(a.x + w, a.y + 22.0f);
-        ImDrawList* list = ImGui::GetWindowDrawList();
-        bool hovered = false;
-        const bool clicked = Hit("##prankmenu", a, b, &hovered);
-        // Once a second: half a second lit, half a second plain
-        const bool lit = std::fmod(ImGui::GetTime(), static_cast<double>(kMenuBlinkPeriod)) < static_cast<double>(kMenuBlinkPeriod) * 0.5 || hovered;
-        if (lit)
-        {
-            Glow(list, a, b, WithAlpha(kHot, 0.6f), 5.0f, 3, 3.0f);
-            list->AddRectFilled(a, b, hovered ? kHotHover : kHot, 3.0f);
-        }
-        const ImU32 color = lit ? kWhite : kHot;
-        Sign18(list, ImVec2(a.x + 14.0f, a.y + 11.0f), 14.0f, color, 0, color, 1.5f);
-        Text(list, ImVec2(a.x + 28.0f, a.y + (22.0f - TextHeight(14.0f)) * 0.5f), 14.0f, color, str::kMenuButton);
-        if (clicked)
-        {
-            RequestFocus();
-        }
-    }
-
     // ---- the tab ----
 
     void PrankTab::DrawTabDecoration(const ImVec2 tabMin, const ImVec2 tabMax, const bool active)
@@ -91,8 +59,8 @@ namespace myengine::ui::prank
         Sign18(fg, ImVec2(tabMin.x + 17.0f, (tabMin.y + tabMax.y) * 0.5f), 14.0f, kWhite, 0, kWhite, 1.6f);
         if (!badgeGone_)
         {
-            // The white pill with the number on the right
-            const ImVec2 a(tabMax.x - 28.0f, (tabMin.y + tabMax.y) * 0.5f - 9.0f);
+            // The white pill with the number on the right, left of the cross of the tab (the cross takes the last 24 px)
+            const ImVec2 a(tabMax.x - 52.0f, (tabMin.y + tabMax.y) * 0.5f - 9.0f);
             const ImVec2 b(a.x + 20.0f, a.y + 18.0f);
             fg->AddRectFilled(a, b, kWhite, 9.0f);
             TextCentered(fg, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 12.0f, kRed, str::kBadgeText);
@@ -100,7 +68,7 @@ namespace myengine::ui::prank
         (void)active;
     }
 
-    void PrankTab::DrawWindow(const ImGuiID dockId)
+    bool PrankTab::DrawWindow(const ImGuiID dockId)
     {
         ImGuiIO& io = ImGui::GetIO();
         const double time = ImGui::GetTime();
@@ -133,7 +101,9 @@ namespace myengine::ui::prank
             ImGui::SetNextWindowFocus();
         }
         const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoNavInputs;
-        const bool shown = ImGui::Begin(WindowName(), nullptr, flags);
+        // p_open puts the cross on the tab: a click on it closes the window, and the editor takes that as "the check mark is off"
+        bool open = true;
+        const bool shown = ImGui::Begin(WindowName(), &open, flags);
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(8);
 
@@ -169,6 +139,7 @@ namespace myengine::ui::prank
         {
             DrawTabDecoration(tabRect.Min, tabRect.Max, active);
         }
+        return !open;
     }
 
     void PrankTab::DrawContent(ImDrawList* list, const ImVec2 min, const ImVec2 size, const double time, const float dt)

@@ -246,8 +246,7 @@ namespace myengine::ui
         void BuildPrankTab(const SceneEditorWindowContext& windowContext);
         void EnsurePrankTab();
         std::string RunPrankCommand(const std::string& command);
-        float PrankMenuButtonWidth() const;
-        void DrawPrankMenuButton(float x, float y);
+        void TogglePrankByShortcut();   // Ctrl+Shift+H
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void StopPlayMode(); // Stop button and Esc: back to the scene snapshot taken at Play, no-op in Edit
         void ValidateSelection() const;
@@ -295,6 +294,7 @@ namespace myengine::ui
         std::unique_ptr<AssistantPanel> assistantPanel_;
         std::unique_ptr<prank::PrankTab> prankTab_;
         core::WindowId prankOwner_ = 0;
+        int prankToggleFrame_ = -1;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;

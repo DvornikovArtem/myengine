@@ -483,7 +483,7 @@ namespace myengine::ui
                 {
                     // The switch of the easter egg tab: a plain item, off hides the tab at once (and it stays off: editor_settings.json, "prankTab")
                     bool prankOn = prank::SettingOn();
-                    if (ImGui::MenuItem(prank::str::kViewMenuItem, nullptr, &prankOn))
+                    if (ImGui::MenuItem(prank::str::kViewMenuItem, prank::str::kShortcut, &prankOn))
                     {
                         prank::SetEnabled(prankOn);
                     }
@@ -550,11 +550,6 @@ namespace myengine::ui
                 const float windowWidth = ImGui::GetWindowWidth();
                 float x = windowPosition.x + windowWidth - 14.0f - total;
                 const float centerY = windowPosition.y + style::kMenuBarHeight * 0.5f;
-                if (prankTab_ != nullptr && prank::Enabled() && (prankOwner_ == 0 || prankOwner_ == windowContext.windowId))
-                {
-                    // The loud button of the easter egg tab, left of the map name
-                    DrawPrankMenuButton(x - 18.0f - PrankMenuButtonWidth(), centerY - 11.0f);
-                }
                 auto* drawList = ImGui::GetWindowDrawList();
                 PushFontRole(FontRole::Secondary);
                 const float textY = std::floor(centerY - FontRoleSize(FontRole::Secondary) * 0.5f - 0.5f);
@@ -648,6 +643,7 @@ namespace myengine::ui
         {
             CaptureGpuFrame(); // RenderDoc: the next frame goes to Saved/Captures
         }
+        TogglePrankByShortcut();   // Ctrl+Shift+H works from a text field too, in Edit and in Play
         if (io.WantTextInput)
         {
             return; // Delete / Ctrl+Z belong to the text field, not the selected scene entity

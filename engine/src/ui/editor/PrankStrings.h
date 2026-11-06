@@ -17,7 +17,7 @@ namespace myengine::ui::prank::str
 {
     // ---- the tab, the menu, the switch ----
     inline constexpr const char* kTabTitle = "ПОРНО";                       // the window gets spaces around it: the 18+ sign and the badge are drawn there
-    inline constexpr const char* kMenuButton = "ПОРНО";
+    inline constexpr const char* kShortcut = "Ctrl+Shift+H";   // the panic button: hides the tab, the second press brings it back
     inline constexpr const char* kBadgeText = "3";
     inline constexpr const char* kViewMenuItem = "Пасхалка «ПОРНО»";
 

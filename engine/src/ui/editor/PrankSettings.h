@@ -26,6 +26,7 @@ namespace myengine::ui::prank
     bool Hidden();                  // --no-prank: even the View entry is gone
     bool SettingOn();               // the setting itself (the check mark)
     void SetEnabled(bool enabled);  // the check mark of the menu: applies at once and is saved
+    bool Toggle();                  // Ctrl+Shift+H: flips the same setting; false (and nothing happens) with --no-prank
     // The easter egg fonts are baked into the atlas only when the tab is on at the start of the editor
     bool FontsWanted();
 }
