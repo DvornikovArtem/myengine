@@ -35,6 +35,18 @@ namespace myengine::ui::prank
         bool DrawWindow(ImGuiID dockId);
         // Brings the tab to the front (the first frames of the editor, the scripted "focus")
         void RequestFocus() { focusFrames_ = 3; }
+        // True for the first frames after the tab was made at the start of the editor: the editor brings the Viewport to the front
+        // then (a layout saved with the tab in front would open on it otherwise)
+        bool StartupFrame()
+        {
+            if (startupFrames_ <= 0)
+            {
+                return false;
+            }
+            --startupFrames_;
+            return true;
+        }
+        void SkipStartup() { startupFrames_ = 0; }
 
         void Shutdown();
 
@@ -66,6 +78,7 @@ namespace myengine::ui::prank
         int pendingTarget_ = -1;
         GagKind lastGag_ = GagKind::None;
         int focusFrames_ = 0;
+        int startupFrames_ = 4;
         float activeSeconds_ = 0.0f;
         bool badgeGone_ = false;
         bool visible_ = false;
