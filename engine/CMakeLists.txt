@@ -252,6 +252,21 @@ set(ENGINE_SOURCES
   src/ui/editor/EditorTheme.h
   src/ui/editor/EditorWidgets.cpp
   src/ui/editor/EditorWidgets.h
+  src/ui/editor/PrankExplorer.cpp
+  src/ui/editor/PrankExplorer.h
+  src/ui/editor/PrankGags.cpp
+  src/ui/editor/PrankGags.h
+  src/ui/editor/PrankGenerator.cpp
+  src/ui/editor/PrankGenerator.h
+  src/ui/editor/PrankMatcher.cpp
+  src/ui/editor/PrankMatcher.h
+  src/ui/editor/PrankSettings.cpp
+  src/ui/editor/PrankSettings.h
+  src/ui/editor/PrankTab.cpp
+  src/ui/editor/PrankTab.h
+  src/ui/editor/PrankUi.cpp
+  src/ui/editor/PrankUi.h
+  src/ui/editor/PrankStrings.h
   src/ui/editor/SceneEditor.cpp
   src/ui/editor/SceneEditorAssets.cpp
   src/ui/editor/SceneEditorAssistant.cpp
@@ -262,6 +277,7 @@ set(ENGINE_SOURCES
   src/ui/editor/SceneEditorMaterialForm.cpp
   src/ui/editor/SceneEditorOutliner.cpp
   src/ui/editor/SceneEditorPanels.cpp
+  src/ui/editor/SceneEditorPrank.cpp
   src/ui/editor/SceneEditorProject.cpp
   src/ui/editor/SceneEditorBuild.cpp
   src/ui/editor/SceneEditorRlTuning.cpp

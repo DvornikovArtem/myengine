@@ -25,6 +25,8 @@
 #include "editor/EditorIcons.h"
 #include "editor/EditorTheme.h"
 #include "editor/EditorWidgets.h"
+#include "editor/PrankSettings.h"
+#include "editor/PrankUi.h"
 
 #include <tracy/Tracy.hpp>
 
@@ -1132,6 +1134,26 @@ namespace myengine::ui
         editorFonts.icon30 = addIconFont(30.0f);
         editorFonts.icon40 = addIconFont(40.0f);
         editorFonts.icon58 = addIconFont(58.0f);
+
+        // The easter egg (PrankTab): Inter SemiBold in more sizes; a wider set of symbols (the rouble, the arrows and the check marks that the font has)
+        if (prank::FontsWanted() && !gameUi_.build)   // not in a game (FlyDoom, Rocket Arena): there is no editor, no tab
+        {
+            static const ImWchar bigRanges[] = {0x0020, 0x007F, 0x20BD, 0x20BD, 0x0410, 0x044F, 0};
+            for (const float em : prank::kFontSizes)
+            {
+                float baked = 0.0f;
+                ImFontConfig prankConfig;
+                prankConfig.RasterizerDensity = uiScale;
+                baked = em * LineHeightPerEm(interSemiBold);
+                ImFont* font = LoadFontFromPath(*io.Fonts, interSemiBold, baked, em >= 56.0f ? bigRanges : prank::kBakedRanges, &prankConfig);
+                if (font != nullptr && editorFonts.prankCount < EditorFonts::kPrankFontMax)
+                {
+                    editorFonts.prank[editorFonts.prankCount] = font;
+                    editorFonts.prankSize[editorFonts.prankCount] = baked;
+                    ++editorFonts.prankCount;
+                }
+            }
+        }
 
         windowContext->bodyFont = editorFonts.body;
         windowContext->monoFont = editorFonts.mono;

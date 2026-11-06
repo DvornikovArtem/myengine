@@ -55,6 +55,9 @@
 #include "EditorIcons.h"
 #include "EditorStyle.h"
 #include "EditorWidgets.h"
+#include "PrankSettings.h"
+#include "PrankStrings.h"
+#include "PrankTab.h"
 
 namespace myengine::ui::detail
 {

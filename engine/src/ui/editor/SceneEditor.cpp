@@ -89,6 +89,11 @@ namespace myengine::ui
         projectUi_.reset();
         pendingOpenScenePath_.clear();
         pinnedMaterialPath_.clear();
+        if (prankTab_ != nullptr)
+        {
+            prankTab_->Shutdown(); // its assistant runs a claude process of its own and calls into the tools
+            prankTab_.reset();
+        }
         assistantPanel_.reset(); // ends a running claude process
         assistantTools_.reset();
         history_.reset();
@@ -147,6 +152,7 @@ namespace myengine::ui
         BuildAssetBrowserPanel(windowContext);
         BuildScriptConsolePanel(windowContext);
         BuildAssistantPanel(windowContext);
+        BuildPrankTab(windowContext);
         BuildStatisticsPanel(windowContext);
         BuildProjectDialogs();
         DrawLoadingUi();
@@ -473,6 +479,15 @@ namespace myengine::ui
                         if (MenuItemIcon(ICON_BRAIN, tool.name.c_str(), nullptr, tool.open, true, true, width)) { tool.open = !tool.open; }
                     }
                 }
+                if (!prank::Hidden())
+                {
+                    // The switch of the easter egg tab: a plain item, off hides the tab at once (and it stays off: editor_settings.json, "prankTab")
+                    bool prankOn = prank::SettingOn();
+                    if (ImGui::MenuItem(prank::str::kViewMenuItem, nullptr, &prankOn))
+                    {
+                        prank::SetEnabled(prankOn);
+                    }
+                }
                 ImGui::Separator();
                 if (MenuItemIcon(ICON_LAYOUT_GRID, "Reset Layout", nullptr, false, true, false, width))
                 {
@@ -535,6 +550,11 @@ namespace myengine::ui
                 const float windowWidth = ImGui::GetWindowWidth();
                 float x = windowPosition.x + windowWidth - 14.0f - total;
                 const float centerY = windowPosition.y + style::kMenuBarHeight * 0.5f;
+                if (prankTab_ != nullptr && prank::Enabled() && (prankOwner_ == 0 || prankOwner_ == windowContext.windowId))
+                {
+                    // The loud button of the easter egg tab, left of the map name
+                    DrawPrankMenuButton(x - 18.0f - PrankMenuButtonWidth(), centerY - 11.0f);
+                }
                 auto* drawList = ImGui::GetWindowDrawList();
                 PushFontRole(FontRole::Secondary);
                 const float textY = std::floor(centerY - FontRoleSize(FontRole::Secondary) * 0.5f - 0.5f);
@@ -600,6 +620,10 @@ namespace myengine::ui
         ImGui::DockBuilderDockWindow(kAssistantWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kStatisticsWindowName, dockBottom);
         ImGui::DockBuilderDockWindow(kViewportWindowName, dockCenter);
+        if (prank::Enabled())
+        {
+            ImGui::DockBuilderDockWindow(prank::PrankTab::WindowName(), dockCenter);   // next to the Viewport, on the right
+        }
         ImGui::DockBuilderFinish(dockspaceId);
         layoutFocusFrames_ = 4; // once the windows exist, BuildWindowUi brings Details and Content Browser to the front
     }

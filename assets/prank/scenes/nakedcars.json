@@ -1,0 +1,859 @@
+{
+  "entities": [
+    {
+      "Camera": {
+        "farPlane": 200.0,
+        "fovYDeg": 60.0,
+        "isPrimary": true,
+        "nearPlane": 0.009999999776482582,
+        "orthographicHalfHeight": 1.0,
+        "position": [
+          -2.13303542137146,
+          8.143178939819336,
+          -7.439535140991211
+        ],
+        "rotationDeg": [
+          37.75997543334961,
+          14.279994010925293,
+          0.0
+        ]
+      },
+      "CameraController": {
+        "mouseSensitivityDeg": 0.11999999731779099,
+        "moveSpeed": 8.319235801696777,
+        "rotateSpeedDeg": 80.0,
+        "zoomSpeed": 1.0
+      },
+      "Tag": {
+        "name": "Camera_1"
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 1
+    },
+    {
+      "Collider": {
+        "bounciness": 0.0,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/prank_warm.material.json",
+        "meshPath": "assets/models/rl_wheel.obj",
+        "visible": true
+      },
+      "PlayerController": {
+        "airControl": 0.44999998807907104,
+        "jumpSpeed": 6.699999809265137,
+        "moveSpeed": 5.300000190734863,
+        "windowId": 1
+      },
+      "Rigidbody": {
+        "acceleration": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "gravityScale": 1.0,
+        "isKinematic": false,
+        "linearDamping": 0.14000000059604645,
+        "mass": 1.0,
+        "sleepLinearSpeed": 0.07999999821186066,
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "Tag": {
+        "name": "Controlled_1"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.7,
+          -6
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.7,
+          0.7,
+          0.7
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 2
+    },
+    {
+      "Collider": {
+        "bounciness": 0.0,
+        "friction": 0.6499999761581421,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.5,
+        "type": "box"
+      },
+      "MeshRenderer": {
+        "materialPath": "assets/materials/default.material.json",
+        "meshPath": "assets/models/crate.obj",
+        "visible": true
+      },
+      "Tag": {
+        "name": "Floor_1"
+      },
+      "Transform": {
+        "position": [
+          0,
+          -0.5,
+          3
+        ],
+        "rotationDeg": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          18,
+          1,
+          26
+        ]
+      },
+      "WindowBinding": {
+        "windowId": 1
+      },
+      "id": 3
+    },
+    {
+      "id": 4,
+      "Tag": {
+        "name": "GameManager"
+      },
+      "Script": {
+        "scripts": [
+          {
+            "module": "game_manager",
+            "class": "GameManager",
+            "props": {
+              "fall_damage": 1,
+              "fall_height": -4.0,
+              "firework_count": 20,
+              "firework_speed": 5.0,
+              "hit_cooldown": 1.5,
+              "round_duration": 90.0,
+              "target_score": 5
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "Tag": {
+        "name": "CoinSpawner"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.5,
+          3
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "Script": {
+        "scripts": [
+          {
+            "module": "coin_spawner",
+            "class": "CoinSpawner",
+            "props": {
+              "max_coins": 0,
+              "prefab_name": "prank_coin",
+              "spawn_interval": 999.0,
+              "spawn_radius": 1.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "Tag": {
+        "name": "EnemySpawner"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.5,
+          3
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "Script": {
+        "scripts": [
+          {
+            "module": "enemy_spawner",
+            "class": "EnemySpawner",
+            "props": {
+              "initial_delay": 9999.0,
+              "max_enemies": 0,
+              "prefab_name": "prank_chaser",
+              "spawn_radius": 1.5,
+              "wave_growth": 0,
+              "wave_interval": 10.0,
+              "wave_size": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "Tag": {
+        "name": "Мяч"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.6,
+          2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.9,
+          0.9,
+          0.9
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/sphere.obj",
+        "materialPath": "assets/materials/gold.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "sphere",
+        "radius": 0.5,
+        "isTrigger": false,
+        "bounciness": 0.6,
+        "friction": 0.4,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "Rigidbody": {
+        "mass": 0.6,
+        "useGravity": true,
+        "isKinematic": false,
+        "linearDamping": 0.35,
+        "gravityScale": 1.0,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "acceleration": [
+          0,
+          0,
+          0
+        ],
+        "sleepLinearSpeed": 0.08
+      }
+    },
+    {
+      "id": 8,
+      "Tag": {
+        "name": "Футбол"
+      },
+      "Script": {
+        "scripts": [
+          {
+            "module": "prank_football",
+            "class": "PrankFootball",
+            "props": {
+              "goal_z": 13.0,
+              "goal_half_width": 2.6
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "Tag": {
+        "name": "Заголовок"
+      },
+      "Script": {
+        "scripts": [
+          {
+            "module": "prank_title",
+            "class": "PrankTitle",
+            "props": {
+              "title": "Колёса без кузова",
+              "hint": "Только колёса и мяч. Загони мяч в ворота, 5 голов"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "Tag": {
+        "name": "Штанга_1"
+      },
+      "Transform": {
+        "position": [
+          -2.9,
+          0.9,
+          14.2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          1.8,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 11,
+      "Tag": {
+        "name": "Штанга_2"
+      },
+      "Transform": {
+        "position": [
+          2.9,
+          0.9,
+          14.2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.3,
+          1.8,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 12,
+      "Tag": {
+        "name": "Перекладина"
+      },
+      "Transform": {
+        "position": [
+          0,
+          1.9,
+          14.2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          6.1,
+          0.3,
+          0.3
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 13,
+      "Tag": {
+        "name": "Борт_лево"
+      },
+      "Transform": {
+        "position": [
+          -9.2,
+          0.6,
+          3
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.4,
+          1.2,
+          26
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 14,
+      "Tag": {
+        "name": "Борт_право"
+      },
+      "Transform": {
+        "position": [
+          9.2,
+          0.6,
+          3
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.4,
+          1.2,
+          26
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 15,
+      "Tag": {
+        "name": "Борт_дальний"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.6,
+          15.8
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          18,
+          1.2,
+          0.4
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 16,
+      "Tag": {
+        "name": "Борт_ближний"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.6,
+          -9.8
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          18,
+          1.2,
+          0.4
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/crate.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "box",
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "bounciness": 0.0,
+        "friction": 0.65,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "radius": 0.5
+      }
+    },
+    {
+      "id": 17,
+      "Tag": {
+        "name": "Колесо_1"
+      },
+      "Transform": {
+        "position": [
+          -4,
+          0.6,
+          -2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "sphere",
+        "radius": 0.9,
+        "isTrigger": false,
+        "bounciness": 0.2,
+        "friction": 0.4,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "Rigidbody": {
+        "mass": 1.2,
+        "useGravity": true,
+        "isKinematic": false,
+        "linearDamping": 0.3,
+        "gravityScale": 1.0,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "acceleration": [
+          0,
+          0,
+          0
+        ],
+        "sleepLinearSpeed": 0.08
+      }
+    },
+    {
+      "id": 18,
+      "Tag": {
+        "name": "Колесо_2"
+      },
+      "Transform": {
+        "position": [
+          0,
+          0.6,
+          2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "sphere",
+        "radius": 0.9,
+        "isTrigger": false,
+        "bounciness": 0.2,
+        "friction": 0.4,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "Rigidbody": {
+        "mass": 1.2,
+        "useGravity": true,
+        "isKinematic": false,
+        "linearDamping": 0.3,
+        "gravityScale": 1.0,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "acceleration": [
+          0,
+          0,
+          0
+        ],
+        "sleepLinearSpeed": 0.08
+      }
+    },
+    {
+      "id": 19,
+      "Tag": {
+        "name": "Колесо_3"
+      },
+      "Transform": {
+        "position": [
+          4,
+          0.6,
+          -2
+        ],
+        "rotationDeg": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.6,
+          0.6,
+          0.6
+        ]
+      },
+      "MeshRenderer": {
+        "meshPath": "assets/models/rl_wheel.obj",
+        "materialPath": "assets/materials/prank_cool.material.json",
+        "visible": true
+      },
+      "Collider": {
+        "type": "sphere",
+        "radius": 0.9,
+        "isTrigger": false,
+        "bounciness": 0.2,
+        "friction": 0.4,
+        "offset": [
+          0,
+          0,
+          0
+        ],
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "Rigidbody": {
+        "mass": 1.2,
+        "useGravity": true,
+        "isKinematic": false,
+        "linearDamping": 0.3,
+        "gravityScale": 1.0,
+        "velocity": [
+          0,
+          0,
+          0
+        ],
+        "acceleration": [
+          0,
+          0,
+          0
+        ],
+        "sleepLinearSpeed": 0.08
+      }
+    }
+  ]
+}

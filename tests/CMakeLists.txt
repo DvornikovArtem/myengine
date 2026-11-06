@@ -108,6 +108,25 @@ set_property(TARGET myengine_content_browser_tests PROPERTY FOLDER "Tests")
 add_test(NAME content_browser COMMAND myengine_content_browser_tests)
 set_tests_properties(content_browser PROPERTIES TIMEOUT 30)
 
+# The easter egg tab of the editor (docs/editor/prank-tab.md): the choice of a mini-scene by key words, the switch, the tables of texts and colours, the mini-scenes
+add_executable(myengine_prank_tests
+  ui/PrankTests.cpp)
+
+target_link_libraries(myengine_prank_tests PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_prank_tests)
+set_property(TARGET myengine_prank_tests PROPERTY FOLDER "Tests")
+add_test(NAME prank COMMAND myengine_prank_tests)
+set_tests_properties(prank PROPERTIES TIMEOUT 30)
+
+# Manual integration test: plays a mini-scene of the easter egg generator in a DX12 window (myengine_prank_smoke octopus|fox|lava|hardcore|nakedcars)
+add_executable(myengine_prank_smoke
+  scene/PrankSceneSmoke.cpp)
+
+target_link_libraries(myengine_prank_smoke PRIVATE myengine_engine)
+myengine_apply_compiler_options(myengine_prank_smoke)
+myengine_copy_runtime_assets(myengine_prank_smoke)
+set_property(TARGET myengine_prank_smoke PROPERTY FOLDER "Tests")
+
 add_executable(myengine_project_tests
   core/ProjectContextTests.cpp)
 

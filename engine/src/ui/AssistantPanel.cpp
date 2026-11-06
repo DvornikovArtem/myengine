@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <functional>
 #include <iterator>
 #include <string>
@@ -353,6 +354,7 @@ namespace myengine::ui
             {
                 assistant::AssistantBridgeConfig bridgeConfig;
                 bridgeConfig.repositoryRoot = root;
+                bridgeConfig.pipeName = config_.bridgePipeName;
                 // Codex has no permission prompt tool: its changes are confirmed inside the call, and files are
                 // changed with the bridge's own tools
                 bridgeConfig.confirmInCall = codex || external;
@@ -403,6 +405,10 @@ namespace myengine::ui
             cli.executable = settings_.codexPath;
             cli.workingDirectory = root;
             cli.systemPromptFiles = {root / "assets" / "assistant" / "system_prompt.md", root / "assets" / "assistant" / "system_prompt_codex.md"};
+            if (!config_.extraPromptFile.empty())
+            {
+                cli.systemPromptFiles.push_back(config_.extraPromptFile);   // Codex takes a list of files: the extra one goes last
+            }
             cli.transcriptDirectory = root / "Saved" / "assistant" / "codex";
             cli.model = settings_.codexModel;
             cli.logger = config_.logger;
@@ -419,6 +425,29 @@ namespace myengine::ui
             cli.executable = settings_.claudePath;
             cli.workingDirectory = root;
             cli.systemPromptFile = root / "assets" / "assistant" / "system_prompt.md";
+            if (!config_.extraPromptFile.empty())
+            {
+                // The CLI takes one file: the usual prompt and the extra one are put together under Saved/
+                std::error_code promptError;
+                std::string joined;
+                for (const auto& part : {cli.systemPromptFile, config_.extraPromptFile})
+                {
+                    std::ifstream stream(part, std::ios::binary);
+                    if (stream)
+                    {
+                        joined.append(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+                        joined += "\n\n";
+                    }
+                }
+                const auto combined = root / "Saved" / "assistant" / (config_.extraPromptFile.stem().string() + "_combined.md");
+                std::filesystem::create_directories(combined.parent_path(), promptError);
+                std::ofstream out(combined, std::ios::binary | std::ios::trunc);
+                if (out && !joined.empty())
+                {
+                    out << joined;
+                    cli.systemPromptFile = combined;
+                }
+            }
             cli.logger = config_.logger;
             if (!bridgeExecutable.empty())
             {

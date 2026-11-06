@@ -46,6 +46,10 @@ namespace myengine::ui
         assistant::AssistantSettings settings;
         // Where a choice made in the panel is written (%APPDATA%\myengine\editor_settings.json); empty: not saved
         std::filesystem::path settingsFile;
+        // A second panel of the editor (the easter egg generator of PrankTab) runs the same assistant with a prompt of its own after the usual one, and with
+        // a pipe of its own for the MCP bridge (two bridges must not share the default name of the process). Empty: the usual panel
+        std::filesystem::path extraPromptFile;
+        std::wstring bridgePipeName;
     };
 
     // Assistant panel: list of chats, header with model and effort, transcript in Markdown, composer with

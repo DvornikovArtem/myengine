@@ -168,6 +168,11 @@ namespace
                 _putenv_s("MYENGINE_NO_FACEID", "1");
                 continue;
             }
+            if (argument == L"--no-prank")   // the editor starts without the easter egg tab (same as MYENGINE_NO_PRANK=1)
+            {
+                _putenv_s("MYENGINE_NO_PRANK", "1");
+                continue;
+            }
             if (argument == L"--fly-brain")   // the 3D fly brain window open at the start (docs/flybrain/brain-view.md)
             {
                 options.openFlyBrain = true;
@@ -506,7 +511,7 @@ try
     {
         MessageBoxW(
             nullptr,
-            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--faceid-db <file>] [--fly-brain [--fbrain <file>]]\n"
+            L"Usage: myengine.exe [--project <file.myproject>] [--scene <path>] [--play] [--project-browser] [--game] [--no-faceid] [--no-prank] [--faceid-db <file>] [--fly-brain [--fbrain <file>]]\n"
             L"  Game: --game opens the Rocket League game (menus, HUD, no editor); MYENGINE_UI_SCRIPT=<file> drives it from a script (docs/game/rl-ui.md)\n"
             L"  DOOM: --game doom (or FlyDoom.exe) [--iwad <file.wad>] [--doom-args \"-warp 1 1 -skill 3\"] [--doom-square-pixels] [--doom-no-music]  (docs/game/doom.md)\n"
             L"  Fly plays DOOM: [--fly [doomfly|bio]] [--fbrain <file>] [--fly-seed N] [--fly-reward] [--flybrain auto|cpu|gpu] [--fly-mode fly-learn|human-vs-fly|fly-vs-fly] [--fly-fast] [--fly-untrained]  (docs/game/flydoom-fly.md)\n"
