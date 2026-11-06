@@ -197,6 +197,16 @@ namespace myengine::ui
 
     std::string SceneEditor::RunEditorCommand(const std::string& command)
     {
+        // `prank ...`: the easter egg tab (SceneEditorPrank.cpp)
+        if (command.rfind("prank", 0) == 0)
+        {
+            std::string rest = command.substr(5);
+            while (!rest.empty() && rest.front() == ' ')
+            {
+                rest.erase(rest.begin());
+            }
+            return RunPrankCommand(rest);
+        }
         if (!buildPanel_)
         {
             return "no Build window";

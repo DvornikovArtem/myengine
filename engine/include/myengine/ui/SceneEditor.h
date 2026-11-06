@@ -62,6 +62,11 @@ namespace myengine::scene
     class PrefabLibrary;
 }
 
+namespace myengine::ui::prank
+{
+    class PrankTab;
+}
+
 namespace myengine::ui
 {
     class ContentBrowser;
@@ -237,6 +242,12 @@ namespace myengine::ui
         void BuildScriptConsolePanel(const SceneEditorWindowContext& windowContext);
         void BuildAssistantPanel(const SceneEditorWindowContext& windowContext);
         void InitializeAssistant();
+        // The easter egg tab (docs/editor/prank-tab.md): created when it is on, drawn by one editor window
+        void BuildPrankTab(const SceneEditorWindowContext& windowContext);
+        void EnsurePrankTab();
+        std::string RunPrankCommand(const std::string& command);
+        float PrankMenuButtonWidth() const;
+        void DrawPrankMenuButton(float x, float y);
         void HandleKeyboardShortcuts(const SceneEditorWindowContext& windowContext);
         void StopPlayMode(); // Stop button and Esc: back to the scene snapshot taken at Play, no-op in Edit
         void ValidateSelection() const;
@@ -282,6 +293,8 @@ namespace myengine::ui
         ecs::EntityId pinnedMaterialEntity_ = ecs::kInvalidEntity; // selection when it was pinned; another selection unpins
         std::unique_ptr<assistant::AssistantTools> assistantTools_; // before the panel: the panel's bridge calls into it
         std::unique_ptr<AssistantPanel> assistantPanel_;
+        std::unique_ptr<prank::PrankTab> prankTab_;
+        core::WindowId prankOwner_ = 0;
         std::string pendingSceneMutationSnapshot_;
         std::string pendingGizmoMutationSnapshot_;
         bool gizmoWasUsing_ = false;

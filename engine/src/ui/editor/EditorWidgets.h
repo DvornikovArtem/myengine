@@ -66,6 +66,12 @@ namespace myengine::ui
         ImFont* icon30 = nullptr;
         ImFont* icon40 = nullptr;
         ImFont* icon58 = nullptr;
+        // The easter egg of the editor (PrankTab): Inter SemiBold in a few more sizes with a wider set of symbols, baked only
+        // while the tab is on. The atlas is built once, so a size that is not here cannot be drawn: PrankFontNear picks the nearest.
+        static constexpr int kPrankFontMax = 14;
+        ImFont* prank[kPrankFontMax]{};
+        float prankSize[kPrankFontMax]{};
+        int prankCount = 0;
     };
 
     // Registers the fonts of the current ImGui context (called by UiManager right after the atlas is built)
@@ -76,6 +82,8 @@ namespace myengine::ui
     // The size in pixels that PushFontRole gives the role (its line height, not the em of the spec). Use it for what
     // is centred by hand: FramePadding.y = (height - FontRoleSize(role)) / 2.
     float FontRoleSize(FontRole role);
+    // The baked font of the easter egg nearest to `wanted` pixels (null when they are not baked); `size` is the size it must be drawn at
+    ImFont* PrankFontNear(float wanted, float& size);
 
     // Draws one Lucide glyph centred on `center`, at the baked size
     void DrawIcon(ImDrawList* drawList, IconSize size, const char* icon, ImVec2 center, ImU32 color);

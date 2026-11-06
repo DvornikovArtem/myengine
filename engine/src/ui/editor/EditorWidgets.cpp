@@ -219,6 +219,26 @@ namespace myengine::ui
         ImGui::PopFont();
     }
 
+    ImFont* PrankFontNear(const float wanted, float& size)
+    {
+        const EditorFonts& fonts = CurrentFonts();
+        ImFont* best = nullptr;
+        float bestDistance = 1.0e9f;
+        // `wanted` is an em of the spec; the fonts are baked by line height (the same font as Strong, so the same ratio)
+        const float lineHeightPerEm = fonts.strongSize > 0.0f ? fonts.strongSize / style::kFontStrong : 1.0f;
+        for (int i = 0; i < fonts.prankCount; ++i)
+        {
+            const float distance = std::fabs(fonts.prankSize[i] - wanted * lineHeightPerEm);
+            if (fonts.prank[i] != nullptr && distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = fonts.prank[i];
+                size = fonts.prankSize[i];
+            }
+        }
+        return best;
+    }
+
     float FontRoleSize(const FontRole role)
     {
         float size = 0.0f;
