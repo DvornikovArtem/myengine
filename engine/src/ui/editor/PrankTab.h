@@ -4,8 +4,8 @@
 // and at the bottom an "AI generator 18+" that turns any request into a harmless little game. The whole joke is in the contrast: the wrapping promises
 // something terrible, what is inside is a game, a pun or a student. Nothing here is real adult content.
 //
-// The tab is on by default; PrankSettings.h switches it off (the "prankTab" setting, --no-prank). Switched off, nothing of it exists: no window, no menu
-// button, no badge. Internal to engine/src/ui/editor.
+// The tab is on by default; PrankSettings.h switches it off (the "prankTab" setting, --no-prank). Switched off, nothing of it exists: no window, no
+// badge. The cross on the tab and Ctrl+Shift+H switch it off at once. Internal to engine/src/ui/editor.
 
 #pragma once
 
@@ -31,13 +31,10 @@ namespace myengine::ui::prank
         // Every frame while the editor runs: the generator (the assistant) goes on even when the tab is hidden
         void Update(float dt);
         // The window. `dockId`: the node of the Viewport, where the window lands when the saved layout does not know it
-        void DrawWindow(ImGuiID dockId);
-        // Brings the tab to the front (the menu button, the first frames of the editor)
+        // True when the cross on the tab was clicked: the editor switches the tab off (the same as the check mark of the Window menu)
+        bool DrawWindow(ImGuiID dockId);
+        // Brings the tab to the front (the first frames of the editor, the scripted "focus")
         void RequestFocus() { focusFrames_ = 3; }
-
-        // The button in the main menu bar, at the screen position (it must be drawn inside the menu bar window)
-        float MenuButtonWidth() const;
-        void DrawMenuButton(ImVec2 position);
 
         void Shutdown();
 

@@ -137,19 +137,6 @@ namespace myengine::ui
 #endif
     }
 
-    float SceneEditor::PrankMenuButtonWidth() const
-    {
-        return prankTab_ != nullptr ? prankTab_->MenuButtonWidth() : 0.0f;
-    }
-
-    void SceneEditor::DrawPrankMenuButton(const float x, const float y)
-    {
-        if (prankTab_ != nullptr)
-        {
-            prankTab_->DrawMenuButton(ImVec2(x, y));
-        }
-    }
-
     void SceneEditor::BuildPrankTab(const SceneEditorWindowContext& windowContext)
     {
         // The scripted input of the tests works whether the tab is on or not (the checks of the menu and of --no-prank click the editor itself)
@@ -188,7 +175,30 @@ namespace myengine::ui
         {
             dockId = viewport->DockId;
         }
-        prankTab_->DrawWindow(dockId);
+        if (prankTab_->DrawWindow(dockId))
+        {
+            // The cross on the tab: the same as taking the check mark off (the setting is saved, the window goes away next frame)
+            prank::SetEnabled(false);
+        }
+    }
+
+    // Ctrl+Shift+H, the panic button: the tab goes away at once and comes back with the second press. It is the check mark of the Window menu, so the
+    // setting is saved. From any panel of the editor, in Edit and in Play; --no-prank leaves it dead.
+    void SceneEditor::TogglePrankByShortcut()
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        if (prank::Hidden() || !io.KeyCtrl || !io.KeyShift || io.KeyAlt || !ImGui::IsKeyPressed(ImGuiKey_H, false))
+        {
+            return;
+        }
+        // One press per frame even when several editor windows ask the same ImGui frame
+        const int frame = ImGui::GetFrameCount();
+        if (frame == prankToggleFrame_)
+        {
+            return;
+        }
+        prankToggleFrame_ = frame;
+        prank::Toggle();
     }
 
     // The commands of the scripted input (`editor prank ...`, docs/editor/prank-tab.md): the screenshots and the checks that cannot click
@@ -197,7 +207,7 @@ namespace myengine::ui
         std::istringstream words(command);
         std::string verb;
         words >> verb;
-        const bool inputVerb = verb == "click" || verb == "dclick" || verb == "move" || verb == "esc" || verb == "enter" || verb == "type";
+        const bool inputVerb = verb == "click" || verb == "dclick" || verb == "move" || verb == "esc" || verb == "enter" || verb == "type" || verb == "hotkey";
         if (!prank::Enabled() && !inputVerb)
         {
             return "the easter egg tab is off";
@@ -237,6 +247,18 @@ namespace myengine::ui
             }
             PushClick(x, y, verb == "dclick" ? 2 : 1);
             return verb + " " + std::to_string(static_cast<int>(x)) + " " + std::to_string(static_cast<int>(y));
+        }
+        if (verb == "hotkey")
+        {
+            // Ctrl+Shift+H as the keyboard sends it: both modifiers down, H down and up, the modifiers up (one event per frame)
+            auto& queue = InputQueue();
+            queue.push_back({PrankInputEvent::Kind::Key, 0.0f, 0.0f, ImGuiMod_Ctrl, true, {}});
+            queue.push_back({PrankInputEvent::Kind::Key, 0.0f, 0.0f, ImGuiMod_Shift, true, {}});
+            queue.push_back({PrankInputEvent::Kind::Key, 0.0f, 0.0f, ImGuiKey_H, true, {}});
+            queue.push_back({PrankInputEvent::Kind::Key, 0.0f, 0.0f, ImGuiKey_H, false, {}});
+            queue.push_back({PrankInputEvent::Kind::Key, 0.0f, 0.0f, ImGuiMod_Shift, false, {}});
+            queue.push_back({PrankInputEvent::Kind::Key, 0.0f, 0.0f, ImGuiMod_Ctrl, false, {}});
+            return "hotkey Ctrl+Shift+H";
         }
         if (verb == "move")
         {

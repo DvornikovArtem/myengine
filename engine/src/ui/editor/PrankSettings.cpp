@@ -148,6 +148,17 @@ namespace myengine::ui::prank
         SaveEnabled(SettingsFile(), enabled, ignored);
     }
 
+    bool Toggle()
+    {
+        EnsureInitialized();
+        if (g_noPrank)
+        {
+            return false;
+        }
+        SetEnabled(!g_setting);
+        return true;
+    }
+
     bool FontsWanted()
     {
         EnsureInitialized();

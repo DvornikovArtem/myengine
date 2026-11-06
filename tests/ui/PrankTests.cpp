@@ -185,7 +185,7 @@ namespace
         SetEnvironmentVariableW(L"MYENGINE_ASSISTANT_SETTINGS", file.wstring().c_str());
         Check(prank::SettingsFile() == file, "MYENGINE_ASSISTANT_SETTINGS names the file");
         prank::Initialize(false);
-        Check(prank::Enabled() && prank::SettingOn() && !prank::Hidden() && prank::FontsWanted(), "on by default: tab, menu button and fonts");
+        Check(prank::Enabled() && prank::SettingOn() && !prank::Hidden() && prank::FontsWanted(), "on by default: tab and fonts");
         prank::Initialize(true);
         Check(!prank::Enabled() && prank::SettingOn() && prank::Hidden() && !prank::FontsWanted(), "--no-prank: nothing, not even the View item, no fonts");
         Write(file, R"({"prankTab": false})");
@@ -195,9 +195,15 @@ namespace
         Check(prank::Enabled() && prank::LoadEnabled(file), "the check mark turns it on at once and is saved");
         prank::SetEnabled(false);
         Check(!prank::Enabled() && !prank::LoadEnabled(file), "the check mark turns it off at once and is saved");
+        // Ctrl+Shift+H and the cross on the tab: the same setting as the check mark, saved, and dead with --no-prank
+        Check(prank::Toggle() && prank::Enabled() && prank::LoadEnabled(file), "the shortcut brings the tab back and saves it");
+        Check(prank::Toggle() && !prank::Enabled() && !prank::LoadEnabled(file), "the second press hides it and saves it");
+        Check(prank::Toggle() && prank::Enabled(), "and back again");
+        prank::Initialize(true);
+        Check(!prank::Toggle() && !prank::Enabled() && prank::LoadEnabled(file), "--no-prank: the shortcut does nothing and the file is not touched");
         SetEnvironmentVariableW(L"MYENGINE_ASSISTANT_SETTINGS", nullptr);
         fs::remove_all(directory);
-        std::cout << "  settings: file, keys kept, --no-prank, the check mark\n";
+        std::cout << "  settings: file, keys kept, --no-prank, the check mark, the shortcut\n";
     }
 
     // ---- the tables ----
