@@ -55,7 +55,18 @@ namespace myengine::core::crash
     // so the stack of the dump names it with its file and line.
     namespace test
     {
-        void DivideByZero();      // EXCEPTION_INT_DIVIDE_BY_ZERO 0xC0000094
-        void AccessViolation();   // EXCEPTION_ACCESS_VIOLATION 0xC0000005: a write to the address 0
+        void DivideByZero();       // EXCEPTION_INT_DIVIDE_BY_ZERO 0xC0000094
+        void AccessViolation();    // EXCEPTION_ACCESS_VIOLATION 0xC0000005: a write to the address 0
+        void AssertionFailure();   // kAssertionFailure 0xE0000003: MYENGINE_CHECK of a false condition
     }
+
+    // The code of the exception of a failed MYENGINE_CHECK
+    constexpr unsigned long kAssertionFailure = 0xE0000003;
+
+    // A failed MYENGINE_CHECK: the condition, the file and the line go to the report ("assertion: ..."), then the exception kAssertionFailure is raised
+    // here, so the crash handler writes the report with the context of this call (the stack goes on to the function with the check)
+    [[noreturn]] void AssertionFailed(const char* condition, const char* file, int line);
 }
+
+// An assertion that stays in a release build (the standard assert() is off there: NDEBUG). A false condition crashes the game with a report.
+#define MYENGINE_CHECK(condition) ((condition) ? static_cast<void>(0) : ::myengine::core::crash::AssertionFailed(#condition, __FILE__, __LINE__))

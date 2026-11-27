@@ -609,11 +609,13 @@ namespace myengine::game
             static const CrashButton kButtons[] = {
                 {"main/crash-divide", "INTEGER DIVIDE BY ZERO", "crash test: integer divide by zero", &core::crash::test::DivideByZero},
                 {"main/crash-access", "ACCESS VIOLATION", "crash test: access violation", &core::crash::test::AccessViolation},
+                {"main/crash-assert", "ASSERTION FAILURE", "crash test: assertion failure", &core::crash::test::AssertionFailure},
             };
             constexpr float kStep = 66.0f;
             const Rect panel{1380.0f, 196.0f, 460.0f, 70.0f + kStep * static_cast<float>(std::size(kButtons))};
             Panel(f, panel, true);
-            Text(f, FontStyle::Bold, 20.0f, {panel.x + 52.0f, panel.y + 20.0f}, style::kBad, "CRASH TEST", Align::Left, 0.1f);   // right of the slanted edge
+            // the top edge of the slanted panel starts h * tan(12 deg) to the right: the caption starts after it
+            Text(f, FontStyle::Bold, 20.0f, {panel.x + panel.h * style::kBevelTan + 16.0f, panel.y + 20.0f}, style::kBad, "CRASH TEST", Align::Left, 0.1f);
             Text(f, FontStyle::SemiBold, 16.0f, {panel.x + panel.w - 24.0f, panel.y + 23.0f}, style::kTextDim, std::string("BUILD ") + MYENGINE_BUILD_ID,
                  Align::Right, 0.06f);
             for (std::size_t i = 0; i < std::size(kButtons); ++i)

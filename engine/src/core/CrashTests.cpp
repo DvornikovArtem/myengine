@@ -21,4 +21,10 @@ namespace myengine::core::crash::test
 #pragma warning(suppress : 6011)   // on purpose: the write through the null pointer
         *nothing = 42;   // <- EXCEPTION_ACCESS_VIOLATION 0xC0000005: writing the address 0
     }
+
+    __declspec(noinline) void AssertionFailure()
+    {
+        volatile int lives = 0;
+        MYENGINE_CHECK(lives > 0);   // <- assertion failure 0xE0000003 (MYENGINE_CHECK stays in a release build)
+    }
 }

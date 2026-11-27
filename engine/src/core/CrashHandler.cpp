@@ -40,6 +40,7 @@ namespace myengine::core::crash
         char g_reportId[17]{};
         char g_scene[256] = "(none yet)";
         char g_lastAction[256] = "(none yet)";
+        char g_assertion[512]{};   // the failed MYENGINE_CHECK (AssertionFailed): "lives > 0 at CrashTests.cpp:31"
         DWORD g_mainThread = 0;
 
         using MiniDumpWriteDumpFn = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION,
@@ -88,6 +89,7 @@ namespace myengine::core::crash
             case 0xE06D7363: return "unhandled C++ exception";
             case 0xE0000001: return "std::terminate / abort";
             case 0xE0000002: return "invalid CRT parameter or pure virtual call";
+            case kAssertionFailure: return "assertion failure";
             default: return "exception";
             }
         }
@@ -239,10 +241,18 @@ namespace myengine::core::crash
             char access[96]{};
             DescribeAccess(record, access, sizeof(access));
 
+            // a failed MYENGINE_CHECK names its condition and place
+            static char assertion[sizeof(g_assertion) + 32];
+            assertion[0] = 0;
+            if (code == kAssertionFailure && g_assertion[0] != 0)
+            {
+                std::snprintf(assertion, sizeof(assertion), "assertion: %s\r\n", g_assertion);
+            }
+
             // the log of the run next to the dump, with a last line that names the report
-            static char logLine[512];
-            const int logLineLength = std::snprintf(logLine, sizeof(logLine), "[CRASH] reportId=%s buildId=%s: %s 0x%08lX at %s%s\r\n", g_reportId,
-                                                    MYENGINE_BUILD_ID, ExceptionName(code), static_cast<unsigned long>(code), where, access);
+            static char logLine[1024];
+            const int logLineLength = std::snprintf(logLine, sizeof(logLine), "[CRASH] reportId=%s buildId=%s: %s 0x%08lX at %s%s\r\n%s", g_reportId,
+                                                    MYENGINE_BUILD_ID, ExceptionName(code), static_cast<unsigned long>(code), where, access, assertion);
             CopyLog(logCopyPath, logLine, logLineLength);
 
             // what can be read without a debugger (LR5: reportId, the time and buildId are here before the dump is opened)
@@ -258,6 +268,7 @@ namespace myengine::core::crash
                 "scene: %s\r\n"
                 "last action: %s\r\n"
                 "exception: %s 0x%08lX at %s%s\r\n"
+                "%s"
                 "thread: %lu (%s)\r\n"
                 "process: %lu\r\n"
                 "dump: %s\r\n"
@@ -265,7 +276,7 @@ namespace myengine::core::crash
                 "\r\nThe end of the log:\r\n",
                 g_productName, g_reportId, now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, utc.wYear, utc.wMonth, utc.wDay, utc.wHour,
                 utc.wMinute, utc.wSecond, MYENGINE_BUILD_ID, MYENGINE_VERSION_STRING, MYENGINE_GIT_COMMIT_FULL, g_scene, g_lastAction, ExceptionName(code),
-                static_cast<unsigned long>(code), where, access, static_cast<unsigned long>(thread), thread == g_mainThread ? "the main thread" : "not the main thread",
+                static_cast<unsigned long>(code), where, access, assertion, static_cast<unsigned long>(thread), thread == g_mainThread ? "the main thread" : "not the main thread",
                 static_cast<unsigned long>(GetCurrentProcessId()), dumped ? "written (the .dmp next to this file)" : "NOT written");
             HANDLE text = CreateFileW(textPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (text != INVALID_HANDLE_VALUE)
@@ -379,6 +390,24 @@ namespace myengine::core::crash
         const size_t length = std::min(action.size(), sizeof(g_lastAction) - 1);
         std::memcpy(g_lastAction, action.data(), length);
         g_lastAction[length] = 0;
+    }
+
+    void AssertionFailed(const char* condition, const char* file, const int line)
+    {
+        // the name of the file without the folders of the machine that built it
+        const char* name = file != nullptr ? file : "?";
+        for (const char* p = name; *p != 0; ++p)
+        {
+            if (*p == '\\' || *p == '/')
+            {
+                name = p + 1;
+            }
+        }
+        std::snprintf(g_assertion, sizeof(g_assertion), "%s at %s:%d", condition != nullptr ? condition : "?", name, line);
+        // the exception goes through the filter of the unhandled exceptions: the dump gets the context of this place
+        const ULONG_PTR arguments[3] = {reinterpret_cast<ULONG_PTR>(condition), reinterpret_cast<ULONG_PTR>(file), static_cast<ULONG_PTR>(line)};
+        RaiseException(kAssertionFailure, EXCEPTION_NONCONTINUABLE, 3, arguments);
+        std::abort();   // not reached: a noncontinuable exception does not come back
     }
 
     void Reassert()
