@@ -54,6 +54,9 @@
     the first line of tools\steam_sdk.txt (a local file), then the folders "sdk" / "steamworks_sdk" next to the repository (up the tree).
 .PARAMETER CopyZipTo
     Also copy the zip to this folder (created if needed): the place of the files that go to friends.
+.PARAMETER BuildId
+    The id of the build (LR5, docs/crash/README.md): the exe shows it in the menu and writes it into every crash report, version.txt has it. GitHub Actions
+    gives GITHUB_RUN_ID.GITHUB_RUN_ATTEMPT (tools/ci/build_release.ps1); the default "local" is a build on a machine.
 #>
 [CmdletBinding()]
 param(
@@ -68,7 +71,8 @@ param(
     [switch]$NoWwise,
     [string]$SteamSdk = '',
     [string]$WwiseSdk = '',
-    [string]$CopyZipTo = ''
+    [string]$CopyZipTo = '',
+    [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$BuildId = 'local'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -282,12 +286,12 @@ if (-not $SkipBuild) {
     $cache = Join-Path $buildPath 'CMakeCache.txt'
     if (Test-Path $cache) {
         # CMAKE_SUPPRESS_REGENERATION is on: a change of the CMake files (the version, the resources of the exe) reaches the build only by this
-        Write-Step "Re-running CMake for $BuildDir"
-        Invoke-Native 'cmake' @('-S', $root, '-B', $buildPath)
+        Write-Step "Re-running CMake for $BuildDir (build id $BuildId)"
+        Invoke-Native 'cmake' @('-S', $root, '-B', $buildPath, "-DMYENGINE_BUILD_ID=$BuildId")
     }
     if (-not (Test-Path $cache)) {
-        Write-Step "Configuring $BuildDir ($($vs.Generator))"
-        $configure = @('-S', $root, '-B', $buildPath, '-G', $vs.Generator, '-A', 'x64',
+        Write-Step "Configuring $BuildDir ($($vs.Generator), build id $BuildId)"
+        $configure = @('-S', $root, '-B', $buildPath, '-G', $vs.Generator, '-A', 'x64', "-DMYENGINE_BUILD_ID=$BuildId",
             '-DMYENGINE_SHIPPING=ON', '-DMYENGINE_BUILD_TESTS=OFF', '-DMYENGINE_COPY_RUNTIME_ASSETS=OFF',
             "-DMYENGINE_WWISE=$(if ($useWwise) { 'ON' } else { 'OFF' })")
         if ($useWwise) { $configure += "-DWWISE_SDK_DIR=$($wwiseSdkFolder.Replace('\', '/'))" }
@@ -539,7 +543,7 @@ try {
     $changes = @(& git -C $root status --porcelain 2>$null)
     if ($changes.Count -gt 0) { $treeState = "the sources had $($changes.Count) uncommitted change(s) when this package was built: they are not in the commit" }
 } catch { }
-$versionText = "$gameName $version`r`ncommit $commit`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n"
+$versionText = "$gameName $version`r`ncommit $commit`r`ncommit-full $commitFull`r`nbuild $BuildId`r`nsteam $(if ($useSteam) { 'yes' } else { 'no' })`r`nwwise $(if ($useWwise) { 'yes' } else { 'no' })`r`n"
 foreach ($placedFile in $placed) { $versionText += "file $placedFile`r`n" }
 Write-TextFile (Join-Path $dist 'version.txt') $versionText $false
 

@@ -7,3 +7,7 @@
 #define MYENGINE_VERSION_STRING "@PROJECT_VERSION@"
 // the commit the build was configured at (the package script writes the exact one to version.txt)
 #define MYENGINE_GIT_COMMIT "@MYENGINE_GIT_COMMIT@"
+#define MYENGINE_GIT_COMMIT_FULL "@MYENGINE_GIT_COMMIT_FULL@"
+// The id of the build (LR5, docs/crash/README.md): GITHUB_RUN_ID.GITHUB_RUN_ATTEMPT of the Actions run that built the release, "local" for a build on
+// a machine. The same id is in build-info.txt of both release archives (the game and the symbols) and in every crash report of this exe.
+#define MYENGINE_BUILD_ID "@MYENGINE_BUILD_ID@"

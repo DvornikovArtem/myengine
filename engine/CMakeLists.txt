@@ -142,6 +142,7 @@ set(ENGINE_SOURCES
   src/config/AppConfig.cpp
   src/core/AppPaths.cpp
   src/core/CrashHandler.cpp
+  src/core/CrashTests.cpp
   src/core/DpiScale.cpp
   src/core/Application.cpp
   src/core/FileWatcher.cpp

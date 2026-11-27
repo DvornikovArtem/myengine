@@ -19,6 +19,7 @@
 #include <myengine/core/Application.h>
 #include <myengine/core/CrashHandler.h>
 #include <myengine/core/ProjectContext.h>
+#include <myengine/core/Version.h>
 #include <doomfly/FlyModes.h>
 #include <myengine/render/dx12/ShaderLayoutDump.h>
 
@@ -526,7 +527,9 @@ try
     }
 
     // The crash report identifies the product that was actually launched, after command-line mode selection.
-    const wchar_t* crashProductName = options.doomMode ? L"FlyDoom" : (options.gameMode ? L"Rocket Arena" : L"myengine editor");
+    // (RocketArena.exe starts the game from its config, not from --game: a shipping build is the game)
+    const wchar_t* crashProductName =
+        options.doomMode ? L"FlyDoom" : ((options.gameMode || myengine::core::apppaths::IsShipping()) ? L"Rocket Arena" : L"myengine editor");
     myengine::core::crash::Install(myengine::core::apppaths::UserDataDirectory() / L"crashes", myengine::core::apppaths::LogDirectory() / L"myengine.log", crashProductName);
     myengine::core::crash::CrashIfRequested();
 
@@ -620,6 +623,10 @@ try
         return app.GetExitCode() != 0 ? app.GetExitCode() : -1;
     }
 
+    // LR5: the log of a run says which build it is and where its crash report would go (the report has the same buildId)
+    app.GetLogger().Info(std::string("Build: version ") + MYENGINE_VERSION_STRING + ", buildId " + MYENGINE_BUILD_ID + ", commit " + MYENGINE_GIT_COMMIT_FULL);
+    app.GetLogger().Info("Crash handler: reportId " + myengine::core::crash::ReportId() + ", reports go to " +
+                         (myengine::core::apppaths::UserDataDirectory() / L"crashes").u8string());
     app.GetLogger().Info("Config path: " + configPath.string());
     app.GetLogger().Info("Configured windows (from config): " + std::to_string(config.windows.size()));
 

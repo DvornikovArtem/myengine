@@ -1,0 +1,66 @@
+# LR5 (docs/crash/README.md): the build of the engine in GitHub Actions and the GitHub Release of a tag.
+#  - a push to a working branch: a clean checkout with the submodules, the build of the game with the debug information (RelWithDebInfo) by the usual script
+#    of the project (tools/package_game.ps1 through tools/ci/build_release.ps1), the two archives as the artifacts of the run;
+#  - a push of a tag v*: the same build of the commit of the tag, and the two archives are published as the assets of the GitHub Release of that tag,
+#    its text names the buildId, the commit and this run. A missing file or a failed publication fails the run.
+name: Build and release
+
+on:
+  push:
+    branches: [main, 'lab5-crash', 'lab5/**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # gh release create
+
+jobs:
+  build:
+    name: Build Rocket Arena (RelWithDebInfo)
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - name: Check out the sources (with the submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and pack (game + symbols)
+        id: pack
+        shell: powershell
+        run: |
+          ./tools/ci/build_release.ps1 -Out "$env:RUNNER_TEMP\release" -BuildDir "$env:RUNNER_TEMP\build"
+
+      - name: Keep the archives of the run
+        uses: actions/upload-artifact@v4
+        with:
+          name: RocketArena-build${{ steps.pack.outputs.build_id }}
+          path: |
+            ${{ steps.pack.outputs.game_zip }}
+            ${{ steps.pack.outputs.symbols_zip }}
+            ${{ steps.pack.outputs.notes }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the GitHub Release
+        if: github.ref_type == 'tag'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GAME_ZIP: ${{ steps.pack.outputs.game_zip }}
+          SYMBOLS_ZIP: ${{ steps.pack.outputs.symbols_zip }}
+          NOTES: ${{ steps.pack.outputs.notes }}
+          BUILD_ID: ${{ steps.pack.outputs.build_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag $env:GAME_ZIP $env:SYMBOLS_ZIP --verify-tag --title "Rocket Arena $tag (build $env:BUILD_ID)" --notes-file $env:NOTES
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }
+          # the release has both archives (a failed upload fails the run)
+          $assets = @(gh release view $tag --json assets --jq '.assets[].name')
+          if ($LASTEXITCODE -ne 0) { throw "gh release view failed with exit code $LASTEXITCODE" }
+          foreach ($zip in @($env:GAME_ZIP, $env:SYMBOLS_ZIP)) {
+            $name = Split-Path -Leaf $zip
+            if ($assets -notcontains $name) { throw "The release $tag has no asset $name (it has: $($assets -join ', '))" }
+          }
+          Write-Host "Published: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases/tag/$tag"
