@@ -49,7 +49,10 @@ if(MYENGINE_SHIPPING)
   set_target_properties(myengine PROPERTIES OUTPUT_NAME RocketArena)
   # A PDB for the minidumps of the players (core/CrashHandler.h): the names of the functions of a crash. It stays out of the package
   # (package_game.ps1 keeps it in dist/symbols); the exe names it without the folder, so no path of the repository is in the exe.
-  target_link_options(myengine PRIVATE /DEBUG /OPT:REF /OPT:ICF /PDBALTPATH:%_PDB%)
+  # The name is put by a generator expression: /PDBALTPATH:%_PDB% went through the escaping of CMake and MSBuild and the exe named "%%%RocketArena.pdb%%%",
+  # a file no debugger finds (LR5, docs/crash/dump-analysis.md).
+  # /INCREMENTAL:NO: RelWithDebInfo links incrementally by default, and /OPT:ICF turns that off with the warning LNK4075
+  target_link_options(myengine PRIVATE /DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO "/PDBALTPATH:$<TARGET_PDB_FILE_NAME:myengine>")
 else()
   target_compile_definitions(myengine PRIVATE MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()
@@ -72,7 +75,7 @@ target_link_libraries(FlyDoom PRIVATE myengine_engine myengine_doomfly myengine_
 target_include_directories(FlyDoom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(FlyDoom PRIVATE MYENGINE_FLYDOOM=1)
 if(MYENGINE_SHIPPING)
-  target_link_options(FlyDoom PRIVATE /DEBUG /OPT:REF /OPT:ICF /PDBALTPATH:%_PDB%)
+  target_link_options(FlyDoom PRIVATE /DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO "/PDBALTPATH:$<TARGET_PDB_FILE_NAME:FlyDoom>")
 else()
   target_compile_definitions(FlyDoom PRIVATE MYENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()

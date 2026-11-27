@@ -195,6 +195,7 @@ set_property(TARGET Jolt PROPERTY FOLDER "External")
 # The version of the game and of the exe resources comes from project(... VERSION) above and nowhere else:
 # generated/myengine/core/Version.h (the menu, the crash report) and app/resources/RocketArena.rc.in (VERSIONINFO of the exe)
 set(MYENGINE_GIT_COMMIT "unknown")
+set(MYENGINE_GIT_COMMIT_FULL "unknown")
 find_package(Git QUIET)
 if(GIT_FOUND)
   execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
@@ -202,7 +203,14 @@ if(GIT_FOUND)
   if(MYENGINE_GIT_RESULT EQUAL 0 AND MYENGINE_GIT_COMMIT_OUT)
     set(MYENGINE_GIT_COMMIT "${MYENGINE_GIT_COMMIT_OUT}")
   endif()
+  execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE MYENGINE_GIT_COMMIT_FULL_OUT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE MYENGINE_GIT_FULL_RESULT)
+  if(MYENGINE_GIT_FULL_RESULT EQUAL 0 AND MYENGINE_GIT_COMMIT_FULL_OUT)
+    set(MYENGINE_GIT_COMMIT_FULL "${MYENGINE_GIT_COMMIT_FULL_OUT}")
+  endif()
 endif()
+# LR5: the id of the build (GITHUB_RUN_ID.GITHUB_RUN_ATTEMPT in GitHub Actions, tools/ci/build_release.ps1); a build on a machine is "local"
+set(MYENGINE_BUILD_ID "local" CACHE STRING "The id of the build: the menu, the crash reports and build-info.txt of the release archives say it")
 configure_file(cmake/Version.h.in "${CMAKE_BINARY_DIR}/generated/myengine/core/Version.h" @ONLY)
 
 add_subdirectory(engine)

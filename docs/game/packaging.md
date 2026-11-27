@@ -50,7 +50,7 @@ CMake-опция `MYENGINE_SHIPPING` (по умолчанию OFF). Её вкл�
 | Недавние проекты | `%APPDATA%\myengine\recent_projects.json` | `%LOCALAPPDATA%\RocketArena\recent_projects.json` |
 | Миниатюры, захваты GPU, статистика кадра | `<проект>\Saved\…` | `%LOCALAPPDATA%\RocketArena\Saved\…` |
 | Бинарный кэш моделей и текстур | рядом с исходным файлом (`.myemesh`, `.myetex`) | `%LOCALAPPDATA%\RocketArena\Cache\<хэш пути>.myemesh` / `.myetex` |
-| Отчёт и дамп падения | `%APPDATA%\myengine\crashes\` | `%LOCALAPPDATA%\RocketArena\crashes\crash-<дата>-<время>.dmp` и `.txt`, маркер `pending.txt` до следующего запуска |
+| Отчёт и дамп падения | `%APPDATA%\myengine\crashes\` | `%LOCALAPPDATA%\RocketArena\crashes\crash-<дата>-<время>-<reportId>.dmp`, `.txt` и `.log`, маркер `pending.txt` до следующего запуска |
 | Настройки игры (видео, камера, звук, последний выбор в Play) | `%APPDATA%\myengine\game_settings.json` | `%LOCALAPPDATA%\RocketArena\game_settings.json` |
 | Личные клавиши | `%APPDATA%\myengine\rl_controls.json` | `%LOCALAPPDATA%\RocketArena\rl_controls.json` (пишет Settings > Controls) |
 | Свой `rl_tuning.json` (окно RL Tuning) | `assets/data/rl_tuning.json` проекта | `%LOCALAPPDATA%\RocketArena\rl_tuning.json` (читается вместо файла дистрибутива) |
@@ -115,7 +115,7 @@ FlyDoom/
 2. иконка и поля exe (`FlyDoom`, версия как в `version.txt`);
 3. запуск из чистой папки без аргументов (`--exit-after-frames`): код 0, рядом с exe ничего не изменилось, лог в `<LOCALAPPDATA>/FlyDoom/logs` без путей репозитория и без `[ERROR]`, строка `DOOM: the game data is ...`, в `APPDATA` ничего, скриншот кадра — картинка из многих цветов, а не чёрный экран;
 4. каждый WAD пакета отдельно через `--iwad` с `-warp 1 1`: игра берёт именно его и доходит до первого уровня (на машине с DOOM из Steam запуск без аргументов может выбрать его, поэтому WAD пакета проверяются по `--iwad`);
-5. падение (`MYENGINE_CRASH_TEST=1`): `.dmp` (больше 10 КБ) и `.txt` (с «access violation», версией и местом `FlyDoom.exe+0x…`) в `crashes` и маркер `pending.txt`; следующий запуск пишет в лог «the previous run crashed» с именем отчёта, показывает красную плашку на 12 секунд («The game crashed last time. Send crash-….txt from %LOCALAPPDATA%\FlyDoom\crashes») и снимает маркер.
+5. падение (`MYENGINE_CRASH_TEST=1`): `.dmp` (больше 10 КБ) и `.txt` (с «access violation», версией и местом `FlyDoom.exe+0x…`) в `crashes` и маркер `pending.txt`; следующий запуск пишет в лог «the previous run crashed» с именем отчёта, показывает красную плашку на 12 секунд («The game crashed last time. Send crash-…-<reportId>.dmp / .txt / .log from %LOCALAPPDATA%\FlyDoom\crashes») и снимает маркер.
 
 Мозг мухи проверяется как файл; когда N1 научит игру читать `.fbrain`, к проверке добавится строка лога о загрузке.
 
@@ -129,11 +129,12 @@ FlyDoom/
 
 `engine/include/myengine/core/CrashHandler.h`, подключён первой строкой `wWinMain` (`main.cpp`). Что ловится: необработанные исключения (`SetUnhandledExceptionFilter`: обращение по null, деление на ноль, необработанный C++ `throw`), `std::terminate`, `abort()`, чисто виртуальный вызов, неверный параметр CRT. Что пишется в `%LOCALAPPDATA%\RocketArena\crashes\`:
 
-- `crash-<дата>-<время>.dmp`: minidump (стеки всех потоков, список модулей, исключение; 70-250 КБ), через `dbghelp.dll` из System32, который подгружается только при падении. С сегментами данных библиотек дамп этой игры весит около 40 МБ: для присылки другом это много, поэтому их нет; если для разбора понадобится больше, добавьте `MiniDumpWithDataSegs` в `CrashHandler.cpp`;
-- `crash-<дата>-<время>.txt`: версия и коммит, время, исключение (код, `RocketArena.exe+0x…`), последние 40 строк лога (лог при следующем запуске перезаписывается, поэтому его конец копируется сюда; при падении в первые миллисекунды лога ещё нет);
+- `crash-<дата>-<время>-<reportId>.dmp`: minidump (стеки всех потоков, список модулей, исключение; 70-250 КБ), через `dbghelp.dll` из System32, который подгружается только при падении. С сегментами данных библиотек дамп этой игры весит около 40 МБ: для присылки другом это много, поэтому их нет; если для разбора понадобится больше, добавьте `MiniDumpWithDataSegs` в `CrashHandler.cpp`;
+- `crash-<дата>-<время>-<reportId>.txt`: reportId, время (местное и UTC), buildId, версия и полный SHA, сцена, последнее действие, исключение (код, `RocketArena.exe+0x…`, для access violation — чтение/запись и адрес), поток, последние 40 строк лога (ЛР5: [../crash/README.md](../crash/README.md));
+- `crash-<дата>-<время>-<reportId>.log`: копия всего лога упавшего запуска (при следующем запуске `myengine.log` перезаписывается) с последней строкой `[CRASH] reportId=… buildId=…`; при падении в первые миллисекунды лога ещё нет;
 - `pending.txt`: маркер, пишется последним; в нём путь к `.txt` и одна строка о причине.
 
-Папка `crashes` создаётся вместе с родителями (первый же запуск, упавший до создания `%LOCALAPPDATA%\RocketArena`, тоже оставляет отчёт). Игрок видит окно «Rocket Arena has stopped working» с папкой отчёта. При следующем запуске, на первом главном меню, игра находит маркер, удаляет его и показывает красный тост: «The game crashed last time. Send crash-….txt from %LOCALAPPDATA%\RocketArena\crashes» (12 с); в лог идёт строка `Game UI: the previous run crashed: …`. Тост показывается один раз на падение. Отчёт и дамп лежат, пока игрок их не удалит.
+Папка `crashes` создаётся вместе с родителями (первый же запуск, упавший до создания `%LOCALAPPDATA%\RocketArena`, тоже оставляет отчёт). Игрок видит окно «Rocket Arena has stopped working» с reportId, buildId и путём отчёта. `reportId` (64 случайных бита) создаётся при `Install`, поэтому два падения никогда не перезапишут друг друга. При следующем запуске, на первом главном меню, игра находит маркер, удаляет его и показывает красный тост: «The game crashed last time. Send crash-…-<reportId>.dmp / .txt / .log from %LOCALAPPDATA%\RocketArena\crashes» (12 с); в лог идёт строка `Game UI: the previous run crashed: …`. Тост показывается один раз на падение. Отчёт и дамп лежат, пока игрок их не удалит.
 
 **Steam забирает обработчики себе.** `SteamAPI_Init` (его вызывает экран Private match, когда ему нужен Steam) пишет в консоль «Setting breakpad minidump AppID = 480» и ставит свой обработчик необработанных исключений (на машине разработки порядок не проверялся без `Reassert`: он дешёвый и страхует от замены). Поэтому экраны игры каждый кадр зовут `crash::Reassert()` (`RlGameFlow::Draw`): один атомарный обмен фильтра, и если на месте оказался чужой, все обработчики (фильтр, `std::terminate`, `abort`, чисто виртуальный вызов, неверный параметр CRT) возвращаются. Проверяется в `check_package.ps1` падением через 10 с после открытия экрана Steam (`MYENGINE_CRASH_TEST=2`).
 

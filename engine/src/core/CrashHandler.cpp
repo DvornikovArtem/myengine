@@ -3,6 +3,7 @@
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Version.h>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <random>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -34,6 +36,12 @@ namespace myengine::core::crash
         wchar_t g_logFile[MAX_PATH]{};
         wchar_t g_productName[128] = L"Rocket Arena";
         volatile LONG g_entered = 0;
+        // LR5: the id of the report of this run, and the context of the crash (SetScene, SetLastAction)
+        char g_reportId[17]{};
+        char g_scene[256] = "(none yet)";
+        char g_lastAction[256] = "(none yet)";
+        char g_assertion[512]{};   // the failed MYENGINE_CHECK (AssertionFailed): "lives > 0 at CrashTests.cpp:31"
+        DWORD g_mainThread = 0;
 
         using MiniDumpWriteDumpFn = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION,
                                                   PMINIDUMP_CALLBACK_INFORMATION);
@@ -81,7 +89,38 @@ namespace myengine::core::crash
             case 0xE06D7363: return "unhandled C++ exception";
             case 0xE0000001: return "std::terminate / abort";
             case 0xE0000002: return "invalid CRT parameter or pure virtual call";
+            case kAssertionFailure: return "assertion failure";
             default: return "exception";
+            }
+        }
+
+        // "writing the address 0x0000000000000000" for an access violation (the first two parameters of the record say read / write / execute and where)
+        void DescribeAccess(const EXCEPTION_RECORD* record, char* out, const size_t size)
+        {
+            out[0] = 0;
+            if (record == nullptr || (record->ExceptionCode != EXCEPTION_ACCESS_VIOLATION && record->ExceptionCode != EXCEPTION_IN_PAGE_ERROR) ||
+                record->NumberParameters < 2)
+            {
+                return;
+            }
+            const ULONG_PTR kind = record->ExceptionInformation[0];
+            const char* verb = kind == 0 ? "reading" : (kind == 1 ? "writing" : (kind == 8 ? "executing" : "accessing"));
+            std::snprintf(out, size, " (%s the address 0x%016llx)", verb, static_cast<unsigned long long>(record->ExceptionInformation[1]));
+        }
+
+        // The copy of the log of the run (myengine.log is truncated by the next start) with one line at its end that ties it to the report
+        void CopyLog(const wchar_t* target, const char* lastLine, const int lastLength)
+        {
+            if (g_logFile[0] == 0 || !CopyFileW(g_logFile, target, FALSE))
+            {
+                return;
+            }
+            HANDLE file = CreateFileW(target, FILE_APPEND_DATA, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file != INVALID_HANDLE_VALUE)
+            {
+                DWORD written = 0;
+                WriteFile(file, lastLine, lastLength > 0 ? static_cast<DWORD>(lastLength) : 0, &written, nullptr);
+                CloseHandle(file);
             }
         }
 
@@ -158,12 +197,19 @@ namespace myengine::core::crash
             MakeDirectories(g_directory);
             SYSTEMTIME now{};
             GetLocalTime(&now);
+            SYSTEMTIME utc{};
+            GetSystemTime(&utc);
+            // crash-<date>-<time>-<reportId>: the name sorts by time, and two crashes never share it (the reportId is new in every run)
             wchar_t stem[MAX_PATH]{};
-            _snwprintf_s(stem, _TRUNCATE, L"%s\\crash-%04d%02d%02d-%02d%02d%02d", g_directory, now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+            _snwprintf_s(stem, _TRUNCATE, L"%s\\crash-%04d%02d%02d-%02d%02d%02d-%S", g_directory, now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
+                         g_reportId);
             wchar_t dumpPath[MAX_PATH]{};
             wchar_t textPath[MAX_PATH]{};
+            wchar_t logCopyPath[MAX_PATH]{};
             _snwprintf_s(dumpPath, _TRUNCATE, L"%s.dmp", stem);
             _snwprintf_s(textPath, _TRUNCATE, L"%s.txt", stem);
+            _snwprintf_s(logCopyPath, _TRUNCATE, L"%s.log", stem);
+            const DWORD thread = GetCurrentThreadId();
 
             // the dump: dbghelp from System32 (loaded now, not linked: a game that never crashes does not carry it)
             bool dumped = false;
@@ -174,7 +220,7 @@ namespace myengine::core::crash
                 if (write != nullptr && file != INVALID_HANDLE_VALUE)
                 {
                     MINIDUMP_EXCEPTION_INFORMATION info{};
-                    info.ThreadId = GetCurrentThreadId();
+                    info.ThreadId = thread;   // the filter runs on the thread that crashed: the dump marks it as the one of the exception
                     info.ExceptionPointers = pointers;
                     info.ClientPointers = FALSE;
                     // the stacks of all threads, the modules, the exception: some hundred KB (with the data segments of all the libraries the dump of this game is 40 MB)
@@ -187,23 +233,56 @@ namespace myengine::core::crash
                 }
             }
 
-            const DWORD code = (pointers != nullptr && pointers->ExceptionRecord != nullptr) ? pointers->ExceptionRecord->ExceptionCode : 0;
-            const void* address = (pointers != nullptr && pointers->ExceptionRecord != nullptr) ? pointers->ExceptionRecord->ExceptionAddress : nullptr;
+            const EXCEPTION_RECORD* record = pointers != nullptr ? pointers->ExceptionRecord : nullptr;
+            const DWORD code = record != nullptr ? record->ExceptionCode : 0;
+            const void* address = record != nullptr ? record->ExceptionAddress : nullptr;
             char where[MAX_PATH + 40]{};
             DescribeAddress(address, where, sizeof(where));
+            char access[96]{};
+            DescribeAccess(record, access, sizeof(access));
 
-            char head[1024]{};
+            // a failed MYENGINE_CHECK names its condition and place
+            static char assertion[sizeof(g_assertion) + 32];
+            assertion[0] = 0;
+            if (code == kAssertionFailure && g_assertion[0] != 0)
+            {
+                std::snprintf(assertion, sizeof(assertion), "assertion: %s\r\n", g_assertion);
+            }
+
+            // the log of the run next to the dump, with a last line that names the report
+            static char logLine[1024];
+            const int logLineLength = std::snprintf(logLine, sizeof(logLine), "[CRASH] reportId=%s buildId=%s: %s 0x%08lX at %s%s\r\n%s", g_reportId,
+                                                    MYENGINE_BUILD_ID, ExceptionName(code), static_cast<unsigned long>(code), where, access, assertion);
+            CopyLog(logCopyPath, logLine, logLineLength);
+
+            // what can be read without a debugger (LR5: reportId, the time and buildId are here before the dump is opened)
+            static char head[4096];
             const int headLength = std::snprintf(
                 head, sizeof(head),
-                "%S %s (%s)\r\nTime: %04d-%02d-%02d %02d:%02d:%02d\r\nException: %s 0x%08lX at %s\r\nDump: %s\r\n\r\nThe end of the log:\r\n",
-                g_productName,
-                MYENGINE_VERSION_STRING, MYENGINE_GIT_COMMIT, now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, ExceptionName(code),
-                static_cast<unsigned long>(code), where, dumped ? "written (the .dmp next to this file)" : "NOT written");
+                "%S crash report\r\n"
+                "reportId: %s\r\n"
+                "time: %04d-%02d-%02d %02d:%02d:%02d (local), %04d-%02d-%02dT%02d:%02d:%02dZ (UTC)\r\n"
+                "buildId: %s\r\n"
+                "version: %s\r\n"
+                "commit: %s\r\n"
+                "scene: %s\r\n"
+                "last action: %s\r\n"
+                "exception: %s 0x%08lX at %s%s\r\n"
+                "%s"
+                "thread: %lu (%s)\r\n"
+                "process: %lu\r\n"
+                "dump: %s\r\n"
+                "log: the .log next to this file (the whole log of the run)\r\n"
+                "\r\nThe end of the log:\r\n",
+                g_productName, g_reportId, now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, utc.wYear, utc.wMonth, utc.wDay, utc.wHour,
+                utc.wMinute, utc.wSecond, MYENGINE_BUILD_ID, MYENGINE_VERSION_STRING, MYENGINE_GIT_COMMIT_FULL, g_scene, g_lastAction, ExceptionName(code),
+                static_cast<unsigned long>(code), where, access, assertion, static_cast<unsigned long>(thread), thread == g_mainThread ? "the main thread" : "not the main thread",
+                static_cast<unsigned long>(GetCurrentProcessId()), dumped ? "written (the .dmp next to this file)" : "NOT written");
             HANDLE text = CreateFileW(textPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (text != INVALID_HANDLE_VALUE)
             {
                 DWORD written = 0;
-                WriteFile(text, head, headLength > 0 ? static_cast<DWORD>(headLength) : 0, &written, nullptr);
+                WriteFile(text, head, headLength > 0 ? static_cast<DWORD>(std::min(headLength, static_cast<int>(sizeof(head)) - 1)) : 0, &written, nullptr);
                 AppendLogTail(text);
                 CloseHandle(text);
 
@@ -224,7 +303,9 @@ namespace myengine::core::crash
             wchar_t message[MAX_PATH * 2 + 256]{};
             if (GetEnvironmentVariableW(L"MYENGINE_CRASH_NO_DIALOG", message, 8) == 0)
             {
-                _snwprintf_s(message, _TRUNCATE, L"%s has stopped working.\n\nThe crash report was saved to:\n%s\n\nPlease send the .txt and .dmp files to the person who gave you the game.", g_productName, g_directory);
+                _snwprintf_s(message, _TRUNCATE,
+                             L"%s has stopped working.\n\nReport %S (build %S) was saved to:\n%s\n\nPlease send its three files (.dmp, .txt, .log) to the person who gave you the game.",
+                             g_productName, g_reportId, MYENGINE_BUILD_ID, stem);
                 MessageBoxW(nullptr, message, g_productName, MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
             }
             return EXCEPTION_EXECUTE_HANDLER;
@@ -284,7 +365,49 @@ namespace myengine::core::crash
         CopyPath(g_directory, crashDirectory);
         CopyPath(g_logFile, logFile);
         wcsncpy_s(g_productName, productName != nullptr ? productName : L"myengine", _TRUNCATE);
+        g_mainThread = GetCurrentThreadId();
+        // the reportId: 64 random bits (std::random_device is rand_s on Windows), made now: the crashed process does not have to
+        std::random_device random;
+        const unsigned long long id = (static_cast<unsigned long long>(random()) << 32) | random();
+        std::snprintf(g_reportId, sizeof(g_reportId), "%016llx", id);
         SetHandlers();
+    }
+
+    std::string ReportId()
+    {
+        return g_reportId;
+    }
+
+    void SetScene(const std::string_view scene)
+    {
+        const size_t length = std::min(scene.size(), sizeof(g_scene) - 1);
+        std::memcpy(g_scene, scene.data(), length);
+        g_scene[length] = 0;
+    }
+
+    void SetLastAction(const std::string_view action)
+    {
+        const size_t length = std::min(action.size(), sizeof(g_lastAction) - 1);
+        std::memcpy(g_lastAction, action.data(), length);
+        g_lastAction[length] = 0;
+    }
+
+    void AssertionFailed(const char* condition, const char* file, const int line)
+    {
+        // the name of the file without the folders of the machine that built it
+        const char* name = file != nullptr ? file : "?";
+        for (const char* p = name; *p != 0; ++p)
+        {
+            if (*p == '\\' || *p == '/')
+            {
+                name = p + 1;
+            }
+        }
+        std::snprintf(g_assertion, sizeof(g_assertion), "%s at %s:%d", condition != nullptr ? condition : "?", name, line);
+        // the exception goes through the filter of the unhandled exceptions: the dump gets the context of this place
+        const ULONG_PTR arguments[3] = {reinterpret_cast<ULONG_PTR>(condition), reinterpret_cast<ULONG_PTR>(file), static_cast<ULONG_PTR>(line)};
+        RaiseException(kAssertionFailure, EXCEPTION_NONCONTINUABLE, 3, arguments);
+        std::abort();   // not reached: a noncontinuable exception does not come back
     }
 
     void Reassert()
@@ -344,7 +467,7 @@ namespace myengine::core::crash
         const std::string folder = apppaths::IsShipping()
             ? "%LOCALAPPDATA%\\" + crashDirectory.parent_path().filename().u8string() + "\\" + crashDirectory.filename().u8string()
             : report.text.parent_path().generic_u8string();
-        return "The game crashed last time. Send " + report.text.filename().generic_u8string() + " from " + folder;
+        return "The game crashed last time. Send " + report.text.stem().generic_u8string() + ".dmp / .txt / .log from " + folder;
     }
 
     void CrashIfRequested()

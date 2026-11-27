@@ -277,7 +277,9 @@ namespace myengine::game
 
         void GoTo(Frame& f, const Screen next)
         {
-            Log(std::string("screen ") + kScreenNames[static_cast<int>(next)]);
+            const std::string action = std::string("screen ") + kScreenNames[static_cast<int>(next)];
+            Log(action);
+            core::crash::SetLastAction(action);   // the "last action" of a crash report (LR5)
             screen = next;
             screenTime = 0.0f;
             askQuit = askLeave = askRestart = lobbyAskLeave = false;
@@ -492,7 +494,7 @@ namespace myengine::game
             const Id play = HashId("main/play"), training = HashId("main/training"), settingsId = HashId("main/settings"), exit = HashId("main/exit");
             const Id garageId = HashId("main/garage");
             f.SetDefaultFocus(mainDefaultFocus);
-            const bool dialogOpen = askQuit || !errorText.empty();
+            const bool dialogOpen = askQuit || !errorText.empty() || crashAsk >= 0;
             Column column({76.0f, 370.0f, style::kMenuButtonWidth, style::kMenuButtonHeight}, style::kMenuButtonStep);
             if (MenuButton(f, play, column.Next(), "PLAY", Icon::Play))
             {
@@ -544,6 +546,7 @@ namespace myengine::game
                 Text(f, FontStyle::BlackItalic, 34.0f, {plate.x + 36.0f, plate.y + 32.0f}, style::kText, name);
                 Text(f, FontStyle::Bold, 18.0f, {plate.x + 50.0f + TextWidth(f, FontStyle::BlackItalic, 34.0f, name), plate.y + 44.0f}, style::kTextDim, "\xC2\xB7 " + Upper(car->className), Align::Left, 0.08f);
             }
+            DrawCrashTest(f, !askQuit && errorText.empty());
             if (!crashChecked)
             {
                 // the previous run crashed: the game says so once, with the file the player can send (core/CrashHandler.h)
@@ -585,6 +588,64 @@ namespace myengine::game
                     errorText.clear();
                     errorTitle.clear();
                 }
+            }
+        }
+
+        // ---- LR5: the crash test of a release (docs/crash/tester-guide.md)
+        // A panel of the main menu, right under the nickname: the id of the build and a button for every kind of the test crash. A button asks first
+        // (one stray click must not crash a normal run); Crash writes the last action to the log and to the crash handler, then crashes in a function
+        // of its own (core/CrashTests.cpp): the report names the action, and the stack of its dump goes through that function to this one.
+
+        struct CrashButton
+        {
+            const char* id;
+            const char* label;
+            const char* action;
+            void (*crash)();
+        };
+
+        void DrawCrashTest(Frame& f, const bool enabled)
+        {
+            static const CrashButton kButtons[] = {
+                {"main/crash-divide", "INTEGER DIVIDE BY ZERO", "crash test: integer divide by zero", &core::crash::test::DivideByZero},
+                {"main/crash-access", "ACCESS VIOLATION", "crash test: access violation", &core::crash::test::AccessViolation},
+                {"main/crash-assert", "ASSERTION FAILURE", "crash test: assertion failure", &core::crash::test::AssertionFailure},
+            };
+            constexpr float kStep = 66.0f;
+            const Rect panel{1380.0f, 196.0f, 460.0f, 70.0f + kStep * static_cast<float>(std::size(kButtons))};
+            Panel(f, panel, true);
+            // the top edge of the slanted panel starts h * tan(12 deg) to the right: the caption starts after it
+            Text(f, FontStyle::Bold, 20.0f, {panel.x + panel.h * style::kBevelTan + 16.0f, panel.y + 20.0f}, style::kBad, "CRASH TEST", Align::Left, 0.1f);
+            Text(f, FontStyle::SemiBold, 16.0f, {panel.x + panel.w - 24.0f, panel.y + 23.0f}, style::kTextDim, std::string("BUILD ") + MYENGINE_BUILD_ID,
+                 Align::Right, 0.06f);
+            for (std::size_t i = 0; i < std::size(kButtons); ++i)
+            {
+                const CrashButton& button = kButtons[i];
+                const Rect rect{panel.x + 24.0f, panel.y + 60.0f + kStep * static_cast<float>(i), panel.w - 48.0f, 56.0f};
+                if (ActionButton(f, HashId(button.id), rect, button.label, Icon::None, enabled && crashAsk < 0))
+                {
+                    crashAsk = static_cast<int>(i);
+                    Log(std::string("crash test: asked for ") + button.label);
+                }
+            }
+            if (crashAsk < 0 || crashAsk >= static_cast<int>(std::size(kButtons)))
+            {
+                return;
+            }
+            const CrashButton& asked = kButtons[crashAsk];
+            const std::string text = std::string(asked.label) + " - a crash report is written.";
+            const DialogResult result = ConfirmDialog(f, HashId("main/crash-confirm"), {"CRASH THE GAME?", text, "Crash", "Cancel"});
+            if (result == DialogResult::Confirm)
+            {
+                crashAsk = -1;
+                Log(asked.action);
+                core::crash::SetLastAction(asked.action);
+                asked.crash();
+            }
+            else if (result == DialogResult::Cancel)
+            {
+                crashAsk = -1;
+                Log("crash test: cancelled");
             }
         }
 
@@ -951,7 +1012,8 @@ namespace myengine::game
         std::string garageClickCar;             // the double click that equips with the mouse
         double garageClickTime = -10.0;
         bool carsPreloaded = false;
-        bool crashChecked = false;              // the report of a crash of the previous run is looked for once, on the first main menu
+        int crashAsk = -1;                      // LR5: the CRASH TEST button whose confirmation is open (-1: none)
+        bool crashChecked = false;           // the report of a crash of the previous run is looked for once, on the first main menu
         bool carMissingToast = false;           // the car of the file is not in the data any more: Pulse, said once on the main menu
         Id mainDefaultFocus = HashId("main/play");
         std::map<std::string, std::uint64_t> carImages;

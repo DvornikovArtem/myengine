@@ -13,6 +13,7 @@
 
 #include <myengine/core/AppPaths.h>
 #include <myengine/core/Application.h>
+#include <myengine/core/CrashHandler.h>
 #include <myengine/core/DpiScale.h>
 #include <myengine/core/FramePacer.h>
 #include <imm.h>
@@ -2152,6 +2153,7 @@ namespace myengine::core
         }
 
         RebindWindowControlledEntities();
+        crash::SetScene(sceneSavePath_.filename().u8string());   // the scene of a crash report (LR5)
         return true;
     }
 
@@ -2172,6 +2174,7 @@ namespace myengine::core
         // From now on Save Scene and the save on exit go to this file
         sceneSavePath_ = resolvedPath;
         RebindWindowControlledEntities();
+        crash::SetScene(resolvedPath.filename().u8string());
         core::ServiceLocator::GetEditorRuntimeState().mapPath =
             core::ServiceLocator::GetProjectContext().ToProjectRelative(sceneSavePath_);
         UpdateWindowTitles();
@@ -2296,6 +2299,7 @@ namespace myengine::core
             }
             RebindWindowControlledEntities();
             logger_.Info("SceneSerializer: scene loaded from " + load->path.u8string());
+            crash::SetScene(load->path.filename().u8string());
         }
 
         loadingService_.End(load->loadingId);
