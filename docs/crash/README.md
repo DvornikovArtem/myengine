@@ -50,7 +50,7 @@ git push origin v0.1.0-lr5.3
 | Лог хранит контекст: сцена и последнее действие | `crash::SetScene` при загрузке сцены (`Application.cpp`), `crash::SetLastAction` при смене экрана (`screen main`, `screen match` …) и при нажатии кнопки CRASH TEST; это же пишется в лог (`Game UI: …`); при старте в лог идут `Build: …` и `Crash handler: reportId …, reports go to …` |
 | Где отчёт и что передавать | `%LOCALAPPDATA%\RocketArena\crashes\`, все три файла — [tester-guide.md](tester-guide.md); путь и reportId показывает и окно «has stopped working» |
 
-Тестовые сбои — панель **CRASH TEST** в главном меню (`DrawCrashTest`, [`RlGameFlow.cpp`](../../engine/src/game/RlGameFlow.cpp)). Каждый сбой вызывается отдельной функцией `__declspec(noinline)` в [`CrashTests.cpp`](../../engine/src/core/CrashTests.cpp), поэтому верхний кадр стека — она, с файлом и строкой. Значения помечены `volatile`, чтобы оптимизатор `/O2` не убрал деление и запись. Assertion failure (lr5.2) — `MYENGINE_CHECK`: проверка, которая остаётся в релизной сборке (стандартный `assert` там выключен `NDEBUG`). При провале она пишет условие, файл и строку в «last action» и поднимает исключение `0xE0000003`, поэтому у дампа есть контекст.
+Тестовые сбои — панель **CRASH TEST** в главном меню (`DrawCrashTest`, [`RlGameFlow.cpp`](../../engine/src/game/RlGameFlow.cpp)). Каждый сбой вызывается отдельной функцией `__declspec(noinline)` в [`CrashTests.cpp`](../../engine/src/core/CrashTests.cpp), поэтому верхний кадр стека — она, с файлом и строкой. Значения помечены `volatile`, чтобы оптимизатор `/O2` не убрал деление и запись. Assertion failure (lr5.2) — `MYENGINE_CHECK`: проверка, которая остаётся в релизной сборке (стандартный `assert` там выключен `NDEBUG`). При провале она пишет условие, файл и строку в строку `assertion:` отчёта и поднимает исключение `0xE0000003` через `RaiseException`. Фильтр видит его как любое другое исключение, поэтому в дампе есть контекст и стек до функции с проверкой.
 
 ## 2.3. Символы и разбор дампа
 
@@ -64,11 +64,27 @@ git push origin v0.1.0-lr5.3
 - **Два аварийных запуска — два отчёта:** у каждого запуска свой `reportId`, имена файлов не совпадают.
 - **Дамп раннего релиза после выхода нового:** архивы каждого релиза неизменны, а pdb раннего релиза подходит только к его exe. См. [dump-analysis.md](dump-analysis.md) §3.
 
-## Что проверено
+## Релизы
 
-См. раздел «Проверка» в описании PR ЛР5. Локально:
-- сборка тем же скриптом, что в CI (`build_release.ps1`);
-- распаковка zip в чистую папку и запуск;
-- штатный выход;
-- сбои всех кнопок с отчётами;
-- разбор дампа по символам.
+| Тег | Коммит | buildId | Прогон Actions |
+| --- | --- | --- | --- |
+| [`v0.1.0-lr5.1`](https://github.com/DvornikovArtem/myengine/releases/tag/v0.1.0-lr5.1) | `bcc040a` — CI, релизы, краш-репорт, кнопки деления на ноль и access violation | `45917922037.1` | [45917922037](https://github.com/DvornikovArtem/myengine/actions/runs/45917922037) |
+| [`v0.1.0-lr5.2`](https://github.com/DvornikovArtem/myengine/releases/tag/v0.1.0-lr5.2) | `d834514` — `MYENGINE_CHECK` и кнопка ASSERTION FAILURE | `45918555182.1` | [45918555182](https://github.com/DvornikovArtem/myengine/actions/runs/45918555182) |
+
+Сборка в Actions идёт около 8 минут (`windows-2025`, Visual Studio 2026, без предупреждений компилятора).
+
+## Что проверено (27.11)
+
+Проверено на релизах, скачанных из GitHub (`gh release download`), распакованных в пустые папки на другом диске, с отдельным `LOCALAPPDATA`:
+
+- `build-info.txt` обоих архивов каждого релиза: один `buildId` и один SHA. Те же значения — в описании релиза, в строке `Build:` лога и в `.txt` отчёта.
+- **Штатный запуск и выход** (lr5.2): меню, переход в TRAINING с клавиатуры, закрытие окна. Код выхода 0, папка `crashes` не создаётся.
+- **Два аварийных запуска** (lr5.1, INTEGER DIVIDE BY ZERO дважды): коды `0xC0000094`, два отчёта с разными `reportId`, оба остаются в папке. Тот же адрес `RocketArena.exe+0x307039`.
+- **ACCESS VIOLATION**: `0xC0000005`, «writing the address 0x0000000000000000».
+- **ASSERTION FAILURE** (lr5.2): `0xE0000003`, «assertion: lives > 0 at CrashTests.cpp:28».
+- **Разбор дампа** по символам того же релиза (через `dbghelp.dll`, как в отладчиках). Верхний кадр — `myengine::core::crash::test::DivideByZero` (`CrashTests.cpp`, строка 14), ниже — `RlGameFlow::Impl::DrawCrashTest` (`RlGameFlow.cpp:641`) и `DrawMain`. Для assertion цепочка такая: `KERNELBASE!RaiseException` ← `crash::AssertionFailed` ← `test::AssertionFailure` (`CrashTests.cpp:28`) ← `DrawCrashTest`.
+- **Дамп раннего релиза после выхода нового:** символы lr5.1 разбирают дамп lr5.1. Символы lr5.2 к нему не подходят: имени функции и строки нет, только ближайший экспорт.
+- Окно «Rocket Arena has stopped working» показывает reportId, buildId и путь. Следующий запуск показывает красную плашку и снимает маркер.
+- Сборки `RelWithDebInfo` (пакет) и `Debug` (редактор) — без предупреждений от этих изменений. Единственное оставшееся `MSB8028` у `myengine_doomgeneric` было и раньше.
+
+После обновления до этой ветки основную папку `build/` нужно один раз переконфигурировать (`setup.bat`): `Version.h` генерируется CMake, а регенерация в проекте выключена (`CMAKE_SUPPRESS_REGENERATION`).
